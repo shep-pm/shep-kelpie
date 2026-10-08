@@ -22,6 +22,7 @@ mod table;
 
 pub use table::table_of;
 mod agents;
+mod gateway;
 mod local;
 mod removed;
 mod reviewers;
@@ -31,6 +32,7 @@ pub use agents::{
     Account, AgentHarness, AgentName, Harness, Implementer, Limit, ModelServer, PmAgent,
     RoleAgentNames, RoleAgents, UsageReader,
 };
+pub use gateway::{Gateway, GatewayKey, GatewayName, Gateways, KeyVar, ModelHost, Route};
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use reviewers::{LeaseName, ListedReviewer, default_reviewers};
 pub use skills::{SkillChoice, SkillName, StepSkills};

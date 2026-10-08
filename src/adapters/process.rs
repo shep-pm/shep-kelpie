@@ -49,7 +49,7 @@ impl Processes {
     /// Runs `command` to its end with stdin closed, collecting its output
     #[cfg(test)]
     pub(super) fn output(&self, command: &mut Command) -> Result<Output, RunError> {
-        self.run(command, Until::default(), &|_| {}, None)
+        self.run(command, Until::default(), &|_| {}, None, b"")
     }
 
     /// Like `output`, killing the child once `ending` is asked if one is
@@ -64,7 +64,7 @@ impl Processes {
             deadline: None,
             ending,
         };
-        self.run(command, until, spawned, None)
+        self.run(command, until, spawned, None, b"")
     }
 
     /// Like `output_telling`, with the child's stdout and stderr written to
@@ -86,7 +86,7 @@ impl Processes {
             deadline: None,
             ending,
         };
-        self.run(command, until, spawned, Some(outputs))
+        self.run(command, until, spawned, Some(outputs), b"")
     }
 
     /// Like `output`, and kills the child once `limit` has passed
@@ -95,11 +95,24 @@ impl Processes {
         command: &mut Command,
         limit: Duration,
     ) -> Result<Output, RunError> {
+        self.output_within_fed(command, limit, b"")
+    }
+
+    /// Like `output_within`, with `input` written to the child's stdin
+    ///
+    /// A secret goes this way rather than in the arguments, which any
+    /// process on the machine can list.
+    pub(super) fn output_within_fed(
+        &self,
+        command: &mut Command,
+        limit: Duration,
+        input: &[u8],
+    ) -> Result<Output, RunError> {
         let until = Until {
             deadline: Some(Instant::now() + limit),
             ending: None,
         };
-        self.run(command, until, &|_| {}, None)
+        self.run(command, until, &|_| {}, None, input)
     }
 
     fn run(
@@ -108,6 +121,7 @@ impl Processes {
         until: Until<'_>,
         spawned: &dyn Fn(u32),
         outputs: Option<[&Path; 2]>,
+        input: &[u8],
     ) -> Result<Output, RunError> {
         let (out, err) = match outputs {
             Some([out, err]) => (
@@ -119,14 +133,22 @@ impl Processes {
         // Its own process group, led by its own pid, so a program it spawns
         // and leaves behind (a build, a test run) is reachable by signalling
         // the group, not just the one pid this struct tracks.
+        let stdin = match input.is_empty() {
+            true => Stdio::null(),
+            false => Stdio::piped(),
+        };
         let mut child = command
-            .stdin(Stdio::null())
+            .stdin(stdin)
             .stdout(out)
             .stderr(err)
             .process_group(0)
             .spawn()
             .map_err(RunError::Io)?;
         let pid = child.id();
+        // A few hundred bytes, which a pipe takes whole before the child reads.
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(input);
+        }
         let stdout = drain(child.stdout.take());
         let stderr = drain(child.stderr.take());
         let id = {
@@ -344,14 +366,14 @@ impl Until<'_> {
 // and was measured to reach the group leader and a process it had spawned,
 // on both procps-ng 4.0.2 and macOS's BSD pkill.
 fn signal_group(pgid: u32, signal: &str) {
-    let _ = Command::new("pkill")
+    let _ = crate::spawn::command("pkill")
         .args([format!("-{signal}"), "-g".to_owned(), pgid.to_string()])
         .stdin(Stdio::null())
         .status();
 }
 
 fn group_running(pgid: u32) -> bool {
-    Command::new("pgrep")
+    crate::spawn::command("pgrep")
         .args(["-g", &pgid.to_string()])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

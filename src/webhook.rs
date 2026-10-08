@@ -1,5 +1,5 @@
 //! Kelpie's own settings: the webhook, the counted leases' capacities, the
-//! GPU's metrics page and kelpie's own Codex login
+//! GPU's metrics page, kelpie's own Codex login and its model gateways
 //!
 //! Kelpie's `[kelpie]` section of `dogs.toml`, or the file under kelpie's
 //! home it had before one, shared by every project. Every part is
@@ -9,6 +9,7 @@
 //! credential, so no error, log line or status carries it.
 //! `kelpie-settings.example.toml` beside this crate shows the section.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -17,8 +18,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use shep_client::dogs::dog_config;
 
+use crate::forwarder::Upstream;
 use crate::lease::counted::CARGO_TEST_CAPACITY;
-use crate::settings::{EndpointUrl, SettingsError};
+use crate::settings::{EndpointUrl, Gateway, GatewayName, Gateways, SettingsError};
 
 /// What every project shares
 #[dog_config]
@@ -40,6 +42,11 @@ pub struct KelpieSettings {
     /// when absent. A leading `~/` is the home folder.
     #[serde(default)]
     pub codex_home: Option<PathBuf>,
+    /// Model gateways such as paddock, by name, which an agent file
+    /// names as `gateway` in place of its server's `url`. A runner reads
+    /// them when it starts.
+    #[serde(default)]
+    pub gateways: BTreeMap<GatewayName, Gateway>,
 }
 
 /// The counted leases' capacities
@@ -139,9 +146,15 @@ fn authority(rest: &str) -> &str {
 /// What a malformed file is told, since the parser's own message could quote the URL
 const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntfy`) \
                      and an `https://` `url`, a `[leases]` table with a \
-                     `cargo-test` count, a `gpu_metrics_url`, a `codex_home` path, and nothing else";
+                     `cargo-test` count, a `gpu_metrics_url`, a `codex_home` path, \
+                     `[gateways.<name>]` tables with `url` and `key_env`, and nothing else";
 
 impl KelpieSettings {
+    /// The gateways, with each key read from kelpie's environment
+    pub fn gateways(&self) -> Gateways {
+        Gateways::new(self.gateways.clone())
+    }
+
     /// The folder holding kelpie's own Codex login, which every Codex call
     /// signs in from and no call reads otherwise
     ///
@@ -219,7 +232,7 @@ impl KelpieSettings {
             },
         ];
         crate::settings::refuse_removed(text, &removed)?;
-        toml::from_str(text).map_err(|e: toml::de::Error| {
+        let read: Self = toml::from_str(text).map_err(|e: toml::de::Error| {
             let line = e
                 .span()
                 .map(|span| text[..span.start].matches('\n').count() + 1);
@@ -227,7 +240,13 @@ impl KelpieSettings {
                 Some(line) => format!("line {line} is not right: {SHAPE}"),
                 None => SHAPE.to_owned(),
             }
-        })
+        })?;
+        // Every call to a gateway goes through kelpie's forwarder or comes from kelpie itself.
+        for (name, gateway) in &read.gateways {
+            Upstream::new(&gateway.base())
+                .map_err(|e| format!("`gateways.{name}.url` cannot be used: {e}"))?;
+        }
+        Ok(read)
     }
 }
 
@@ -449,5 +468,17 @@ mod tests {
                 .to_string();
             assert!(err.contains("`codex_home`"), "{refused}: {err}");
         }
+    }
+
+    #[test]
+    fn a_gateway_reads_and_one_the_forwarder_cannot_dial_is_refused() {
+        let gateway = "[gateways.paddock]\nurl = \"http://gpu:8700\"\nkey_env = \"PADDOCK_KEY\"\n";
+        let read = KelpieSettings::parse(gateway).unwrap();
+        assert_eq!(read.gateways().key_vars(), ["PADDOCK_KEY"]);
+        let err = parse_err(&gateway.replace("http://", "https://"));
+        assert!(
+            err.starts_with("`gateways.paddock.url` cannot be used"),
+            "{err}"
+        );
     }
 }

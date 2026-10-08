@@ -54,6 +54,8 @@ pub struct ClaudeCli {
     pub(super) lambs: Option<Arc<dyn LambLabels>>,
     pub(super) sandbox: Arc<dyn Sandbox>,
     pub(super) home: PathBuf,
+    // What a call with no fence may not read either: the shepherd's home
+    pub(super) unfenced_no_read: Vec<String>,
 }
 
 // The default home and tools are the maintainer's: `$HOME` and kelpie's own tools.
@@ -70,6 +72,7 @@ impl Default for ClaudeCli {
                 &crate::home::kelpie_home().unwrap_or_else(|_| home.join(crate::home::OLD)),
             ))),
             home,
+            unfenced_no_read: Vec::new(),
         }
     }
 }
@@ -96,12 +99,26 @@ impl ClaudeCli {
     /// with its home at `home`, the way a runner does
     ///
     /// No call on any harness reads kelpie's Codex login in `codex_home`,
-    /// apart from Codex's own link to its `auth.json`. pi and Codex made
-    /// from this share its sandbox.
-    pub fn in_runtime(self, tools: Tools, home: PathBuf, codex_home: &Path) -> Self {
+    /// apart from Codex's own link to its `auth.json`, or sees the variables
+    /// in `secret_vars`. pi and Codex made from this share its sandbox.
+    pub fn in_runtime(
+        self,
+        tools: Tools,
+        home: PathBuf,
+        codex_home: &Path,
+        secret_vars: Vec<String>,
+    ) -> Self {
         let runtime = Arc::new(SandboxRuntime::new(tools));
         let unread = vec![format!("{}/**", codex_home.display())];
-        self.sandboxed(Arc::new(Unreadable::new(runtime, unread)), home)
+        let sandbox = Unreadable::new(runtime, unread).unsetting(secret_vars);
+        self.sandboxed(Arc::new(sandbox), home)
+    }
+
+    /// Keeps a call with no fence, such as a reviewer's session, out of
+    /// `shep_home`, which holds the sheep entries' `env` and `dogs.toml`
+    pub fn unfenced_unread(mut self, shep_home: &Path) -> Self {
+        self.unfenced_no_read = vec![format!("{}/**", shep_home.display())];
+        self
     }
 
     /// Runs each call inside `sandbox`, as Claude Code with its home at `home`
@@ -124,8 +141,8 @@ impl ClaudeCli {
 
 impl Agents for ClaudeCli {
     fn prepare(&self, call: &AgentCall) -> Result<(), AgentError> {
-        write_settings(call)?;
-        sandbox::policy(call, &self.home).map(drop)
+        write_settings(call, &self.unfenced_no_read)?;
+        sandbox::policy(call, &self.home, &self.unfenced_no_read).map(drop)
     }
 
     fn run(&self, call: &AgentCall, ending: &Ending) -> Result<AgentReply, AgentError> {
@@ -162,9 +179,13 @@ impl Agents for ClaudeCli {
 }
 
 /// Writes the call's settings file whole, from the call alone
-pub(crate) fn write_settings(call: &AgentCall) -> Result<(), AgentError> {
-    let text = serde_json::to_string_pretty(&settings::settings(call.tools, &call.reach))
-        .expect("settings are JSON");
+pub(crate) fn write_settings(call: &AgentCall, unfenced: &[String]) -> Result<(), AgentError> {
+    let mut value = settings::settings(call.tools, &call.reach);
+    let reads = settings::unfenced_reads(&call.cwd, &call.reach, unfenced);
+    if let Some(deny) = value["permissions"]["deny"].as_array_mut() {
+        deny.extend(reads.into_iter().map(serde_json::Value::from));
+    }
+    let text = serde_json::to_string_pretty(&value).expect("settings are JSON");
     let folder = call.settings.parent().unwrap_or(std::path::Path::new("/"));
     std::fs::create_dir_all(folder)
         .and_then(|()| std::fs::write(&call.settings, text))
@@ -336,7 +357,8 @@ mod tests {
         std::fs::create_dir_all(tools.sandbox().parent().unwrap()).unwrap();
         std::fs::write(tools.sandbox(), "").unwrap();
         let login = dir.path().join("codex");
-        let claude = ClaudeCli::default().in_runtime(tools, dir.path().join("home"), &login);
+        let claude =
+            ClaudeCli::default().in_runtime(tools, dir.path().join("home"), &login, Vec::new());
         let settings = dir.path().join("call.srt.json");
         claude
             .sandbox

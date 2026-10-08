@@ -207,6 +207,7 @@ async fn issue(here: Here<'_>, name: &ProjectName, args: &[&str]) -> Result<Vec<
     let paths = ProjectPaths::under(here.kelpie_home, here.shep_home, name);
     let loaded = source::load(&tables, name.as_str(), here.home, &paths.folder)
         .map_err(|e| e.to_string())?;
+    crate::spawn::hide(loaded.kelpie.gateways().key_vars());
     let agents = Agents::load(&paths.agents).map_err(|e| e.to_string())?;
     let listed = (loaded.settings.role_agents(&agents)).map_err(|e| e.to_string())?;
     let writer = Writer::of(&agents)?;
@@ -236,7 +237,9 @@ async fn issue(here: Here<'_>, name: &ProjectName, args: &[&str]) -> Result<Vec<
     }
     let codex_home =
         (loaded.kelpie.codex_home(here.home, here.kelpie_home)).map_err(|e| e.to_string())?;
-    let claude = ClaudeCli::default().in_runtime(tools, here.home.to_owned(), &codex_home);
+    let secret_vars = loaded.kelpie.gateways().key_vars();
+    let claude =
+        ClaudeCli::default().in_runtime(tools, here.home.to_owned(), &codex_home, secret_vars);
     issues::headless(&project, &writer, &request, &Gh, &claude)
 }
 

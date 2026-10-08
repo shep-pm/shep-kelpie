@@ -19,7 +19,7 @@ pub use verbs::{USAGE, VERBS, main, split_project, verb_first};
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use serde_json::{Map, Value};
 use shep_client::Client;
@@ -51,7 +51,7 @@ impl Checkout {
     pub fn of(folder: &Path) -> Result<Self, String> {
         // Git's answer, or none when it ran and refused; a git that cannot run is an error.
         let git = |args: &[&str]| {
-            let output = Command::new("git")
+            let output = crate::spawn::command("git")
                 .arg("-C")
                 .arg(folder)
                 .args(args)
@@ -306,6 +306,8 @@ pub(crate) async fn halt(client: &Client, name: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
     use super::*;
 
     #[test]

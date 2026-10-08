@@ -13,7 +13,6 @@
 //! refreshed here, where the refreshed one can be saved.
 
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -68,7 +67,7 @@ impl Meter for CodexMeter {
         let answer = self
             .processes
             .answer_within(
-                Command::new("codex")
+                crate::spawn::command("codex")
                     .arg("app-server")
                     .env("CODEX_HOME", &self.codex_home),
                 REQUESTS,

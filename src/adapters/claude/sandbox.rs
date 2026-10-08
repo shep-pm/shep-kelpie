@@ -44,7 +44,7 @@ impl ClaudeCli {
         for folder in [&scratch, &transcripts(&self.home, &call.cwd)?] {
             std::fs::create_dir_all(folder).map_err(|e| setup(folder, e))?;
         }
-        let mut command = Command::new(&self.program);
+        let mut command = crate::spawn::command(&self.program);
         command
             .args(argv)
             .current_dir(&call.cwd)
@@ -54,7 +54,7 @@ impl ClaudeCli {
     }
 
     fn inside(&self, call: &AgentCall, command: &Command) -> Result<Command, AgentError> {
-        let policy = policy(call, &self.home)?;
+        let policy = policy(call, &self.home, &self.unfenced_no_read)?;
         self.sandbox
             .wrap(&policy, &sandbox_settings(call), command)
             .map_err(|e| AgentError::Setup(e.to_string()))
@@ -95,16 +95,29 @@ pub(crate) fn fence_policy(fence: &Fence) -> Policy {
 
 /// The whole call's policy: its fence, or none, and what Claude Code itself needs
 ///
+/// A call with no fence may not read `unfenced` either, its own folder apart.
+///
 /// # Errors
 ///
 /// [`AgentError::Setup`] when the call's transcript folder cannot be named.
-pub(crate) fn policy(call: &AgentCall, home: &Path) -> Result<Policy, AgentError> {
+pub(crate) fn policy(
+    call: &AgentCall,
+    home: &Path,
+    unfenced: &[String],
+) -> Result<Policy, AgentError> {
     let mut policy = match &call.reach.fence {
         Some(fence) => fence_policy(fence),
-        None => Policy {
-            no_read: CREDENTIALS.map(str::to_owned).into(),
-            ..Policy::default()
-        },
+        None => {
+            let no_read = CREDENTIALS.iter().map(|&p| p.to_owned());
+            let mut policy = Policy {
+                no_read: no_read.chain(unfenced.iter().cloned()).collect(),
+                ..Policy::default()
+            };
+            if !unfenced.is_empty() {
+                policy.read.push(call.cwd.clone());
+            }
+            policy
+        }
     };
     policy.no_read.extend(fence::others_credentials(HARNESS));
     let transcripts = transcripts(home, &call.cwd)?;
@@ -284,7 +297,7 @@ mod tests {
     #[test]
     fn a_worker_writes_its_fence_its_transcripts_and_its_scratch_and_reaches_the_model() {
         let w = World::new();
-        let policy = policy(&w.worker(), &w.path("home")).unwrap();
+        let policy = policy(&w.worker(), &w.path("home"), &[]).unwrap();
         let transcripts = transcripts(&w.path("home"), &w.path("wt")).unwrap();
         let scratch = w.path("worker/settings.tmp");
         assert_eq!(policy.write[..2], [w.path("wt"), w.path("build")]);
@@ -310,7 +323,7 @@ mod tests {
         let mut review = w.call(Role::Reviewer);
         review.settings = w.path("worker/review-settings.json");
         review.reach.read = vec![w.path("extra")];
-        let policy = policy(&review, &w.path("home")).unwrap();
+        let policy = policy(&review, &w.path("home"), &[]).unwrap();
         assert_eq!(
             policy.write,
             [
@@ -324,6 +337,31 @@ mod tests {
         assert_eq!(policy.no_read, denied);
         assert!(policy.read.contains(&w.path("extra")));
         assert!(!policy.verify_tls);
+    }
+
+    // The shepherd's home holds the sheep entry's `env`, a gateway's key with
+    // it, and `dogs.toml` the webhook's URL. The worktree under it stays readable.
+    #[test]
+    fn an_unfenced_call_reads_nothing_of_the_shepherds_home_but_its_own_folder() {
+        let w = World::new();
+        let review = w.call(Role::Reviewer);
+        let shep = vec![format!("{}/**", w.path("").display())];
+        let policy = policy(&review, &w.path("home"), &shep).unwrap();
+        assert!(policy.no_read.contains(&shep[0]), "{:?}", policy.no_read);
+        assert!(policy.read.contains(&w.path("wt")));
+        let deny = super::super::settings::unfenced_reads(&review.cwd, &review.reach, &shep);
+        let deny = deny.join(" ");
+        let worker = format!("Read(/{}/**)", w.path("worker").display());
+        assert!(deny.contains(&worker), "{deny}");
+        assert!(
+            !deny.contains(&w.path("wt").display().to_string()),
+            "{deny}"
+        );
+        let without = super::policy(&review, &w.path("home"), &[]).unwrap();
+        assert!(
+            !without.read.contains(&w.path("wt")),
+            "nothing to read around"
+        );
     }
 
     #[test]
@@ -392,7 +430,9 @@ mod tests {
             ]
         );
         assert_eq!(command.get_current_dir(), Some(w.path("wt").as_path()));
-        let env: Vec<_> = command.get_envs().map(|(name, _)| name).collect();
+        // Only those it sets: it also unsets whatever `spawn` hides.
+        let set = command.get_envs().filter(|(_, value)| value.is_some());
+        let env: Vec<_> = set.map(|(name, _)| name).collect();
         assert_eq!(
             env,
             ["CLAUDE_CODE_DISABLE_AUTO_MEMORY", "CLAUDE_CODE_TMPDIR"]
@@ -401,7 +441,7 @@ mod tests {
         let [(policy_used, file)] = wrapped.as_slice() else {
             panic!("wrapped once, not {wrapped:?}")
         };
-        assert_eq!(policy_used, &policy(&call, &w.path("home")).unwrap());
+        assert_eq!(policy_used, &policy(&call, &w.path("home"), &[]).unwrap());
         assert_eq!(file, &w.path("worker/settings.sandbox.json"));
         assert!(
             !w.path("ran").exists(),

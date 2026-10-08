@@ -11,7 +11,7 @@
 //! starts.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use shep_client::shep_core::protocol::request::{ActionOutcome, ProcessInfo, Response};
@@ -80,7 +80,7 @@ pub async fn project_here(
 // The checkouts `folder` belongs to: its own top folder, and for a worktree
 // the checkout it was made from. None when it is in no git checkout.
 fn checkout_roots(folder: &Path) -> Vec<PathBuf> {
-    let output = Command::new("git")
+    let output = crate::spawn::command("git")
         .arg("-C")
         .arg(folder)
         .args([

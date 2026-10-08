@@ -65,22 +65,32 @@ pub trait Sandbox: Send + Sync + fmt::Debug {
 }
 
 /// A sandbox that keeps some paths unread by every call it runs, whatever
-/// the call's policy says
+/// the call's policy says, and some variables out of its environment
 ///
 /// Kelpie's own Codex login is kept this way, so a call on any harness
 /// leaves it unread. A call that names a file there in its policy's `read`
-/// may still read that file.
+/// may still read that file. A gateway's key is a variable kept out.
 #[derive(Debug, Clone)]
 pub struct Unreadable {
     inner: Arc<dyn Sandbox>,
     paths: Vec<String>,
+    vars: Vec<String>,
 }
 
 impl Unreadable {
     /// `inner`, with `paths`, absolute or under `~/` with `**` globs,
     /// added to every policy's `no_read`
     pub fn new(inner: Arc<dyn Sandbox>, paths: Vec<String>) -> Self {
-        Self { inner, paths }
+        Self {
+            inner,
+            paths,
+            vars: Vec::new(),
+        }
+    }
+
+    /// The same, with `vars` unset in every call's environment
+    pub fn unsetting(self, vars: Vec<String>) -> Self {
+        Self { vars, ..self }
     }
 }
 
@@ -93,7 +103,11 @@ impl Sandbox for Unreadable {
     ) -> Result<Command, SandboxError> {
         let mut policy = policy.clone();
         policy.no_read.extend(self.paths.iter().cloned());
-        self.inner.wrap(&policy, settings, command)
+        let mut wrapped = self.inner.wrap(&policy, settings, command)?;
+        for var in &self.vars {
+            wrapped.env_remove(var);
+        }
+        Ok(wrapped)
     }
 }
 
@@ -164,5 +178,20 @@ mod tests {
         let wrapped = seen.0.lock().unwrap().clone().unwrap();
         assert_eq!(wrapped.no_read, ["~/.ssh/**", "/k/codex/**"]);
         assert_eq!(wrapped.read, policy.read);
+    }
+
+    #[test]
+    fn a_gateways_key_is_unset_in_every_call() {
+        let sandbox = Unreadable::new(Arc::new(Seen::default()), Vec::new())
+            .unsetting(vec!["PADDOCK_KEY".into()]);
+        let wrapped = sandbox
+            .wrap(
+                &Policy::default(),
+                Path::new("/s.json"),
+                &Command::new("true"),
+            )
+            .unwrap();
+        let envs: Vec<_> = wrapped.get_envs().collect();
+        assert_eq!(envs, [("PADDOCK_KEY".as_ref(), None)]);
     }
 }

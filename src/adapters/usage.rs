@@ -4,7 +4,6 @@
 //! window as `Current session: 2% used · resets Sep 27 at 3:40am (America/New_York)`,
 //! with the zone named at the end and the year left out.
 
-use std::process::Command;
 use std::time::Duration;
 
 use jiff::civil::{Date, DateTime};
@@ -44,7 +43,7 @@ impl Meter for UsageMeter {
         let output = self
             .processes
             .output_within(
-                Command::new("claude").args([
+                crate::spawn::command("claude").args([
                     "-p",
                     "/usage",
                     "--output-format",

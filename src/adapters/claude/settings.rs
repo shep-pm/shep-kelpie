@@ -99,6 +99,21 @@ pub(crate) const NO_TOOLS: [&str; 12] = [
 // What `kelpie guard` judges: every command, and a subagent's isolation.
 const GUARDED_TOOLS: &str = "Bash|Agent|Task";
 
+/// The Read rules that keep a call with no fence, working in `cwd`, out of
+/// `unfenced` but for `cwd` and the folders it reads
+pub(crate) fn unfenced_reads(cwd: &Path, reach: &Reach, unfenced: &[String]) -> Vec<String> {
+    if reach.fence.is_some() {
+        return Vec::new();
+    }
+    let own: Vec<PathBuf> = std::iter::once(cwd.to_owned())
+        .chain(reach.read.iter().cloned())
+        .collect();
+    read_denials(unfenced, &own)
+        .iter()
+        .map(|p| read_rule(p))
+        .collect()
+}
+
 /// The settings file's contents for a call with these tools and sandbox
 pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
     let mut deny: Vec<String> = Vec::new();

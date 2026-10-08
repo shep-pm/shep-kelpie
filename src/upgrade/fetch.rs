@@ -56,7 +56,7 @@ pub fn build_ref(work: &Path, repo: &str, reference: &str) -> Result<PathBuf, St
     let clone = work.join("source");
     std::fs::create_dir_all(work).map_err(|e| format!("cannot make {}: {e}", work.display()))?;
     let git = |args: &[&str]| {
-        let mut git = Command::new("git");
+        let mut git = crate::spawn::command("git");
         git.arg("-C").arg(&clone).args(args);
         git
     };
@@ -65,7 +65,7 @@ pub fn build_ref(work: &Path, repo: &str, reference: &str) -> Result<PathBuf, St
             "fetch", "--quiet", "--tags", "--force", "origin",
         ]))?;
     } else {
-        run(Command::new("git")
+        run(crate::spawn::command("git")
             .args(["clone", "--quiet", "--", repo])
             .arg(&clone))?;
     }
@@ -84,7 +84,7 @@ pub fn build_ref(work: &Path, repo: &str, reference: &str) -> Result<PathBuf, St
     ]))?;
     // Its own target folder, wherever the maintainer's `CARGO_TARGET_DIR` points.
     let target = clone.join("target");
-    run(Command::new("cargo")
+    run(crate::spawn::command("cargo")
         .args(["build", "--release", "--locked"])
         .env("CARGO_TARGET_DIR", &target)
         .current_dir(&clone))?;
@@ -122,11 +122,11 @@ pub fn download_release(work: &Path, version: &str) -> Result<PathBuf, String> {
     std::fs::create_dir_all(&folder)
         .map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
     let asset = asset();
-    run(Command::new("gh")
+    run(crate::spawn::command("gh")
         .args(["release", "download", &format!("v{version}")])
         .args(["--repo", SLUG, "--pattern", &asset, "--clobber", "--dir"])
         .arg(&folder))?;
-    run(Command::new("tar")
+    run(crate::spawn::command("tar")
         .arg("-xzf")
         .arg(folder.join(&asset))
         .arg("-C")

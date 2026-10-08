@@ -4,12 +4,13 @@
 //! chunks that fit the model's context, whole hunks where they fit. Each
 //! chunk goes to the server's `/chat/completions` with kelpie's fixed
 //! prompt, through `curl`, and each reply is read in the findings format.
+//! A gateway's key reaches `curl` on its stdin, never in its arguments.
 //! Requests and replies are kept under the round's folder, beside the
 //! `round-N.txt` and its completion marker a command would write.
 
 use std::fmt::Write as _;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -17,7 +18,7 @@ use serde_json::{Value, json};
 use super::LocalReviewer;
 use crate::adapters::process::RunError;
 use crate::ports::{Finding, ReviewerError, read_review};
-use crate::settings::Endpoint;
+use crate::settings::{Endpoint, Route};
 use crate::worktree::Linked;
 
 /// The review prompt every chunk is sent with
@@ -51,8 +52,9 @@ impl LocalReviewer {
     /// Asks the server for its models, so an endpoint that cannot answer
     /// stops the runner at start
     pub(super) fn check_endpoint(&self, endpoint: &Endpoint) -> Result<(), String> {
-        let url = format!("{}/models", endpoint.url.as_str());
-        let output = Command::new("curl")
+        let route = self.gateways.route(&endpoint.host)?;
+        let url = format!("{}/models", route.base.as_str());
+        let output = crate::spawn::command("curl")
             .args(["-sS", "-o", "/dev/null", "-w", "%{http_code}"])
             .args([
                 "--connect-timeout",
@@ -85,6 +87,7 @@ impl LocalReviewer {
         round: u32,
         criteria: &str,
     ) -> Result<Vec<Finding>, ReviewerError> {
+        let route = (self.gateways.route(&endpoint.host)).map_err(ReviewerError::Failed)?;
         let diff = diff(worktree, base)?;
         let system = system_prompt(criteria);
         let context = endpoint.context.get() as usize;
@@ -111,13 +114,13 @@ impl LocalReviewer {
             std::fs::write(&request, body.to_string())
                 .map_err(|e| failed(&request, "write", &e))?;
             let answer = self.ask(
-                endpoint,
+                &route,
                 &request,
                 &folder.join(format!("reply-{index}.json")),
             )?;
             text.push_str(answer.trim());
             text.push('\n');
-            let url = endpoint.url.as_str();
+            let url = route.base.as_str();
             findings.extend(read_review(&answer).map_err(|reply| {
                 ReviewerError::Failed(format!(
                     "{url}'s reply is neither findings nor CLEAN: {}",
@@ -133,13 +136,8 @@ impl LocalReviewer {
     }
 
     // One chunk's request, answered with the model's words and no thinking.
-    fn ask(
-        &self,
-        endpoint: &Endpoint,
-        request: &Path,
-        reply: &Path,
-    ) -> Result<String, ReviewerError> {
-        let url = format!("{}/chat/completions", endpoint.url.as_str());
+    fn ask(&self, route: &Route, request: &Path, reply: &Path) -> Result<String, ReviewerError> {
+        let url = format!("{}/chat/completions", route.base.as_str());
         // curl leaves the file alone on a reply with no body, and a retried
         // round reuses the name.
         std::fs::remove_file(reply)
@@ -148,7 +146,7 @@ impl LocalReviewer {
                 _ => Err(e),
             })
             .map_err(|e| failed(reply, "remove", &e))?;
-        let mut command = Command::new("curl");
+        let mut command = crate::spawn::command("curl");
         command
             .args(["-sS", "-X", "POST", "-w", "%{http_code}"])
             .args(["-H", "Content-Type: application/json", "-H", "Expect:"])
@@ -158,9 +156,17 @@ impl LocalReviewer {
             .arg("-o")
             .arg(reply)
             .arg(&url);
+        let config = match &route.key {
+            Some(key) => {
+                command.args(["--config", "-"]);
+                let header = format!("Authorization: Bearer {}", key.expose());
+                crate::adapters::curl::render(&[("header", header)])
+            }
+            None => String::new(),
+        };
         let output = self
             .processes
-            .output_within(&mut command, REQUEST_TIMEOUT)
+            .output_within_fed(&mut command, REQUEST_TIMEOUT, config.as_bytes())
             .map_err(|e| match e {
                 RunError::Io(e) => ReviewerError::Spawn(format!("curl: {e}")),
                 RunError::Stopped => ReviewerError::Stopped,

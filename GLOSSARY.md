@@ -86,6 +86,14 @@ What runs an agent's session: Claude Code (`claude-code`), Codex (`codex`)
 or pi (`pi`, a model on an OpenAI-compatible server). A reviewer may also
 run as a `command`, an `endpoint` or a `bot`.
 
+**Gateway**:
+One endpoint in front of a host's model servers, such as paddock,
+named once in kelpie's own settings with the variable holding its key. A
+pi agent or an endpoint reviewer names one in place of its server's URL.
+It queues its calls, so kelpie takes no GPU lock for them, and a worker's
+turn on one holds a lease of the gateway's own on its model.
+_Avoid_: proxy, router
+
 **Implementer**:
 An agent a project lists to build its work items. An issue's `agent:<name>`
 label picks one, and an issue without one runs on the **default

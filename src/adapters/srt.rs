@@ -42,7 +42,7 @@ impl Sandbox for SandboxRuntime {
         std::fs::create_dir_all(folder)
             .and_then(|()| std::fs::write(settings, text))
             .map_err(|e| SandboxError::Settings(settings.to_owned(), e.kind().to_string()))?;
-        let mut wrapped = Command::new("node");
+        let mut wrapped = crate::spawn::command("node");
         wrapped
             .arg(cli)
             .arg("--settings")

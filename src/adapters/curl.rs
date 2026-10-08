@@ -5,7 +5,7 @@
 //! dropped: an error names only curl's exit code or the HTTP status.
 
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use super::ntfy;
 use crate::ports::{Alert, AlertError, Alerts, Reply, Since};
@@ -69,7 +69,7 @@ impl Alerts for Curl {
 // Runs curl on `config`, whose `write-out` prints the HTTP status last, and
 // returns what it printed before the status, and the status.
 fn run(config: &str) -> Result<(String, u16), AlertError> {
-    let mut child = Command::new("curl")
+    let mut child = crate::spawn::command("curl")
         .args(["--config", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -183,6 +183,8 @@ fn fit(text: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
     use std::io::{BufRead, BufReader, Read};
     use std::net::TcpListener;
     use std::thread;

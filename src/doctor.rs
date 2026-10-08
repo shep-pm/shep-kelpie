@@ -4,6 +4,7 @@
 //! missing is what a runner would stop on. It changes nothing. The one post
 //! it can make is a test alert, and only when asked.
 
+mod gateways;
 pub mod host;
 mod machine;
 mod project;
@@ -17,6 +18,7 @@ use shep_client::Client;
 
 use self::host::Host;
 use crate::adapters::{ClaudeCli, Curl, Gh, LocalReviewer, SystemClock, SystemHost};
+use crate::agents::Agents;
 use crate::coderabbit::CodeRabbit;
 use crate::flock;
 use crate::ports::{Alerts, Clock, Forge, Meter, Reviewer};
@@ -235,6 +237,12 @@ async fn projects(client: &Client, probes: Probes<'_>, here: Here<'_>, ask: Ask<
         }
     };
     lines.extend(rulings::old_file(&section, here.kelpie_home));
+    if let Some(kelpie) = &kelpie {
+        // An agents folder that cannot be read is each project's line to report.
+        let folder = here.kelpie_home.join(crate::agents::FOLDER);
+        let agents = Agents::load(&folder).unwrap_or_else(|_| Agents::embedded());
+        lines.extend(gateways::checks(&kelpie.gateways(), &agents));
+    }
     if ask.test_alert {
         lines.push(rulings::test_alert(kelpie.as_ref(), probes.alerts));
     }

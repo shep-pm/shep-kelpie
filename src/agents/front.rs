@@ -18,8 +18,8 @@ use crate::review_bot::Bot;
 mod bot;
 
 use crate::settings::{
-    Account, AgentHarness, ContextSize, Effort, Endpoint, EndpointUrl, Harness, LeaseName, Limit,
-    LocalCommand, ModelServer, NonBlank, RoleModel, UsageReader,
+    Account, AgentHarness, ContextSize, Effort, Endpoint, EndpointUrl, GatewayName, Harness,
+    LeaseName, Limit, LocalCommand, ModelHost, ModelServer, NonBlank, RoleModel, UsageReader,
 };
 use bot::at_key;
 
@@ -53,6 +53,8 @@ struct Implementer {
     lease: Option<LeaseName>,
     #[serde(default)]
     url: Option<EndpointUrl>,
+    #[serde(default)]
+    gateway: Option<GatewayName>,
     #[serde(default)]
     context: Option<ContextSize>,
 }
@@ -102,6 +104,8 @@ struct Reviewer {
     #[serde(default)]
     url: Option<EndpointUrl>,
     #[serde(default)]
+    gateway: Option<GatewayName>,
+    #[serde(default)]
     context: Option<ContextSize>,
     #[serde(default)]
     command: Option<PathBuf>,
@@ -132,7 +136,7 @@ struct SessionKeys<'a> {
     effort: Effort,
     usage: Option<UsageReader>,
     lease: Option<&'a LeaseName>,
-    url: Option<&'a EndpointUrl>,
+    host: Option<ModelHost>,
     context: Option<ContextSize>,
 }
 
@@ -163,7 +167,7 @@ pub(super) fn parse(text: &str) -> Result<Agent, String> {
                 effort: keys.effort,
                 usage: keys.usage,
                 lease: keys.lease.as_ref(),
-                url: keys.url.as_ref(),
+                host: host(keys.url.as_ref(), keys.gateway.as_ref())?,
                 context: keys.context,
             })?,
             prompt,
@@ -232,7 +236,7 @@ impl OnClaude {
                 effort: self.effort,
                 usage: None,
                 lease: None,
-                url: None,
+                host: None,
                 context: None,
             })?,
             prompt,
@@ -293,7 +297,7 @@ impl Reviewer {
             effort,
             usage: self.usage,
             lease: self.lease.as_ref(),
-            url: self.url.as_ref(),
+            host: host(self.url.as_ref(), self.gateway.as_ref())?,
             context: self.context,
         })
     }
@@ -305,11 +309,12 @@ impl Reviewer {
         let session_keys = self.model.is_some()
             || self.effort.is_some()
             || self.url.is_some()
+            || self.gateway.is_some()
             || self.context.is_some();
         if session_keys {
             return Err(
-                "runs a command, which takes no `model`, `effort`, `url` or \
-                        `context`"
+                "runs a command, which takes no `model`, `effort`, `url`, `gateway` \
+                        or `context`"
                     .into(),
             );
         }
@@ -346,13 +351,17 @@ impl Reviewer {
                         `ollama` or `ollama_model`: its url is the Ollama host"
                 .into());
         }
-        let (Some(url), Some(model), Some(context)) = (&self.url, &self.model, self.context) else {
-            return Err("runs on an endpoint, which needs the server as `url`, its \
-                        `model` and the model's context size as `context`"
+        let host = host(self.url.as_ref(), self.gateway.as_ref())?;
+        let (Some(host), Some(model), Some(context)) = (host, &self.model, self.context) else {
+            return Err("runs on an endpoint, which needs the server as `url` or a \
+                        `gateway`, its `model` and the model's context size as `context`"
                 .into());
         };
+        if matches!(host, ModelHost::Gateway(_)) && self.lease.is_some() {
+            return Err(NO_LEASE.into());
+        }
         Ok(Endpoint {
-            url: url.clone(),
+            host,
             model: model.clone(),
             context,
             lease: self.lease.clone(),
@@ -390,31 +399,51 @@ fn session(keys: &SessionKeys<'_>) -> Result<Runs, String> {
     })
 }
 
+// A server's URL or the gateway in front of it, whichever the keys name.
+fn host(
+    url: Option<&EndpointUrl>,
+    gateway: Option<&GatewayName>,
+) -> Result<Option<ModelHost>, String> {
+    match (url, gateway) {
+        (Some(_), Some(_)) => Err("names both `url` and `gateway`: keep the one its \
+                                   requests go to"
+            .into()),
+        (Some(url), None) => Ok(Some(ModelHost::Url(url.clone()))),
+        (None, Some(gateway)) => Ok(Some(ModelHost::Gateway(gateway.clone()))),
+        (None, None) => Ok(None),
+    }
+}
+
+/// Why a model behind a gateway takes no `lease`
+const NO_LEASE: &str = "names a `gateway`, which queues its calls itself, so it takes no `lease`";
+
 fn role_model(keys: &SessionKeys<'_>) -> Result<RoleModel, String> {
-    let harness = match (keys.harness, keys.url, keys.context) {
+    let harness = match (keys.harness, &keys.host, keys.context) {
         (Harness::ClaudeCode, None, None) => AgentHarness::ClaudeCode,
         (Harness::ClaudeCode, ..) => {
-            return Err("runs on claude-code, which takes no `url` or `context`".into());
+            return Err("runs on claude-code, which takes no `url`, `gateway` or `context`".into());
         }
-        (Harness::Pi, Some(url), Some(context)) => {
-            if let Err(e) = Upstream::new(url) {
+        (Harness::Pi, Some(host), Some(context)) => {
+            if let ModelHost::Url(url) = host
+                && let Err(e) = Upstream::new(url)
+            {
                 return Err(format!(
                     "runs on pi, with a `url` kelpie cannot forward to: {e}"
                 ));
             }
             AgentHarness::Pi(ModelServer {
-                url: url.clone(),
+                host: host.clone(),
                 context,
             })
         }
         (Harness::Pi, ..) => {
-            return Err("runs on pi, which needs the model's server as `url` \
-                        and its context size as `context`"
+            return Err("runs on pi, which needs the model's server as `url` or a \
+                        `gateway`, and its context size as `context`"
                 .into());
         }
         (Harness::Codex, None, None) => AgentHarness::Codex,
         (Harness::Codex, ..) => {
-            return Err("runs on codex, which takes no `url` or `context`".into());
+            return Err("runs on codex, which takes no `url`, `gateway` or `context`".into());
         }
         #[cfg(test)]
         (Harness::StandIn, ..) => AgentHarness::StandIn,
@@ -448,7 +477,10 @@ fn limit(keys: &SessionKeys<'_>) -> Result<Limit, String> {
             usage.as_str()
         ));
     }
+    let gateway = matches!(keys.host, Some(ModelHost::Gateway(_)));
     match (usage, keys.lease) {
+        (UsageReader::None, Some(_)) if gateway => Err(NO_LEASE.into()),
+        (UsageReader::None, None) if gateway => Ok(Limit::Gateway),
         (UsageReader::None, lease) => {
             Ok(Limit::Lease(lease.cloned().unwrap_or_else(LeaseName::gpu)))
         }

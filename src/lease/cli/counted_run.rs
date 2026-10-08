@@ -69,7 +69,9 @@ pub(crate) async fn run_with_patience(socket: &Path, command: &[&str], tries: u3
     if let Err(e) = visit.inheritable(true) {
         say(&format!("{e}: the lease is held by this process alone"));
     }
-    let spawned = tokio::process::Command::new(program).args(args).spawn();
+    let spawned = tokio::process::Command::from(crate::spawn::command(program))
+        .args(args)
+        .spawn();
     let _ = visit.inheritable(false);
     let mut child = match spawned {
         Ok(child) => child,

@@ -151,19 +151,25 @@ fn serve(project: &str) -> Result<(), Exit> {
     let codex_home = kelpie_settings
         .codex_home(&home, &kelpie_home)
         .map_err(|e| e.to_string())?;
-    let claude = ClaudeCli::labelling(Arc::new(shepherd.clone())).in_runtime(
-        paths.tools.clone(),
-        home.clone(),
-        &codex_home,
-    );
-    let reviewer = LocalReviewer::default();
+    // A runner reads the gateways once, so each key's variable is unset in every call it makes.
+    let gateways = kelpie_settings.gateways();
+    crate::spawn::hide(gateways.key_vars());
+    let claude = ClaudeCli::labelling(Arc::new(shepherd.clone()))
+        .in_runtime(
+            paths.tools.clone(),
+            home.clone(),
+            &codex_home,
+            gateways.key_vars(),
+        )
+        .unfenced_unread(&shep_home);
+    let reviewer = LocalReviewer::default().with_gateways(gateways.clone());
     let epoch = Epoch(u64::from(std::process::id()));
     let book = BookFile::new(kelpie_home.join(crate::dog::BOOK));
     let leases = Arc::new(ShepLeases::new(shepherd.clone(), Asker::new(epoch), book));
     let ports = Ports {
         agents: Arc::new(Routed::new(
             Arc::new(claude.clone()),
-            Arc::new(claude.pi()),
+            Arc::new(claude.pi().with_gateways(gateways)),
             Arc::new(claude.codex(codex_home.clone())),
         )),
         forge: Box::new(Gh),

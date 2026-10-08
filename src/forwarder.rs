@@ -4,12 +4,14 @@
 //! admin calls (pull, delete, create) where it answers chat. So a local
 //! worker never reaches the server. It reaches a forwarder kelpie runs
 //! outside the sandbox, which passes one request, the chat completions call,
-//! and refuses every other path and method by name.
+//! and refuses every other path and method by name. A model behind a
+//! gateway gets the gateway's key from the forwarder, in place of whatever
+//! the worker sent, so the key never enters the sandbox.
 
 use std::net::{IpAddr, Ipv4Addr};
 
 use crate::confine::Verdict;
-use crate::settings::EndpointUrl;
+use crate::settings::{EndpointUrl, GatewayKey};
 
 /// The host a worker's sandbox is told its model lives on
 ///
@@ -25,6 +27,7 @@ pub struct Upstream {
     address: String,
     host: String,
     base: String,
+    key: Option<GatewayKey>,
 }
 
 /// Why a model server's URL cannot be forwarded to
@@ -74,7 +77,22 @@ impl Upstream {
             address,
             host: canonical(host),
             base: base.to_owned(),
+            key: None,
         })
+    }
+
+    /// The same server, a gateway that takes `key` as its bearer key
+    pub fn with_key(self, key: GatewayKey) -> Self {
+        Self {
+            key: Some(key),
+            ..self
+        }
+    }
+
+    /// The gateway's key the forwarder sends in place of the worker's, if any
+    #[inline]
+    pub fn key(&self) -> Option<&GatewayKey> {
+        self.key.as_ref()
     }
 
     /// The server's host, without port or brackets, in lower case

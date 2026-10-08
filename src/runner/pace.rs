@@ -149,7 +149,7 @@ impl Runner {
     fn spent_accounts(&self) -> BTreeSet<Account> {
         let account = |limit: &Limit| match limit {
             Limit::Account(account) => Some(*account),
-            Limit::Lease(_) => None,
+            Limit::Lease(_) | Limit::Gateway => None,
         };
         self.spent_limits().filter_map(account).collect()
     }

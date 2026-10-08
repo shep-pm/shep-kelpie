@@ -36,6 +36,7 @@ pub mod sheep;
 pub mod shep_home;
 pub mod shepherd;
 pub mod skills;
+pub mod spawn;
 pub mod state;
 pub mod terminal;
 pub mod tools;

@@ -258,7 +258,7 @@ impl CodexCli {
             })?),
             None => None,
         };
-        let mut command = Command::new(&self.program);
+        let mut command = crate::spawn::command(&self.program);
         command
             .args(argv(
                 call,

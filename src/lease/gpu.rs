@@ -10,7 +10,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -44,7 +44,7 @@ fn darwin_user_temp_dir() -> Option<PathBuf> {
     if !cfg!(target_os = "macos") {
         return None;
     }
-    let output = Command::new("getconf")
+    let output = crate::spawn::command("getconf")
         .arg("DARWIN_USER_TEMP_DIR")
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -57,7 +57,7 @@ fn darwin_user_temp_dir() -> Option<PathBuf> {
 
 /// Whether process `pid` is alive, the way the scripts' `kill -0` asks
 pub fn alive(pid: u32) -> bool {
-    Command::new("kill")
+    crate::spawn::command("kill")
         .args(["-0", &pid.to_string()])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -308,6 +308,8 @@ pub fn scripts_naps(waited: u64) -> Duration {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
     use super::*;
 
     fn lock() -> (tempfile::TempDir, GpuLock) {

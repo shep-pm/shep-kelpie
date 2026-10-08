@@ -307,6 +307,9 @@ impl Runner {
         notes.extend(worker_files::remove_old(&paths.worker));
         let agents = settings.role_agents(&book)?;
         let lineup = settings.lineup(&book, home)?;
+        let listed = agents.implementers.iter().map(|i| &i.name);
+        let reviewers = lineup.iter().map(|r| &r.name);
+        (kelpie_settings.gateways()).check_listed(&book, listed.chain(reviewers))?;
         let webhook = kelpie_settings.webhook;
         if webhook.is_none() {
             eprintln!(

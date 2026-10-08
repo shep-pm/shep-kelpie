@@ -75,7 +75,7 @@ impl World {
     fn try_to(&self, script: &str) -> Output {
         let tools = KelpieTools::at(std::env::var_os("KELPIE_TOOLS").expect(NEEDS).into());
         let call = self.call();
-        let policy = policy(&call, &self.path("home")).unwrap();
+        let policy = policy(&call, &self.path("home"), &[]).unwrap();
         let mut inner = Command::new("/bin/sh");
         inner.args(["-c", script]).current_dir(&call.cwd);
         SandboxRuntime::new(tools)

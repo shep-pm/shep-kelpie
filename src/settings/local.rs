@@ -9,6 +9,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::NonBlank;
+use super::gateway::ModelHost;
 use super::reviewers::LeaseName;
 
 // The smallest context the endpoint reviewer accepts, in tokens. At 4096 a
@@ -45,7 +46,11 @@ impl LocalRound {
         self.lease()?;
         match self {
             Self::Endpoint(endpoint) => {
-                let url = endpoint.url.as_str();
+                // A gateway's model takes no lease, so this is never reached for one.
+                let ModelHost::Url(url) = &endpoint.host else {
+                    return None;
+                };
+                let url = url.as_str();
                 let host = url.strip_suffix("/v1").unwrap_or(url);
                 Some((host.to_owned(), Some(endpoint.model.as_str())))
             }
@@ -61,8 +66,8 @@ impl LocalRound {
 /// An OpenAI-compatible server and the model kelpie's reviewer asks
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
-    /// The server's base URL, up to and including its `/v1`
-    pub url: EndpointUrl,
+    /// The server's base URL, or the gateway in front of it
+    pub host: ModelHost,
     /// The model's name as the server knows it
     pub model: NonBlank,
     /// The context size the server gives the model, in tokens
@@ -176,7 +181,7 @@ mod tests {
     #[test]
     fn the_ollama_host_is_an_endpoints_url_or_a_commands_own_setting_and_only_under_a_lease() {
         let mut endpoint = Endpoint {
-            url: url("http://gpu-box:11434/v1/"),
+            host: ModelHost::Url(url("http://gpu-box:11434/v1/")),
             model: "coder".to_owned().try_into().unwrap(),
             context: ContextSize::try_from(8192).unwrap(),
             lease: None,

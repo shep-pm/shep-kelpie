@@ -8,20 +8,20 @@ use super::*;
 use crate::adapters::SandboxRuntime;
 use crate::ports::{Reach, Role};
 use crate::profile::WorkerProfile;
-use crate::settings::{ContextSize, Effort, EndpointUrl};
+use crate::settings::{ContextSize, Effort, EndpointUrl, ModelHost};
 use crate::test::OpenSandbox;
 use crate::tools::Tools as KelpieTools;
 
 // Recorded from pi 0.85.1 on qwen3.8:27b through Ollama, by the ignored test
 // below, with the temporary folder renamed: a new session asked to say ok...
-const FRESH: &str = include_str!("../../../fixtures/pi-p-fresh.jsonl");
+pub(super) const FRESH: &str = include_str!("../../../fixtures/pi-p-fresh.jsonl");
 // ...the same session resumed and asked what it said...
 const RESUMED: &str = include_str!("../../../fixtures/pi-p-resumed.jsonl");
 // ...and a worker refused a write by `kelpie confine`, a command by the
 // sandbox and another by `kelpie guard`, its streaming deltas left out.
 const REFUSED: &str = include_str!("../../../fixtures/pi-p-refused.jsonl");
 
-const FRESH_ID: &str = "0b6f3c1e-7d2a-4f4e-9a51-3c8d2e6f1a07";
+pub(super) const FRESH_ID: &str = "0b6f3c1e-7d2a-4f4e-9a51-3c8d2e6f1a07";
 pub(super) const WORKER_ID: &str = "5a2e9d40-1c7b-4b38-8e6f-2d4a9c1b7e53";
 const URL: &str = "http://192.0.2.9:11434/v1";
 
@@ -366,7 +366,11 @@ fn the_sandbox_lets_pi_write_only_its_sessions_and_reach_only_the_forwarder() {
     let call = w.fenced(URL, Path::new("/k/kelpie"), Session::New(id(WORKER_ID)));
     let files = Files::of(&call);
     let socket = w.path("worker/forwarder.sock");
-    let policy = policy(&call, &files, &socket);
+    let upstream = ClaudeCli::default()
+        .pi()
+        .upstream(server(&call).unwrap())
+        .unwrap();
+    let policy = policy(&call, &files, &upstream, &socket);
     let home = w.path("worker/settings.pi");
     assert!(policy.write.contains(&home.join("sessions")));
     assert!(!policy.write.contains(&home));
@@ -397,7 +401,7 @@ fn the_sandbox_lets_pi_write_only_its_sessions_and_reach_only_the_forwarder() {
         );
     }
     let open = w.call(URL, Role::Reviewer, Session::New(id(FRESH_ID)));
-    let policy = super::policy(&open, &Files::of(&open), &socket);
+    let policy = super::policy(&open, &Files::of(&open), &upstream, &socket);
     assert_eq!(
         policy.write,
         [
@@ -603,7 +607,7 @@ impl World {
 
     fn server(url: &str) -> ModelServer {
         ModelServer {
-            url: EndpointUrl::try_from(url.to_owned()).unwrap(),
+            host: ModelHost::Url(EndpointUrl::try_from(url.to_owned()).unwrap()),
             context: ContextSize::try_from(65_536).unwrap(),
         }
     }

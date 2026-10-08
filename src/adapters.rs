@@ -18,6 +18,7 @@ mod host;
 mod leases;
 mod local;
 mod ntfy;
+pub(crate) mod paddock;
 mod pi;
 mod process;
 mod srt;

@@ -222,7 +222,7 @@ impl Agents for FakeClaude {
     // The file Claude Code would be started with, so a test reads what a
     // call really left on disk.
     fn prepare(&self, call: &AgentCall) -> Result<(), AgentError> {
-        crate::adapters::write_claude_settings(call)
+        crate::adapters::write_claude_settings(call, &[])
     }
 
     // The session as the terminal would resume it, with no sandbox around it.

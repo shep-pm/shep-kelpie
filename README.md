@@ -368,7 +368,7 @@ Every thread a review bot leaves open goes to the worker as a finding, and shep-
 
 #### Local reviewers
 
-An endpoint takes `url` (the base, up to and including `/v1`), `model`, and `context`, the context size in tokens the server gives that model. Kelpie diffs the pull request, cuts the diff to fit that context, and sends each piece with its own review prompt. Set `context` to what the server really uses: Ollama gives its OpenAI-compatible endpoint a small default context unless `OLLAMA_CONTEXT_LENGTH` says more, and drops whatever doesn't fit without saying so.
+An endpoint takes `url` (the base, up to and including `/v1`) or a `gateway` (see [Gateways](#gateways)), `model`, and `context`, the context size in tokens the server gives that model. Kelpie diffs the pull request, cuts the diff to fit that context, and sends each piece with its own review prompt. Set `context` to what the server really uses: Ollama gives its OpenAI-compatible endpoint a small default context unless `OLLAMA_CONTEXT_LENGTH` says more, and drops whatever doesn't fit without saying so.
 
 A command is run as `<command> --dir <worktree> --round <n> --diff <base>`, with:
 
@@ -379,7 +379,7 @@ A command is run as `<command> --dir <worktree> --round <n> --diff <base>`, with
 
 It writes `round-<n>.txt` in that folder, one finding per line as `SEVERITY|path:line|what|why` with `HIGH`, `MEDIUM` or `LOW`, and then an empty `round-<n>.txt.done`. Kelpie reads nothing without the marker, and nothing from stdout. A nonzero exit fails the round. A command that writes `LOW|<path>:0|not reviewed: <n> lines exceeds the chunk limit|...` is run again with `--files <hunk file>` in place of `--diff`, on that file alone. If that run fails, its file is left unreviewed, as below, with the failure as the reason; only when kelpie cannot cut the hunk with `git diff` does the placeholder stay as the finding. Any other `LOW|<path>:0|not reviewed: <why>|...` line, as the script writes when the model cannot be reached, is a file left unreviewed and not a finding. A round with nothing but those lines reviewed nothing, and the review goes on to the next reviewer. A round that leaves the same files unreviewed as the same reviewer's last round counts against it too, and one that leaves none clears its count. A second such round in a row, which takes two passes, leaves the reviewer out of the review for the rest of the work item, and `status` lists it under `local_reviewers_down`. Another local reviewer, on another command or server, still runs. A round with real findings and some `not reviewed:` lines keeps its findings.
 
-`lease` names the lock kelpie holds around each round of a command or an endpoint. `gpu` is this machine's GPU lock, the one the qwen scripts take. Any other name is a lock of its own, so a reviewer on another machine's GPU never waits on this one's. Leave it off for a command that takes the lock itself, as `qwen-review.sh` does.
+`lease` names the lock kelpie holds around each round of a command or an endpoint. `gpu` is this machine's GPU lock, the one the qwen scripts take. Any other name is a lock of its own, so a reviewer on another machine's GPU never waits on this one's. Leave it off for a command that takes the lock itself, as `qwen-review.sh` does. An endpoint behind a gateway takes no lease, since the gateway queues its rounds.
 
 With a lease, before a round against Ollama, kelpie reads the host's `/api/ps`. An endpoint's host is its `url` without the `/v1`. A command names its host with `ollama: http://localhost:11434`, which needs a lease, and its model with `ollama_model`, else every model the host has loaded is checked. A model partly or wholly on the CPU fails the round and raises a ruling, and a yes runs the round again once the model is back on the GPU. A host with no `/api/ps` is not checked, and `status` shows the model's name, its share on the GPU, its context length and when it unloads.
 
@@ -438,6 +438,40 @@ context: 65536
 Kelpie runs pi with a home of its own, so your `~/.pi` is never read. pi runs no Claude Code hooks, so a worker on pi can't have `worker.guard_hooks`, and the runner refuses to start with them. Kelpie's own checks still run on every command and file write.
 
 A pi call's sandbox allows no host of the model's, since the sandbox opens every port of an allowed host and Ollama's admin calls (pull, delete, create) answer beside chat. Kelpie runs a forwarder outside the sandbox for each call, and the sandbox allows only that. It passes `POST` to the server's `/v1/chat/completions` and refuses every other path and method, naming what was asked. The worker never sees the model's address. The forwarder dials `http://`, so `url` is the server's `http://` address: an `https://` one is refused when settings load.
+
+#### Gateways
+
+A gateway such as paddock, a shep dog, puts one host's model servers behind one endpoint: it loads and unloads models, queues what doesn't fit yet, and lets a long job hold a lease on its model. Name it once in shep-kelpie's own settings:
+
+```toml
+[kelpie.gateways.paddock]
+url = "http://gpu-box:8700"
+key_env = "PADDOCK_KEY"
+```
+
+`url` is its `http://` address, with its OpenAI routes under `/v1`. `key_env` names the variable in the runner's environment that holds the key the gateway gave kelpie, so set it in the runner sheep's `env`. A runner reads its gateways when it starts. A `pi` agent or an `endpoint` reviewer then names the gateway in place of `url`, with `model` as the gateway knows it:
+
+```markdown
+---
+role: implementer
+harness: pi
+model: qwen3.8:27b
+effort: medium
+gateway: paddock
+context: 65536
+---
+```
+
+For a model behind a gateway:
+
+- Kelpie takes no `gpu` lock and reads no `/api/ps`. The gateway queues each call and decides what stays loaded, so such an agent takes no `lease`.
+- The key never enters the sandbox. pi's provider file holds a placeholder, and the forwarder sends the gateway's key in its place. An endpoint's round sends it from kelpie's own `curl`, on its stdin. Every process kelpie starts, an agent call or not, has `key_env`'s variable unset, and a reviewer's session can't read the shepherd's home, where the runner's `env` keeps it.
+- A runner won't start while an agent it lists names a gateway its settings lack, or one whose key's variable is unset.
+- A worker's turn holds a lease on its model from its start to its end, so the gateway evicts nothing it runs on midway. The turn's ceiling counts from the grant, and a gateway too busy to grant it is asked again every 30 seconds until then. A turn that ends or fails releases it, and a runner that dies stops renewing it, so it runs out two minutes later. Only a worker's turn takes one.
+- A pi call's tokens reach the usage ledger unpriced, as any pi call's do. The gateway doesn't say how long a request queued, so that wait is part of the call's seconds.
+- `shep kelpie doctor` checks each gateway: that it answers `GET /v1/models`, that it takes the key (unsure when the shell you run doctor from doesn't have the variable), and that it lists every agent's model.
+
+An implementer behind a gateway is a local implementer, like any `usage: none` one: it runs only the issues labelled for it. Claude Code can't run on a gateway yet.
 
 A Codex agent needs the `codex` command on the shepherd's `PATH` and a ChatGPT plan, and takes only `model` and `effort`:
 
@@ -632,6 +666,7 @@ shep-kelpie's own settings, shared by every project, are the `[kelpie]` section 
 - `[kelpie.leases]` sets how many hold `cargo-test` at once
 - `gpu_metrics_url` is the GPU's Prometheus metrics page, such as `nvidia_gpu_exporter`'s `/metrics`. `status` then shows the GPU's load, memory, power and temperature under `gpu`, read every 15 seconds
 - `codex_home` is where shep-kelpie's own Codex login lives (see [Agents](#agents))
+- `[kelpie.gateways.<name>]` is a model gateway such as paddock, with its `url` and `key_env` (see [Gateways](#gateways)). A runner reads them when it starts
 - A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start. The dog reads `[kelpie.leases]`, and each review bot's window from its agent file, only when it starts, so after a change to either run `shep restart kelpie`
 
 A key kelpie no longer reads, such as `review.reviewers`, `coderabbit` or `planning`, stops the runner, naming the key and what replaces it.

@@ -339,6 +339,7 @@ fn connect(upstream: &Upstream) -> io::Result<TcpStream> {
 
 // The chat call as the model server gets it: its own path, and only the
 // headers a chat client needs, with a length the forwarder counted itself.
+// A gateway gets its own key, never the one the worker sent.
 fn request(upstream: &Upstream, head: &Head, length: usize) -> Vec<u8> {
     let mut text = format!(
         "POST {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Length: {length}\r\n",
@@ -346,9 +347,13 @@ fn request(upstream: &Upstream, head: &Head, length: usize) -> Vec<u8> {
         upstream.address(),
     );
     for (name, value) in &head.headers {
-        if PASSED.contains(&name.as_str()) {
+        let replaced = upstream.key().is_some() && name == "authorization";
+        if PASSED.contains(&name.as_str()) && !replaced {
             text.push_str(&format!("{name}: {value}\r\n"));
         }
+    }
+    if let Some(key) = upstream.key() {
+        text.push_str(&format!("authorization: Bearer {}\r\n", key.expose()));
     }
     text.push_str("\r\n");
     text.into_bytes()
