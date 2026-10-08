@@ -633,6 +633,7 @@ pub(super) enum ReviewCall {
     /// One local round, of the project's kind
     Local {
         local: LocalRound,
+        repo: PathBuf,
         worktree: PathBuf,
         base: String,
         out: PathBuf,

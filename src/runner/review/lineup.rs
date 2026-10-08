@@ -34,7 +34,7 @@ impl Runner {
         }
         let ran = self.ran_of(review);
         let changed = match self.lineup.iter().any(|r| !r.paths.is_empty()) {
-            true => changed_files(worktree, base)?,
+            true => changed_files(&self.settings.repo, worktree, base)?,
             false => Vec::new(),
         };
         let down = |r: &ListedReviewer| {
@@ -140,8 +140,9 @@ impl Runner {
 }
 
 /// The files `worktree` changes from `base`, as git names them
-fn changed_files(worktree: &Path, base: &str) -> Result<Vec<String>, String> {
-    let output = crate::worktree::in_repo(worktree)
+fn changed_files(repo: &Path, worktree: &Path, base: &str) -> Result<Vec<String>, String> {
+    let output = crate::worktree::trusted_command(repo, worktree)
+        .map_err(|e| e.to_string())?
         .args(["diff", "--name-only", "--no-renames", base])
         .stdin(Stdio::null())
         .output()

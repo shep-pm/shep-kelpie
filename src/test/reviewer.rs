@@ -8,6 +8,7 @@ use super::Hold;
 use crate::adapters::LocalReviewer;
 use crate::ports::{Finding, ModelSeat, Reviewer, ReviewerError, RoundStage};
 use crate::settings::LocalRound;
+use crate::worktree::Linked;
 
 /// What the stand-in reviewer answers for its next round
 #[derive(Debug, Clone)]
@@ -74,7 +75,7 @@ impl Reviewer for FakeReviewer {
     fn round(
         &self,
         local: &LocalRound,
-        worktree: &Path,
+        worktree: Linked<'_>,
         base: &str,
         out: &Path,
         round: u32,
@@ -86,7 +87,7 @@ impl Reviewer for FakeReviewer {
     fn round_watched(
         &self,
         local: &LocalRound,
-        worktree: &Path,
+        worktree: Linked<'_>,
         base: &str,
         out: &Path,
         round: u32,
@@ -95,7 +96,7 @@ impl Reviewer for FakeReviewer {
     ) -> Result<Vec<Finding>, ReviewerError> {
         self.seen.lock().unwrap().push(SeenRound {
             local: local.clone(),
-            worktree: worktree.to_owned(),
+            worktree: worktree.worktree.to_owned(),
             base: base.to_owned(),
             out: out.to_owned(),
             round,

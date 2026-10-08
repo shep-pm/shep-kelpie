@@ -18,6 +18,7 @@ use super::LocalReviewer;
 use crate::adapters::process::RunError;
 use crate::ports::{Finding, ReviewerError, read_review};
 use crate::settings::Endpoint;
+use crate::worktree::Linked;
 
 /// The review prompt every chunk is sent with
 const PROMPT: &str = include_str!("review-prompt.md");
@@ -78,7 +79,7 @@ impl LocalReviewer {
     pub(super) fn endpoint_round(
         &self,
         endpoint: &Endpoint,
-        worktree: &Path,
+        worktree: Linked<'_>,
         base: &str,
         out: &Path,
         round: u32,
@@ -228,12 +229,20 @@ pub(super) fn quote(text: &str) -> String {
     }
 }
 
-fn diff(worktree: &Path, base: &str) -> Result<String, ReviewerError> {
-    let output = crate::worktree::in_repo(worktree)
+fn diff(at: Linked<'_>, base: &str) -> Result<String, ReviewerError> {
+    let cannot = |why: &dyn std::fmt::Display| {
+        ReviewerError::Failed(format!(
+            "cannot diff {} from {base}: {why}",
+            at.worktree.display()
+        ))
+    };
+    let output = crate::worktree::trusted_command(at.repo, at.worktree)
+        .map_err(|e| cannot(&e))?
         .args([
             "diff",
             "--no-color",
             "--no-ext-diff",
+            "--no-textconv",
             CONTEXT_LINES,
             base,
             "--",
@@ -242,11 +251,7 @@ fn diff(worktree: &Path, base: &str) -> Result<String, ReviewerError> {
         .output()
         .map_err(|e| ReviewerError::Spawn(e.to_string()))?;
     if !output.status.success() {
-        return Err(ReviewerError::Failed(format!(
-            "cannot diff {} from {base}: {}",
-            worktree.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
+        return Err(cannot(&String::from_utf8_lossy(&output.stderr).trim()));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
