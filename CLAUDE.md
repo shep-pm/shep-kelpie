@@ -8,7 +8,7 @@ The design is settled and the pillars are measured. The MVP is being built from 
 
 - `docs/design-log.md`: status, every decision, the measured facts and the test plan. Read it before proposing anything a test has not settled.
 - `docs/specs/`: one spec per test series, and its results. The experiment code and raw results live in shep-pm/kelpie-lab, and results here cite its commits as "the experiments repo".
-- `docs/adr/`: decisions that are hard to reverse. A change that contradicts one names the ADR and argues for reopening it.
+- `docs/adr/`: decisions that are hard to reverse. A change that contradicts one names the ADR and argues for reopening it. Its README lists every option decided against, so check it before proposing one.
 
 ## Vocabulary
 
