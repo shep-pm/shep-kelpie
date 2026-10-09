@@ -65,8 +65,9 @@ fn first_prompt(number: u64, issue: &Issue) -> String {
 pub(super) enum Slot {
     /// The open work item for this issue
     Item(u64),
-    /// The board, while a slot is free under `max_items` and fewer than
-    /// `max_parked` items are parked on rulings other than a follow-up
+    /// The board, while a slot is free under `concurrency.active_items` and fewer than
+    /// `concurrency.pending_rulings` items are parked on rulings other than a follow-up.
+    /// 0 counts as 1: the board opens nothing while any such ruling waits.
     Board,
 }
 
@@ -282,7 +283,7 @@ impl Runner {
                 let issue = self
                     .ports
                     .forge
-                    .issue(&self.settings.forge, item.issue)
+                    .issue(&self.remote, item.issue)
                     .map_err(|e| format!("cannot read issue #{}: {e}", item.issue))?;
                 self.skills
                     .invoke(Step::Implement, &first_prompt(item.issue, &issue))
@@ -315,7 +316,7 @@ impl Runner {
     /// are refused.
     pub(super) fn worker_reach(&self, item: &WorkItem, start: Start) -> Result<Reach, String> {
         let dirs = worktree::prepare(
-            &self.settings.repo,
+            &self.settings.git.checkout,
             &item.worktree,
             &item.branch,
             start,
@@ -334,8 +335,7 @@ impl Runner {
             kelpie: &self.kelpie,
             guard_hooks: &self.settings.worker.guard_hooks,
             kelpie_home: &self.paths.kelpie_home,
-            repo: &self.settings.repo,
-            private_names: &self.settings.private_names,
+            repo: &self.settings.git.checkout,
             allowed_domains: &self.settings.worker.allowed_domains,
             build_env: &self.settings.worker.build_env,
             shep_home: &self.paths.shep_home,
@@ -447,7 +447,7 @@ impl Runner {
                 // A worktree git cannot be read in is told and let go: the
                 // turn ends as it did before, which errs toward the ruling.
                 let uncommitted = match (question.is_none() && no_push && !asked && !pushing)
-                    .then(|| worktree::uncommitted(&self.settings.repo, &item.worktree))
+                    .then(|| worktree::uncommitted(&self.settings.git.checkout, &item.worktree))
                 {
                     Some(Ok(files)) => files,
                     Some(Err(e)) => {
@@ -595,11 +595,7 @@ impl Runner {
     // The open pull request from `branch`. A forge that cannot be asked
     // leaves it unrecorded, and status shows none.
     pub(super) fn pull_request_from(&self, branch: &str) -> Option<u64> {
-        let open = self
-            .ports
-            .forge
-            .open_pull_requests(&self.settings.forge)
-            .ok()?;
+        let open = self.ports.forge.open_pull_requests(&self.remote).ok()?;
         open.into_iter()
             .find(|pr| pr.head == branch)
             .map(|pr| pr.number)

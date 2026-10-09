@@ -115,7 +115,7 @@ impl Runner {
                 self.round_started(&chosen, CallKind::Local)?;
                 Ok(Begin::Review(ReviewCall::Local {
                     local,
-                    repo: self.settings.repo.clone(),
+                    repo: self.settings.git.checkout.clone(),
                     worktree,
                     base,
                     out: build.join("qwen-review"),
@@ -174,7 +174,7 @@ impl Runner {
             Ok(criteria) => criteria,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        let diff = match calls::diff_against(&self.settings.repo, &worktree, &base) {
+        let diff = match calls::diff_against(&self.settings.git.checkout, &worktree, &base) {
             Ok(diff) => diff,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
@@ -359,7 +359,7 @@ impl Runner {
     // cannot say, which leaves the head unrecorded and errs toward a ruling.
     pub(super) fn worktree_head(&self) -> Option<String> {
         let item = self.current()?;
-        match worktree::head(&self.settings.repo, &item.worktree) {
+        match worktree::head(&self.settings.git.checkout, &item.worktree) {
             Ok(head) => Some(head),
             Err(e) => {
                 eprintln!("cannot read issue #{}'s worktree head: {e}", item.issue);
@@ -371,7 +371,7 @@ impl Runner {
     // Asks git rather than the forge: the forge's head lags a push by a moment.
     pub(super) fn origin_head(&self) -> Result<String, String> {
         let item = self.current().expect("a head is a work item's");
-        worktree::origin_head(&self.settings.repo, &item.branch).map_err(|e| e.to_string())
+        worktree::origin_head(&self.settings.git.checkout, &item.branch).map_err(|e| e.to_string())
     }
 
     // Recorded in state before the call is started, the same as a worker's

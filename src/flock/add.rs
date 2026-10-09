@@ -71,9 +71,16 @@ pub struct Place<'a> {
 /// the forge. The schema's description of each key is what lookout shows
 /// beside it.
 const DEFAULTS: &str = r#"
-merge_authority = "ask"
-max_items = 1
-max_parked = 2
+[git]
+merging = "ask"
+issues = "ask"
+
+[ci]
+fix_attempts = -1
+
+[concurrency]
+active_items = 1
+pending_rulings = 2
 
 [agents]
 implementers = ["sonnet-high"]
@@ -136,12 +143,23 @@ pub async fn add(
         let Some(other) = tables.get(sheep).cloned() else {
             continue;
         };
-        let text = |key: &str| other.get(key).and_then(Value::as_str).map(str::to_owned);
-        let runs_from = text("repo").map(|repo| match repo.strip_prefix("~/") {
+        // Today's `git` table, or the top-level key a table from before it holds.
+        let text = |key: &str, old: &str| {
+            let git = other.get("git").and_then(Value::as_object);
+            let set = git.and_then(|git| git.get(key)).or_else(|| other.get(old));
+            set.and_then(Value::as_str).map(str::to_owned)
+        };
+        let runs_from = text("checkout", "repo").map(|repo| match repo.strip_prefix("~/") {
             Some(rest) => place.home.join(rest),
             None => repo.into(),
         });
-        let same_repo = text("forge").as_deref() == Some(slug);
+        // With no `git.remote`, its runner reads the repo from its checkout's `origin`.
+        let same_repo = match text("remote", "forge") {
+            Some(remote) => remote == slug,
+            None => (runs_from.as_deref())
+                .and_then(|folder| super::Checkout::of(folder).ok())
+                .is_some_and(|theirs| theirs.forge.as_str() == slug),
+        };
         if runs_from.as_deref() == Some(checkout.root.as_path()) || same_repo {
             return Err(format!(
                 "project `{sheep}` already runs this checkout or {slug}: `shep kelpie start {sheep}`"
@@ -156,10 +174,10 @@ pub async fn add(
     if set {
         let loaded = Settings::from_table(&table, name.as_str(), place.home, place.home)
             .map_err(|e| e.to_string())?;
-        if loaded.repo != checkout.root {
+        if loaded.git.checkout != checkout.root {
             return Err(format!(
                 "project {name} runs from {}, not this checkout",
-                loaded.repo.display()
+                loaded.git.checkout.display()
             ));
         }
     }
@@ -250,12 +268,14 @@ fn settings(name: &ProjectName, place: Place<'_>) -> Result<Map<String, Value>, 
     let root = &place.checkout.root;
     let mut table = table_of(DEFAULTS)?;
     let text = |s: &str| Value::String(s.to_owned());
-    table.insert("repo".into(), text(&root.display().to_string()));
-    table.insert("forge".into(), text(place.checkout.forge.as_str()));
-    table.insert(
-        "ci".into(),
-        Value::Bool(root.join(".github/workflows").is_dir()),
-    );
+    if let Some(Value::Object(repo)) = table.get_mut("git") {
+        repo.insert("checkout".into(), text(&root.display().to_string()));
+        repo.insert("remote".into(), text(place.checkout.forge.as_str()));
+    }
+    if let Some(Value::Object(ci)) = table.get_mut("ci") {
+        let workflows = root.join(".github/workflows").is_dir();
+        ci.insert("block".into(), Value::Bool(workflows));
+    }
     // `qwen` first where the maintainer's script is installed, as `add`
     // writes its file, and no review bot: those are listed by hand.
     let reviewers = crate::settings::default_reviewers(place.home);

@@ -5,8 +5,9 @@
 //! findings file in its build folder. When the pull request merges, kelpie
 //! reads that file once and files only findings it sent the worker itself,
 //! in its own words: a line the worker invents or rewrites files nothing.
-//! Under `auto` each finding is filed at once, and under
-//! `ask` the maintainer is asked first. A finding an open issue already holds
+//! `git.issues` decides what follows: under `file` each finding is filed at
+//! once, under `ask` the maintainer is asked first, and under `skip` nothing
+//! is filed and the findings stay in the review. A finding an open issue already holds
 //! gets a comment on that issue instead of a second one.
 
 use std::path::Path;
@@ -16,7 +17,7 @@ use super::report::{Begin, StepReport};
 use super::review::findings;
 use crate::board::READY;
 use crate::ports::{Finding, ForgeError, OpenIssue, Severity};
-use crate::settings::MergeAuthority;
+use crate::settings::Filing;
 use crate::state::{RulingKind, StateError};
 use crate::work_item::FollowUps;
 
@@ -45,8 +46,10 @@ impl Runner {
         let Some(number) = item.pull_request else {
             return Ok(None);
         };
+        let filing = self.settings.git.issues;
         let pending = match item.follow_ups.clone() {
             Some(pending) => pending,
+            None if filing == Filing::Skip => return Ok(None),
             None => {
                 let found = match read_deferred(&item.build, &item.held, &item.worktree) {
                     Ok(found) => found,
@@ -64,14 +67,17 @@ impl Runner {
         if pending.findings.is_empty() {
             return Ok(None);
         }
-        if !pending.ruled && self.settings.merge_authority == MergeAuthority::Ask {
-            let kind = RulingKind::FollowUp {
-                findings: pending.findings,
-                refused: None,
-            };
-            return self.raise(number, kind).map(Some);
+        match (pending.ruled, filing) {
+            (false, Filing::Ask) => {
+                let kind = RulingKind::FollowUp {
+                    findings: pending.findings,
+                    refused: None,
+                };
+                self.raise(number, kind).map(Some)
+            }
+            (false, Filing::Skip) => Ok(None),
+            (true, _) | (false, Filing::File) => self.file_follow_ups(number).map(Some),
         }
-        self.file_follow_ups(number).map(Some)
     }
 
     // One finding at a time, each taken off the work item once it is filed,
@@ -79,7 +85,7 @@ impl Runner {
     fn file_follow_ups(&mut self, number: u64) -> Result<Begin, StateError> {
         let item = self.current().expect("a follow-up is of a work item");
         let issue = item.issue;
-        let repo = self.settings.forge.clone();
+        let repo = self.remote.clone();
         let mut open = match self.ports.forge.open_issues(&repo) {
             Ok(open) => open,
             Err(e) => {

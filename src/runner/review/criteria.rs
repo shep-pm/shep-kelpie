@@ -19,7 +19,7 @@ impl Runner {
         let found = self
             .ports
             .forge
-            .issue(&self.settings.forge, issue)
+            .issue(&self.remote, issue)
             .map_err(|e| format!("cannot read issue #{issue} for the review round: {e}"))?;
         Ok(format!(
             "#{issue} {}\n\n{}",

@@ -14,7 +14,7 @@ use crate::board::Skip;
 use crate::lease::gpu::LockHolder;
 use crate::ports::{ModelSeat, SessionId};
 use crate::review_bot::Bot;
-use crate::settings::{AgentName, MergeAuthority};
+use crate::settings::{AgentName, Merging};
 use crate::skills::StepSkill;
 use crate::state::{Finished, LeaseHeld, Ruling, StateError, Waiting};
 use crate::work_item::{Attached, BotSkipped, Phase, QwenTally, Spend, Split, Turn, WorkItem};
@@ -47,8 +47,8 @@ const RULE_USAGE: &str =
 pub struct Status<'a> {
     /// The project
     pub project: &'a str,
-    /// Who decides its merges
-    pub merge_authority: MergeAuthority,
+    /// Who merges its green, reviewed pull requests, `git.merging`
+    pub merging: Merging,
     /// The first of `work_items`, where a status read before they existed
     /// finds the work item
     pub work_item: Option<WorkItemStatus<'a>>,
@@ -56,7 +56,7 @@ pub struct Status<'a> {
     pub work_items: Vec<WorkItemStatus<'a>>,
     /// How many work items may hold a slot at once. `working` can list
     /// more, since an item going on through CI or a merge holds none.
-    pub max_items: u32,
+    pub active_items: u32,
     /// The issues of the open work items going on, neither parked nor
     /// waiting for a slot, oldest first
     pub working: Vec<u64>,
@@ -69,7 +69,7 @@ pub struct Status<'a> {
     /// How many work items may wait parked on rulings before the board
     /// opens nothing new. A merged item on its follow-up ruling, which
     /// `parked` lists, does not count.
-    pub max_parked: u32,
+    pub pending_rulings: u32,
     /// Pull requests adopted and waiting for a free slot, oldest first
     pub adopted: &'a [Waiting],
     /// Ready issues the board passed over on its last poll, and why
@@ -577,14 +577,14 @@ mod tests {
             rig.ask(&runner, "status", None),
             json!({
                 "project": "koji",
-                "merge_authority": "ask",
+                "merging": "ask",
                 "work_item": null,
                 "work_items": [],
-                "max_items": 1,
+                "active_items": 1,
                 "working": [],
                 "waiting_for_slot": [],
                 "parked": [],
-                "max_parked": 2,
+                "pending_rulings": 2,
                 "adopted": [],
                 "skipped": [],
                 "rulings": [],

@@ -73,7 +73,7 @@ pub struct WorkItem {
     /// so the next summon asks it for a full review.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rebased: bool,
-    /// Whether it holds one of the slots `max_items` sets, which a phase
+    /// Whether it holds one of the slots `concurrency.active_items` sets, which a phase
     /// that calls a model needs
     #[serde(default, skip_serializing_if = "Seat::is_held")]
     pub seat: Seat,
@@ -601,7 +601,7 @@ mod tests {
                         "ruling": 0, "merge": 0, "other": 0,
                     },
                 },
-                "counts": { "review_rounds": 2, "fix_turns": 1, "rulings": 1 },
+                "counts": { "review_rounds": 2, "fix_turns": 1, "rulings": 1, "ci_fix_turns": 1 },
                 "calls": [{
                     "role": "worker",
                     "at": 10,

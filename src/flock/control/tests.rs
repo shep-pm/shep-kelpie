@@ -34,7 +34,7 @@ fn launch(shepherd: &FakeShepherd) -> Launch {
 /// Registers project `name`'s runner for the checkout at `root`, up when `online`
 fn runner(shepherd: &FakeShepherd, name: &str, root: &Path, online: bool) {
     let mut table = crate::test::project_table(EXAMPLE);
-    table.insert("repo".into(), Value::String(root.display().to_string()));
+    table["git"]["checkout"] = Value::String(root.display().to_string());
     shepherd.holds(launch(shepherd).runner(&project(name), table), online);
 }
 
@@ -82,7 +82,7 @@ async fn start_brings_up_the_runner_then_reaches_it() {
 async fn start_brings_up_a_runner_whose_entry_still_sets_kill_timeout() {
     let shepherd = FakeShepherd::new().await;
     let mut table = crate::test::project_table(EXAMPLE);
-    table.insert("repo".into(), Value::String("/src/koji".into()));
+    table["git"]["checkout"] = Value::String("/src/koji".into());
     let mut entry = launch(&shepherd).runner(&project("koji"), table);
     entry.kill_timeout = UpDuration::from_millis(10_000);
     shepherd.holds(entry, false);

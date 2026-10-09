@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::guard::{FOLDER_FLAG, NAME_FLAG, RECORD_FLAG};
+use crate::guard::{FOLDER_FLAG, RECORD_FLAG};
 use crate::ports::{Fence, PM_NOTES, Reach, Tools};
 use crate::settings::HookEvent;
 use crate::trim::trimmed;
@@ -284,16 +284,11 @@ fn hooks(fence: &Fence) -> Value {
         .folders
         .iter()
         .map(|p| shell_quote(&format!("{FOLDER_FLAG}{}", p.display())));
-    let names = guard
-        .private_names
-        .iter()
-        .map(|n| shell_quote(&format!("{NAME_FLAG}{n}")));
     let issues = (guard.issues.iter())
         .flat_map(|rules| rules.flags())
         .map(|flag| shell_quote(&flag));
     let commands: Vec<String> = (commands.into_iter())
         .chain(folders)
-        .chain(names)
         .chain(issues)
         .collect();
     pre.push(entry(Some(GUARDED_TOOLS), &commands.join(" ")));

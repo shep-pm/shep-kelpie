@@ -12,7 +12,7 @@ fn slug() -> ForgeSlug {
 
 fn guarded() -> (Guarded, FakeForge) {
     let fake = FakeForge::new("/nowhere".into());
-    let local = LocalPaths::new([Path::new("/Users/me/.kelpie")], ["acme corp"]);
+    let local = LocalPaths::new([Path::new("/Users/me/.kelpie")]);
     (Guarded::new(Box::new(fake.clone()), local), fake)
 }
 
@@ -32,7 +32,6 @@ fn every_encoding_of_a_local_path_is_refused_at_every_post() {
         "see ~/.ssh/config",
         concat!("open http://192.", "168.1.20:3000"),
         "ssh alex@mac.local",
-        "for Acme Corp only",
     ] {
         let (forge, fake) = guarded();
         let repo = slug();
@@ -60,8 +59,8 @@ fn a_refusal_names_the_field_and_what_it_found() {
         "not posted: the issue's body names a path under the home folder"
     );
     assert_eq!(
-        refusal(forge.create_issue(&slug(), "Acme Corp", "a body", &[])),
-        "not posted: the issue's title names a name on this project's private list"
+        refusal(forge.create_issue(&slug(), "at mac.local:80", "a body", &[])),
+        "not posted: the issue's title names an address on a local network"
     );
     assert_eq!(
         refusal(forge.post_comment(&slug(), 3, "in /Users/me/.kelpie/x")),

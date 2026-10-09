@@ -113,8 +113,6 @@ pub struct WorkerProfile<'a> {
     pub kelpie_home: &'a Path,
     /// The project's checkout, whose path the guard keeps off the forge
     pub repo: &'a Path,
-    /// The words the project's settings keep off the forge, which the guard refuses
-    pub private_names: &'a [NonBlank],
     /// The project's own guard hooks, which run after kelpie's
     pub guard_hooks: &'a [GuardHook],
     /// The domains the project's settings add to GitHub's
@@ -195,11 +193,6 @@ impl WorkerProfile<'_> {
                 build: self.build.to_owned(),
                 git_common_dir: self.git_common_dir.to_owned(),
                 folders: vec![self.kelpie_home.to_owned(), self.repo.to_owned()],
-                private_names: self
-                    .private_names
-                    .iter()
-                    .map(|n| n.as_str().to_owned())
-                    .collect(),
                 issues: None,
             },
             hooks: self.guard_hooks.to_vec(),
@@ -279,7 +272,6 @@ mod tests {
             kelpie: Path::new("/opt/kelpie's bin/kelpie"),
             kelpie_home: Path::new("/k"),
             repo: Path::new("/k/repos/shep"),
-            private_names: &[],
             guard_hooks: hooks,
             allowed_domains: domains,
             build_env: &BTreeMap::new(),
@@ -317,7 +309,6 @@ mod tests {
             kelpie: Path::new("/opt/kelpie"),
             kelpie_home: &kelpie,
             repo: Path::new("/r"),
-            private_names: &[],
             guard_hooks: &[],
             allowed_domains: &[],
             build_env: &BTreeMap::new(),
@@ -437,7 +428,6 @@ mod tests {
             kelpie: Path::new("/opt/kelpie"),
             kelpie_home: Path::new("/k"),
             repo: Path::new("/k/repos/shep"),
-            private_names: &[],
             guard_hooks: &[],
             allowed_domains: &[],
             build_env: &build_env,
@@ -658,32 +648,6 @@ mod tests {
         );
         assert_eq!(s["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
         assert_eq!(s["hooks"]["PostToolUse"], Value::Null);
-    }
-
-    #[test]
-    fn the_guard_is_handed_the_projects_private_names() {
-        let names = ["Acme Corp", "it's"].map(|n| NonBlank::try_from(n.to_owned()).unwrap());
-        let profile = WorkerProfile {
-            worktree: Path::new("/k/wt/shep/7"),
-            build: Path::new("/k/targets/shep/7"),
-            git_common_dir: Path::new("/k/repos/shep/.git"),
-            git_dir: Path::new("/k/repos/shep/.git/worktrees/7"),
-            branch: "kelpie/7",
-            kelpie: Path::new("/opt/kelpie"),
-            kelpie_home: Path::new("/k"),
-            repo: Path::new("/k/repos/shep"),
-            private_names: &names,
-            guard_hooks: &[],
-            allowed_domains: &[],
-            build_env: &BTreeMap::new(),
-            shep_home: Path::new("/srv/shep"),
-            door: Path::new("/k/dog/lease.sock"),
-        };
-        let s = profile.settings();
-        assert_eq!(
-            s["hooks"]["PreToolUse"][1]["hooks"][0]["command"],
-            r"'/opt/kelpie' 'guard' '/k/repos/shep/.git' '/k/wt/shep/7' '--folder=/k' '--folder=/k/repos/shep' '--name=Acme Corp' '--name=it'\''s'"
-        );
     }
 
     #[test]

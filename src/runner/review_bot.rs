@@ -118,7 +118,7 @@ impl Runner {
     /// Steps a review bot's round, waiting to summon or waiting for its review
     pub(super) fn bot_step(&mut self) -> Result<Begin, StateError> {
         let number = self.number();
-        let pr = self.ports.forge.pull_request(&self.settings.forge, number);
+        let pr = self.ports.forge.pull_request(&self.remote, number);
         match pr.map(|pr| pr.state) {
             Ok(PullRequestState::Open) => {}
             // The maintainer merged it by hand, which is their own ruling.
@@ -239,7 +239,7 @@ impl Runner {
         if bot != Bot::Coderabbit {
             return Ok(None);
         }
-        match self.ports.forge.visibility(&self.settings.forge) {
+        match self.ports.forge.visibility(&self.remote) {
             Ok(Visibility::Public) => Ok(None),
             Ok(Visibility::Private | Visibility::Internal) => {
                 self.release(bot)?;
@@ -251,7 +251,7 @@ impl Runner {
                     .map(Some)
             }
             Err(e) => {
-                let repo = self.settings.forge.as_str();
+                let repo = self.remote.as_str();
                 Ok(Some(self.gate_failed(format!(
                     "cannot read whether {repo} is public: {e}"
                 ))))
@@ -369,7 +369,7 @@ impl Runner {
         })?;
         let profile = self.profile(bot);
         let body = profile.full_review().unwrap_or_default();
-        let posted = self.ports.forge.comment(&self.settings.forge, number, body);
+        let posted = self.ports.forge.comment(&self.remote, number, body);
         if let Err(e) = posted {
             let stage = if again {
                 ReviewStage::Summoned {
@@ -411,7 +411,7 @@ impl Runner {
         readied: Option<Timestamp>,
         full: bool,
     ) -> Result<Option<Begin>, StateError> {
-        let repo = self.settings.forge.clone();
+        let repo = self.remote.clone();
         let pr = match self.ports.forge.pull_request(&repo, number) {
             Ok(pr) => pr,
             Err(e) => {
@@ -707,7 +707,7 @@ impl Runner {
         }
         let mut failed = None;
         for id in self.item().threads_sent.clone() {
-            match self.ports.forge.resolve_thread(&self.settings.forge, &id) {
+            match self.ports.forge.resolve_thread(&self.remote, &id) {
                 Ok(()) => left.retain(|t| t != &id),
                 Err(e) => {
                     failed = Some(format!("cannot resolve a thread on #{number}: {e}"));
@@ -812,7 +812,7 @@ impl Runner {
         let activity = self
             .ports
             .forge
-            .review_bot(&self.settings.forge, number, bot.login())
+            .review_bot(&self.remote, number, bot.login())
             .map_err(|e| format!("cannot read {} on #{number}: {e}", bot.name()))?;
         if let Some((per_hour, at)) = bot.quota(&activity) {
             self.ports
@@ -833,7 +833,7 @@ impl Runner {
         if self.labelled(bot, number)? != on {
             self.ports
                 .forge
-                .set_label(&self.settings.forge, number, label, on)
+                .set_label(&self.remote, number, label, on)
                 .map_err(|e| format!("cannot change `{label}` on #{number}: {e}"))?;
         }
         self.update(|item| {
@@ -852,7 +852,7 @@ impl Runner {
         let pr = self
             .ports
             .forge
-            .pull_request(&self.settings.forge, number)
+            .pull_request(&self.remote, number)
             .map_err(|e| format!("cannot read #{number}: {e}"))?;
         Ok(pr.labels.contains(&label))
     }

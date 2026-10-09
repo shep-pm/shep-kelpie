@@ -12,7 +12,6 @@
 //!
 //! - a folder it was given, in its canonical form too, so a symlinked home
 //!   names the same place twice
-//! - a word from the project's own list of private names
 //!
 //! A [`Surface::Prose`] is text a person reads, so it also refuses
 //! `/home/<name>`, `C:\Users\<name>`, `/private/tmp` and `/var/folders`,
@@ -20,7 +19,7 @@
 //! under `~`, and an address on a local network. Code and its patches are
 //! full of all of them (another user's home in a fixture, `~/` in a doc, `self.local`,
 //! an address in a fixture), so a [`Surface::Code`] leaves them be and holds
-//! only to the folders it was given and the private names.
+//! only to the folders it was given.
 
 use std::fmt;
 use std::fs;
@@ -51,8 +50,6 @@ pub enum Surface {
 pub enum Leak {
     /// A path on this machine
     Path,
-    /// A word from the project's list of private names
-    Name,
     /// A path under the home folder, written `~/...`
     Tilde,
     /// An address on a local network
@@ -63,29 +60,23 @@ impl fmt::Display for Leak {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Path => "a path on this machine, which names its user",
-            Self::Name => "a name on this project's private list",
             Self::Tilde => "a path under the home folder",
             Self::Lan => "an address on a local network",
         })
     }
 }
 
-/// What to keep off the forge: folders, and private names
+/// What to keep off the forge: folders
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LocalPaths {
     folders: Vec<String>,
-    names: Vec<String>,
 }
 
 impl LocalPaths {
-    /// A check for `folders` and for `names`
+    /// A check for `folders`
     ///
-    /// A folder with no parent, such as `/`, names nothing and is left out,
-    /// as is a blank name.
-    pub fn new<'a>(
-        folders: impl IntoIterator<Item = &'a Path>,
-        names: impl IntoIterator<Item = &'a str>,
-    ) -> Self {
+    /// A folder with no parent, such as `/`, names nothing and is left out.
+    pub fn new<'a>(folders: impl IntoIterator<Item = &'a Path>) -> Self {
         let mut found: Vec<String> = Vec::new();
         for folder in folders.into_iter().filter(|f| f.parent().is_some()) {
             let canonical = fs::canonicalize(folder).ok();
@@ -97,15 +88,7 @@ impl LocalPaths {
                 }
             }
         }
-        let names = names
-            .into_iter()
-            .map(|n| n.trim().to_lowercase())
-            .filter(|n| !n.is_empty())
-            .collect();
-        Self {
-            folders: found,
-            names,
-        }
+        Self { folders: found }
     }
 
     /// What `text` names that must stay on this machine, if anything
@@ -117,9 +100,6 @@ impl LocalPaths {
         let system = surface == Surface::Prose && names_system_path(text);
         if system || self.folders.iter().any(|f| names_folder(text, f)) {
             return Some(Leak::Path);
-        }
-        if self.names.iter().any(|n| has_word(text, n)) {
-            return Some(Leak::Name);
         }
         if surface == Surface::Prose {
             if has_tilde_path(text) {
@@ -235,14 +215,6 @@ fn names_system_path(text: &str) -> bool {
             .is_some_and(is_word);
         let start = text[..at].chars().rev().nth(1);
         drive && name && start.is_none_or(|c| !is_word(c))
-    })
-}
-
-// `word` between characters that are not letters or digits.
-fn has_word(text: &str, word: &str) -> bool {
-    text.match_indices(word).any(|(at, _)| {
-        let edge = |c: Option<char>| c.is_none_or(|c| !c.is_alphanumeric());
-        edge(before(text, at)) && edge(text[at + word.len()..].chars().next())
     })
 }
 

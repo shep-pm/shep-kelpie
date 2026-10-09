@@ -31,7 +31,7 @@ use crate::ports::{
 };
 use crate::profile::CREDENTIALS;
 use crate::runner::{HUMAN, ProjectPaths};
-use crate::settings::{AgentName, RoleAgents, RoleModel, Settings};
+use crate::settings::{AgentName, ForgeSlug, RoleAgents, RoleModel, Settings};
 use crate::usage;
 use crate::worktree;
 
@@ -77,8 +77,10 @@ impl Writer {
 /// The project a request is for
 #[derive(Debug, Clone, Copy)]
 pub struct Project<'a> {
-    /// Its settings: the checkout, the forge repo and the private names
+    /// Its settings, such as its checkout
     pub settings: &'a Settings,
+    /// Its repo on the forge, as `git.remote` or the checkout's `origin` names it
+    pub remote: &'a ForgeSlug,
     /// Where its files live under kelpie's home
     pub paths: &'a ProjectPaths,
     /// Its implementers, which an issue's `agent:` label names
@@ -113,7 +115,7 @@ impl Mode {
 ///
 /// A message naming the label the forge would not read or make.
 pub fn make_labels(forge: &dyn Forge, project: &Project<'_>, mode: Mode) -> Result<(), String> {
-    let repo = &project.settings.forge;
+    let repo = project.remote;
     let slug = repo.as_str();
     let have = forge
         .repo_labels(repo)
@@ -161,7 +163,7 @@ fn reach(
     let settings = project.settings;
     let paths = project.paths;
     let common = worktree::git(
-        &settings.repo,
+        &settings.git.checkout,
         ["rev-parse", "--path-format=absolute", "--git-common-dir"],
     )
     .map_err(|e| e.to_string())?;
@@ -194,10 +196,7 @@ fn reach(
             worktree: checkout.to_owned(),
             build: checkout.to_owned(),
             git_common_dir: PathBuf::from(common),
-            folders: vec![paths.kelpie_home.clone(), settings.repo.clone()],
-            private_names: (settings.private_names.iter())
-                .map(|n| n.as_str().to_owned())
-                .collect(),
+            folders: vec![paths.kelpie_home.clone(), settings.git.checkout.clone()],
             issues: Some(rules),
         },
         hooks: Vec::new(),
@@ -233,7 +232,7 @@ pub fn headless(
         crate::work_item::new_session_id().map_err(|e| format!("cannot draw a session id: {e}"))?;
     let folder = project.paths.issues();
     let checkout = folder.join(&session.0);
-    let repo = &project.settings.repo;
+    let repo = &project.settings.git.checkout;
     worktree::view(repo, &checkout)
         .map_err(|e| format!("cannot check out main for the issue writer: {e}"))?;
     let call = call(project, writer, request, &session, &checkout)?;
@@ -372,7 +371,7 @@ fn tail(text: &str) -> String {
 
 // Each filed issue as the forge holds it, with what it lacks.
 fn report(project: &Project<'_>, forge: &dyn Forge, filed: &Filed) -> Result<Vec<String>, String> {
-    let repo = &project.settings.forge;
+    let repo = project.remote;
     let slug = repo.as_str();
     let status = Mode::Headless.status();
     let mut lines = match filed.filed.len() {
@@ -468,7 +467,7 @@ pub fn interactive(
     program: &OsStr,
 ) -> Result<Interactive, String> {
     let folder = project.paths.issues();
-    let checkout = &project.settings.repo;
+    let checkout = &project.settings.git.checkout;
     let run = crate::work_item::new_session_id()
         .map_err(|e| format!("cannot draw a name for its files: {e}"))?;
     let file = folder.join(format!("interactive-{}.json", run.0));

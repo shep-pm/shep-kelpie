@@ -1,7 +1,7 @@
 //! Dispatch: the board's next issue opens a work item in a free slot
 //!
-//! A running project with fewer than `max_items` working and fewer than
-//! `max_parked` parked asks the board on its steps, after starting any pull
+//! A running project with fewer than `concurrency.active_items` working and fewer than
+//! `concurrency.pending_rulings` parked asks the board on its steps, after starting any pull
 //! request it adopted and checking its open pull requests for one asking
 //! for a rework. A queued issue waits until a slot is free, an issue, or a
 //! pull request, whose work item is open waits for it to end, and an issue
@@ -17,10 +17,10 @@ use crate::state::StateError;
 
 impl Runner {
     // The step runs this only while the board may open a work item, and it
-    // opens at most one, so nothing here checks `max_items` again.
+    // opens at most one, so nothing here checks `concurrency.active_items` again.
     pub(super) fn dispatch(&mut self) -> Result<Begin, StateError> {
         let forge = &self.ports.forge;
-        let repo = &self.settings.forge;
+        let repo = &self.remote;
         let listed = forge
             .ready_issues(repo)
             .and_then(|ready| forge.open_pull_requests(repo).map(|open| (ready, open)));
@@ -164,7 +164,7 @@ impl Runner {
     // goes only once its issue reads as closed. One the forge lists ready is
     // open, and one it cannot answer for stays.
     fn trim_finished(&mut self, ready: &[ReadyIssue]) -> Result<(), StateError> {
-        let repo = &self.settings.forge;
+        let repo = &self.remote;
         let closed: Vec<u64> = self
             .state
             .finished

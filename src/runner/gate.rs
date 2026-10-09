@@ -17,7 +17,7 @@ use super::report::{Begin, StepReport};
 use super::rework::HUMAN;
 use crate::board::READY;
 use crate::ports::{Checks, PullRequestState, Timestamp};
-use crate::settings::MergeAuthority;
+use crate::settings::Merging;
 use crate::skills::Step;
 use crate::state::{RulingKind, StateError, Stuck};
 use crate::work_item::{Phase, Turn, foreign_change};
@@ -28,6 +28,8 @@ use crate::worktree::{self, Base};
 pub(crate) const CHECKS_SETTLE: u64 = 120;
 
 mod catch_up;
+#[cfg(test)]
+mod fix_attempts;
 
 impl Runner {
     pub(super) fn check_ci(&mut self) -> Result<Begin, StateError> {
@@ -38,7 +40,7 @@ impl Runner {
         let Phase::Ci { head: seen, since } = item.phase.clone() else {
             return Ok(Begin::Idle);
         };
-        let pr = match self.ports.forge.pull_request(&self.settings.forge, number) {
+        let pr = match self.ports.forge.pull_request(&self.remote, number) {
             Ok(pr) => pr,
             Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
         };
@@ -90,7 +92,7 @@ impl Runner {
             return Ok(parked);
         }
         if known.head.is_none() {
-            if self.settings.merge_authority == MergeAuthority::Auto {
+            if self.settings.git.merging == Merging::Auto {
                 return self.regate_unknown(number, &pr.head);
             }
             let head = Some(pr.head.clone());
@@ -99,7 +101,7 @@ impl Runner {
         if base == Base::Behind {
             return self.rebase(number, &pr.head);
         }
-        if !self.settings.ci {
+        if !self.settings.ci.block {
             return self.passed(number, pr.head);
         }
         // A check set registers a check at a time, so a verdict waits until
@@ -151,7 +153,7 @@ impl Runner {
             && !unread_head
             && !note_fix
             && !late_fix;
-        if self.settings.merge_authority == MergeAuthority::Auto && vouched {
+        if self.settings.git.merging == Merging::Auto && vouched {
             self.update(|item| {
                 item.phase = Phase::Merge {
                     head,
@@ -183,6 +185,8 @@ impl Runner {
 
     // A worker that pushed nothing after its last red run would get the
     // same run again and again, so the second time the maintainer decides.
+    // A red run once the work item's fix turns reach `ci.fix_attempts`
+    // raises that ruling too, in place of a fix turn.
     fn ci_failed(
         &mut self,
         number: u64,
@@ -191,26 +195,59 @@ impl Runner {
     ) -> Result<Begin, StateError> {
         let item = self.current().expect("CI runs on a work item");
         if item.red_head.as_deref() == Some(head.as_str()) {
-            return self.raise(number, Stuck::StillRed { head, checks }.into());
+            let fix_turns = None;
+            return self.raise(
+                number,
+                Stuck::StillRed {
+                    head,
+                    checks,
+                    fix_turns,
+                }
+                .into(),
+            );
+        }
+        let turns = item.counts.ci_fix_turns;
+        if self
+            .settings
+            .ci
+            .fix_attempts
+            .cap()
+            .is_some_and(|cap| turns >= cap)
+        {
+            let fix_turns = Some(turns);
+            return self.raise(
+                number,
+                Stuck::StillRed {
+                    head,
+                    checks,
+                    fix_turns,
+                }
+                .into(),
+            );
         }
         let prompt = self
             .skills
-            .invoke(Step::Ci, &red_prompt(number, &head, &checks));
-        self.back_to_worker(number, head, checks, prompt)
+            .invoke(Step::CiFix, &red_prompt(number, &head, &checks));
+        self.back_to_worker(number, head, checks, prompt, true)
     }
 
     // The failure becomes the worker's next turn, and this head is marked red
-    // so a second failure at it goes to the maintainer instead.
+    // so a second failure at it goes to the maintainer instead. A red run's
+    // turn, `counted`, is one of those `ci.fix_attempts` caps, saved with it.
     pub(super) fn back_to_worker(
         &mut self,
         number: u64,
         head: String,
         checks: Vec<String>,
         prompt: String,
+        counted: bool,
     ) -> Result<Begin, StateError> {
         let issue = self.current().expect("CI runs on a work item").issue;
         let red = head.clone();
         self.update(|item| {
+            if counted {
+                item.counts.ci_fix_turns = item.counts.ci_fix_turns.saturating_add(1);
+            }
             item.red_head = Some(red);
             item.turn = Turn::Next { prompt };
             item.phase = Phase::Implement;
@@ -226,7 +263,7 @@ impl Runner {
     /// Where `head` stands against `origin`, or why git could not say
     pub(super) fn base_of(&self, head: &str) -> Result<Base, String> {
         let item = self.current().expect("a base is of a work item");
-        worktree::base_of(&self.settings.repo, &item.branch, head)
+        worktree::base_of(&self.settings.git.checkout, &item.branch, head)
             .map_err(|e| format!("cannot fetch main: {e}"))
     }
 
@@ -235,7 +272,7 @@ impl Runner {
     fn regate_unknown(&mut self, number: u64, head: &str) -> Result<Begin, StateError> {
         let item = self.current().expect("CI runs on a work item");
         let issue = item.issue;
-        let at = worktree::head(&self.settings.repo, &item.worktree);
+        let at = worktree::head(&self.settings.git.checkout, &item.worktree);
         let regated = at
             .map_err(|e| format!("cannot read the worktree's head: {e}"))
             .and_then(|at| self.regate(&at, head));
@@ -508,7 +545,7 @@ pub(super) mod tests {
     #[test]
     fn with_ci_off_the_checks_are_never_read() {
         let rig = Rig::new("webapp");
-        rig.edit_settings(|s| s.replace("ci = true", "ci = false"));
+        rig.edit_settings(|s| s.replace("block = true", "block = false"));
         let runner = rig.open().unwrap();
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);

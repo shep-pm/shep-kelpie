@@ -112,7 +112,7 @@ fn usage() -> Usage {
 // A running project with two slots, and issues 7 and 8 open in them
 fn two_open(project: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
-    rig.edit_settings(|s| s.replace("max_items = 1", "max_items = 2"));
+    rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 2"));
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.ask(&runner, "add", Some("8"));

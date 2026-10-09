@@ -472,7 +472,7 @@ mod tests {
     #[test]
     fn a_stop_with_calls_running_lets_go_without_waiting_for_them() {
         let rig = Rig::new("acme");
-        rig.edit_settings(|s| s.replace("max_items = 1", "max_items = 2"));
+        rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 2"));
         let runner = Arc::new(rig.open().unwrap());
         rig.ask(&runner, "add", Some("7"));
         rig.ask(&runner, "add", Some("8"));

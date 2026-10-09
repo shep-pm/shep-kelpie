@@ -212,8 +212,10 @@ async fn issue(here: Here<'_>, name: &ProjectName, args: &[&str]) -> Result<Vec<
     let listed = (loaded.settings.role_agents(&agents)).map_err(|e| e.to_string())?;
     let writer = Writer::of(&agents)?;
     let kelpie = std::env::current_exe().map_err(|e| format!("cannot find kelpie itself: {e}"))?;
+    let remote = crate::runner::check_checkout(&loaded.settings).map_err(|e| e.to_string())?;
     let project = Project {
         settings: &loaded.settings,
+        remote: &remote,
         paths: &paths,
         agents: &listed,
         kelpie: &kelpie,

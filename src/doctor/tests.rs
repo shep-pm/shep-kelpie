@@ -93,8 +93,8 @@ impl Scene {
             &repo,
             &["remote", "add", "origin", "https://github.com/o/r.git"],
         );
-        table.insert("repo".into(), json!(repo));
-        table.insert("forge".into(), json!(format!("shep-pm/{name}")));
+        table["git"]["checkout"] = json!(repo);
+        table["git"]["remote"] = json!(format!("shep-pm/{name}"));
         table["agents"]["reviewers"] = json!(["defect-hunter"]);
         edit(&mut table);
         let launch = Launch {
@@ -580,6 +580,39 @@ async fn a_checkout_that_moved_is_missing_and_fails_the_run() {
     std::fs::create_dir(&plain).unwrap();
     let (what, _) = missing(&scene.report().await, "koji: checkout");
     assert!(what.contains("is not a git work tree"), "{what}");
+
+    // In the right place, but with no `origin`: the checkout stays put.
+    git(&plain, &["init", "-q"]);
+    let (what, fix) = missing(&scene.report().await, "koji: checkout");
+    assert!(
+        what.ends_with("has no `origin` remote to cut branches from"),
+        "{what}"
+    );
+    assert!(fix.starts_with("add an `origin` remote"), "{fix}");
+}
+
+#[tokio::test]
+async fn a_repo_that_cannot_be_named_skips_only_the_forge_lines() {
+    let scene = Scene::new().await;
+    scene.runs("golbat", |t| {
+        t["git"].as_object_mut().unwrap().remove("remote");
+    });
+    let off_github = "https://git.example.invalid/o/r.git";
+    git(
+        &scene.home.join("golbat"),
+        &["remote", "set-url", "origin", off_github],
+    );
+    let report = scene.report().await;
+    let (what, fix) = missing(&report, "golbat: checkout");
+    assert!(what.starts_with("setting `git.remote`"), "{what}");
+    assert!(fix.contains("set `git.remote`"), "{fix}");
+    let subjects = subjects(&report);
+    for forge in ["golbat: push access", "golbat: labels"] {
+        assert!(!subjects.contains(&forge), "{forge}: {subjects:?}");
+    }
+    for local in ["golbat: implementers", "golbat: reviewers"] {
+        assert!(subjects.contains(&local), "{local}: {subjects:?}");
+    }
 }
 
 #[tokio::test]

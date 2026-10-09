@@ -14,7 +14,7 @@ use super::gate::{settled, short};
 use super::report::{Begin, StepReport};
 use super::trigger::WhichItem;
 use crate::ports::{Checks, PullRequestState};
-use crate::settings::MergeAuthority;
+use crate::settings::Merging;
 use crate::state::{Finished, Notice, RulingKind, StateError, Stuck};
 use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, Turn};
 use crate::worktree::{self, Base};
@@ -132,7 +132,7 @@ impl Runner {
             return Ok(Begin::Idle);
         };
         let tried = item.merge_tried.clone();
-        let repo = self.settings.forge.clone();
+        let repo = self.remote.clone();
         let pr = match self.ports.forge.pull_request(&repo, number) {
             Ok(pr) => pr,
             Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
@@ -156,12 +156,12 @@ impl Runner {
             return self.queued(number, head, queued);
         }
         // The gate asks again once the project is no longer `auto`.
-        if auto && self.settings.merge_authority != MergeAuthority::Auto {
-            let reason = "the merge authority is no longer auto".to_owned();
+        if auto && self.settings.git.merging != Merging::Auto {
+            let reason = "`git.merging` is no longer `auto`".to_owned();
             return self.withdraw(issue, number, auto, reason);
         }
         let now = self.ports.clock.now();
-        let ci = self.settings.ci;
+        let ci = self.settings.ci.block;
         let settling = ci && readied.is_some_and(|at| !settled(at, now));
         if pr.head != head {
             let reason = format!("#{number} moved to {}", short(&pr.head));
@@ -261,7 +261,7 @@ impl Runner {
     // saw is adopted into the worktree and goes back through every gate.
     pub(super) fn regate(&mut self, from: &str, tip: &str) -> Result<(), String> {
         let item = self.current().expect("a gate is of a work item");
-        let (repo, branch) = (&self.settings.repo, &item.branch);
+        let (repo, branch) = (&self.settings.git.checkout, &item.branch);
         worktree::adopt(repo, &item.worktree, branch, from, tip)
             .map_err(|e| format!("cannot bring the worktree to {}: {e}", short(tip)))?;
         let tip = Some(tip.to_owned());
@@ -358,7 +358,7 @@ impl Runner {
             return Ok(self.gate_failed(reason));
         }
         let removed = worktree::remove(
-            &self.settings.repo,
+            &self.settings.git.checkout,
             &item.worktree,
             &item.branch,
             &item.build,

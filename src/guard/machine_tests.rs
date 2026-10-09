@@ -14,7 +14,7 @@ use crate::local_paths::LocalPaths;
 
 const HOME: &str = "/Users/me";
 
-fn judged(command: &str, home: &str, names: &[&str]) -> Verdict {
+fn judged(command: &str, home: &str) -> Verdict {
     let call = json!({ "tool_name": "Bash", "cwd": "/x", "tool_input": { "command": command } });
     let checkout = Checkout {
         git_common_dir: Path::new("/nowhere"),
@@ -23,7 +23,7 @@ fn judged(command: &str, home: &str, names: &[&str]) -> Verdict {
     judge(
         call.to_string().as_bytes(),
         Some(Path::new(home)),
-        LocalPaths::new([Path::new(home)], names.iter().copied()),
+        LocalPaths::new([Path::new(home)]),
         checkout,
     )
 }
@@ -57,7 +57,7 @@ fn every_encoding_of_a_local_path_is_refused_in_a_comment() {
         "in /var/folders/zz/abc123/T/out.log",
         "in /private/var/folders/zz/abc123/T/out.log",
     ] {
-        let why = refusal(judged(&comment(text), HOME, &[]));
+        let why = refusal(judged(&comment(text), HOME));
         assert!(why.contains("a path on this machine"), "{text}: {why}");
         assert!(!why.contains(text), "{text}: {why}");
     }
@@ -72,20 +72,16 @@ fn a_symlinked_home_is_refused_in_its_canonical_form() {
     std::os::unix::fs::symlink(&real, &link).unwrap();
     let canonical = fs::canonicalize(&real).unwrap();
     let command = comment(&format!("built in {}/wt", canonical.display()));
-    let why = refusal(judged(&command, link.to_str().unwrap(), &[]));
+    let why = refusal(judged(&command, link.to_str().unwrap()));
     assert!(why.contains("a path on this machine"), "{why}");
 }
 
 #[test]
-fn a_home_path_a_lan_address_and_a_private_name_are_refused_in_prose() {
+fn a_home_path_and_a_lan_address_are_refused_in_prose() {
     for (text, what) in [
         ("see ~/.ssh/config", "a path under the home folder"),
         (LAN_URL, "an address on a local network"),
         ("ssh alex@mac.local", "an address on a local network"),
-        (
-            "for Acme Corp only",
-            "a name on this project's private list",
-        ),
     ] {
         for command in [
             comment(text),
@@ -93,7 +89,7 @@ fn a_home_path_a_lan_address_and_a_private_name_are_refused_in_prose() {
             format!("git commit -m 'docs: {text}'"),
             format!("gh pr create --title 'fix: {text}' --body ok"),
         ] {
-            let why = refusal(judged(&command, HOME, &["acme corp"]));
+            let why = refusal(judged(&command, HOME));
             assert!(why.contains(what), "{command}: {why}");
             assert!(!why.contains(text), "{command}: {why}");
         }
@@ -108,11 +104,7 @@ fn ordinary_text_goes_through() {
         concat!("see https://example.com/ho", "me/page"),
         "the acme of it",
     ] {
-        assert_eq!(
-            judged(&comment(text), HOME, &["acme corp"]),
-            Verdict::Allow,
-            "{text}"
-        );
+        assert_eq!(judged(&comment(text), HOME), Verdict::Allow, "{text}");
     }
 }
 
@@ -122,7 +114,7 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 // A worktree with one staged file, judged for a commit of it.
-fn commit_of(text: &str, names: &[&str]) -> Verdict {
+fn commit_of(text: &str) -> Verdict {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("repo");
     fs::create_dir(&repo).unwrap();
@@ -160,7 +152,7 @@ fn commit_of(text: &str, names: &[&str]) -> Verdict {
     judge(
         call.to_string().as_bytes(),
         Some(Path::new(HOME)),
-        LocalPaths::new([Path::new(HOME)], names.iter().copied()),
+        LocalPaths::new([Path::new(HOME)]),
         checkout,
     )
 }
@@ -168,7 +160,7 @@ fn commit_of(text: &str, names: &[&str]) -> Verdict {
 #[test]
 fn a_commit_adding_an_encoded_home_is_refused_naming_the_file() {
     for line in ["at /%2FUsers%2Fme%2Fapp", "at /%252FUsers%252Fme%252Fapp"] {
-        let why = refusal(commit_of(&format!("{line}\n"), &[]));
+        let why = refusal(commit_of(&format!("{line}\n")));
         assert!(why.contains("`notes.md`"), "{line}: {why}");
     }
 }
@@ -183,24 +175,15 @@ fn a_commit_adding_another_users_path_goes_through_and_the_same_text_in_a_body_d
         "/var/folders/zz/abc123/T/x",
         concat!("/ho", "me/alex/x"),
     ] {
-        assert_eq!(
-            commit_of(&format!("{line}\n"), &[]),
-            Verdict::Allow,
-            "{line}"
-        );
-        let why = refusal(judged(&comment(line), HOME, &[]));
+        assert_eq!(commit_of(&format!("{line}\n")), Verdict::Allow, "{line}");
+        let why = refusal(judged(&comment(line), HOME));
         assert!(why.contains("a path on this machine"), "{line}: {why}");
     }
 }
 
 #[test]
 fn the_folders_the_hook_is_given_are_kept_off_the_forge_too() {
-    let args = [
-        "--folder=/srv/kelpie",
-        "--folder=/srv/checkout",
-        "--name=Acme Corp",
-    ]
-    .map(str::to_owned);
+    let args = ["--folder=/srv/kelpie", "--folder=/srv/checkout"].map(str::to_owned);
     let local = local_paths(Some(Path::new(HOME)), &args).unwrap();
     let call = |text: &str| {
         let command = comment(text);
@@ -226,35 +209,30 @@ fn the_folders_the_hook_is_given_are_kept_off_the_forge_too() {
         assert!(why.contains("a path on this machine"), "{text}: {why}");
     }
     assert_eq!(call("see /srv/kelpies/x"), Verdict::Allow);
-    let err = local_paths(None, &["--folder".to_owned()]).unwrap_err();
-    assert!(err.contains("does not take"), "{err}");
+    for arg in ["--folder", "--name=Acme Corp"] {
+        let err = local_paths(None, &[arg.to_owned()]).unwrap_err();
+        assert!(err.contains("does not take"), "{err}");
+    }
 }
 
 #[test]
 fn a_refusal_says_what_to_fix() {
-    let said = |text: &str| refusal(judged(&comment(text), HOME, &["acme corp"]));
+    let said = |text: &str| refusal(judged(&comment(text), HOME));
     for text in ["see /Users/me/x", "see ~/.ssh/config"] {
         assert!(said(text).contains("from its root"), "{text}");
     }
-    for text in [LAN_URL, "for Acme Corp only"] {
-        let why = said(text);
-        assert!(why.contains("Take it out"), "{text}: {why}");
-        assert!(!why.contains("from its root"), "{text}: {why}");
-    }
+    let why = said(LAN_URL);
+    assert!(why.contains("Take it out"), "{why}");
+    assert!(!why.contains("from its root"), "{why}");
 }
 
 #[test]
-fn a_commit_adding_a_private_name_is_refused() {
-    let why = refusal(commit_of("for Acme Corp\n", &["acme corp"]));
-    assert!(
-        why.contains("a name on this project's private list"),
-        "{why}"
-    );
-    assert!(why.contains("`notes.md`"), "{why}");
+fn a_commit_adding_a_word_the_project_once_kept_private_goes_through() {
+    assert_eq!(commit_of("for Acme Corp\n"), Verdict::Allow);
 }
 
 #[test]
 fn a_commit_adding_a_home_path_or_an_address_is_not_refused() {
     let text = "docs say ~/.kelpie, a fixture uses an address, and self.local is a field\n";
-    assert_eq!(commit_of(text, &[]), Verdict::Allow);
+    assert_eq!(commit_of(text), Verdict::Allow);
 }

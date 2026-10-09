@@ -126,6 +126,7 @@ pub(crate) fn a_work_item() -> WorkItem {
             review_rounds: 2,
             fix_turns: 1,
             rulings: 1,
+            ci_fix_turns: 1,
             worker_unreported: 0,
             reviewer_unreported: 0,
         },
@@ -165,7 +166,7 @@ pub(crate) fn with_tables(entry: &str, tables: &str) -> String {
     entry.replace(PACING, &format!("\n{tables}{PACING}"))
 }
 
-/// The `repo` in `settings.example.toml`, which the rig points at its own
+/// The `git.checkout` in `settings.example.toml`, which the rig points at its own
 const EXAMPLE_REPO: &str = "~/GitHub/shep";
 
 /// The reviewers `settings.example.toml` lists, commented out
@@ -493,12 +494,30 @@ impl Rig {
         });
     }
 
-    /// Makes the project's merge authority `auto`, read when a runner next opens
+    /// Makes the project's `git.merging` `auto`, read when a runner next opens
     pub(crate) fn merge_auto(&self) {
-        let (ask, auto) = ("merge_authority = \"ask\"", "merge_authority = \"auto\"");
+        let (ask, auto) = ("merging = \"ask\"", "merging = \"auto\"");
         self.edit_settings(|s| {
-            assert!(s.contains(ask), "the example's merge authority moved");
+            assert!(s.contains(ask), "the example's `git.merging` moved");
             s.replace(ask, auto)
+        });
+    }
+
+    /// Sets the project's `git.issues` to `filing`, read when a runner next opens
+    pub(crate) fn issues(&self, filing: &str) {
+        let ask = "issues = \"ask\"";
+        self.edit_settings(|s| {
+            assert!(s.contains(ask), "the example's `git.issues` moved");
+            s.replace(ask, &format!("issues = \"{filing}\""))
+        });
+    }
+
+    /// Sets the project's `ci.fix_attempts` to `cap`, read when a runner next opens
+    pub(crate) fn fix_attempts(&self, cap: i64) {
+        let none = "fix_attempts = -1";
+        self.edit_settings(|s| {
+            assert!(s.contains(none), "the example's `ci.fix_attempts` moved");
+            s.replace(none, &format!("fix_attempts = {cap}"))
         });
     }
 

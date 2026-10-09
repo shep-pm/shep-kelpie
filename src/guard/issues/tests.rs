@@ -36,7 +36,7 @@ impl Session {
             "tool_input": { "command": command },
         });
         let home = Some(Path::new(HOME));
-        let local = LocalPaths::new(home, []);
+        let local = LocalPaths::new(home);
         judge_issues(call.to_string().as_bytes(), home, local, &self.rules)
     }
 

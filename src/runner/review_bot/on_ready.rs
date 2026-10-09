@@ -31,7 +31,7 @@ impl Runner {
             return Ok(None);
         }
         let number = self.number();
-        let repo = self.settings.forge.clone();
+        let repo = self.remote.clone();
         // A pull request that cannot be read is left to the step after, which says so.
         let draft = self
             .ports

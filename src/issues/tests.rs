@@ -37,6 +37,12 @@ impl Setup {
     fn project(&self) -> Project<'_> {
         Project {
             settings: &self.settings,
+            remote: self
+                .settings
+                .git
+                .remote
+                .as_ref()
+                .expect("the example sets it"),
             paths: &self.paths,
             agents: &self.listed,
             kelpie: Path::new(Rig::KELPIE),
@@ -352,7 +358,7 @@ fn interactive_starts_claude_in_the_checkout_with_the_prompt_appended_and_the_gu
 
     let said = std::fs::read_to_string(&said).unwrap();
     let words: Vec<&str> = said.trim_end_matches('\0').split('\0').collect();
-    let repo = s.settings.repo.canonicalize().unwrap();
+    let repo = s.settings.git.checkout.canonicalize().unwrap();
     assert_eq!(Path::new(words[0]).canonicalize().unwrap(), repo);
     let [settings, ledger] = claude.files.as_slice() else {
         panic!("its settings and its ledger, not {:?}", claude.files)
@@ -386,7 +392,7 @@ fn interactive_starts_claude_in_the_checkout_with_the_prompt_appended_and_the_gu
     // The maintainer is asked before each command the guard lets through.
     assert!(written["permissions"].get("allow").is_none(), "{written}");
     assert_guarded(&written, READY, ledger);
-    assert_file_tools_read_only(&written, &s.settings.repo, &s.rig);
+    assert_file_tools_read_only(&written, &s.settings.git.checkout, &s.rig);
     assert!(
         s.rig.claude.all_seen().is_empty(),
         "no session of kelpie's own"

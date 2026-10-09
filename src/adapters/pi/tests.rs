@@ -642,7 +642,6 @@ impl World {
             kelpie,
             kelpie_home: &self.path("kelpie"),
             repo: &self.path("repo"),
-            private_names: &[],
             guard_hooks: &[],
             allowed_domains: &[],
             build_env: &BTreeMap::new(),

@@ -40,6 +40,7 @@ fn defer(rig: &Rig, text: &str) {
 fn reviewed_in(rig: Rig, found: &[Finding], auto: bool) -> (Rig, Mutex<Runner>, String) {
     if auto {
         rig.merge_auto();
+        rig.issues("file");
     }
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
@@ -61,7 +62,8 @@ fn reviewed_in(rig: Rig, found: &[Finding], auto: bool) -> (Rig, Mutex<Runner>, 
     panic!("the review never settled");
 }
 
-// On a project under `auto`, CI green and the draft ready, with `deferred`
+// On a project under `auto` that files deferred findings at once, CI green
+// and the draft ready, with `deferred`
 // in the worker's deferred findings file
 fn ready_in(rig: Rig, found: &[Finding], deferred: &str) -> (Rig, Mutex<Runner>) {
     let (rig, runner, head) = reviewed_in(rig, found, true);
@@ -255,6 +257,7 @@ fn a_nit_an_older_state_file_held_is_not_filed() {
 fn a_nit_the_worker_deferred_files_nothing() {
     let rig = Rig::new("shep");
     rig.merge_auto();
+    rig.issues("file");
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
@@ -565,11 +568,11 @@ fn ask_after_the_merge(rig: Rig, found: &[Finding]) -> (Rig, Mutex<Runner>, u64,
 #[test]
 fn a_merged_item_on_its_follow_up_ruling_holds_back_no_new_work() {
     let rig = Rig::new("shep");
-    rig.edit_settings(|s| s.replace("max_parked = 2", "max_parked = 1"));
+    rig.edit_settings(|s| s.replace("pending_rulings = 2", "pending_rulings = 1"));
     let (rig, runner, id, _) = ask_after_the_merge(rig, &[racy()]);
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id }));
 
-    // Neither `max_parked` nor its merged branch's files hold #8 back.
+    // Neither `concurrency.pending_rulings` nor its merged branch's files hold #8 back.
     rig.forge.list_ready(8, false);
     assert!(matches!(
         step(&runner).unwrap(),
@@ -632,4 +635,68 @@ fn under_ask_a_no_drops_the_findings() {
     );
     assert!(finished(after_merge(&runner)));
     assert_eq!(rig.forge.created(), []);
+}
+
+// A project under `auto` with `git.issues` as `filing`, CI green on a
+// reviewed pull request whose worker deferred `racy()`, the next step merging it
+fn auto_merging_with_issues(filing: &str) -> (Rig, Mutex<Runner>) {
+    let rig = Rig::new("shep");
+    rig.merge_auto();
+    rig.issues(filing);
+    let (rig, runner, head) = reviewed_in(rig, &[racy()], false);
+    defer(&rig, &lines(&[racy()]));
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::MarkedReady { .. })
+    ));
+    rig.clock.advance(CHECKS_SETTLE);
+    (rig, runner)
+}
+
+#[test]
+fn issues_ask_raises_the_follow_up_ruling_under_auto_merging_too() {
+    let (rig, runner) = auto_merging_with_issues("ask");
+    let Some(StepReport::Ruling { question, .. }) = after_merge(&runner) else {
+        panic!("the maintainer was not asked about the findings");
+    };
+    assert_eq!(rig.forge.merges().len(), 1, "kelpie merged it itself");
+    assert!(question.contains("src/lib.rs:9 looks racy"), "{question}");
+    assert_eq!(rig.forge.created(), [], "nothing is filed before the yes");
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"][0]["kind"]["kind"], "follow-up");
+}
+
+#[test]
+fn issues_skip_files_nothing_asks_nothing_and_the_work_item_finishes() {
+    let (rig, runner) = auto_merging_with_issues("skip");
+    assert!(finished(after_merge(&runner)));
+    assert_eq!(rig.forge.merges().len(), 1);
+    assert_eq!(rig.forge.created(), []);
+    assert_eq!(rig.forge.comments(), []);
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"], json!([]));
+    assert_eq!(status["work_items"], json!([]));
+}
+
+#[test]
+fn issues_file_files_at_once_under_ask_merging_too() {
+    let rig = Rig::new("shep");
+    rig.issues("file");
+    let (rig, runner, head) = reviewed_in(rig, &[racy()], false);
+    defer(&rig, &lines(&[racy()]));
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::Ruling { id: 1, .. })
+    ));
+    rig.ask(&runner, "rule", Some("1 yes"));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::MarkedReady { .. })
+    ));
+    rig.clock.advance(CHECKS_SETTLE);
+    assert_eq!(step(&runner).unwrap(), filed(&[900], &[], 0));
+    assert_eq!(rig.forge.merges().len(), 1);
+    assert_eq!(rig.forge.created().len(), 1);
 }

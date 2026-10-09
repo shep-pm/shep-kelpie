@@ -66,9 +66,6 @@ const MAX_COMMANDS: usize = 200;
 /// How the hook's command line names one more folder to keep off the forge
 pub const FOLDER_FLAG: &str = "--folder=";
 
-/// How the hook's command line names one private word
-pub const NAME_FLAG: &str = "--name=";
-
 /// How the hook's command line asks for an allowed command to be handed
 /// back to run only where it has been judged
 ///
@@ -180,25 +177,21 @@ pub fn pinned(input: &[u8], worktree: &Path, again: &[String]) -> Result<String,
     Ok(answer.to_string())
 }
 
-/// What the hook keeps off the forge: `home`, then the folders and names `args` give
+/// What the hook keeps off the forge: `home`, then the folders `args` give
 ///
 /// # Errors
 ///
 /// What to tell the worker, when `args` holds one the hook does not know.
 pub fn local_paths(home: Option<&Path>, args: &[String]) -> Result<LocalPaths, String> {
     let mut folders: Vec<&Path> = home.into_iter().collect();
-    let mut names = Vec::new();
     for arg in args {
-        if let Some(folder) = arg.strip_prefix(FOLDER_FLAG) {
-            folders.push(Path::new(folder));
-        } else if let Some(name) = arg.strip_prefix(NAME_FLAG) {
-            names.push(name);
-        } else {
+        let Some(folder) = arg.strip_prefix(FOLDER_FLAG) else {
             let shown: String = arg.chars().take(40).collect();
             return Err(format!("kelpie guard does not take `{shown}`"));
-        }
+        };
+        folders.push(Path::new(folder));
     }
-    Ok(LocalPaths::new(folders, names))
+    Ok(LocalPaths::new(folders))
 }
 
 /// Judges the tool call in `input`, with `home` the home folder `~` names and
@@ -381,14 +374,14 @@ impl Home {
             .collect()
     }
 
-    // A name or an address is taken out; a path is written from the repo's root.
+    // An address is taken out; a path is written from the repo's root.
     fn refusal(&self, what: &str, leak: Leak, fix: &str) -> String {
         let advice = match leak {
             Leak::Path | Leak::Tilde => {
                 " Write a path in the repo from its root (`src/lib.rs`), and leave out one \
                  outside it."
             }
-            Leak::Name | Leak::Lan => "",
+            Leak::Lan => "",
         };
         format!("{what} carries {leak}. {fix}{advice}")
     }

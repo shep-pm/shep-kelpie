@@ -3,7 +3,7 @@
 //! A slot bounds model calls: a worker's turn or a review. A work item
 //! takes one when it opens, and keeps it through CI and the merge. Parked
 //! on a ruling it gives the slot up: a parked worker runs no process, so an
-//! unanswered ruling never stalls the project. `max_parked` caps the items
+//! unanswered ruling never stalls the project. `concurrency.pending_rulings` caps the items
 //! parked, and while that many wait the board opens nothing new. Answered,
 //! an item goes on without a slot through anything that calls no model (CI,
 //! a merge, its end), and waits for one, ahead of any new work item, once
@@ -59,10 +59,10 @@ impl Runner {
         self.issues_where(|i| !i.parked() && i.seat != Seat::Without)
     }
 
-    // Whether another work item may open, under `max_items`. An item
+    // Whether another work item may open, under `concurrency.active_items`. An item
     // waiting for a slot takes it first.
     pub(super) fn slot_free(&self) -> bool {
-        self.slot_issues().len() < self.max_items()
+        self.slot_issues().len() < self.active_items()
     }
 
     // The open work items parked on rulings
@@ -80,17 +80,17 @@ impl Runner {
         !ruling.is_some_and(|r| matches!(r.kind, RulingKind::FollowUp { .. }))
     }
 
-    // How many work items `max_parked` counts
+    // How many work items `concurrency.pending_rulings` counts
     pub(super) fn parked_count(&self) -> usize {
         (self.state.work_items.iter())
             .filter(|i| self.held_back(i))
             .count()
     }
 
-    // Whether `max_parked` items wait on rulings, so the board opens nothing.
+    // Whether `concurrency.pending_rulings` items wait on rulings, so the board opens nothing.
     // With none waiting it is never full, 0 included.
     pub(super) fn parked_full(&self) -> bool {
-        let max = usize::try_from(self.settings.max_parked).unwrap_or(usize::MAX);
+        let max = usize::try_from(self.settings.concurrency.pending_rulings).unwrap_or(usize::MAX);
         self.parked_count() >= max.max(1)
     }
 
@@ -114,7 +114,7 @@ impl Runner {
                 _ => {}
             }
         }
-        ahead < self.max_items()
+        ahead < self.active_items()
     }
 
     // Whether the current work item waits for a slot, so no model call may
@@ -128,7 +128,7 @@ impl Runner {
         self.slot_free() && !self.parked_full()
     }
 
-    // Gives a slot freed outside a save, as by a larger `max_items`, to an
+    // Gives a slot freed outside a save, as by a larger `concurrency.active_items`, to an
     // item waiting for one.
     pub(super) fn seat_waiting(&mut self) -> Result<(), StateError> {
         if !self
@@ -140,17 +140,17 @@ impl Runner {
             return Ok(());
         }
         let mut next = self.state.clone();
-        if seat(&self.state, &mut next, self.max_items()) {
+        if seat(&self.state, &mut next, self.active_items()) {
             self.save(next)?;
         }
         Ok(())
     }
 
-    pub(super) fn max_items(&self) -> usize {
-        usize::try_from(self.settings.max_items.get()).unwrap_or(usize::MAX)
+    pub(super) fn active_items(&self) -> usize {
+        usize::try_from(self.settings.concurrency.active_items.get()).unwrap_or(usize::MAX)
     }
 
-    // What the alert for ruling `id` adds while `max_parked` items wait,
+    // What the alert for ruling `id` adds while `concurrency.pending_rulings` items wait,
     // the item parked on it among them
     pub(super) fn parked_note(&self, id: u64) -> Option<String> {
         let parks = (self.state.work_items.iter())
@@ -163,8 +163,8 @@ impl Runner {
             n => format!("{n} rulings are waiting"),
         };
         Some(format!(
-            "{waiting}, and `max_parked` is {}, so no new work item opens until one is answered.",
-            self.settings.max_parked
+            "{waiting}, and `concurrency.pending_rulings` is {}, so no new work item opens until one is answered.",
+            self.settings.concurrency.pending_rulings
         ))
     }
 

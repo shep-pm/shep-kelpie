@@ -138,7 +138,6 @@ mod tests {
                 "# [[app.dogs.kelpie.worker.guard_hooks]]\n# event = \"PreToolUse\"\n# matcher = \"Bash\"\n# command =",
                 "[[app.dogs.kelpie.worker.guard_hooks]]\nevent = \"PreToolUse\"\nmatcher = \"Bash\"\ncommand =",
             )
-            .replace("# private_names =", "private_names =")
             .replace("# reviewers = [\"qwen\", \"defect-hunter\"]", "reviewers = [\"qwen\"]")
             .replace("# pm = \"pm\"", "pm = \"pm\"");
         assert!(
@@ -211,12 +210,47 @@ mod tests {
         let defs = &schema()["$defs"];
         assert_eq!(defs["KickoffHours"]["minimum"], 1);
         assert_eq!(defs["KickoffHours"]["maximum"], 24);
-        let max_items = &defs["Settings"]["properties"]["max_items"];
+        let active_items = &defs["Concurrency"]["properties"]["active_items"];
         assert_eq!(
-            (&max_items["minimum"], &max_items["default"]),
+            (&active_items["minimum"], &active_items["default"]),
             (&1.into(), &1.into())
         );
+        let pending = &defs["Concurrency"]["properties"]["pending_rulings"];
+        assert_eq!(pending["default"], 2);
+        let fix_attempts = &defs["FixAttempts"];
+        assert_eq!(
+            (&fix_attempts["minimum"], &fix_attempts["default"]),
+            (&(-1).into(), &(-1).into())
+        );
+        assert_eq!(fix_attempts["maximum"], u32::MAX);
         assert!(defs["EndpointUrl"]["pattern"].is_string());
+    }
+
+    // Lookout groups a sheep's rows by table, under each table's title.
+    #[test]
+    fn each_project_table_has_a_title_and_says_what_it_holds() {
+        let defs = &schema()["$defs"];
+        for (name, title) in [("Git", "Git"), ("Ci", "CI"), ("Concurrency", "Concurrency")] {
+            assert_eq!(defs[name]["title"], title, "{name}");
+            assert!(defs[name]["description"].is_string(), "{name}");
+        }
+        let pending = &defs["Concurrency"]["properties"]["pending_rulings"]["description"];
+        let pending = pending.as_str().unwrap();
+        assert!(
+            pending.contains("stops new work items opening and is not a cap on rulings"),
+            "{pending}"
+        );
+        let properties = &schema()[SHEEP_SCHEMA_KEY]["properties"];
+        for old in [
+            "repo",
+            "forge",
+            "merge_authority",
+            "max_items",
+            "max_parked",
+            "private_names",
+        ] {
+            assert!(properties[old].is_null(), "{old}");
+        }
     }
 
     #[test]

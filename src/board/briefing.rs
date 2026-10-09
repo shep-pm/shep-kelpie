@@ -34,13 +34,13 @@ pub struct Briefing<'a> {
     /// When it was written
     pub now: Timestamp,
     /// How many work items may hold a slot at once
-    pub max_items: u32,
+    pub active_items: u32,
     /// How many work items parked on rulings stop the board opening work:
     /// the point where it stops, which items already working can pass
-    pub max_parked: u32,
+    pub pending_rulings: u32,
     /// How many open work items hold a slot
     pub held: usize,
-    /// How many open work items are parked on rulings `max_parked` counts
+    /// How many open work items are parked on rulings `concurrency.pending_rulings` counts
     pub parked: usize,
     /// `origin/main`'s commit, once git has read it
     pub main: Option<String>,
@@ -189,9 +189,9 @@ pub fn render(board: &Briefing<'_>) -> String {
         "{} work items open: {} of {} slots taken, and {} of {} parked on rulings.{main}\n",
         board.items.len(),
         board.held,
-        board.max_items,
+        board.active_items,
         board.parked,
-        board.max_parked
+        board.pending_rulings
     );
     open_work(&mut out, board);
     rulings(&mut out, &board.rulings);

@@ -30,7 +30,7 @@ impl Runner {
             i.sub_issues.all_closed() && refused.get(&i.number).is_none_or(|n| *n < TRIES)
         });
         let issue = done?.number;
-        let closed = (self.ports.forge).close_issue(&self.settings.forge, issue, PARENT_CLOSED);
+        let closed = (self.ports.forge).close_issue(&self.remote, issue, PARENT_CLOSED);
         let report = match closed {
             Ok(()) => {
                 self.close_refused.remove(&issue);

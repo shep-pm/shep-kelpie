@@ -49,7 +49,7 @@ pub async fn project_here(
         .iter()
         .filter(|(sheep, table)| {
             Settings::from_table(table, sheep, home, home).is_ok_and(|s| {
-                let repo = s.repo.canonicalize().unwrap_or(s.repo);
+                let repo = s.git.checkout.canonicalize().unwrap_or(s.git.checkout);
                 roots.contains(&repo)
             })
         })

@@ -26,7 +26,7 @@ fn main_at(rig: &Rig) -> String {
 // names the README.
 fn seven_and_eight(project: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
-    rig.edit_settings(|s| s.replace("max_items = 1", "max_items = 3"));
+    rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 3"));
     rig.forge.list_ready(9, false);
     rig.forge.label(9, "priority: P1");
     rig.forge.block(9, 4);
@@ -238,27 +238,6 @@ fn a_turn_hung_before_its_transcript_exists_reads_as_idle() {
     assert!(text.contains(event), "{text}");
     hold.release();
     assert!(hold.answered(PATIENCE), "the turn never answered");
-}
-
-#[test]
-fn a_summary_naming_a_private_name_is_withheld_from_the_board() {
-    let rig = Rig::new("acme");
-    rig.edit_settings(|s| {
-        s.replace(
-            "# private_names = [\"Acme Corp\"]",
-            "private_names = [\"Kestrel\"]",
-        )
-    });
-    let runner = rig.open().unwrap();
-    rig.ask(&runner, "add", Some("7"));
-    rig.claude
-        .script([Scripted::Say("Done for Kestrel, nothing pushed yet.")]);
-    step(&runner).unwrap();
-    let text = board(&rig);
-    let withheld =
-        "  - Last turn: \"(withheld: it names a name on this project's private list)\"\n";
-    assert!(text.contains(withheld), "{text}");
-    assert!(!text.contains("Kestrel"), "{text}");
 }
 
 #[test]

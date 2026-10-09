@@ -164,7 +164,7 @@ impl Runner {
         // A change saved while git runs marks the board due again.
         self.brief.due = false;
         Some(GitJob {
-            repo: self.settings.repo.clone(),
+            repo: self.settings.git.checkout.clone(),
             git: std::mem::take(&mut self.brief.git),
             branches: (self.state.work_items.iter())
                 .map(|item| (item.issue, item.branch.clone()))
@@ -234,8 +234,8 @@ impl Runner {
         }
     }
 
-    // `text`, or a note in its place when it names this machine or a
-    // private name, as nothing kelpie posts may
+    // `text`, or a note in its place when it names this machine, as
+    // nothing kelpie posts may
     pub(super) fn shown(&self, text: String) -> String {
         match self.local.find(&text, Surface::Prose) {
             Some(leak) => format!("(withheld: it names {leak})"),
@@ -252,8 +252,8 @@ impl Runner {
         Briefing {
             project: self.project.as_str(),
             now,
-            max_items: self.settings.max_items.get(),
-            max_parked: self.settings.max_parked,
+            active_items: self.settings.concurrency.active_items.get(),
+            pending_rulings: self.settings.concurrency.pending_rulings,
             held: self
                 .issues_where(|i| !i.parked() && i.seat == Seat::Held)
                 .len(),

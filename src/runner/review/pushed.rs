@@ -109,7 +109,7 @@ impl Runner {
     fn unreadable(&mut self, reason: String) -> Result<Begin, StateError> {
         let number = self.current().and_then(|item| item.pull_request);
         let number = number.expect("review runs on a pull request");
-        match self.ports.forge.pull_request(&self.settings.forge, number) {
+        match self.ports.forge.pull_request(&self.remote, number) {
             Ok(pr) if pr.state == PullRequestState::Merged => {
                 self.update(|item| item.phase = Phase::Done { merged: true })?;
                 self.finish(true)
@@ -127,7 +127,7 @@ impl Runner {
         let Some(item) = self.current() else {
             return false;
         };
-        let repo = &self.settings.repo;
+        let repo = &self.settings.git.checkout;
         let files = worktree::uncommitted(repo, &item.worktree);
         let at = worktree::head(repo, &item.worktree);
         match (files, at) {
@@ -143,7 +143,7 @@ impl Runner {
     // the pushed head when the worktree holds it clean, or how it stands off it.
     fn off_pushed(&self) -> Result<Result<String, Off>, String> {
         let item = self.current().expect("a worktree is a work item's");
-        let repo = &self.settings.repo;
+        let repo = &self.settings.git.checkout;
         let files = worktree::uncommitted(repo, &item.worktree)
             .map_err(|e| format!("cannot list issue #{}'s uncommitted files: {e}", item.issue))?;
         let head = worktree::head(repo, &item.worktree)

@@ -47,8 +47,8 @@ fn a_board_with_an_idle_worker_a_review_call_and_a_ruling_reads_whole() {
     let board = Briefing {
         project: "acme",
         now: Timestamp(NOW),
-        max_items: 2,
-        max_parked: 2,
+        active_items: 2,
+        pending_rulings: 2,
         held: 2,
         parked: 1,
         main: None,
@@ -177,8 +177,8 @@ fn quoting(body: &str) -> String {
     let board = Briefing {
         project: "acme",
         now: Timestamp(NOW),
-        max_items: 2,
-        max_parked: 2,
+        active_items: 2,
+        pending_rulings: 2,
         held: 2,
         parked: 0,
         main: None,

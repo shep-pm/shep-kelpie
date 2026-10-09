@@ -114,7 +114,7 @@ impl Runner {
         self.say_withdrawn(id, issue, Some(number), &why);
         // The worker's turn again, so the hand-back label comes off. One the
         // forge keeps is still kelpie's, and the next merge ruling keeps it.
-        match (self.ports.forge).set_label(&self.settings.forge, number, HUMAN, false) {
+        match (self.ports.forge).set_label(&self.remote, number, HUMAN, false) {
             Ok(()) => self.update(|item| item.known.labels.retain(|l| l != HUMAN)),
             Err(e) => {
                 eprintln!("cannot take the `{HUMAN}` label off #{number}: {e}");

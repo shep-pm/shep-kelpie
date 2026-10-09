@@ -33,7 +33,7 @@ A repo under kelpie, with its settings, board and state file. It runs while
 its runner's sheep runs: you start it, or pause it, which waits for its
 calls and any merge in flight to end and then stops that sheep. A wait that
 runs out, an interrupt or a refused stop leaves it running. Its settings
-(merge authority, agents, pacing) live on it.
+(merge authority, CI, agents, pacing) live on it, each in a table of its own.
 _Avoid_: shift
 
 **Project manager (PM)**:
@@ -282,10 +282,13 @@ A decision only the maintainer makes, one of six kinds: `merge`,
 `follow-up`. A `stuck` ruling's reason is one of `rebase`, `still-red`,
 `merge-refused`, `closed`, `local-model-spilled`, `fix-not-pushed`,
 `unpushed`, `turn-timeout` and `turn-failed`. A worker waiting on one is
-**parked**, and its work item gives up its slot under `max_items`, which
-bounds model calls; `max_parked` caps how many are parked on rulings that
-hold their work back, which leaves out the `follow-up` ruling of a merged
-pull request. The one exception: the PM may retry a stuck item, which
+**parked**, and its work item gives up its slot under `concurrency.active_items`, which
+bounds model calls. `concurrency.pending_rulings` is a threshold for opening
+new work items, not a cap on parking: once that many work items are parked
+on rulings that hold their work back, the board opens no new one, while
+items already open can still park past it. 0 is taken as 1: the board opens
+nothing while any such ruling waits. It leaves out the `follow-up`
+ruling of a merged pull request. The one exception: the PM may retry a stuck item, which
 answers its `stuck` ruling for the maintainer, with a yes or, for CI still
 red, a note sending the worker back. A merge ruling takes three answers:
 `yes`, `no <note>`, whose fix goes to CI and back to the ruling, and
@@ -295,9 +298,12 @@ head. It names open bot nits apart from the threads that hold a merge, and
 nits never do.
 
 **Merge authority**:
-A project's setting for who decides a merge. `ask` raises a ruling before
-every merge. `auto` has kelpie merge once every gate passes, and replaces only
-that ruling: every other ruling still asks.
+Who merges a green, reviewed pull request, a project's `git.merging`. `ask`
+raises a ruling before every merge. `auto` has kelpie merge once every gate
+passes, and replaces only that ruling: the merge still asks where a safety
+gate holds it, such as a pull request no reviewer read. Deferred findings
+follow `git.issues`, not it: a `follow-up` ruling comes only under `ask`.
+Every other ruling still asks.
 
 **Notice**:
 What kelpie sends after a merge under `auto`, through the same webhook as

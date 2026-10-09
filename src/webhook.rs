@@ -231,7 +231,7 @@ impl KelpieSettings {
                       which `shep kelpie add` writes out, and delete the tables",
             },
         ];
-        crate::settings::refuse_removed(text, &removed)?;
+        crate::settings::refuse_removed(text, &removed, &[])?;
         let read: Self = toml::from_str(text).map_err(|e: toml::de::Error| {
             let line = e
                 .span()

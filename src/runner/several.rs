@@ -27,7 +27,7 @@ fn two_free_slots(project: &str) -> (Rig, Mutex<Runner>) {
 
 fn two_slot_rig(project: &str) -> Rig {
     let rig = Rig::new(project);
-    rig.edit_settings(|s| s.replace("max_items = 1", "max_items = 2"));
+    rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 2"));
     rig
 }
 
@@ -333,9 +333,9 @@ fn drop_and_gate_name_the_item_when_more_than_one_is_open() {
 }
 
 #[test]
-fn add_opens_up_to_max_items_and_never_the_same_issue_twice() {
+fn add_opens_up_to_active_items_and_never_the_same_issue_twice() {
     let (rig, runner) = two_slots("xilriws");
-    assert_eq!(rig.ask(&runner, "add", Some("7"))["max_items"], 2);
+    assert_eq!(rig.ask(&runner, "add", Some("7"))["active_items"], 2);
     assert_eq!(
         rig.ask(&runner, "add", Some("7")),
         json!({ "error": "the work item for #7 is in flight" })
@@ -388,7 +388,7 @@ fn the_board_fills_a_free_slot_and_never_takes_an_open_issue_again() {
     assert_eq!(issue_of(step(&runner).unwrap()), 8, "#8's first turn");
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id: 2 }));
 
-    // Both workers are parked on their questions, which fills `max_parked`, so #9 waits.
+    // Both workers are parked on their questions, which fills `concurrency.pending_rulings`, so #9 waits.
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(open_items(&rig, &runner), [7, 8]);
 

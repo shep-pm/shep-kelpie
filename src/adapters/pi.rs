@@ -28,7 +28,7 @@ use super::paddock;
 use super::process::{Processes, RunError};
 use crate::fence;
 use crate::forwarder::{Upstream, WORKER_HOST};
-use crate::guard::{FOLDER_FLAG, NAME_FLAG};
+use crate::guard::FOLDER_FLAG;
 use crate::ports::{
     AgentCall, AgentError, AgentReply, Agents, CallActivity, Ending, Fence, Forward, Policy, Role,
     Sandbox, Session, SessionId, Tools, Usage, written_at,
@@ -467,12 +467,6 @@ fn guard_extension(fence: &Fence) -> String {
             .folders
             .iter()
             .map(|p| format!("{FOLDER_FLAG}{}", p.display())),
-    );
-    commands.extend(
-        guard
-            .private_names
-            .iter()
-            .map(|n| format!("{NAME_FLAG}{n}")),
     );
     let checks = json!({
         "kelpie": text(&guard.kelpie),

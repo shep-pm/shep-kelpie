@@ -15,7 +15,7 @@ pub const IN_PROGRESS: &str = "in-progress";
 impl Runner {
     // Labels `issue` as held, or takes the label off, and notes a refusal
     pub(super) fn mark_held(&mut self, issue: u64, held: bool) {
-        let repo = &self.settings.forge;
+        let repo = &self.remote;
         if let Err(e) = self
             .ports
             .forge
@@ -136,7 +136,7 @@ mod tests {
     fn a_restart_puts_the_label_back_on_an_issue_a_work_item_holds() {
         let (rig, runner) = running("xilriws");
         rig.ask(&runner, "add", Some("7"));
-        let repo = rig.settings().forge;
+        let repo = rig.settings().git.remote.unwrap();
         rig.forge
             .set_issue_label(&repo, 7, IN_PROGRESS, false)
             .unwrap();

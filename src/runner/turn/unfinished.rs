@@ -96,7 +96,7 @@ impl Runner {
     pub(super) fn stopped_short(&mut self) -> Result<Begin, StateError> {
         let item = self.current().expect("a turn is a work item's");
         let (issue, sent_back) = (item.issue, item.sent_back);
-        let open = match self.ports.forge.open_pull_requests(&self.settings.forge) {
+        let open = match self.ports.forge.open_pull_requests(&self.remote) {
             Ok(open) => open,
             Err(e) => {
                 let reason = format!("cannot list open pull requests: {e}");
