@@ -214,6 +214,12 @@ impl Runner {
             return Ok(Begin::Idle);
         }
         let issue = item.issue;
+        // A later turn restarted with a new session, as one that found no
+        // session to resume is, has a worker call on record and is not first.
+        let first = matches!(session, Session::New(_))
+            && prompt.is_none()
+            && !(item.rework || item.adopted)
+            && !item.calls.iter().any(|c| c.role == Role::Worker);
         let prepared = self.prepare(item, session, prompt);
         let mut next = self.state.clone();
         let mut begin = match prepared {
@@ -223,7 +229,11 @@ impl Runner {
                     .expect("the work item checked above");
                 item.turn = Turn::Running { since };
                 let deadline = Timestamp(since.0.saturating_add(ceiling.as_secs()));
-                Begin::Call { call, deadline }
+                Begin::Call {
+                    call,
+                    deadline,
+                    first,
+                }
             }
             Err(reason) => {
                 let names = self.names();

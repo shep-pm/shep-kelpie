@@ -63,6 +63,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         worktree: "/k/wt/shep/42".into(),
         build: "/k/targets/shep/42".into(),
         agent: "opus-high".to_owned().try_into().unwrap(),
+        pinned: true,
         session: SessionId("5e55".into()),
         turn: Turn::Running {
             since: Timestamp(9),

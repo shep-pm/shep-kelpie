@@ -317,6 +317,7 @@ impl Runner {
             None => Session::Still(still(&item.turn, now, &|text| self.shown(text))),
         };
         Item {
+            waiting: self.model_wait(item.issue).map(|w| (w.since, w.why)),
             issue: item.issue,
             title: events::quote(&item.title),
             phase: phase_text(&item.phase, now),
@@ -410,6 +411,16 @@ fn passed_over(skip: &Skip, shown: &dyn Fn(String) -> String) -> (String, bool) 
                 "shares {} with #{with}, parked on a ruling",
                 shown(files.join(", "))
             ),
+            true,
+        ),
+        Skip::Unlabelled { ruling: None, .. } => (
+            "waits for the issue writer to pick its implementer".into(),
+            true,
+        ),
+        Skip::Unlabelled {
+            ruling: Some(id), ..
+        } => (
+            format!("has no `agent:` label, and waits on ruling {id}"),
             true,
         ),
         Skip::Rework { error, .. } | Skip::Adopt { error, .. } => {

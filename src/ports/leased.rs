@@ -7,7 +7,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use super::{AgentCall, AgentError, AgentReply, Agents, CallActivity, Ending};
+use super::{AgentCall, AgentError, AgentReply, Agents, CallActivity, Ending, Wait};
 use crate::lease::gpu::{GpuHold, LockHolder};
 use crate::settings::LeaseName;
 
@@ -66,6 +66,7 @@ impl Agents for Leased {
                     call.issue,
                     call.cwd.display()
                 );
+                ending.wait(Wait::Lease);
                 let held = self.leases.hold(lease, &what, ending)?;
                 let Some(held) = held else {
                     return Err(AgentError::TimedOut(call.harness.harness()));

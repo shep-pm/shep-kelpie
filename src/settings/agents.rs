@@ -8,6 +8,7 @@
 //! `usage` says, or for a local model a lease held for each whole call.
 
 use std::fmt;
+use std::num::NonZeroU32;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -216,10 +217,20 @@ impl Default for Limit {
 #[serde(deny_unknown_fields)]
 pub struct RoleAgentNames {
     /// The agents that build its work items, from kelpie's agent files. An
-    /// issue labelled `agent:<name>` runs on that one, and any other on the
-    /// first that is not a local model. `["sonnet-high"]` when absent.
+    /// issue labelled `agent:<name>` runs on that one. With several listed,
+    /// the issue writer labels any other first; with one, it runs on that.
+    /// `["sonnet-high"]` when absent.
     #[serde(default = "default_implementers")]
     pub implementers: Vec<AgentName>,
+    /// The issue writer's agent file, which `shep kelpie issue` runs and
+    /// which labels an unlabelled issue. `issue-writer` when absent.
+    #[serde(default = "default_issue_writer")]
+    pub issue_writer: AgentName,
+    /// Minutes a work item's first turn may wait for its model, with no
+    /// output yet, before it moves to the next implementer listed. Off when
+    /// absent.
+    #[serde(default)]
+    pub fallback_after: Option<NonZeroU32>,
     /// The agents that review each pull request, from kelpie's agent files,
     /// each once a pass, in this order. When absent, `qwen` where the
     /// maintainer's qwen-review script is installed, then `defect-hunter`.
@@ -237,6 +248,8 @@ impl Default for RoleAgentNames {
     fn default() -> Self {
         Self {
             implementers: default_implementers(),
+            issue_writer: default_issue_writer(),
+            fallback_after: None,
             reviewers: None,
             pm: None,
         }
@@ -245,6 +258,10 @@ impl Default for RoleAgentNames {
 
 fn default_implementers() -> Vec<AgentName> {
     vec![AgentName::kelpies(crate::agents::DEFAULT_IMPLEMENTER)]
+}
+
+fn default_issue_writer() -> AgentName {
+    AgentName::kelpies(crate::agents::ISSUE_WRITER)
 }
 
 /// One agent a project lists in `agents.implementers`
@@ -285,8 +302,8 @@ pub struct PmAgent {
 pub struct RoleAgents {
     /// The project's implementers, in its order, each once
     pub implementers: Vec<Implementer>,
-    /// The implementer an issue with no `agent:` label runs on: the first
-    /// listed that is not a local model
+    /// The implementer listed first, which the issue writer is told is the
+    /// default and an unlabelled issue runs on when only one is listed
     pub default_implementer: Implementer,
     /// The project manager, when the project names one
     pub pm: Option<PmAgent>,
@@ -314,7 +331,7 @@ impl Settings {
     ///
     /// [`SettingsError::Invalid`] naming an agent `agents` lacks or whose
     /// file is another role's, an implementer the worker's fence cannot hold,
-    /// or a list with no implementer that is not a local model.
+    /// or an empty list.
     pub fn role_agents(&self, agents: &Agents) -> Result<RoleAgents, SettingsError> {
         let mut implementers: Vec<Implementer> = Vec::new();
         for name in &self.agents.implementers {
@@ -333,15 +350,20 @@ impl Settings {
                 prompt: agent.prompt.clone(),
             });
         }
-        let Some(default_implementer) = implementers.iter().find(|i| !i.is_local()).cloned() else {
+        let Some(default_implementer) = implementers.first().cloned() else {
             return Err(SettingsError::Invalid {
                 setting: IMPLEMENTERS,
-                reason: "lists no implementer that is not a local model, and a local one \
-                         runs only the issues labelled for it: list one more, such as \
-                         `sonnet-high`, to run the rest"
-                    .into(),
+                reason: "lists no implementer: list one, such as `sonnet-high`".into(),
             });
         };
+        let writer = &self.agents.issue_writer;
+        find(
+            agents,
+            writer,
+            "agents.issue_writer",
+            "agents",
+            Role::IssueWriter,
+        )?;
         let pm = match &self.agents.pm {
             Some(name) => {
                 let agent = find(agents, name, "agents.pm", "agents", Role::Pm)?;

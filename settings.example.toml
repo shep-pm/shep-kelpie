@@ -56,10 +56,11 @@ pending_rulings = 2
 
 # The agents that build the project's work items, by the names of kelpie's
 # agent files, `$SHEP_HOME/kelpie/agents/<name>.md`, which `shep kelpie add`
-# writes out. An issue labelled `agent:<name>` runs on that one, and any
-# other on the first listed that is not a local model (`usage: none`): a
-# local one runs only the issues labelled for it. A work item keeps the
-# agent it opened on. `sonnet-high` alone when absent.
+# writes out, a local model (`usage: none`) as well as any. An issue
+# labelled `agent:<name>` runs on that one. With one listed, any other runs
+# on it; with more, the issue writer reads the issue and labels it first.
+# A work item keeps the agent it opened on, unless its first turn falls
+# back (below). `sonnet-high` alone when absent.
 [app.dogs.kelpie.agents]
 implementers = ["sonnet-high"]
 # The agents that review each pull request, from the same files, whose
@@ -92,6 +93,14 @@ implementers = ["sonnet-high"]
 # Absent, the board's rule picks (priority, then age) and a stuck item
 # waits on its ruling, as it does whenever the project manager is down.
 # pm = "pm"
+# The issue writer's agent file, which `shep kelpie issue` runs and which
+# labels an unlabelled issue. `issue-writer` when absent.
+# issue_writer = "issue-writer"
+# Minutes a work item's first turn may wait for its model with no output
+# before it stops and moves to the next implementer listed that no other
+# item waits on. A later turn never moves, nor does an item labelled with a
+# `!` at the end, as `agent:opus-high!`. Off when absent.
+# fallback_after = 15
 
 # Turn `enabled` off for a stretch when usage limits do not matter: neither
 # the daily allowance nor the 5-hour window then holds anything, and `status`

@@ -11,7 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use crate::ports::{CallActivity, Timestamp};
+use crate::ports::{CallActivity, Timestamp, Wait};
 use crate::state::BoardEvent;
 
 /// How long a call in flight may show nothing before the board calls it idle
@@ -90,6 +90,8 @@ pub struct Item {
     pub branch: String,
     /// What its session is doing
     pub session: Session,
+    /// Since when its worker's turn has waited for its model, and for what
+    pub waiting: Option<(Timestamp, Wait)>,
     /// The worker's last turn's closing message
     pub summary: Option<String>,
     /// The files it touches
@@ -231,6 +233,15 @@ fn open_work(out: &mut String, board: &Briefing<'_>) {
             item.issue, item.title, item.phase, item.agent
         );
         let _ = writeln!(out, "  - Session: {}", session(&item.session, board.now));
+        if let Some((since, why)) = item.waiting {
+            let _ = writeln!(
+                out,
+                "  - Waiting for its model since {} ({}): for {}",
+                clock(since),
+                age(board.now, since),
+                why.as_str()
+            );
+        }
         if let Some(summary) = &item.summary {
             let _ = writeln!(out, "  - Last turn: \"{summary}\"");
         }

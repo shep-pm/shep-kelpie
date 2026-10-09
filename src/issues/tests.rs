@@ -24,7 +24,7 @@ impl Setup {
         let paths = rig.paths();
         let agents = Agents::load(&paths.agents).unwrap();
         let listed = settings.role_agents(&agents).unwrap();
-        let writer = Writer::of(&agents).unwrap();
+        let writer = Writer::of(&agents, &settings.agents.issue_writer).unwrap();
         Self {
             rig,
             settings,

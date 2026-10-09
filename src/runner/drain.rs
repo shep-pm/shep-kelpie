@@ -17,7 +17,8 @@ pub struct Draining {
     /// The calls still running: each work item's, then the project manager's
     pub calls: Vec<CallRunning>,
     /// The longest a call the runner starts may run before it is ended, in
-    /// seconds: the turn ceiling, or the project manager's when longer
+    /// seconds: the turn ceiling, or the project manager's or the issue
+    /// writer's in flight when longer
     pub ceiling: u64,
 }
 
@@ -41,6 +42,8 @@ pub enum CallRole {
     Reviewer,
     /// The project manager's wake
     Pm,
+    /// The issue writer, labelling an issue
+    IssueWriter,
 }
 
 impl Runner {
@@ -60,7 +63,10 @@ impl Runner {
             return None;
         }
         let pm = self.agents.pm.is_some().then_some(super::pm::CEILING);
-        let ceiling = self.turn_ceiling().as_secs().max(pm.unwrap_or(0));
+        let labelling = (self.flights.labelling()).map(|_| super::flight::label::CEILING);
+        let ceiling = (self.turn_ceiling().as_secs())
+            .max(pm.unwrap_or(0))
+            .max(labelling.unwrap_or(0));
         Some(Draining {
             calls: self.flights.running(),
             ceiling,

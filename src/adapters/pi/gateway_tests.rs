@@ -62,7 +62,12 @@ fn a_workers_turn_holds_a_lease_from_start_to_end_and_a_failed_one_too() {
     let worker = on_gateway(&w, Role::Worker);
     let began = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let told = Arc::clone(&began);
-    let ending = Ending::telling(move || told.store(true, std::sync::atomic::Ordering::SeqCst));
+    let waits = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let waited = Arc::clone(&waits);
+    let ending = Ending::telling(
+        move || told.store(true, std::sync::atomic::Ordering::SeqCst),
+        move |wait| waited.lock().unwrap().push(wait),
+    );
     let pi = pi_on(&w, &server, FRESH, 0);
     pi.prepare(&worker).unwrap();
     let reply = pi.run(&worker, &ending).unwrap();
@@ -80,6 +85,7 @@ fn a_workers_turn_holds_a_lease_from_start_to_end_and_a_failed_one_too() {
         began.load(std::sync::atomic::Ordering::SeqCst),
         "the ceiling counts from the grant"
     );
+    assert_eq!(*waits.lock().unwrap(), [crate::ports::Wait::Lease]);
 
     let failing = pi_on(&w, &server, "", 1);
     let err = failing.run(&worker, &Ending::default()).unwrap_err();

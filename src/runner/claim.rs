@@ -1,8 +1,10 @@
-//! The `in-progress` label on an issue a work item holds
+//! The `in-progress` label on an issue a work item holds, and the repo's
+//! `agent:` labels
 //!
 //! It goes on when a work item opens and comes off when one ends, so a
 //! reader of GitHub can see a worker has the issue. The label is a courtesy:
 //! a forge that refuses it leaves a note and never stops the work item.
+//! Each listed implementer's `agent:` label is made where the repo lacks it.
 
 use super::Runner;
 
@@ -38,6 +40,17 @@ impl Runner {
         }
         for issue in finished {
             self.mark_held(issue, false);
+        }
+    }
+
+    // Makes each listed implementer's `agent:` label the repo lacks. Only
+    // adds: removing a label would strip it from every issue, closed ones too.
+    pub(super) fn make_agent_labels(&mut self) {
+        let labels = crate::issues::agent_labels(&self.agents);
+        let wanted = labels.iter().map(crate::issues::AgentLabel::new_label);
+        let made = crate::issues::make_missing(self.ports.forge.as_ref(), &self.remote, wanted);
+        if let Err(e) = made {
+            self.notes.push(e);
         }
     }
 

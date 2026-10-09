@@ -12,7 +12,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use crate::agents::{Agents, AgentsError};
-use crate::board::{LabelError, Skip, agent_label, old_worker_label};
+use crate::board::{LabelError, Skip, agent_label, old_worker_label, pinned};
 use crate::local_paths::LocalPaths;
 use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Guarded, Leased, Ports, SessionId, Timestamp, Visibility};
@@ -177,6 +177,8 @@ pub enum AddError {
     Forge(ForgeError),
     /// The issue's `agent:` label cannot be used
     Label(LabelError),
+    /// The issue writer is labelling the issue
+    Labelling(u64),
     /// No random session id could be drawn, with the OS's reason
     Session(String),
     /// The work item could not be saved
@@ -194,6 +196,10 @@ impl fmt::Display for AddError {
             }
             Self::Forge(e) => write!(f, "cannot read the issue: {e}"),
             Self::Label(e) => e.fmt(f),
+            Self::Labelling(issue) => write!(
+                f,
+                "the issue writer is labelling #{issue}: add it once that call ends"
+            ),
             Self::Session(e) => write!(f, "cannot draw a session id: {e}"),
             Self::State(e) => e.fmt(f),
         }
@@ -392,6 +398,7 @@ impl Runner {
         };
         runner.settle_older_bots()?;
         runner.settle_labels();
+        runner.make_agent_labels();
         runner.brief_now();
         Ok(runner)
     }
@@ -473,7 +480,10 @@ impl Runner {
 
     fn item_status<'a>(&self, item: &'a WorkItem, now: Timestamp) -> WorkItemStatus<'a> {
         let split = item.split(now, self.timing_phase(item));
-        WorkItemStatus::new(item, split)
+        WorkItemStatus {
+            waiting: self.model_wait(item.issue),
+            ..WorkItemStatus::new(item, split)
+        }
     }
 
     /// Opens a work item for `issue`, and returns the implementer its
@@ -488,6 +498,9 @@ impl Runner {
         if self.state.item(issue).is_some() {
             return Err(AddError::InFlight(vec![issue]));
         }
+        if self.flights.labelling() == Some(issue) {
+            return Err(AddError::Labelling(issue));
+        }
         if !self.slot_free() {
             return Err(AddError::InFlight(self.slot_issues()));
         }
@@ -501,8 +514,11 @@ impl Runner {
             .map_err(AddError::Label)?;
         let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
         let mut next = self.state.clone();
-        next.work_items
-            .push(self.fresh(issue, found.title, agent.clone(), session));
+        let pinned = pinned(&found.labels);
+        let mut item = self.fresh(issue, found.title, agent.clone(), session);
+        item.pinned = pinned;
+        next.work_items.push(item);
+        Self::label_ruled(&mut next, issue);
         self.save(next).map_err(AddError::State)?;
         self.notes.extend(note);
         self.mark_held(issue, true);
@@ -545,6 +561,7 @@ impl Runner {
             worktree: self.paths.worktree(issue),
             build: self.paths.build(issue),
             agent,
+            pinned: false,
             session,
             turn: Turn::Due,
             pull_request: None,
@@ -819,7 +836,7 @@ mod tests {
         drop(runner);
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
-        assert_eq!(saved["version"], 16);
+        assert_eq!(saved["version"], 17);
         assert_eq!(
             saved["events"][2]["what"], "project paused",
             "old events stay"

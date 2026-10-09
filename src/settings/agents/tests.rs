@@ -100,25 +100,51 @@ fn the_implementers_keep_the_projects_order_once_each_and_the_first_is_the_defau
 }
 
 #[test]
-fn a_local_implementer_is_never_the_default() {
+fn a_local_implementer_listed_first_is_the_default_and_may_be_the_only_one() {
     let settings = project("implementers = [\"qwen\", \"sonnet-high\"]\n");
     let agents = settings.role_agents(&book()).unwrap();
     assert_eq!(names(&agents), ["qwen", "sonnet-high"]);
-    assert_eq!(agents.default_implementer.name.as_str(), "sonnet-high");
-    assert!(agents.implementers[0].is_local());
+    assert_eq!(agents.default_implementer.name.as_str(), "qwen");
+    assert!(agents.default_implementer.is_local());
 
-    let err = project("implementers = [\"qwen\"]\n")
+    let only = project("implementers = [\"qwen\", \"box\"]\n");
+    let agents = only.role_agents(&book()).unwrap();
+    assert_eq!(names(&agents), ["qwen", "box"]);
+
+    let err = project("implementers = []\n")
         .role_agents(&book())
         .unwrap_err()
         .to_string();
     assert_eq!(
         err,
-        "setting `agents.implementers`: lists no implementer that is not a local model, \
-         and a local one runs only the issues labelled for it: list one more, such as \
-         `sonnet-high`, to run the rest"
+        "setting `agents.implementers`: lists no implementer: list one, such as `sonnet-high`"
     );
-    let none = project("implementers = []\n").role_agents(&book());
-    assert!(none.is_err());
+}
+
+#[test]
+fn the_issue_writer_is_the_file_agents_issue_writer_names() {
+    let settings = project("implementers = [\"sonnet-high\"]\n");
+    assert_eq!(settings.agents.issue_writer.as_str(), "issue-writer");
+    assert_eq!(settings.agents.fallback_after, None);
+
+    let writer = "---\nrole: issue-writer\nharness: claude-code\nmodel: claude-sonnet-5-5\n\
+                  effort: low\n---\nWrite issues.\n";
+    let named = project("implementers = [\"sonnet-high\"]\nissue_writer = \"scribe\"\n");
+    assert!(named.role_agents(&book().with("scribe", writer)).is_ok());
+    let err = named.role_agents(&book()).unwrap_err().to_string();
+    assert!(
+        err.contains("`agents.issue_writer` names scribe, which has no agent file"),
+        "{err}"
+    );
+    let wrong = project("implementers = [\"sonnet-high\"]\nissue_writer = \"opus-high\"\n");
+    let err = wrong.role_agents(&book()).unwrap_err().to_string();
+    assert!(
+        err.contains("whose agent file's role is `implementer`"),
+        "{err}"
+    );
+
+    let timed = project("implementers = [\"sonnet-high\"]\nfallback_after = 15\n");
+    assert_eq!(timed.agents.fallback_after.map(|m| m.get()), Some(15));
 }
 
 #[test]

@@ -62,6 +62,7 @@ impl Runner {
         let held = self.pm_holds(&all);
         ready.retain(|issue| !held.contains(&issue.number));
         let mut paced = false;
+        let mut unlabelled: Vec<Skip> = Vec::new();
         loop {
             let implementers = self.agents.implementer_names();
             let finished = &self.state.finished;
@@ -69,6 +70,7 @@ impl Runner {
             let mut skipped = pick.skipped;
             skipped.extend(failed.iter().cloned());
             skipped.extend(overlaps.iter().cloned());
+            skipped.extend(unlabelled.iter().cloned());
             skipped.sort_by_key(Skip::issue);
             let takeable = takeable(&ready, &open, finished, &implementers);
             let Some(issue) = pick.issue else {
@@ -113,6 +115,30 @@ impl Runner {
                     return Ok(Begin::Idle);
                 }
             };
+            // An issue the issue writer is labelling waits for it, even one
+            // labelled by hand meanwhile.
+            let labelling = self.flights.labelling() == Some(issue);
+            if let Some(found) = ready.iter().find(|i| i.number == issue)
+                && (labelling || self.needs_label(found))
+            {
+                let ruling = self.unlabelled_ruling(issue);
+                if labelling
+                    || ruling.is_some()
+                    || self.draining
+                    || self.flights.labelling().is_some()
+                {
+                    unlabelled.push(Skip::Unlabelled { issue, ruling });
+                    ready.retain(|i| i.number != issue);
+                    continue;
+                }
+                if let Some(held) = self.pace_writer()?.holds() {
+                    self.skipped = skipped;
+                    return Ok(held);
+                }
+                let found = found.clone();
+                self.skipped = skipped;
+                return Ok(Begin::Label(found));
+            }
             match self.add(issue) {
                 Ok(agent) => {
                     self.skipped.clone_from(&skipped);
@@ -311,6 +337,7 @@ mod tests {
     fn an_agent_label_added_after_dispatch_changes_nothing() {
         let (rig, runner) = listing_opus("chelone");
         rig.forge.list_ready(6, false);
+        rig.forge.label(6, "agent:sonnet-high");
         step(&runner).unwrap();
         rig.forge.label(6, "agent:opus-high");
         rig.claude
