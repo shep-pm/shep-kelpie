@@ -33,7 +33,7 @@ const REVIEW_FILE: &str = "maintainer-review.md";
 /// Why `rework` was refused
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReworkError {
-    /// No slot is free under `max_items`, counting the items waiting for
+    /// No slot is free under `concurrency.active_items`, counting the items waiting for
     /// one, or one for this issue is open already: the issues of those in
     /// the way
     InFlight(Vec<u64>),
@@ -133,7 +133,7 @@ impl Runner {
         let pr = self
             .ports
             .forge
-            .reviewed(&self.settings.forge, number)
+            .reviewed(&self.remote, number)
             .map_err(|e| ReworkError::PullRequest(number, e))?;
         self.start_rework(number, pr)
     }
@@ -164,7 +164,7 @@ impl Runner {
             error: error.to_string(),
         };
         for (number, issue) in ours {
-            let pr = match self.ports.forge.reviewed(&self.settings.forge, number) {
+            let pr = match self.ports.forge.reviewed(&self.remote, number) {
                 Ok(pr) => pr,
                 Err(e) => {
                     skipped.push(skip(issue, number, ReworkError::PullRequest(number, e)));
@@ -232,7 +232,7 @@ impl Runner {
         review: Option<String>,
         refused: &ReworkError,
     ) -> Result<Result<Begin, ReworkError>, StateError> {
-        let repo = &self.settings.forge;
+        let repo = &self.remote;
         if labelled && let Err(e) = self.ports.forge.set_label(repo, number, READY, false) {
             return Ok(Err(ReworkError::Unlabel(number, READY, e)));
         }
@@ -246,7 +246,7 @@ impl Runner {
         let comment_failed = self
             .ports
             .forge
-            .comment(&self.settings.forge, number, &comment)
+            .comment(&self.remote, number, &comment)
             .err()
             .map(|e| e.to_string());
         Ok(Ok(Begin::Report(StepReport::ReworkRefused {
@@ -269,7 +269,7 @@ impl Runner {
     // Puts `ready-for-human` on pull request `number` and takes
     // `ready-for-agent` off, as its labels on the forge stand now.
     pub(super) fn hand_back(&self, number: u64) -> Result<(), String> {
-        let repo = &self.settings.forge;
+        let repo = &self.remote;
         let failed = |e: ForgeError| format!("cannot hand #{number} back: {e}");
         let labels = self
             .ports
@@ -301,7 +301,7 @@ impl Runner {
             PullRequestState::Closed => return Err(ReworkError::NotOpen(number, "closed")),
         }
         let me = self.viewer().map_err(ReworkError::Viewer)?;
-        let repo = &self.settings.forge;
+        let repo = &self.remote;
         let issue = pr
             .branch
             .strip_prefix("kelpie/")
@@ -331,7 +331,7 @@ impl Runner {
         // counts once when it finds it.
         let mut bot_reads = std::collections::BTreeMap::new();
         // The head the turn starts from, so a turn that pushes nothing is told apart.
-        let head = worktree::origin_head(&self.settings.repo, &pr.branch)
+        let head = worktree::origin_head(&self.settings.git.checkout, &pr.branch)
             .map_err(|e| ReworkError::Head(pr.branch.clone(), e.to_string()))?;
         for bot in self
             .listed_bots()

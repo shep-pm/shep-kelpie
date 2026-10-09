@@ -112,7 +112,7 @@ mod tests {
 
     use super::*;
     use crate::runner::{StepReport, step};
-    use crate::settings::MergeAuthority;
+    use crate::settings::Merging;
     use crate::shepherd::SHEP_VERSION;
     use crate::test::{Rig, Scripted, project_table};
 
@@ -244,14 +244,14 @@ mod tests {
         );
         look.read().unwrap();
 
-        table
-            .lock()
-            .unwrap()
-            .insert("merge_authority".into(), Value::String("auto".into()));
+        let mut table = table.lock().unwrap();
+        let git = table.get_mut("git").and_then(Value::as_object_mut).unwrap();
+        git.insert("merging".into(), Value::String("auto".into()));
+        drop(table);
         look.again(&runner);
 
         let runner = runner.lock().unwrap();
-        assert_eq!(runner.settings().merge_authority, MergeAuthority::Auto);
+        assert_eq!(runner.settings().git.merging, Merging::Auto);
     }
 
     const MINE: &str = "---\nrole: implementer\nharness: claude-code\nmodel: claude-mine-1\n\

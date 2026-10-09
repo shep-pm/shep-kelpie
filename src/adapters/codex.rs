@@ -28,7 +28,7 @@ use super::claude::{ClaudeCli, LambLabels};
 use super::pi::step_skill;
 use super::process::{Processes, RunError};
 use crate::fence;
-use crate::guard::{FOLDER_FLAG, NAME_FLAG, PIN_FLAG};
+use crate::guard::{FOLDER_FLAG, PIN_FLAG};
 use crate::ports::{
     AgentCall, AgentError, AgentReply, Agents, CallActivity, Ending, Fence, Policy, Sandbox,
     Session, SessionId, Tools, Usage, written_at,
@@ -569,12 +569,6 @@ fn hooks(fence: &Fence) -> toml::Value {
             .folders
             .iter()
             .map(|p| shell_quote(&format!("{FOLDER_FLAG}{}", p.display()))),
-    )
-    .chain(
-        guard
-            .private_names
-            .iter()
-            .map(|n| shell_quote(&format!("{NAME_FLAG}{n}"))),
     )
     .collect();
     toml::Value::Array(vec![

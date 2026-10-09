@@ -14,7 +14,7 @@ use super::review::pushed::{off_text, push_prompt};
 use super::rework::HUMAN;
 use super::{Names, Runner};
 use crate::ports::Timestamp;
-use crate::settings::MergeAuthority;
+use crate::settings::Merging;
 use crate::state::{Fix, ProjectState, Resume, Ruling, RulingKind, StateError, Stuck};
 use crate::work_item::{Known, Phase, Review, ReviewStage, Turn, WorkItem, foreign_change};
 use crate::worktree;
@@ -180,7 +180,7 @@ impl Runner {
             (&head_moved, &answer, parked)
             && let RulingKind::ForeignChange { known: seen, .. } = &ruling.kind
         {
-            let tip = worktree::origin_head(&self.settings.repo, &item.branch)
+            let tip = worktree::origin_head(&self.settings.git.checkout, &item.branch)
                 .map_err(|e| RuleError::Adopt(to.clone(), e.to_string()))?;
             if tip != *to {
                 let change = foreign_change(&item.known, &seen.labels, seen.ready, &tip);
@@ -206,9 +206,9 @@ impl Runner {
                 item.late_from = None;
                 self.late_reads.remove(&item.issue);
             }
-            let regate = match (vouches, self.settings.merge_authority) {
-                (true, MergeAuthority::Auto) => regate(&self.settings.repo, item)?,
-                (true, MergeAuthority::Ask) => {
+            let regate = match (vouches, self.settings.git.merging) {
+                (true, Merging::Auto) => regate(&self.settings.git.checkout, item)?,
+                (true, Merging::Ask) => {
                     item.known.head = None;
                     false
                 }
@@ -232,7 +232,7 @@ impl Runner {
                     let (from, to) = (item.known.head.take(), known.head.clone());
                     item.phase = match (from, to) {
                         (Some(from), Some(to)) if from != to => {
-                            let (repo, branch) = (&self.settings.repo, &item.branch);
+                            let (repo, branch) = (&self.settings.git.checkout, &item.branch);
                             worktree::adopt(repo, &item.worktree, branch, &from, &to)
                                 .map_err(|e| RuleError::Adopt(to, e.to_string()))?;
                             Phase::Review(Review::first())
@@ -246,7 +246,7 @@ impl Runner {
                     None
                 }
                 Move::Decline { prompt, from, to } => {
-                    let (repo, branch) = (&self.settings.repo, &item.branch);
+                    let (repo, branch) = (&self.settings.git.checkout, &item.branch);
                     worktree::adopt(repo, &item.worktree, branch, &from, &to)
                         .map_err(|e| RuleError::Adopt(to.clone(), e.to_string()))?;
                     item.known.head = Some(to);
@@ -266,7 +266,7 @@ impl Runner {
                 if let Some(number) = item.pull_request
                     && item.known.labels.iter().any(|l| l == HUMAN)
                 {
-                    let repo = &self.settings.forge;
+                    let repo = &self.remote;
                     let off = self.ports.forge.set_label(repo, number, HUMAN, false);
                     off.map_err(|e| RuleError::Unlabel(number, e.to_string()))?;
                     item.known.labels.retain(|l| l != HUMAN);
@@ -328,10 +328,7 @@ impl Runner {
         let number = number?;
         let ruling = self.state.rulings.iter().find(|r| r.id == id)?;
         let comment = comment(&ruling.kind)?;
-        let posted = self
-            .ports
-            .forge
-            .comment(&self.settings.forge, number, &comment);
+        let posted = self.ports.forge.comment(&self.remote, number, &comment);
         posted.err().map(|e| e.to_string())
     }
 
@@ -416,15 +413,39 @@ fn comment(kind: &RulingKind) -> Option<String> {
     Some(format!("{said}\n\nWaiting on the maintainer."))
 }
 
+// The fix turns a worker had on red runs. The cap is read live, so a
+// lowered one can sit below the count.
+fn fix_turns_had(turns: u32) -> String {
+    match turns {
+        0 => "The worker has had no fix turn on red runs".to_owned(),
+        1 => "The worker has had 1 fix turn on red runs".to_owned(),
+        n => format!("The worker has had {n} fix turns on red runs"),
+    }
+}
+
 fn stuck_comment(reason: &Stuck) -> String {
     match reason {
         Stuck::Rebase { why } => {
             format!("This branch could not be rebased onto main: {why}.")
         }
-        Stuck::StillRed { head, checks } => format!(
+        Stuck::StillRed {
+            head,
+            checks,
+            fix_turns: None,
+        } => format!(
             "CI failed again at {} and no fix was pushed: {}.",
             short(head),
             checks.join(", ")
+        ),
+        Stuck::StillRed {
+            head,
+            checks,
+            fix_turns: Some(turns),
+        } => format!(
+            "CI failed at {}: {}. {}.",
+            short(head),
+            checks.join(", "),
+            fix_turns_had(*turns)
         ),
         // The forge's own words stay off a public pull request.
         Stuck::MergeRefused { head, .. } => {
@@ -675,11 +696,26 @@ pub(super) fn question(id: u64, issue: u64, number: Option<u64>, kind: &RulingKi
                 "Kelpie cannot rebase {about} onto main: {why}. \
                  Once the branch is fixed, {yes} has kelpie look again"
             ),
-            Stuck::StillRed { head, checks } => format!(
+            Stuck::StillRed {
+                head,
+                checks,
+                fix_turns: None,
+            } => format!(
                 "CI failed again on {about} at {}, and the worker pushed \
                  no fix: {}. {yes} has kelpie look again",
                 short(head),
                 checks.join(", ")
+            ),
+            Stuck::StillRed {
+                head,
+                checks,
+                fix_turns: Some(turns),
+            } => format!(
+                "CI failed on {about} at {}: {}. {}, and the cap `ci.fix_attempts` sets is \
+                 reached. {yes} has kelpie look again",
+                short(head),
+                checks.join(", "),
+                fix_turns_had(*turns)
             ),
             Stuck::MergeRefused { head, why } => format!(
                 "Kelpie could not merge {about} at {} after catching it up: {why}. \

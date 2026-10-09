@@ -10,7 +10,7 @@ const HOME: &str = "/home/me";
 
 // What the hook keeps off the forge when it is given only the home folder.
 fn local(home: Option<&Path>) -> LocalPaths {
-    LocalPaths::new(home, [])
+    LocalPaths::new(home)
 }
 
 fn call(cwd: &Path, command: &str, checkout: Checkout<'_>) -> Verdict {
@@ -927,13 +927,13 @@ fn the_pin_flags_are_taken_out_of_the_rest() {
         "--folder=/k".to_owned(),
         PIN_FLAG.to_owned(),
         HERE_FLAG.to_owned(),
-        "--name=x".to_owned(),
+        "--folder=/j".to_owned(),
     ];
     let (pin, rest) = pin_flag(&args);
     assert!(pin);
     let (here, rest) = here_flag(&rest);
     assert!(here);
-    assert_eq!(rest, ["--folder=/k", "--name=x"]);
+    assert_eq!(rest, ["--folder=/k", "--folder=/j"]);
     assert!(local_paths(None, &rest).is_ok());
     assert!(!pin_flag(&rest).0);
     assert!(!here_flag(&rest).0);

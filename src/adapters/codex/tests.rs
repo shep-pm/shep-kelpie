@@ -598,7 +598,6 @@ fn worker_in(wt: &Path, build: &Path, kelpie: &Path, root: &Path, call: AgentCal
         kelpie,
         kelpie_home: &root.join("kelpie"),
         repo: &root.join("repo"),
-        private_names: &[],
         guard_hooks: &[],
         allowed_domains: &[],
         build_env: &BTreeMap::new(),

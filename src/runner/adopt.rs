@@ -146,7 +146,7 @@ impl Runner {
         let pr = self
             .ports
             .forge
-            .reviewed(&self.settings.forge, number)
+            .reviewed(&self.remote, number)
             .map_err(|e| AdoptError::PullRequest(number, e))?;
         if let Err(e) = self.adoptable(number, &pr) {
             if e.settled() {
@@ -248,7 +248,7 @@ impl Runner {
         number: u64,
         refused: &AdoptError,
     ) -> Result<Result<Begin, AdoptError>, StateError> {
-        let repo = &self.settings.forge;
+        let repo = &self.remote;
         let unlabelled = self.ports.forge.pull_request(repo, number).and_then(|pr| {
             if pr.labels.iter().any(|l| l == READY) {
                 self.ports.forge.set_label(repo, number, READY, false)
@@ -276,10 +276,7 @@ impl Runner {
 
     fn refusal_comment(&self, number: u64, refused: &AdoptError) -> Option<String> {
         let comment = format!("Kelpie cannot adopt this pull request: {refused}.");
-        let posted = self
-            .ports
-            .forge
-            .comment(&self.settings.forge, number, &comment);
+        let posted = self.ports.forge.comment(&self.remote, number, &comment);
         posted.err().map(|e| e.to_string())
     }
 
@@ -317,7 +314,7 @@ impl Runner {
     // writes what the worker needs, takes the triage and summon labels off
     // and saves the work item, in that order.
     fn start_adoption(&mut self, number: u64) -> Result<(u64, AgentName), AdoptError> {
-        let repo = self.settings.forge.clone();
+        let repo = self.remote.clone();
         let pr = self
             .ports
             .forge
@@ -340,7 +337,7 @@ impl Runner {
         // A start that failed part way leaves a worktree on a head `origin`
         // may have moved past, so each start begins from a fresh one.
         let removed = worktree::remove(
-            &self.settings.repo,
+            &self.settings.git.checkout,
             &fresh.worktree,
             &pr.branch,
             &fresh.build,
@@ -348,14 +345,14 @@ impl Runner {
         );
         removed.map_err(|e| AdoptError::Worktree(e.to_string()))?;
         let prepared = worktree::prepare(
-            &self.settings.repo,
+            &self.settings.git.checkout,
             &fresh.worktree,
             &pr.branch,
             Start::Pushed,
             &fresh.build,
         );
         prepared.map_err(|e| AdoptError::Worktree(e.to_string()))?;
-        let head = worktree::origin_head(&self.settings.repo, &pr.branch)
+        let head = worktree::origin_head(&self.settings.git.checkout, &pr.branch)
             .map_err(|e| AdoptError::Worktree(e.to_string()))?;
         // A listed bot's `rounds` counts the reviews it gave so far. One of
         // this head counts when the bot's round finds it, as any read does.
@@ -454,7 +451,7 @@ impl Runner {
         if !item.adopted {
             return Some(head);
         }
-        let checked_out = worktree::head(&self.settings.repo, &item.worktree).ok()?;
+        let checked_out = worktree::head(&self.settings.git.checkout, &item.worktree).ok()?;
         (checked_out == head).then_some(head)
     }
 

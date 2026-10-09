@@ -115,9 +115,10 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
         "add wrote a kill_timeout"
     );
     let settings = scene.settings();
-    assert_eq!(settings.repo, scene.checkout.root);
-    assert_eq!(settings.forge.as_str(), "shep-pm/koji-website");
-    assert!(settings.ci, "the checkout has workflows");
+    assert_eq!(settings.git.checkout, scene.checkout.root);
+    let remote = settings.git.remote.as_ref().map(ForgeSlug::as_str);
+    assert_eq!(remote, Some("shep-pm/koji-website"));
+    assert!(settings.ci.block, "the checkout has workflows");
     let reviewers = settings.agents.reviewers.clone().unwrap();
     assert_eq!(
         reviewers,
@@ -190,7 +191,7 @@ async fn add_from_a_checkout_puts_its_worktrees_under_the_project_s_folder() {
     let shep_home = scene.shepherd.home();
     assert_eq!(runner.env["SHEP_HOME"], shep_home.display().to_string());
     assert!(!runner.env.contains_key("KELPIE_HOME"), "{:?}", runner.env);
-    assert_eq!(scene.settings().repo, scene.checkout.root);
+    assert_eq!(scene.settings().git.checkout, scene.checkout.root);
     let paths = ProjectPaths::under(&crate::home::under(shep_home), shep_home, &scene.name);
     assert_eq!(paths.worktree(7), shep_home.join("kelpie/koji/worktrees/7"));
     assert_eq!(paths.build(7), shep_home.join("kelpie/koji/builds/7"));
@@ -239,7 +240,7 @@ async fn a_public_repo_with_no_ci_gets_no_ci_and_still_lists_no_review_bot() {
     std::fs::remove_dir_all(scene.checkout.root.join(".github")).unwrap();
     scene.add().await.unwrap();
     let settings = scene.settings();
-    assert!(!settings.ci);
+    assert!(!settings.ci.block);
     let reviewers = settings.agents.reviewers.unwrap();
     assert_eq!(reviewers, [AgentName::kelpies("defect-hunter")]);
 }
@@ -302,6 +303,26 @@ async fn a_checkout_or_repo_another_project_runs_is_refused() {
     scene.name = ProjectName::try_from("koji-again").unwrap();
     let err = scene.add().await.unwrap_err();
     assert!(err.starts_with("project `koji` already runs"), "{err}");
+    assert_eq!(scene.shepherd.writes(), []);
+}
+
+#[tokio::test]
+async fn another_checkout_of_a_repo_a_project_reads_from_its_origin_is_refused() {
+    let mut scene = Scene::new().await;
+    let theirs = scene.shepherd.scratch("koji-elsewhere");
+    crate::test::git(&theirs, &["init", "-q"]);
+    let origin = "git@github.com:shep-pm/koji-website.git";
+    crate::test::git(&theirs, &["remote", "add", "origin", origin]);
+    let mut table = crate::test::project_table(include_str!("../../../settings.example.toml"));
+    table["git"]["checkout"] = Value::String(theirs.display().to_string());
+    let git = table["git"].as_object_mut().unwrap();
+    git.remove("remote");
+    let older = ProjectName::try_from("older").unwrap();
+    scene
+        .shepherd
+        .holds(scene.launch.runner(&older, table), true);
+    let err = scene.add().await.unwrap_err();
+    assert!(err.starts_with("project `older` already runs"), "{err}");
     assert_eq!(scene.shepherd.writes(), []);
 }
 
@@ -385,7 +406,7 @@ async fn a_runner_from_a_flockfile_with_no_table_is_given_one() {
             .any(|l| l.ends_with("already there, and given its settings")),
         "{lines:?}"
     );
-    assert_eq!(scene.settings().repo, scene.checkout.root);
+    assert_eq!(scene.settings().git.checkout, scene.checkout.root);
     let writes = scene.shepherd.writes();
     let added_runner = |w: &Request| matches!(w, Request::Add { apps } if apps[0].name == "koji");
     assert!(!writes.iter().any(added_runner), "{writes:?}");

@@ -105,8 +105,11 @@ pub(in crate::runner) fn stuck_on(kind: &RulingKind) -> Option<&'static str> {
         RulingKind::Stuck(Stuck::TurnTimeout { .. }) => {
             Some("its worker's turn ran past its ceiling")
         }
+        RulingKind::Stuck(Stuck::StillRed {
+            fix_turns: None, ..
+        }) => Some("CI failed again and the worker pushed no fix"),
         RulingKind::Stuck(Stuck::StillRed { .. }) => {
-            Some("CI failed again and the worker pushed no fix")
+            Some("CI failed and the worker's fix turns reached the cap `ci.fix_attempts` sets")
         }
         _ => None,
     }

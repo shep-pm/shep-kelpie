@@ -1,12 +1,11 @@
 //! A project's settings
 //!
-//! Its runner sheep's `[app.dogs.kelpie]` table. Unknown keys are refused, so a misspelt or
-//! malformed setting stops the runner with a message naming it. Every
-//! setting is required except the ones added after the first build
-//! (`max_items`, `max_parked`, `pacing.enabled`, `worker.allowed_domains`,
-//! `worker.build_env`, `worker.instructions_file`, `worker.turn_timeout`,
-//! `worker.guard_hooks`, `[skills]` and `[agents]`).
-//! `settings.example.toml` beside this crate holds the defaults.
+//! Its runner sheep's `[app.dogs.kelpie]` table, every setting in a table of
+//! its own. Unknown keys are refused, so a misspelt or malformed setting
+//! stops the runner with a message naming it. `git.checkout`,
+//! `git.merging`, `ci.block` and `pacing.kickoff_hours` are required, with
+//! the tables that hold them and `[worker]`, and every other key has a
+//! default. `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -22,7 +21,9 @@ mod table;
 
 pub use table::table_of;
 mod agents;
+mod ci;
 mod gateway;
+mod git;
 mod local;
 mod removed;
 mod reviewers;
@@ -32,7 +33,9 @@ pub use agents::{
     Account, AgentHarness, AgentName, Harness, Implementer, Limit, ModelServer, PmAgent,
     RoleAgentNames, RoleAgents, UsageReader,
 };
+pub use ci::{Ci, Concurrency, FixAttempts};
 pub use gateway::{Gateway, GatewayKey, GatewayName, Gateways, KeyVar, ModelHost, Route};
+pub use git::{Filing, Git, Merging};
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use reviewers::{LeaseName, ListedReviewer, default_reviewers};
 pub use skills::{SkillChoice, SkillName, StepSkills};
@@ -42,34 +45,16 @@ pub use skills::{SkillChoice, SkillName, StepSkills};
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
-    /// The project's own checkout. A leading `~/` is the home folder.
-    pub repo: PathBuf,
-    /// The project's repo on the forge
-    pub forge: ForgeSlug,
-    /// Who decides a merge
-    pub merge_authority: MergeAuthority,
-    /// Whether the repo runs CI on pull requests
-    ///
-    /// With it on, a pull request with no checks yet waits for them. With it
-    /// off, kelpie reads no checks and asks for the merge once the branch
-    /// has the latest `main`.
-    pub ci: bool,
-    /// How many work items may hold a slot, which a worker's turn or a
-    /// review needs, each with its own branch, worktree and gates. One
-    /// parked on a ruling gives its slot up. 1 when absent.
-    #[serde(default = "default_max_items")]
-    pub max_items: NonZeroU32,
-    /// How many work items may wait parked on rulings before the board
-    /// opens nothing new. Items already working can still park past it, and
-    /// a merged item on its follow-up ruling does not count. 0 opens
-    /// nothing while any ruling waits. 2 when absent.
-    #[serde(default = "default_max_parked")]
-    pub max_parked: u32,
-    /// Words that stay off the forge: kelpie refuses a post naming one, and
-    /// a worker's guard refuses a commit or `gh` text that does. Whole
-    /// words, whatever their case. None when absent.
+    /// The project's repo: its checkout, its GitHub repo, who merges, and
+    /// what becomes of deferred findings
+    pub git: Git,
+    /// The project's CI: whether a merge waits for it, and how many fix
+    /// turns a red run gets
+    pub ci: Ci,
+    /// How many work items run at once, and how many may wait on rulings
+    /// before the board opens no more. Its defaults when absent.
     #[serde(default)]
-    pub private_names: Vec<NonBlank>,
+    pub concurrency: Concurrency,
     /// The agents that build the project's work items and review its pull
     /// requests, from kelpie's agent files
     #[serde(default)]
@@ -96,6 +81,7 @@ const REVIEWER_FILES: &str = "reviewers are agent files listed in `agents.review
 const BOT_FILES: &str = "review bots are reviewer agent files on the `bot` harness, listed \
                          in `agents.reviewers` and run once a pass in their place";
 const ONCE_A_PASS: &str = "a review bot reads once a pass, so no round cap is counted";
+const GROUPED: &str = "every project setting sits in a table now";
 
 // The keys removed features left behind
 const REMOVED: &[Removed] = &[
@@ -268,20 +254,53 @@ const REMOVED: &[Removed] = &[
                   a review bot now reads once a pass",
         fix: DELETE,
     },
+    Removed {
+        key: "repo",
+        because: GROUPED,
+        fix: "move its value to `git.checkout`",
+    },
+    Removed {
+        key: "forge",
+        because: GROUPED,
+        fix: "move its value to `git.remote`, or delete it to read the repo from the \
+              checkout's `origin`",
+    },
+    Removed {
+        key: "merge_authority",
+        because: "it set both who merges and whether deferred findings are asked about",
+        fix: "move its value to `git.merging`, and set `git.issues`: `ask` asks before \
+              filing deferred findings as `ask` did, and `file` files them as `auto` did",
+    },
+    Removed {
+        key: "ci",
+        because: GROUPED,
+        fix: "move its value to `block` in a `[ci]` table",
+    },
+    Removed {
+        key: "max_items",
+        because: GROUPED,
+        fix: "move its value to `concurrency.active_items`",
+    },
+    Removed {
+        key: "max_parked",
+        because: GROUPED,
+        fix: "move its value to `concurrency.pending_rulings`",
+    },
+    Removed {
+        key: "private_names",
+        because: "kelpie no longer checks text for the project's own words",
+        fix: "guard a worker's commits and posts with a hook in `worker.guard_hooks`, \
+              and delete it",
+    },
+    Removed {
+        key: "skills.ci",
+        because: "the step is named for what it does, apart from the `[ci]` table",
+        fix: "move its value to `skills.ci_fix`",
+    },
 ];
 
-/// Who decides a merge
-///
-/// `auto` replaces only the merge ruling: every other ruling still asks.
-/// `ask-surface` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum MergeAuthority {
-    /// Kelpie asks for a ruling before every merge
-    Ask,
-    /// Kelpie merges once every gate passes, then posts a notice of the merge
-    Auto,
-}
+// The keys removed above that name a table now, refused only when set to a value
+const NOW_TABLES: &[&str] = &["ci"];
 
 /// One role's model and effort
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -380,17 +399,6 @@ pub struct Worker {
     /// on a ruling, keeping its session. 60 when absent.
     #[serde(default = "default_turn_timeout")]
     pub turn_timeout: NonZeroU32,
-}
-
-/// One work item at a time, as every project ran before `max_items`
-fn default_max_items() -> NonZeroU32 {
-    NonZeroU32::MIN
-}
-
-/// Two items waiting on the maintainer, so one unanswered ruling cannot
-/// stall a project and a run of them cannot open pull request after pull request
-fn default_max_parked() -> u32 {
-    2
 }
 
 /// The design log's default for `worker.turn_timeout`, in minutes
@@ -621,8 +629,8 @@ impl core::error::Error for SettingsError {}
 impl Settings {
     // `~/` in a path setting is the home folder.
     fn expand(&mut self, home: &Path) {
-        if let Ok(rest) = self.repo.strip_prefix("~") {
-            self.repo = home.join(rest);
+        if let Ok(rest) = self.git.checkout.strip_prefix("~") {
+            self.git.checkout = home.join(rest);
         }
         for file in self.files_mut() {
             if let Ok(rest) = file.strip_prefix("~") {
@@ -656,7 +664,7 @@ impl Settings {
 ///
 /// A message naming every removed key `text` sets, each with what replaces it.
 pub(crate) fn refuse_removed_settings(text: &str, home: &Path) -> Result<(), String> {
-    removed::refuse(text, REMOVED).map_err(|message| {
+    removed::refuse(text, REMOVED, NOW_TABLES).map_err(|message| {
         let table = text.parse::<toml::Table>().unwrap_or_default();
         let listed = table
             .get("agents")

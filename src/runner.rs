@@ -18,7 +18,7 @@ use crate::pacer::Assessment;
 use crate::ports::{ForgeError, Guarded, Leased, Ports, SessionId, Timestamp, Visibility};
 use crate::review_bot::{Bot, Profile};
 use crate::settings::{
-    Account, AgentName, ListedReviewer, NonBlank, RoleAgents, Settings, SettingsError,
+    Account, AgentName, ForgeSlug, ListedReviewer, RoleAgents, Settings, SettingsError,
 };
 use crate::skills::Skills;
 use crate::state::ids::RulingIds;
@@ -169,7 +169,7 @@ impl From<StateError> for OpenError {
 /// Why `add` was refused
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AddError {
-    /// No slot is free under `max_items`, counting the items waiting for
+    /// No slot is free under `concurrency.active_items`, counting the items waiting for
     /// one, or one for this issue is open already: the issues of those in
     /// the way
     InFlight(Vec<u64>),
@@ -207,6 +207,9 @@ impl core::error::Error for AddError {}
 pub struct Runner {
     project: ProjectName,
     settings: Settings,
+    // The project's repo on the forge: `git.remote`, or the checkout's
+    // `origin` when it is absent, read when the runner starts
+    remote: ForgeSlug,
     // The project's extra worker instructions, read once when the runner starts
     extra_instructions: Option<String>,
     // Each step's skill, loaded when the runner starts or its settings change
@@ -290,9 +293,8 @@ impl Runner {
         kelpie: &Path,
         mut ports: Ports,
     ) -> Result<Self, OpenError> {
-        let folders = [home, paths.kelpie_home.as_path(), settings.repo.as_path()];
-        let names = settings.private_names.iter().map(NonBlank::as_str);
-        let local = LocalPaths::new(folders, names);
+        let checkout = settings.git.checkout.as_path();
+        let local = LocalPaths::new([home, paths.kelpie_home.as_path(), checkout]);
         ports.forge = Box::new(Guarded::new(ports.forge, local.clone()));
         let leases = Arc::clone(&ports.local_leases);
         ports.agents = Arc::new(Leased::new(Arc::clone(&ports.agents), leases));
@@ -318,7 +320,7 @@ impl Runner {
             );
         }
         let totp = replies::authenticator(webhook.as_ref(), &paths.totp)?;
-        check_repo(&settings)?;
+        let remote = check_checkout(&settings)?;
         let extra_instructions = instructions::read_extra(&settings)?;
         let env_home = std::env::var_os("HOME").map(PathBuf::from);
         guard_hooks::check(
@@ -329,7 +331,7 @@ impl Runner {
         check_bots(&lineup, &ports)?;
         crate::skills::check(&settings.skills, &paths.skills)?;
         let skills = Skills::load(&settings.skills, &paths.skills);
-        check_coderabbit(&settings, &lineup, &ports)?;
+        check_coderabbit(&remote, &lineup, &ports)?;
         check_local(&lineup, &ports)?;
         let mut state = store.load()?.unwrap_or_default();
         // A review call in flight when the runner stopped never resumes on
@@ -355,6 +357,7 @@ impl Runner {
         let mut runner = Self {
             project,
             settings,
+            remote,
             extra_instructions,
             skills,
             paths: paths.clone(),
@@ -398,6 +401,11 @@ impl Runner {
         &self.settings
     }
 
+    /// The project's repo on the forge, as read when the runner started
+    pub fn remote(&self) -> &ForgeSlug {
+        &self.remote
+    }
+
     // The profile of `bot`, which a start checks every listed bot has.
     fn profile(&self, bot: Bot) -> std::sync::Arc<dyn Profile> {
         let found = self.ports.review_bots.iter().find(|p| p.bot() == bot);
@@ -426,7 +434,7 @@ impl Runner {
         let now = self.ports.clock.now();
         Status {
             project: self.project.as_str(),
-            merge_authority: self.settings.merge_authority,
+            merging: self.settings.git.merging,
             work_item: self
                 .state
                 .work_items
@@ -438,11 +446,11 @@ impl Runner {
                 .iter()
                 .map(|item| self.item_status(item, now))
                 .collect(),
-            max_items: self.settings.max_items.get(),
+            active_items: self.settings.concurrency.active_items.get(),
             working: self.issues_where(|i| !i.parked() && i.seat != Seat::Waiting),
             waiting_for_slot: self.issues_where(|i| i.seat == Seat::Waiting),
             parked: self.parked_issues(),
-            max_parked: self.settings.max_parked,
+            pending_rulings: self.settings.concurrency.pending_rulings,
             adopted: &self.state.adopted,
             skipped: &self.skipped,
             rulings: &self.state.rulings,
@@ -473,7 +481,7 @@ impl Runner {
     ///
     /// # Errors
     ///
-    /// [`AddError`] when the project has `max_items` working or one for this
+    /// [`AddError`] when the project has `concurrency.active_items` working or one for this
     /// issue open already, the issue cannot be read or its `agent:` label names
     /// no listed implementer, or the change cannot be saved. Nothing changes then.
     pub fn add(&mut self, issue: u64) -> Result<AgentName, AddError> {
@@ -486,7 +494,7 @@ impl Runner {
         let found = self
             .ports
             .forge
-            .issue(&self.settings.forge, issue)
+            .issue(&self.remote, issue)
             .map_err(AddError::Forge)?;
         let (agent, note) = self
             .labelled_agent(issue, &found.labels)
@@ -599,7 +607,7 @@ impl Runner {
     }
 
     fn save(&mut self, mut next: ProjectState) -> Result<(), StateError> {
-        slots::seat(&self.state, &mut next, self.max_items());
+        slots::seat(&self.state, &mut next, self.active_items());
         self.charge(&mut next);
         self.note_changes(&mut next);
         self.store.save(&next)?;
@@ -608,15 +616,23 @@ impl Runner {
     }
 }
 
-/// Whether `settings.repo` is a git checkout with an `origin`, which the runner needs to open
+/// How [`check_checkout`]'s refusal of a checkout with no `origin` ends
+pub(crate) const NO_ORIGIN: &str = "has no `origin` remote to cut branches from";
+
+/// The project's repo on the forge, once `git.checkout` is found to be a
+/// git checkout with an `origin`, which the runner needs to open
+///
+/// The repo is `git.remote`, or the GitHub repo `origin` names when that
+/// is absent.
 ///
 /// # Errors
 ///
-/// [`SettingsError::Invalid`] naming `repo` and what is wrong with it.
-pub(crate) fn check_repo(settings: &Settings) -> Result<(), SettingsError> {
-    let repo = &settings.repo;
+/// [`SettingsError::Invalid`] naming `git.checkout` and what is wrong with
+/// it, or `git.remote` when it is absent and `origin` is not a GitHub repo.
+pub(crate) fn check_checkout(settings: &Settings) -> Result<ForgeSlug, SettingsError> {
+    let repo = &settings.git.checkout;
     let invalid = |reason: String| SettingsError::Invalid {
-        setting: "repo",
+        setting: "git.checkout",
         reason,
     };
     if !repo.is_dir() {
@@ -638,13 +654,20 @@ pub(crate) fn check_repo(settings: &Settings) -> Result<(), SettingsError> {
         )));
     }
     // Every work item's branch is cut from `origin/main`.
-    if !git(&["remote", "get-url", "origin"])?.status.success() {
-        return Err(invalid(format!(
-            "{} has no `origin` remote to cut branches from",
-            repo.display()
-        )));
+    let origin = git(&["remote", "get-url", "origin"])?;
+    if !origin.status.success() {
+        return Err(invalid(format!("{} {NO_ORIGIN}", repo.display())));
     }
-    Ok(())
+    if let Some(remote) = &settings.git.remote {
+        return Ok(remote.clone());
+    }
+    let url = String::from_utf8_lossy(&origin.stdout).trim().to_owned();
+    crate::flock::forge_of(&url).ok_or_else(|| SettingsError::Invalid {
+        setting: "git.remote",
+        reason: "it is not set, and the checkout's `origin` is not a GitHub repo over HTTPS \
+                 or SSH: set it to the repo as `owner/name`"
+            .to_owned(),
+    })
 }
 
 /// Whether `worker.instructions_file`, when set, can be read, which the runner needs to open
@@ -699,7 +722,7 @@ fn check_bots(lineup: &[ListedReviewer], ports: &Ports) -> Result<(), SettingsEr
 // CodeRabbit's free plan reviews public repos only, so listing it for a
 // repo the forge reports otherwise stops the runner.
 fn check_coderabbit(
-    settings: &Settings,
+    remote: &ForgeSlug,
     lineup: &[ListedReviewer],
     ports: &Ports,
 ) -> Result<(), OpenError> {
@@ -709,7 +732,7 @@ fn check_coderabbit(
     let Some(listed) = listed else {
         return Ok(());
     };
-    let visibility = match ports.forge.visibility(&settings.forge)? {
+    let visibility = match ports.forge.visibility(remote)? {
         Visibility::Public => return Ok(()),
         Visibility::Private => "private",
         Visibility::Internal => "internal",
@@ -719,7 +742,7 @@ fn check_coderabbit(
         reason: format!(
             "{}: {} is {visibility}, and {}'s free plan reviews public repos only",
             listed.name,
-            settings.forge.as_str(),
+            remote.as_str(),
             Bot::Coderabbit.name()
         ),
     }
@@ -796,7 +819,7 @@ mod tests {
         drop(runner);
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
-        assert_eq!(saved["version"], 15);
+        assert_eq!(saved["version"], 16);
         assert_eq!(
             saved["events"][2]["what"], "project paused",
             "old events stay"
@@ -836,7 +859,10 @@ mod tests {
             )
         });
         let err = rig.open().unwrap_err();
-        assert!(err.to_string().starts_with("setting `repo`: "), "{err}");
+        assert!(
+            err.to_string().starts_with("setting `git.checkout`: "),
+            "{err}"
+        );
         assert!(
             err.to_string()
                 .ends_with("not-a-repo is not a git work tree"),
@@ -849,10 +875,38 @@ mod tests {
         let rig = Rig::new("koji");
         git(&rig.repo(), &["remote", "remove", "origin"]);
         let err = rig.open().unwrap_err().to_string();
-        assert!(err.starts_with("setting `repo`: "), "{err}");
+        assert!(err.starts_with("setting `git.checkout`: "), "{err}");
         assert!(
             err.ends_with("koji has no `origin` remote to cut branches from"),
             "{err}"
+        );
+    }
+
+    #[test]
+    fn with_no_remote_set_the_repo_is_read_from_origin() {
+        for url in [
+            "git@github.com:shep-pm/from-origin.git",
+            "https://github.com/shep-pm/from-origin",
+        ] {
+            let rig = Rig::new("koji");
+            rig.edit_settings(|s| s.replace("remote = \"shep-pm/shep\"\n", ""));
+            git(&rig.repo(), &["remote", "set-url", "origin", url]);
+            let runner = rig.open().unwrap();
+            let runner = runner.lock().unwrap();
+            assert_eq!(runner.remote().as_str(), "shep-pm/from-origin", "{url}");
+            assert_eq!(runner.settings().git.remote, None);
+        }
+    }
+
+    #[test]
+    fn with_no_remote_set_an_origin_off_github_stops_the_runner_naming_the_setting() {
+        let rig = Rig::new("koji");
+        rig.edit_settings(|s| s.replace("remote = \"shep-pm/shep\"\n", ""));
+        let err = rig.open().unwrap_err().to_string();
+        assert_eq!(
+            err,
+            "setting `git.remote`: it is not set, and the checkout's `origin` is not a GitHub \
+             repo over HTTPS or SSH: set it to the repo as `owner/name`"
         );
     }
 
@@ -862,7 +916,7 @@ mod tests {
         let gone = rig.repo().display().to_string();
         rig.edit_settings(|s| s.replace(&gone, &format!("{gone}-gone")));
         let err = rig.open().unwrap_err().to_string();
-        assert!(err.starts_with("setting `repo`: "), "{err}");
+        assert!(err.starts_with("setting `git.checkout`: "), "{err}");
         assert!(err.ends_with("reactmap-gone is not a folder"), "{err}");
     }
 

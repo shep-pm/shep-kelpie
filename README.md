@@ -126,10 +126,12 @@ On a repo without those four labels, `add` makes them. The runner puts `in-progr
 
 `add` writes the project's settings with these defaults:
 
-- `merge_authority = "ask"`: you rule on every merge
-- `max_items = 1`: one work item working at a time. With more, their turns and reviews run at the same time, one call at a time per work item. A work item parked on a ruling gives its slot up
-- `max_parked = 2`: at most two work items wait on your rulings before the board opens nothing new
-- `ci` is on when the checkout has `.github/workflows`
+- `git.checkout` and `git.remote`: the checkout and the GitHub repo its `origin` names
+- `git.merging = "ask"`: you rule on every merge
+- `git.issues = "ask"`: you rule before deferred findings are filed as issues
+- `ci.block` is on when the checkout has `.github/workflows`, and `ci.fix_attempts = -1` puts no cap on the worker's fix turns for red runs
+- `concurrency.active_items = 1`: one work item working at a time. With more, their turns and reviews run at the same time, one call at a time per work item. A work item parked on a ruling gives its slot up
+- `concurrency.pending_rulings = 2`: once two work items wait on your rulings, the board opens nothing new. It does not cap rulings
 - `agents.implementers = ["sonnet-high"]`
 - `agents.reviewers = ["defect-hunter"]`, with `qwen` first when `~/.claude/scripts/qwen-review.sh` exists, and no review bot
 - `pacing.enabled = true`
@@ -243,11 +245,11 @@ Issues labelled `ready-for-agent` are the board. What decides whether, and when,
 - An issue with sub-issues is never worked itself: its sub-issues are, and shep-kelpie closes it once every sub-issue is closed
 - Of the rest, `priority: P0` to `P3` labels order them, then the oldest goes first. An `agent:<name>` label, such as `agent:opus-high`, picks the agent that works it from those the project lists in `agents.implementers` (see [Agents](#agents)), and a label naming one it does not list keeps the issue off the board. An old `worker:` label is no longer read: that issue runs on the default implementer, and the runner's log says so
 - With a project manager set up (see [The project manager](#the-project-manager)), it picks among two or more issues the board could start, and may hold some back. Without one, or while it is down, the order above picks
-- A slot under `max_items` bounds model calls. A work item takes one when it opens and keeps it through CI and the merge, but one parked on a ruling gives it up, so the board opens the next issue while it waits. Once `max_parked` work items are parked, the board opens nothing new, and the alert for the ruling that filled it says so. It is the point where the board stops, not a hard limit: items already working can still park past it, and `add` ignores it. `max_parked = 0` stops the board while any ruling waits, and with none waiting the board opens work as ever. A merged pull request parked on its follow-up ruling counts toward neither cap. An issue whose body names a file the branch of a parked item not yet merged changes waits for that item, and `status` lists it under `skipped` as `overlap`. One whose paths the board has not read yet, or every one while such a branch's files are not known, waits a pass and is listed as `paths-unread`
+- A slot under `concurrency.active_items` bounds model calls. A work item takes one when it opens and keeps it through CI and the merge, but one parked on a ruling gives it up, so the board opens the next issue while it waits. Once `concurrency.pending_rulings` work items are parked, the board opens nothing new, and the alert for the ruling that filled it says so. It is the point where the board stops, not a hard limit: items already working can still park past it, and `add` ignores it. `concurrency.pending_rulings = 0` stops the board while any ruling waits, and with none waiting the board opens work as ever. A merged pull request parked on its follow-up ruling counts toward neither cap. An issue whose body names a file the branch of a parked item not yet merged changes waits for that item, and `status` lists it under `skipped` as `overlap`. One whose paths the board has not read yet, or every one while such a branch's files are not known, waits a pass and is listed as `paths-unread`
 - Once you answer its ruling, a work item goes on without a slot through anything that calls no model: CI, a merge, or its end. When it needs a worker's turn or a review again, such as for your `no <note>` or a red CI run, it waits for the next slot to free, ahead of any new issue. `status` lists the open items' issues under `working`, `waiting_for_slot` and `parked`
 - No turn starts while Claude's 5-hour window is at 50% or more, and no new work item starts once today's share of the week is spent. `shep kelpie status` says why under `pacer`, and `enabled = false` in the project's `[app.dogs.kelpie.pacing]` turns both off
 
-`shep kelpie add <issue>` opens a work item for an issue at once, without the label, ahead of the board's order. It queues nothing: while every slot under `max_items` is held or waited for, `add <issue>` is refused.
+`shep kelpie add <issue>` opens a work item for an issue at once, without the label, ahead of the board's order. It queues nothing: while every slot under `concurrency.active_items` is held or waited for, `add <issue>` is refused.
 
 On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep kelpie rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep kelpie adopt <pr>`. Adoptions and reworks go before any issue. Kelpie puts `ready-for-human` on each pull request it hands back.
 
@@ -269,7 +271,7 @@ Every step shep-kelpie drives an agent through runs a skill, by default from [ma
 | `spec` | `to-spec` | not driven yet |
 | `implement` | `implement` | the worker's first turn on an issue |
 | `tests` | `tdd` | named in the worker's instructions |
-| `ci` | `diagnosing-bugs` | the worker's turn on a red CI run |
+| `ci_fix` | `diagnosing-bugs` | the worker's turn on a red CI run |
 | `pr` | `pr` | named in the worker's instructions, unless the repo has a pull request template |
 | `reset` | `handoff` | not driven yet |
 | `retro` | `retro` | not driven yet (#104) |
@@ -288,7 +290,7 @@ A skill that can't load runs shep-kelpie's own prompt instead. The runner logs w
 
 Each pull request goes through a review before CI. A project lists its reviewers in `agents.reviewers`, in the order the review runs them, each an agent file whose `role` is `reviewer` (see [Agents](#agents)). Each listed reviewer runs once, in order, and a list changed mid-pass runs whichever listed reviewers the pass has not. A reviewer whose call fails three times in a row is passed over for the rest of the pass, and `status` lists it under `reviewers_skipped`. One that finds anything sends the worker all of its findings, at its own severity, for one fix turn, and the next reviewer reads the fix. A round of nothing goes straight to the next reviewer. A round of nits gets its fix turn too, and that fix starts nothing new: the pass goes on to the next reviewer as after any fix, and a bot that read the pull request before has its nits on the head that fix pushed left open, so a bot that reviews every push cannot loop on nits. A fix turn that pushes nothing parks on a ruling, unless the worker deferred every finding it was sent or every one was a nit, in which case the next reviewer reads the pull request as it stands: a ruling over nits would ask you about what never holds a merge. A file the review script skipped for its size is cut into hunks and reviewed again, and what those hunks find goes to the fix turn as any finding does; only the notice for a file it still could not review is reported with its round and never sent, since no fix of the worker's reviews it. A pass that ends with no reviewer having read the pull request, because one was down, kept failing or reviewed no file, marks the work item unreviewed: `status` shows why, the merge ruling's question says so, and under `auto` it gets the merge ruling instead of merging. An empty list, or reviewers whose `paths` all miss the change, is your choice, and the log says so once. Every round reads the head on `origin`, which is what CI and the merge take: before one runs, the worker's worktree must hold nothing uncommitted and have that head checked out. If it does not, the worker gets one turn to push or discard, and a worktree still off the pushed head after it parks on a `stuck` ruling for `unpushed`, naming the files, and both heads when they differ, whose yes gives the worker another such turn. After the last one the pull request goes to CI. There is no judge and no second pass: whatever the last fix leaves is what CI and the merge see. The merge takes only a head a round read, or one kelpie sent to CI unread on purpose: a fix turn's push, for review findings or red CI or a conflict, a pass your list gives nobody to read, or its own catch-up with `main` of such a head; an adopted pull request's head as it arrived counts too. Any other head, such as one pushed by hand, is named in the merge ruling, and under `auto` gets the ruling instead of merging. A pass starts again from the top only on new code that needs the whole review, such as the change a merge ruling's `rework` asks for, a change you accept that someone else pushed, or a rework of the pull request. The fix a merge ruling's `no` asks for goes to CI and back to the merge ruling, with no new pass. An empty list reviews nothing.
 
-A finding the worker leaves as out of scope goes into its deferred findings file. Once the pull request merges, each one above a nit becomes a `ready-for-agent` issue linking it: under `ask` after a `follow-up` ruling, and under `auto` with none. A nit left there is dropped.
+A finding the worker leaves as out of scope goes into its deferred findings file. Once the pull request merges, `git.issues` decides what becomes of each one above a nit, whatever `git.merging` is: under `ask` a `follow-up` ruling comes first and a yes files each as a `ready-for-agent` issue linking the pull request, under `file` they are filed with no ruling, and under `skip` nothing is filed and they stay in the review. A nit left there is dropped.
 
 A reviewer runs in one of four ways, by its file's `harness`:
 
@@ -385,9 +387,9 @@ With a lease, before a round against Ollama, kelpie reads the host's `/api/ps`. 
 
 ### CI and the merge
 
-After the review's last reviewer, kelpie waits for CI on the pull request's head. A red run is the worker's next turn, naming the failed checks; a second red run on a head the worker left alone asks you. A green run on a branch without the latest `main` is caught up first: kelpie rebases its own commits onto `main` and pushes with a lease, or merges `main` in where the branch holds a merge or commits that are not its own, and a conflict is the worker's next turn. A project with `ci = false` reads no checks.
+After the review's last reviewer, kelpie waits for CI on the pull request's head. A red run is the worker's next turn, naming the failed checks; a second red run on a head the worker left alone asks you. `ci.fix_attempts` caps those fix turns for a work item: once the worker has had that many, the next red run asks you instead, and `0` asks on the first. `-1`, the default, sets no cap. A green run on a branch without the latest `main` is caught up first: kelpie rebases its own commits onto `main` and pushes with a lease, or merges `main` in where the branch holds a merge or commits that are not its own, and a conflict is the worker's next turn. A project with `ci.block = false` reads no checks, and `ci.fix_attempts` does not apply. Review rounds never wait for CI.
 
-A project on `merge_authority = "ask"` gets a ruling before every merge, and a yes merges only the head it was asked about, while CI on it is green and it has the latest `main`. A project on `"auto"` merges its pull requests without asking once every gate passes, and posts a notice after. Every other ruling still asks under `auto`. The merge is always a merge commit of the head the gates passed, never a squash, and kelpie then removes the worktree, both branches and the build folder. With a merge queue on `main`, kelpie queues the pull request and waits on the queue.
+A project on `git.merging = "ask"` gets a ruling before every merge, and a yes merges only the head it was asked about, while CI on it is green and it has the latest `main`. A project on `"auto"` merges its pull requests without asking once every gate passes, and posts a notice after. Every other ruling still asks under `auto`, and so does the merge for a pull request no reviewer read, one with a review bot's thread above a nit open, a head no round read, the fix a merge ruling's `no` asked for, and the fix for a bot's late round: each is a safety gate, not a setting, and the ruling names which one raised it. The merge is always a merge commit of the head the gates passed, never a squash, and kelpie then removes the worktree, both branches and the build folder. With a merge queue on `main`, kelpie queues the pull request and waits on the queue.
 
 A commit someone else pushes to a work item's branch, or a label or ready state kelpie did not set, parks it on a `foreign-change` ruling. A pull request that changes agents' own files, such as `.claude` or `.mcp.json`, parks it on an `agent-files` ruling. A pull request you merge by hand ends its work item; one closed without merging parks it.
 
@@ -500,7 +502,7 @@ A local implementer, one whose usage is `none`, is never the default: it gets on
 
 ### The briefing
 
-The runner writes the board out as `board.md` in the project's folder, and `status` names the file under `board`. It is the briefing the project manager's agent reads, so that agent never runs git or gh itself, and you can read it too. Code writes it, with no model call, at start and whenever the board changes: a call starting or ending, a phase change, a ruling raised or answered, a read of the ready queue. It is written again at least once a minute while the runner looks at the board, and each write replaces the file whole. Text that names this machine or one of the project's `private_names` is withheld from it, as from the forge. It holds:
+The runner writes the board out as `board.md` in the project's folder, and `status` names the file under `board`. It is the briefing the project manager's agent reads, so that agent never runs git or gh itself, and you can read it too. Code writes it, with no model call, at start and whenever the board changes: a call starting or ending, a phase change, a ruling raised or answered, a read of the ready queue. It is written again at least once a minute while the runner looks at the board, and each write replaces the file whole. Text that names this machine is withheld from it, as from the forge. It holds:
 
 - each open work item: its issue, phase, pull request, age and agent, the worker's last closing message, and the files its branch touches
 - what each item's session is doing. A worker's turn shows when it last made a tool call or wrote output, read from its transcript (Codex's output file, pi's session file), and reads as idle after 10 minutes of neither
@@ -542,7 +544,7 @@ Measured on 33 real decision points from this repo and shep, a project manager b
 
 When you exit `claude`, the work item carries on, and its next turn resumes the same session. A commit or push you make while attached is the worker's own, as a push in a turn is, so the gate takes it as the branch's head rather than a change kelpie did not make. The runner holds the work item while either the `attach` command or the session it started runs, each known by its pid and start time, and lets it go at its next pass once both have ended. A SIGTERM or SIGHUP to `attach` is passed on to the session, which `attach` waits for. `status` shows the hold under the item's `attached`, and `drop` refuses the item while it is held.
 
-`attach` changes nothing and says what to do instead for a work item whose worker has no session yet (its first turn starts one), one parked on a ruling (answer it first), one holding no slot under `max_items` when none is free (its session would be one more model call; with one free, `attach` takes it), or one merging. Only a Claude Code worker can be attached: a Codex or pi worker's session resumes another way, by hand.
+`attach` changes nothing and says what to do instead for a work item whose worker has no session yet (its first turn starts one), one parked on a ruling (answer it first), one holding no slot under `concurrency.active_items` when none is free (its session would be one more model call; with one free, `attach` takes it), or one merging. Only a Claude Code worker can be attached: a Codex or pi worker's session resumes another way, by hand.
 
 ## Rulings
 
@@ -584,7 +586,7 @@ Before it restarts a runner, the upgrade drains it, so the restart cuts no worke
 
 If an upgrade stops after the swap (a merge or a call that outlasts the wait, a sheep that does not come back, Ctrl-C), the new build is already installed and the message says so. `shep kelpie upgrade --binary <installed path>` finishes the restarts and touches no file. `--rollback` does not: it swaps the two builds again.
 
-Before going back to a build older than `max_parked`, by `--rollback` or any other way, finish or drop every work item that does not hold a slot: parked, waiting for one, or going on without one. Draining only stops new calls and leaves those items in the state file, which the older build refuses.
+This build writes each project's state file as version 16, and every older build refuses a version 16 file, whatever it holds, so going back by `--rollback` or any other way leaves the older build unable to read it. An older build also never knew a work item that holds no slot: parked, waiting for one, or going on without one. Finish or drop those before going back. Draining only stops new calls and leaves them in the state file.
 
 Every sheep it restarts must run the dog's path. If one does not, the upgrade stops before it changes anything and names the sheep and its path. A `--binary` without its executable bits is refused with the `chmod +x` that fixes it, and only one upgrade runs at a time: a second refuses while the first holds `$SHEP_HOME/kelpie/upgrade.lock`. The swap changes the file for every shepherd that adopts the same path, with no check against their shep.
 
@@ -650,11 +652,14 @@ The dog holds `cargo-test`, a share of this machine for running tests, and `gpu`
 
 ### Settings
 
-A project's settings are its `[app.dogs.kelpie]` table, which lookout edits in the runner's pane. `settings.example.toml` lists every key, and shows a runner's Flockfile entry for a project set up by hand. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it. An older entry's `kill_timeout = "10s"` still works, and is no longer needed. The keys:
+A project's settings are its `[app.dogs.kelpie]` table, which lookout edits in the runner's pane. Every setting sits in a table of its own. `settings.example.toml` lists every key, and shows a runner's Flockfile entry for a project set up by hand. It needs `SHEP_HOME` as an absolute path in `env`, since a sheep starts without it. An older entry's `kill_timeout = "10s"` still works, and is no longer needed. The keys:
 
-- `repo` and `forge`: the checkout and its GitHub repo
-- `merge_authority`, `ci`, `max_items` and `max_parked`: see [CI and the merge](#ci-and-the-merge), [Add your project](#4-add-your-project) and [The board](#the-board)
-- `private_names`: words that stay off the forge, whatever their case, and off a worker's commits and `gh` calls
+- `git.checkout`: the project's checkout
+- `git.remote`: its GitHub repo as `owner/name`. Left out, the runner reads it from the checkout's `origin` when it starts, and an `origin` that is not a GitHub repo stops the runner naming the setting
+- `git.merging`: who merges a green, reviewed pull request, `ask` or `auto` (see [CI and the merge](#ci-and-the-merge))
+- `git.issues`: what becomes of deferred findings, `ask`, `file` or `skip` (see [The review](#the-review)). `ask` when left out
+- `ci.block`: whether the repo runs CI that a merge waits for, and `ci.fix_attempts`: how many fix turns red runs get, `-1` for no cap (see [CI and the merge](#ci-and-the-merge))
+- `concurrency.active_items` and `concurrency.pending_rulings`: how many work items hold a slot, and how many parked on rulings stop the board opening new ones, which is not a cap on rulings (see [The board](#the-board))
 - `agents.implementers`, `agents.reviewers` and `agents.pm`: see [Agents](#agents)
 - `pacing.enabled` and `pacing.kickoff_hours`: whether usage holds work, and the hours a day the per-hour figure in `status` divides the day's allowance by
 - `worker.allowed_domains`, `worker.build_env` (variables that point tool caches into the build folder), `worker.instructions_file`, `worker.guard_hooks` (Claude Code hooks of the project's own, after kelpie's guard) and `worker.turn_timeout`
@@ -667,9 +672,9 @@ shep-kelpie's own settings, shared by every project, are the `[kelpie]` section 
 - `gpu_metrics_url` is the GPU's Prometheus metrics page, such as `nvidia_gpu_exporter`'s `/metrics`. `status` then shows the GPU's load, memory, power and temperature under `gpu`, read every 15 seconds
 - `codex_home` is where shep-kelpie's own Codex login lives (see [Agents](#agents))
 - `[kelpie.gateways.<name>]` is a model gateway such as paddock, with its `url` and `key_env` (see [Gateways](#gateways)). A runner reads them when it starts
-- A change reaches a running runner at its next wake, within a minute when idle. `repo` and `forge` wait for its next start. The dog reads `[kelpie.leases]`, and each review bot's window from its agent file, only when it starts, so after a change to either run `shep restart kelpie`
+- A change reaches a running runner at its next wake, within a minute when idle. `git.checkout` and `git.remote` wait for its next start. The dog reads `[kelpie.leases]`, and each review bot's window from its agent file, only when it starts, so after a change to either run `shep restart kelpie`
 
-A key kelpie no longer reads, such as `review.reviewers`, `coderabbit` or `planning`, stops the runner, naming the key and what replaces it.
+A key kelpie no longer reads, such as `review.reviewers`, `coderabbit` or `planning`, stops the runner, naming the key and what replaces it. So does each top-level key from before the tables: `repo`, `forge`, `merge_authority`, `ci`, `max_items`, `max_parked` and `skills.ci` name the key that took each over, and `private_names` says to guard a worker's commits and posts with a hook in `worker.guard_hooks` instead. That works for a Claude Code worker only: hooks are refused for pi and Codex implementers, and the issue writer's and kelpie's own posts never ran through them, so for those nothing replaces `private_names`.
 
 ### shep-kelpie's home
 

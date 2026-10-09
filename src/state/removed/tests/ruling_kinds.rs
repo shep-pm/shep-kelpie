@@ -71,6 +71,7 @@ fn a_still_red_ruling_is_stuck_on_a_red_run() {
         Stuck::StillRed {
             head: "bad".into(),
             checks: vec!["lint".into()],
+            fix_turns: None,
         },
     );
 }

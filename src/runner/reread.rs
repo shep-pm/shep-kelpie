@@ -1,8 +1,8 @@
 //! A settings change reaching a running runner
 //!
 //! Every setting takes effect live, at the next step or call that reads
-//! it, except `repo` and `forge`: a work item's worktree and pull request
-//! belong to them, so those wait for the runner's next start. The agent
+//! it, except `git.checkout` and `git.remote`: a work item's worktree and
+//! pull request belong to them, so those wait for the runner's next start. The agent
 //! files are read again with them, and a change to those alone is a change
 //! too. A change is checked as a start checks it, and one that fails keeps
 //! the settings the runner has.
@@ -29,13 +29,16 @@ impl Runner {
         kelpie: KelpieSettings,
     ) -> Result<Option<String>, OpenError> {
         let mut waiting = Vec::new();
-        if settings.repo != self.settings.repo {
-            waiting.push("repo");
-            settings.repo.clone_from(&self.settings.repo);
+        if settings.git.checkout != self.settings.git.checkout {
+            waiting.push("git.checkout");
+            settings
+                .git
+                .checkout
+                .clone_from(&self.settings.git.checkout);
         }
-        if settings.forge != self.settings.forge {
-            waiting.push("forge");
-            settings.forge = self.settings.forge.clone();
+        if settings.git.remote != self.settings.git.remote {
+            waiting.push("git.remote");
+            settings.git.remote.clone_from(&self.settings.git.remote);
         }
         let gpu_metrics_url = kelpie.gpu_metrics_url.clone();
         let book = Agents::load(&self.paths.agents)?;
@@ -62,7 +65,7 @@ impl Runner {
             lineup.iter().any(coderabbit)
         };
         if listed(&lineup) && !listed(&self.lineup) {
-            check_coderabbit(&settings, &lineup, &self.ports)?;
+            check_coderabbit(&self.remote, &lineup, &self.ports)?;
         }
         if lineup != self.lineup {
             check_local(&lineup, &self.ports)?;
@@ -105,17 +108,14 @@ impl Runner {
 // A project's settings and the webhook.
 type Reach<'a> = (&'a Settings, &'a Option<Webhook>);
 
-// The top-level settings that differ. `webhook` also changes when kelpie's
-// own settings do.
+// The settings that differ, by key or by table. `webhook` also changes
+// when kelpie's own settings do.
 fn changed((old, was): Reach<'_>, (new, now): Reach<'_>) -> Vec<&'static str> {
     [
-        (
-            "merge_authority",
-            old.merge_authority != new.merge_authority,
-        ),
+        ("git.merging", old.git.merging != new.git.merging),
+        ("git.issues", old.git.issues != new.git.issues),
         ("ci", old.ci != new.ci),
-        ("max_items", old.max_items != new.max_items),
-        ("max_parked", old.max_parked != new.max_parked),
+        ("concurrency", old.concurrency != new.concurrency),
         ("pacing", old.pacing != new.pacing),
         ("worker", old.worker != new.worker),
         ("skills", old.skills != new.skills),
@@ -131,7 +131,7 @@ mod tests {
     use std::path::Path;
 
     use crate::ports::Visibility;
-    use crate::settings::MergeAuthority;
+    use crate::settings::{Filing, Merging};
     use crate::test::Rig;
     use crate::webhook::{KelpieSettings, WebhookKind};
 
@@ -145,20 +145,26 @@ mod tests {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
         let next = settings_with(&rig, |s| {
-            s.replace("merge_authority = \"ask\"", "merge_authority = \"auto\"")
+            s.replace("merging = \"ask\"", "merging = \"auto\"")
+                .replace("issues = \"ask\"", "issues = \"skip\"")
+                .replace("fix_attempts = -1", "fix_attempts = 2")
                 .replace("kickoff_hours = 8", "kickoff_hours = 6")
-                .replace("max_items = 1", "max_items = 2")
+                .replace("active_items = 1", "active_items = 2")
         });
         let mut runner = runner.lock().unwrap();
         let line = runner.reread(next, rig.kelpie_settings()).unwrap();
         assert_eq!(
             line.as_deref(),
-            Some("settings changed: merge_authority, max_items, pacing now in effect")
+            Some(
+                "settings changed: git.merging, git.issues, ci, concurrency, pacing now in effect"
+            )
         );
-        assert_eq!(runner.settings().max_items.get(), 2);
-        assert_eq!(runner.settings().merge_authority, MergeAuthority::Auto);
+        assert_eq!(runner.settings().concurrency.active_items.get(), 2);
+        assert_eq!(runner.settings().git.merging, Merging::Auto);
+        assert_eq!(runner.settings().git.issues, Filing::Skip);
+        assert_eq!(runner.settings().ci.fix_attempts.cap(), Some(2));
         assert_eq!(runner.settings().pacing.kickoff_hours.get(), 6);
-        assert_eq!(runner.status().merge_authority, MergeAuthority::Auto);
+        assert_eq!(runner.status().merging, Merging::Auto);
     }
 
     #[test]
@@ -173,25 +179,29 @@ mod tests {
     }
 
     #[test]
-    fn repo_and_forge_wait_for_the_next_start() {
+    fn the_checkout_and_the_remote_wait_for_the_next_start() {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
         let repo = rig.repo().display().to_string();
         let next = settings_with(&rig, |s| {
-            s.replace("forge = \"shep-pm/shep\"", "forge = \"shep-pm/elsewhere\"")
-                .replace(&repo, "/srv/elsewhere")
-                .replace("kickoff_hours = 8", "kickoff_hours = 6")
+            s.replace(
+                "remote = \"shep-pm/shep\"",
+                "remote = \"shep-pm/elsewhere\"",
+            )
+            .replace(&repo, "/srv/elsewhere")
+            .replace("kickoff_hours = 8", "kickoff_hours = 6")
         });
         let mut runner = runner.lock().unwrap();
         let line = runner.reread(next, rig.kelpie_settings()).unwrap();
         assert_eq!(
             line.as_deref(),
             Some(
-                "settings changed: pacing now in effect; repo and forge from the runner's next start"
+                "settings changed: pacing now in effect; git.checkout and git.remote from the \
+                 runner's next start"
             )
         );
-        assert_eq!(runner.settings().forge.as_str(), "shep-pm/shep");
-        assert_eq!(runner.settings().repo, rig.repo());
+        assert_eq!(runner.remote().as_str(), "shep-pm/shep");
+        assert_eq!(runner.settings().git.checkout, rig.repo());
     }
 
     #[test]

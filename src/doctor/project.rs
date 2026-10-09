@@ -9,8 +9,10 @@ use super::{Here, Line, Probes, rulings};
 use crate::agents::Agents;
 use crate::flock::add::LABELS;
 use crate::ports::{NewLabel, Visibility};
-use crate::runner::{ProjectName, ProjectPaths, SUMMON_LABEL, check_instructions, check_repo};
-use crate::settings::{Account, Limit, Settings, SettingsError};
+use crate::runner::{
+    NO_ORIGIN, ProjectName, ProjectPaths, SUMMON_LABEL, check_checkout, check_instructions,
+};
+use crate::settings::{Account, ForgeSlug, Limit, Settings, SettingsError};
 use crate::webhook::KelpieSettings;
 
 /// A line for each project folder in kelpie's home whose old settings file
@@ -105,15 +107,46 @@ pub(super) fn checks(
         Ok(settings) => settings,
         Err(e) => return wrong(e.to_string()),
     };
-    let repo = &settings.forge;
-    let slug = repo.as_str();
-    let mut lines = vec![checkout(at("checkout"), &settings)];
+    let (line, remote) = checkout(at("checkout"), &settings);
+    let mut lines = vec![line];
     if settings.worker.instructions_file.is_some() {
         lines.push(instructions(at("instructions"), &settings));
     }
     let (book, line) = implementers(at("implementers"), &settings, &paths);
     lines.push(line);
+    // The forge lines need the repo, and the checkout line says why when it is unknown.
+    if let Some(repo) = &remote {
+        let coderabbit = coderabbit_listed(&settings, &book, here.home);
+        lines.extend(forge_lines(&at, repo, &settings, coderabbit, probes));
+    }
+    lines.push(reviewers(at("reviewers"), &settings, (&book, here), probes));
+    if let Some(kelpie) = kelpie.filter(|_| spends_codex(&settings, &book, here)) {
+        lines.push(match kelpie.codex_home(here.home, here.kelpie_home) {
+            Ok(codex_home) => super::machine::codex(
+                at("codex usage"),
+                &*(probes.codex_meter)(&codex_home),
+                probes.clock,
+            ),
+            Err(e) => Line::missing(at("codex usage"), e.to_string(), "set `codex_home` in kelpie's settings to a folder of kelpie's own, absolute or under `~/`"),
+        });
+    }
+    if let Some(kelpie) = kelpie {
+        lines.push(rulings::channel(at("rulings"), kelpie));
+    }
+    lines
+}
 
+// Push access, the labels, and the review bot where CodeRabbit is listed:
+// each read from `repo` on the forge.
+fn forge_lines(
+    at: &dyn Fn(&str) -> String,
+    repo: &ForgeSlug,
+    settings: &Settings,
+    coderabbit: bool,
+    probes: Probes<'_>,
+) -> Vec<Line> {
+    let slug = repo.as_str();
+    let mut lines = Vec::new();
     lines.push(match probes.forge.can_push(repo) {
         Ok(true) => Line::ok(at("push access"), format!("may push to {slug}")),
         Ok(false) => Line::missing(
@@ -128,7 +161,6 @@ pub(super) fn checks(
         ),
     });
 
-    let coderabbit = coderabbit_listed(&settings, &book, here.home);
     let wanted: Vec<NewLabel> = (LABELS.into_iter())
         .filter(|l| coderabbit || l.name != SUMMON_LABEL)
         .collect();
@@ -145,7 +177,7 @@ pub(super) fn checks(
                     format!("{slug} has no {}", gone.join(", ")),
                     format!(
                         "`shep kelpie add` in {} makes them",
-                        settings.repo.display()
+                        settings.git.checkout.display()
                     ),
                 )
             }
@@ -160,23 +192,9 @@ pub(super) fn checks(
     if coderabbit {
         lines.push(review_bot(
             &at(&probes.review_bot.name().to_lowercase()),
-            &settings,
+            repo,
             probes,
         ));
-    }
-    lines.push(reviewers(at("reviewers"), &settings, (&book, here), probes));
-    if let Some(kelpie) = kelpie.filter(|_| spends_codex(&settings, &book, here)) {
-        lines.push(match kelpie.codex_home(here.home, here.kelpie_home) {
-            Ok(codex_home) => super::machine::codex(
-                at("codex usage"),
-                &*(probes.codex_meter)(&codex_home),
-                probes.clock,
-            ),
-            Err(e) => Line::missing(at("codex usage"), e.to_string(), "set `codex_home` in kelpie's settings to a folder of kelpie's own, absolute or under `~/`"),
-        });
-    }
-    if let Some(kelpie) = kelpie {
-        lines.push(rulings::channel(at("rulings"), kelpie));
     }
     lines
 }
@@ -230,20 +248,32 @@ fn spends_codex(settings: &Settings, book: &Agents, here: Here<'_>) -> bool {
     sessions || roles.is_some_and(|roles| roles.implementers.iter().any(|i| codex(&i.limit)))
 }
 
-fn checkout(subject: String, settings: &Settings) -> Line {
-    match check_repo(settings) {
-        Ok(()) => Line::ok(
-            subject,
-            format!(
-                "{} is a git checkout with an origin",
-                settings.repo.display()
-            ),
-        ),
-        Err(e) => Line::missing(
-            subject,
-            e.to_string(),
-            "set `repo` to where the checkout is, or run `shep kelpie add` in it",
-        ),
+// The checkout's line, and the repo on the forge where it is known: from
+// `git.remote`, or from `origin` when that is absent.
+fn checkout(subject: String, settings: &Settings) -> (Line, Option<ForgeSlug>) {
+    match check_checkout(settings) {
+        Ok(remote) => {
+            let found = format!(
+                "{} is a git checkout with an origin, and the repo is {}",
+                settings.git.checkout.display(),
+                remote.as_str()
+            );
+            (Line::ok(subject, found), Some(remote))
+        }
+        Err(e) => {
+            let fix = match &e {
+                SettingsError::Invalid {
+                    setting: "git.remote",
+                    ..
+                } => "set `git.remote` to the repo on GitHub as `owner/name`",
+                SettingsError::Invalid { reason, .. } if reason.ends_with(NO_ORIGIN) => {
+                    "add an `origin` remote to the checkout, naming the repo on GitHub"
+                }
+                _ => "set `git.checkout` to where the checkout is, or run `shep kelpie add` in it",
+            };
+            let line = Line::missing(subject, e.to_string(), fix);
+            (line, settings.git.remote.clone())
+        }
     }
 }
 
@@ -275,8 +305,8 @@ fn coderabbit_listed(settings: &Settings, book: &Agents, home: &std::path::Path)
 
 // The runner refuses to start with the bot listed for a repo that is not
 // public, and a bot that has never commented on it is likely not installed.
-fn review_bot(subject: &str, settings: &Settings, probes: Probes<'_>) -> Line {
-    let (repo, bot) = (&settings.forge, probes.review_bot);
+fn review_bot(subject: &str, repo: &ForgeSlug, probes: Probes<'_>) -> Line {
+    let bot = probes.review_bot;
     let slug = repo.as_str();
     match probes.forge.visibility(repo) {
         Ok(Visibility::Public) => {}

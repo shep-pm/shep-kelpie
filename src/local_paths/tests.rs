@@ -2,8 +2,8 @@ use std::path::Path;
 
 use super::*;
 
-fn checking(folders: &[&str], names: &[&str]) -> LocalPaths {
-    LocalPaths::new(folders.iter().map(Path::new), names.iter().copied())
+fn checking(folders: &[&str]) -> LocalPaths {
+    LocalPaths::new(folders.iter().map(Path::new))
 }
 
 fn refused(paths: &LocalPaths, text: &str) -> bool {
@@ -12,7 +12,7 @@ fn refused(paths: &LocalPaths, text: &str) -> bool {
 
 #[test]
 fn a_folder_and_what_is_under_it_are_found_whatever_the_case() {
-    let paths = checking(&["/Users/me/.kelpie/"], &[]);
+    let paths = checking(&["/Users/me/.kelpie/"]);
     for text in [
         "/Users/me/.kelpie",
         "at /Users/me/.kelpie/wt/koji/7/src/a.rs:3",
@@ -25,7 +25,7 @@ fn a_folder_and_what_is_under_it_are_found_whatever_the_case() {
 
 #[test]
 fn a_longer_name_that_starts_like_a_folder_is_not_it() {
-    let paths = checking(&["/Users/me"], &[]);
+    let paths = checking(&["/Users/me"]);
     for text in [
         concat!("/Us", "ers/meg/x"),
         concat!("/Us", "ers/me-2"),
@@ -38,13 +38,13 @@ fn a_longer_name_that_starts_like_a_folder_is_not_it() {
 
 #[test]
 fn a_folder_with_no_parent_names_nothing() {
-    let paths = checking(&["/", ""], &[]);
+    let paths = checking(&["/", ""]);
     assert!(!refused(&paths, "/usr/bin/env and /"));
 }
 
 #[test]
 fn an_encoded_path_is_found() {
-    let paths = checking(&["/Users/me"], &[]);
+    let paths = checking(&["/Users/me"]);
     for text in [
         "http://localhost:5173/%2FUsers%2Fme%2Fapp%2Fsrc%2Fmain.ts",
         "at /%2fusers%2fme/app",
@@ -112,23 +112,12 @@ fn a_symlinked_folder_is_found_in_its_canonical_form_too() {
     std::fs::create_dir(&real).unwrap();
     let link = dir.path().join("link-kelpie");
     std::os::unix::fs::symlink(&real, &link).unwrap();
-    let paths = LocalPaths::new([link.as_path()], []);
+    let paths = LocalPaths::new([link.as_path()]);
     let canonical = std::fs::canonicalize(&real).unwrap();
     let text = format!("built in {}/target", canonical.display());
     assert_eq!(paths.find(&text, Surface::Code), Some(Leak::Path));
     let text = format!("built in {}/target", link.display());
     assert_eq!(paths.find(&text, Surface::Code), Some(Leak::Path));
-}
-
-#[test]
-fn a_private_name_is_found_as_a_word_whatever_the_case() {
-    let paths = checking(&[], &["Acme Corp", " ", "zeta"]);
-    for text in ["for acme corp", "ACME CORP's roadmap", "a-zeta-b", "(zeta)"] {
-        assert_eq!(paths.find(text, Surface::Code), Some(Leak::Name), "{text}");
-    }
-    for text in ["zetas", "azeta", "acme", "nothing"] {
-        assert_eq!(paths.find(text, Surface::Code), None, "{text}");
-    }
 }
 
 #[test]

@@ -23,7 +23,7 @@ impl Runner {
         // An adopted branch's commits are someone else's, so it is merged, never rewritten.
         let rewrite = !item.adopted;
         let outcome = worktree::rebase(
-            &self.settings.repo,
+            &self.settings.git.checkout,
             &item.worktree,
             &item.branch,
             head,

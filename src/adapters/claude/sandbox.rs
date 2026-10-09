@@ -244,7 +244,6 @@ mod tests {
                 kelpie: Path::new("/k/kelpie"),
                 kelpie_home: Path::new("/k"),
                 repo: Path::new("/k/repo"),
-                private_names: &[],
                 guard_hooks: &[],
                 allowed_domains: &[],
                 build_env: &BTreeMap::new(),

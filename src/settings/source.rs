@@ -78,7 +78,11 @@ mod tests {
 
     fn tables() -> Tables {
         let mut table = crate::test::project_table(EXAMPLE);
-        table.insert("forge".into(), "shep-pm/from-table".into());
+        let git = table
+            .get_mut("git")
+            .and_then(serde_json::Value::as_object_mut);
+        git.unwrap()
+            .insert("remote".into(), "shep-pm/from-table".into());
         Tables {
             project: Some(table),
             kelpie: SECTION.into(),
@@ -88,8 +92,29 @@ mod tests {
     #[test]
     fn the_table_and_the_section_are_what_a_runner_reads() {
         let loaded = load_from(&tables()).unwrap();
-        assert_eq!(loaded.settings.forge.as_str(), "shep-pm/from-table");
+        assert_eq!(
+            loaded.settings.git.remote.unwrap().as_str(),
+            "shep-pm/from-table"
+        );
         assert_eq!(loaded.kelpie.webhook.unwrap().kind, WebhookKind::Discord);
+    }
+
+    // shep hands the table over as JSON, and lookout may have kept an old key in it.
+    #[test]
+    fn an_old_top_level_key_in_the_json_shep_hands_over_is_refused_naming_its_replacement() {
+        let mut tables = tables();
+        let table = tables.project.as_mut().unwrap();
+        table.insert("max_items".into(), 3.into());
+        table.insert("ci".into(), true.into());
+        let err = load_from(&tables).unwrap_err().to_string();
+        assert_eq!(
+            err,
+            "the [app.dogs.kelpie] table on shep: these are no longer settings:\n\
+             - `ci`, because every project setting sits in a table now: move its value to \
+             `block` in a `[ci]` table\n\
+             - `max_items`, because every project setting sits in a table now: move its value \
+             to `concurrency.active_items`"
+        );
     }
 
     #[test]

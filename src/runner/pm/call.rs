@@ -73,7 +73,7 @@ impl Runner {
         let homes = [shep.clone()]
             .into_iter()
             .chain((!kelpie.starts_with(shep)).then(|| kelpie.clone()))
-            .chain([self.settings.repo.clone()])
+            .chain([self.settings.git.checkout.clone()])
             .map(|home| format!("{}/**", home.display()));
         let no_read = (crate::profile::CREDENTIALS.iter())
             .chain(&[GH_CONFIG])
@@ -96,11 +96,8 @@ impl Runner {
                     worktree: folder.clone(),
                     build: folder.clone(),
                     git_common_dir: folder,
-                    folders: vec![kelpie.clone(), self.settings.repo.clone()],
+                    folders: vec![kelpie.clone(), self.settings.git.checkout.clone()],
                     issues: None,
-                    private_names: (self.settings.private_names.iter())
-                        .map(|n| n.as_str().to_owned())
-                        .collect(),
                 },
                 hooks: Vec::new(),
             })),

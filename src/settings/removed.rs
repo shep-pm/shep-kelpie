@@ -22,17 +22,25 @@ pub(crate) const DELETE: &str = "delete it";
 /// Refuses `text` when it sets any of `keys`
 ///
 /// A text that is not TOML passes, so the real parser reports it. A table
-/// named along with a key inside it is named by that key alone.
+/// named along with a key inside it is named by that key alone. A key in
+/// `tables` names a table of today's settings, so it is refused only when
+/// set to a value.
 ///
 /// # Errors
 ///
 /// A message naming each of `keys` that `text` sets, in `keys`' order, why
 /// it went, and what to do instead.
-pub(crate) fn refuse(text: &str, keys: &[Removed]) -> Result<(), String> {
+pub(crate) fn refuse(text: &str, keys: &[Removed], tables: &[&str]) -> Result<(), String> {
     let Ok(table) = text.parse::<toml::Table>() else {
         return Ok(());
     };
-    let set: Vec<&Removed> = keys.iter().filter(|r| sets(&table, r.key)).collect();
+    let set: Vec<&Removed> = keys
+        .iter()
+        .filter(|r| match tables.contains(&r.key) {
+            true => sets_value(&table, r.key),
+            false => sets(&table, r.key),
+        })
+        .collect();
     let inner = |outer: &str| {
         let prefix = format!("{outer}.");
         set.iter().any(|r| r.key.starts_with(&prefix))
@@ -93,6 +101,11 @@ fn sets(table: &toml::Table, key: &str) -> bool {
     }
 }
 
+// A top-level `key` set to anything but a table.
+fn sets_value(table: &toml::Table, key: &str) -> bool {
+    table.get(key).is_some_and(|value| !value.is_table())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,19 +125,19 @@ mod tests {
 
     #[test]
     fn a_dotted_key_is_found_in_its_table_and_nowhere_else() {
-        let err = refuse("[models.planner]\nmodel = \"m\"\n", &KEYS).unwrap_err();
+        let err = refuse("[models.planner]\nmodel = \"m\"\n", &KEYS, &[]).unwrap_err();
         assert_eq!(
             err,
             "`models.planner` is no longer a setting, because the planning call is gone: \
              name nothing"
         );
-        let err = refuse("ruling_channels = [\"relay\"]\n", &KEYS).unwrap_err();
+        let err = refuse("ruling_channels = [\"relay\"]\n", &KEYS, &[]).unwrap_err();
         assert_eq!(
             err,
             "`ruling_channels` is no longer a setting, because the relay is gone: delete it"
         );
-        assert_eq!(refuse("[models.worker]\nplanner = 1\n", &KEYS), Ok(()));
-        assert_eq!(refuse("not toml [", &KEYS), Ok(()));
+        assert_eq!(refuse("[models.worker]\nplanner = 1\n", &KEYS, &[]), Ok(()));
+        assert_eq!(refuse("not toml [", &KEYS, &[]), Ok(()));
     }
 
     #[test]
@@ -145,6 +158,7 @@ mod tests {
         let err = refuse(
             "ruling_channels = [\"relay\"]\n[models.planner]\nmodel = \"m\"\n",
             &KEYS,
+            &[],
         )
         .unwrap_err();
         assert_eq!(

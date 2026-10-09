@@ -61,10 +61,10 @@ fn an_item_parked_on_a_ruling_frees_its_slot_for_the_next_ready_issue() {
 }
 
 #[test]
-fn a_full_max_parked_opens_nothing_and_its_alert_counts_the_rulings() {
+fn a_full_pending_rulings_opens_nothing_and_its_alert_counts_the_rulings() {
     let (rig, runner) = seven_asks("acme");
     let [(_, first)] = rig.alerts.posts().try_into().unwrap();
-    assert!(!first.text.contains("max_parked"), "{}", first.text);
+    assert!(!first.text.contains("pending_rulings"), "{}", first.text);
     for issue in [8, 9] {
         rig.forge.list_ready(issue, false);
     }
@@ -75,7 +75,7 @@ fn a_full_max_parked_opens_nothing_and_its_alert_counts_the_rulings() {
     let (_, filled) = rig.alerts.posts().pop().unwrap();
     assert!(
         filled.text.ends_with(
-            "\n\n2 rulings are waiting, and `max_parked` is 2, so no new work item opens \
+            "\n\n2 rulings are waiting, and `concurrency.pending_rulings` is 2, so no new work item opens \
              until one is answered."
         ),
         "{}",
@@ -92,9 +92,9 @@ fn a_full_max_parked_opens_nothing_and_its_alert_counts_the_rulings() {
 }
 
 #[test]
-fn max_parked_0_opens_nothing_while_any_ruling_waits() {
+fn pending_rulings_0_opens_nothing_while_any_ruling_waits() {
     let rig = Rig::new("acme");
-    rig.edit_settings(|s| s.replace("max_parked = 2", "max_parked = 0"));
+    rig.edit_settings(|s| s.replace("pending_rulings = 2", "pending_rulings = 0"));
     let runner = rig.open().unwrap();
     // With no ruling waiting, the board opens work as ever.
     rig.forge.list_ready(7, false);
@@ -106,7 +106,7 @@ fn max_parked_0_opens_nothing_while_any_ruling_waits() {
     assert!(
         alert
             .text
-            .contains("1 ruling is waiting, and `max_parked` is 0")
+            .contains("1 ruling is waiting, and `concurrency.pending_rulings` is 0")
     );
     rig.forge.list_ready(8, false);
     assert_eq!(step(&runner).unwrap(), None);
@@ -114,14 +114,14 @@ fn max_parked_0_opens_nothing_while_any_ruling_waits() {
 }
 
 #[test]
-fn a_larger_max_items_gives_a_waiting_item_its_slot() {
+fn a_larger_active_items_gives_a_waiting_item_its_slot() {
     let (rig, runner) = seven_asks("acme");
     rig.forge.list_ready(8, false);
     assert_eq!(dispatched(step(&runner).unwrap()), (8, vec![]));
     rig.ask(&runner, "rule", Some("1 answer the short one"));
     assert_eq!(slots(&rig, &runner), [json!([8]), json!([7]), json!([])]);
 
-    rig.edit_settings(|s| s.replace("max_items = 1", "max_items = 2"));
+    rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 2"));
     let next = rig.settings();
     runner
         .lock()
@@ -142,12 +142,12 @@ fn an_answered_ruling_waits_for_the_slot_and_goes_before_a_new_issue() {
     // #8 holds the one slot, so #7's answer waits for it.
     rig.ask(&runner, "rule", Some("1 answer the short one"));
     assert_eq!(slots(&rig, &runner), [json!([8]), json!([7]), json!([])]);
-    // Its session would be a model call past `max_items` too.
+    // Its session would be a model call past `concurrency.active_items` too.
     let me = std::process::id();
     let refused = rig.ask(&runner, "attach", Some(&format!("7 {me}")));
     let why = refused["error"].as_str().unwrap();
     assert!(
-        why.starts_with("the work item for #7 holds no slot under `max_items`"),
+        why.starts_with("the work item for #7 holds no slot under `concurrency.active_items`"),
         "{why}"
     );
     assert!(rig.ask(&runner, "status", None)["work_item"]["attached"].is_null());
@@ -329,7 +329,10 @@ fn a_still_red_yes_goes_to_ci_with_every_slot_taken() {
     let me = std::process::id();
     let refused = rig.ask(&runner, "attach", Some(&format!("7 {me}")));
     let why = refused["error"].as_str().unwrap();
-    assert!(why.contains("holds no slot under `max_items`"), "{why}");
+    assert!(
+        why.contains("holds no slot under `concurrency.active_items`"),
+        "{why}"
+    );
     rig.forge.set_checks(&fixed, Checks::Passed);
     let Some(StepReport::Ruling {
         issue: 7, question, ..

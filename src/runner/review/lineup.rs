@@ -34,7 +34,7 @@ impl Runner {
         }
         let ran = self.ran_of(review);
         let changed = match self.lineup.iter().any(|r| !r.paths.is_empty()) {
-            true => changed_files(&self.settings.repo, worktree, base)?,
+            true => changed_files(&self.settings.git.checkout, worktree, base)?,
             false => Vec::new(),
         };
         let down = |r: &ListedReviewer| {

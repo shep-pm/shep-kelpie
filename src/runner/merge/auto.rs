@@ -76,7 +76,7 @@ fn raised(report: Option<StepReport>) -> u64 {
 // posted, and the worker waits with nothing merged.
 fn still_asks(rig: &Rig, runner: &Mutex<Runner>, id: u64, kind: &str) {
     let status = rig.ask(runner, "status", None);
-    assert_eq!(status["merge_authority"], "auto");
+    assert_eq!(status["merging"], "auto");
     assert_eq!(status["rulings"][0]["id"], id);
     assert_eq!(status["rulings"][0]["kind"]["kind"], kind);
     assert_eq!(
@@ -455,17 +455,17 @@ fn marked_ready_under_auto(project: &str) -> (Rig, Mutex<Runner>, String) {
 fn a_merge_started_under_auto_asks_once_the_project_is_back_on_ask() {
     let (rig, runner, head) = marked_ready_under_auto("shep");
     drop(runner);
-    rig.edit_settings(|s| s.replace("merge_authority = \"auto\"", "merge_authority = \"ask\""));
+    rig.edit_settings(|s| s.replace("merging = \"auto\"", "merging = \"ask\""));
     let runner = rig.open().unwrap();
     rig.clock.advance(CHECKS_SETTLE);
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::MergeWithdrawn { reason, .. })
-            if reason == "the merge authority is no longer auto"
+            if reason == "`git.merging` is no longer `auto`"
     ));
     let id = raised(rig.verdict(&runner));
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["merge_authority"], "ask");
+    assert_eq!(status["merging"], "ask");
     assert_eq!(
         status["rulings"][0]["kind"],
         json!({ "kind": "merge", "head": head })
@@ -687,7 +687,7 @@ fn a_merge_that_landed_before_a_switch_to_ask_still_gets_its_notice() {
     // The merge landed, and the runner stopped before it could save that.
     rig.forge.set_state(71, PullRequestState::Merged);
     drop(runner);
-    rig.edit_settings(|s| s.replace("merge_authority = \"auto\"", "merge_authority = \"ask\""));
+    rig.edit_settings(|s| s.replace("merging = \"auto\"", "merging = \"ask\""));
     let runner = rig.open().unwrap();
     rig.clock.advance(CHECKS_SETTLE);
     assert!(merged(step(&runner).unwrap()));

@@ -157,8 +157,6 @@ pub struct Guard {
     /// Folders besides the home folder whose paths stay off the forge: kelpie's
     /// home and the project's checkout
     pub folders: Vec<PathBuf>,
-    /// Words that stay off the forge
-    pub private_names: Vec<String>,
     /// For the issue writer, what it may file. The guard then runs only the
     /// commands that file, label and link issues, and git's read-only ones.
     pub issues: Option<IssueRules>,

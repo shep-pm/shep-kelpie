@@ -2,6 +2,9 @@ use super::*;
 
 const EXAMPLE: &str = include_str!("../../settings.example.toml");
 
+// The example's first table, before which a test writes a key at the top level
+const GIT: &str = "[app.dogs.kelpie.git]\n";
+
 const HOME: &str = "/home/me";
 const FOLDER: &str = "/home/me/.shep/kelpie/shep";
 
@@ -29,11 +32,14 @@ fn with_hook(event: &str) -> String {
 #[test]
 fn the_example_holds_the_first_build_defaults() {
     let s = parse(EXAMPLE).unwrap();
-    assert_eq!(s.repo, Path::new("/home/me/GitHub/shep"));
-    assert_eq!(s.forge.as_str(), "shep-pm/shep");
-    assert_eq!(s.merge_authority, MergeAuthority::Ask);
-    assert!(s.ci);
-    assert_eq!(s.max_items.get(), 1);
+    assert_eq!(s.git.checkout, Path::new("/home/me/GitHub/shep"));
+    assert_eq!(s.git.remote.unwrap().as_str(), "shep-pm/shep");
+    assert_eq!(s.git.merging, Merging::Ask);
+    assert_eq!(s.git.issues, Filing::Ask);
+    assert!(s.ci.block);
+    assert_eq!(s.ci.fix_attempts.cap(), None);
+    assert_eq!(s.concurrency.active_items.get(), 1);
+    assert_eq!(s.concurrency.pending_rulings, 2);
     let implementers: Vec<&str> = s.agents.implementers.iter().map(|n| n.as_str()).collect();
     assert_eq!(implementers, ["sonnet-high"]);
     assert_eq!(
@@ -86,8 +92,52 @@ fn the_instructions_file_expands_the_home_folder_and_defaults_to_none() {
 
 #[test]
 fn a_missing_setting_is_named() {
-    let text = EXAMPLE.replace("forge = \"shep-pm/shep\"\n", "");
-    assert!(parse_err(&text).contains("missing field `forge`"));
+    let text = EXAMPLE.replace("merging = \"ask\"\n", "");
+    let err = parse_err(&text);
+    assert!(err.contains("missing field `merging`"), "{err}");
+    assert!(err.contains("`git`"), "{err}");
+}
+
+#[test]
+fn the_remote_may_be_left_to_the_checkout_s_origin() {
+    let text = EXAMPLE.replace("remote = \"shep-pm/shep\"\n", "");
+    assert_eq!(parse(&text).unwrap().git.remote, None);
+    let err = parse_err(&EXAMPLE.replace("\"shep-pm/shep\"", "\"shep\""));
+    assert!(err.contains("`git.remote = \"shep\"`"), "{err}");
+    assert!(err.contains("must be `owner/name`"), "{err}");
+}
+
+#[test]
+fn the_issues_setting_asks_files_or_skips_and_asks_when_absent() {
+    for (value, filing) in [
+        ("ask", Filing::Ask),
+        ("file", Filing::File),
+        ("skip", Filing::Skip),
+    ] {
+        let text = EXAMPLE.replace("issues = \"ask\"", &format!("issues = \"{value}\""));
+        assert_eq!(parse(&text).unwrap().git.issues, filing, "{value}");
+    }
+    let absent = EXAMPLE.replace("issues = \"ask\"\n", "");
+    assert_eq!(parse(&absent).unwrap().git.issues, Filing::Ask);
+    let err = parse_err(&EXAMPLE.replace("issues = \"ask\"", "issues = \"auto\""));
+    assert!(err.contains("unknown variant `auto`"), "{err}");
+}
+
+#[test]
+fn fix_attempts_is_a_cap_from_0_or_minus_1_for_none_and_none_when_absent() {
+    let with =
+        |value: &str| EXAMPLE.replace("fix_attempts = -1", &format!("fix_attempts = {value}"));
+    assert_eq!(parse(&with("0")).unwrap().ci.fix_attempts.cap(), Some(0));
+    assert_eq!(parse(&with("3")).unwrap().ci.fix_attempts.cap(), Some(3));
+    assert_eq!(parse(&with("-1")).unwrap().ci.fix_attempts.cap(), None);
+    let absent = EXAMPLE.replace("fix_attempts = -1\n", "");
+    assert_eq!(parse(&absent).unwrap().ci.fix_attempts.cap(), None);
+    let err = parse_err(&with("-2"));
+    assert!(err.contains("`ci.fix_attempts = -2`"), "{err}");
+    assert!(
+        err.contains("must be -1 for no cap, or a count from 0"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -99,14 +149,11 @@ fn a_missing_nested_setting_is_named_with_its_table() {
 }
 
 #[test]
-fn ci_must_be_said_either_way() {
-    let err = parse_err(&EXAMPLE.replace("ci = true\n", ""));
-    assert!(err.contains("missing field `ci`"), "{err}");
-    assert!(
-        !parse(&EXAMPLE.replace("ci = true", "ci = false"))
-            .unwrap()
-            .ci
-    );
+fn ci_block_must_be_said_either_way() {
+    let err = parse_err(&EXAMPLE.replace("block = true\n", ""));
+    assert!(err.contains("missing field `block`"), "{err}");
+    let off = parse(&EXAMPLE.replace("block = true", "block = false")).unwrap();
+    assert!(!off.ci.block);
 }
 
 #[test]
@@ -129,13 +176,75 @@ fn a_table_written_before_the_worker_keys_loads_with_their_defaults() {
 
 #[test]
 fn one_work_item_is_open_at_a_time_when_the_table_does_not_say() {
-    let before = EXAMPLE.replace("max_items = 1\n", "");
-    assert!(!before.contains("max_items ="));
-    assert_eq!(parse(&before).unwrap().max_items.get(), 1);
-    let text = EXAMPLE.replace("max_items = 1", "max_items = 3");
-    assert_eq!(parse(&text).unwrap().max_items.get(), 3);
-    let err = parse_err(&EXAMPLE.replace("max_items = 1", "max_items = 0"));
-    assert!(err.contains("`max_items = 0`"), "{err}");
+    let before = EXAMPLE.replace("active_items = 1\n", "");
+    assert!(!before.contains("active_items ="));
+    assert_eq!(parse(&before).unwrap().concurrency.active_items.get(), 1);
+    let text = EXAMPLE.replace("active_items = 1", "active_items = 3");
+    assert_eq!(parse(&text).unwrap().concurrency.active_items.get(), 3);
+    let err = parse_err(&EXAMPLE.replace("active_items = 1", "active_items = 0"));
+    assert!(err.contains("`concurrency.active_items = 0`"), "{err}");
+}
+
+#[test]
+fn a_table_with_no_concurrency_table_takes_its_defaults() {
+    let start = EXAMPLE.find("[app.dogs.kelpie.concurrency]").unwrap();
+    let end = EXAMPLE.find("# The agents that build").unwrap();
+    let text = format!("{}{}", &EXAMPLE[..start], &EXAMPLE[end..]);
+    assert!(!text.contains("pending_rulings"));
+    let s = parse(&text).unwrap();
+    assert_eq!(s.concurrency.active_items.get(), 1);
+    assert_eq!(s.concurrency.pending_rulings, 2);
+    let zero = EXAMPLE.replace("pending_rulings = 2", "pending_rulings = 0");
+    assert_eq!(parse(&zero).unwrap().concurrency.pending_rulings, 0);
+}
+
+// Every top-level key from before the tables, each with its value as it was.
+const OLD_KEYS: &str = "[app.dogs.kelpie]\nrepo = \"~/GitHub/shep\"\nforge = \"shep-pm/shep\"\n\
+                        merge_authority = \"auto\"\nci = true\nmax_items = 2\nmax_parked = 1\n\
+                        private_names = [\"Acme Corp\"]\n";
+
+#[test]
+fn every_old_top_level_key_is_refused_at_once_naming_what_replaces_it() {
+    assert!(EXAMPLE.contains(GIT), "the example's git table moved");
+    // The old `ci` and today's `[ci]` cannot both be in one table.
+    let start = EXAMPLE.find("[app.dogs.kelpie.ci]").unwrap();
+    let end = EXAMPLE.find("[app.dogs.kelpie.concurrency]").unwrap();
+    let text = format!("{}{}", &EXAMPLE[..start], &EXAMPLE[end..]);
+    let skills = "\n[app.dogs.kelpie.skills]\nci = { kind = \"none\" }\n";
+    let text = text.replace(GIT, &format!("{OLD_KEYS}{GIT}")) + skills;
+    let grouped = "because every project setting sits in a table now";
+    assert_eq!(
+        parse_err(&text),
+        format!(
+            "the [app.dogs.kelpie] table on shep: these are no longer settings:\n\
+             - `repo`, {grouped}: move its value to `git.checkout`\n\
+             - `forge`, {grouped}: move its value to `git.remote`, or delete it to read \
+             the repo from the checkout's `origin`\n\
+             - `merge_authority`, because it set both who merges and whether deferred \
+             findings are asked about: move its value to `git.merging`, and set \
+             `git.issues`: `ask` asks before filing deferred findings as `ask` did, and \
+             `file` files them as `auto` did\n\
+             - `ci`, {grouped}: move its value to `block` in a `[ci]` table\n\
+             - `max_items`, {grouped}: move its value to `concurrency.active_items`\n\
+             - `max_parked`, {grouped}: move its value to `concurrency.pending_rulings`\n\
+             - `private_names`, because kelpie no longer checks text for the project's own \
+             words: guard a worker's commits and posts with a hook in \
+             `worker.guard_hooks`, and delete it\n\
+             - `skills.ci`, because the step is named for what it does, apart from the \
+             `[ci]` table: move its value to `skills.ci_fix`"
+        )
+    );
+}
+
+#[test]
+fn the_ci_table_is_not_taken_for_the_old_ci_key() {
+    assert!(parse(EXAMPLE).is_ok());
+    let text = EXAMPLE.replace("block = true\n", "block = true\nci = true\n");
+    assert!(
+        parse_err(&text).contains("`ci.ci = true`: unknown field `ci`"),
+        "{}",
+        parse_err(&text)
+    );
 }
 
 #[test]
@@ -162,7 +271,7 @@ fn a_zero_turn_timeout_is_still_refused() {
 
 #[test]
 fn the_relays_settings_are_refused_by_name() {
-    let table = "[app.dogs.kelpie]\n";
+    let table = "[app.dogs.kelpie.git]\n";
     let relay = "[app.dogs.kelpie.models.relay]\nmodel = \"m\"\neffort = \"low\"\n";
     let with_model = format!("{EXAMPLE}\n{relay}");
     let err = parse_err(&with_model);
@@ -172,8 +281,10 @@ fn the_relays_settings_are_refused_by_name() {
     );
     assert!(err.contains("delete it"), "{err}");
 
-    let with_channels =
-        EXAMPLE.replace(table, &format!("{table}ruling_channels = [\"webhook\"]\n"));
+    let with_channels = EXAMPLE.replace(
+        table,
+        &format!("[app.dogs.kelpie]\nruling_channels = [\"webhook\"]\n{table}"),
+    );
     let err = parse_err(&with_channels);
     assert!(
         err.contains("`ruling_channels` is no longer a setting"),
@@ -183,7 +294,7 @@ fn the_relays_settings_are_refused_by_name() {
 
 #[test]
 fn the_planning_calls_settings_are_refused_by_name() {
-    let table = "[app.dogs.kelpie]\n";
+    let table = "[app.dogs.kelpie.git]\n";
     let removed = [
         ("planning", "[app.dogs.kelpie.planning]\nenabled = false\n"),
         (
@@ -208,7 +319,10 @@ fn the_planning_calls_settings_are_refused_by_name() {
             "{key}: {err}"
         );
     }
-    let at_top = EXAMPLE.replace(table, &format!("{table}planning = {{ enabled = true }}\n"));
+    let at_top = EXAMPLE.replace(
+        table,
+        &format!("[app.dogs.kelpie]\nplanning = {{ enabled = true }}\n{table}"),
+    );
     assert!(parse_err(&at_top).contains("`planning` is no longer"));
 }
 
@@ -326,19 +440,16 @@ fn a_misspelt_setting_is_named() {
 }
 
 #[test]
-fn merge_authority_auto_is_accepted() {
-    let text = EXAMPLE.replace("merge_authority = \"ask\"", "merge_authority = \"auto\"");
-    assert_eq!(parse(&text).unwrap().merge_authority, MergeAuthority::Auto);
+fn merging_auto_is_accepted() {
+    let text = EXAMPLE.replace("merging = \"ask\"", "merging = \"auto\"");
+    assert_eq!(parse(&text).unwrap().git.merging, Merging::Auto);
 }
 
 #[test]
-fn merge_authority_ask_surface_is_refused() {
-    let text = EXAMPLE.replace(
-        "merge_authority = \"ask\"",
-        "merge_authority = \"ask-surface\"",
-    );
+fn merging_ask_surface_is_refused() {
+    let text = EXAMPLE.replace("merging = \"ask\"", "merging = \"ask-surface\"");
     let err = parse_err(&text);
-    assert!(err.contains("merge_authority"), "{err}");
+    assert!(err.contains("`git.merging = \"ask-surface\"`"), "{err}");
     assert!(err.contains("unknown variant `ask-surface`"), "{err}");
 }
 
@@ -387,8 +498,8 @@ fn the_review_bot_settings_bot_files_replace_are_refused_saying_what_replaces_ea
         format!("`coderabbit` is no longer a setting, because {BOT_FILES}: delete it")
     );
     let listed = EXAMPLE.replace(
-        "max_items = 1\n",
-        "max_items = 1\npull_request_reviewers = [\"cubic\"]\n",
+        "[app.dogs.kelpie.git]\n",
+        "[app.dogs.kelpie]\npull_request_reviewers = [\"cubic\"]\n[app.dogs.kelpie.git]\n",
     );
     assert_eq!(
         refused(&listed),
@@ -398,7 +509,7 @@ fn the_review_bot_settings_bot_files_replace_are_refused_saying_what_replaces_ea
              read should come, which `shep kelpie add` writes out"
         )
     );
-    let generated = EXAMPLE.replace("max_items = 1\n", "max_items = 1\ngenerated = []\n");
+    let generated = EXAMPLE.replace(GIT, &format!("[app.dogs.kelpie]\ngenerated = []\n{GIT}"));
     assert_eq!(
         refused(&generated),
         "`generated` is no longer a setting, because it only kept files out of the review \
@@ -412,8 +523,8 @@ fn the_review_bot_settings_bot_files_replace_are_refused_saying_what_replaces_ea
 fn a_table_carrying_several_removed_keys_names_them_all_at_once() {
     let text = EXAMPLE
         .replace(
-            "max_items = 1\n",
-            "max_items = 1\ngenerated = [\"Cargo.lock\"]\n",
+            "[app.dogs.kelpie.git]\n",
+            "[app.dogs.kelpie]\ngenerated = [\"Cargo.lock\"]\n[app.dogs.kelpie.git]\n",
         )
         .replace(
             "# reviewers = [\"qwen\", \"defect-hunter\"]",
@@ -583,26 +694,9 @@ fn build_env_names_folders_inside_the_build_folder() {
 }
 
 #[test]
-fn private_names_are_read_and_default_to_none() {
-    assert_eq!(parse(EXAMPLE).unwrap().private_names, []);
-    let text = EXAMPLE.replace(
-        "max_items = 1\n",
-        "max_items = 1\nprivate_names = [\"Acme Corp\", \"zeta\"]\n",
-    );
-    let names: Vec<_> = parse(&text).unwrap().private_names;
-    let names: Vec<&str> = names.iter().map(NonBlank::as_str).collect();
-    assert_eq!(names, ["Acme Corp", "zeta"]);
-    let blank = EXAMPLE.replace(
-        "max_items = 1\n",
-        "max_items = 1\nprivate_names = [\" \"]\n",
-    );
-    assert!(parse_err(&blank).contains("blank"), "{}", parse_err(&blank));
-}
-
-#[test]
-fn a_repo_path_without_a_tilde_is_kept() {
+fn a_checkout_path_without_a_tilde_is_kept() {
     let text = EXAMPLE.replace("\"~/GitHub/shep\"", "\"/srv/shep\"");
-    assert_eq!(parse(&text).unwrap().repo, Path::new("/srv/shep"));
+    assert_eq!(parse(&text).unwrap().git.checkout, Path::new("/srv/shep"));
 }
 
 #[test]

@@ -25,7 +25,7 @@ pub use vendored::{PIN, PLUGIN, UPSTREAM};
 
 /// A step kelpie drives an agent through
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum Step {
     /// Triaging an issue
     Triage,
@@ -36,7 +36,7 @@ pub enum Step {
     /// How the worker writes tests
     Tests,
     /// The worker's turn on a red CI run
-    Ci,
+    CiFix,
     /// How the worker writes its pull request's body
     Pr,
     /// A session reset's handoff
@@ -52,7 +52,7 @@ impl Step {
         Self::Spec,
         Self::Implement,
         Self::Tests,
-        Self::Ci,
+        Self::CiFix,
         Self::Pr,
         Self::Reset,
         Self::Retro,
@@ -65,7 +65,7 @@ impl Step {
             Self::Spec => "spec",
             Self::Implement => "implement",
             Self::Tests => "tests",
-            Self::Ci => "ci",
+            Self::CiFix => "ci_fix",
             Self::Pr => "pr",
             Self::Reset => "reset",
             Self::Retro => "retro",
@@ -79,7 +79,7 @@ impl Step {
             Self::Spec => "to-spec",
             Self::Implement => "implement",
             Self::Tests => "tdd",
-            Self::Ci => "diagnosing-bugs",
+            Self::CiFix => "diagnosing-bugs",
             Self::Pr => "pr",
             Self::Reset => "handoff",
             Self::Retro => "retro",
@@ -272,7 +272,7 @@ const FORMAT_RULE: &str = "- Reply in the format kelpie asks for below. Where th
 /// The headless rules for `step`'s skill, one bullet per line
 fn rules(step: Step) -> String {
     let own = match step {
-        Step::Implement | Step::Tests | Step::Ci | Step::Pr => {
+        Step::Implement | Step::Tests | Step::CiFix | Step::Pr => {
             "- Record each decision you made in the skill's place in your pull request's \
              body. One only the maintainer can make still ends your turn in a \
              `<kelpie-question>` block.\n\

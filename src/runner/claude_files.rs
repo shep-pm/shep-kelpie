@@ -40,7 +40,7 @@ impl Runner {
         };
         let accepted = item.claude_files_accepted.as_deref();
         let phase = item.phase.clone();
-        match fence::changed(&self.settings.repo, &item.branch, accepted) {
+        match fence::changed(&self.settings.git.checkout, &item.branch, accepted) {
             Ok((_, files)) if files.is_empty() => Ok(None),
             Ok((head, files)) => {
                 let kind = RulingKind::AgentFiles { head, files, phase };
@@ -57,7 +57,7 @@ impl Runner {
     pub(super) fn claude_files_refusal(&self) -> Option<String> {
         let item = self.current()?;
         let accepted = item.claude_files_accepted.as_deref();
-        match fence::differ(&self.settings.repo, &item.worktree, accepted) {
+        match fence::differ(&self.settings.git.checkout, &item.worktree, accepted) {
             Ok(files) if files.is_empty() => None,
             Ok(files) => Some(format!(
                 "agents' own files in the worktree differ from main's: {}",

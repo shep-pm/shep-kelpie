@@ -63,7 +63,7 @@ pub enum AttachError {
     Ruling(u64, u64),
     /// The work item is merging or being closed, past its worker's turns
     Merging(u64),
-    /// The work item holds no slot under `max_items`, which its worker's
+    /// The work item holds no slot under `concurrency.active_items`, which its worker's
     /// session needs, and none is free for it
     NoSlot(u64),
     /// The worker runs on a harness whose sessions resume another way
@@ -105,7 +105,7 @@ impl fmt::Display for AttachError {
             ),
             Self::NoSlot(issue) => write!(
                 f,
-                "the work item for #{issue} holds no slot under `max_items`, which its \
+                "the work item for #{issue} holds no slot under `concurrency.active_items`, which its \
                  worker's session needs, and none is free: `shep kelpie attach {issue}` \
                  works once another work item ends or parks and frees one"
             ),

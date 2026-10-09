@@ -30,7 +30,7 @@ impl Runner {
         head: String,
         queued: MergeQueued,
     ) -> Result<Begin, StateError> {
-        let repo = self.settings.forge.clone();
+        let repo = self.remote.clone();
         let standing = match self.ports.forge.merge_queue(&repo, number) {
             Ok(standing) => standing,
             Err(e) => {
@@ -59,21 +59,21 @@ impl Runner {
         }
         let prompt = self
             .skills
-            .invoke(Step::Ci, &queue_prompt(number, &head, &reason));
-        self.back_to_worker(number, head, vec!["merge queue".to_owned()], prompt)
+            .invoke(Step::CiFix, &queue_prompt(number, &head, &reason));
+        self.back_to_worker(number, head, vec!["merge queue".to_owned()], prompt, false)
     }
 
     // Auto-merge queues whatever head the branch has once it can, so one
     // that waits on a head kelpie never gated is disarmed and goes back to CI.
     fn armed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
-        let repo = self.settings.forge.clone();
+        let repo = self.remote.clone();
         let pr = match self.ports.forge.pull_request(&repo, number) {
             Ok(pr) => pr,
             Err(e) => return Ok(self.gate_failed(format!("cannot read #{number}: {e}"))),
         };
         let reason = if pr.head != head {
             format!("#{number} moved to {}", short(&pr.head))
-        } else if self.settings.ci && matches!(pr.checks, Checks::Failed(_)) {
+        } else if self.settings.ci.block && matches!(pr.checks, Checks::Failed(_)) {
             format!("CI on #{number} is no longer green")
         } else {
             return Ok(Begin::Idle);
