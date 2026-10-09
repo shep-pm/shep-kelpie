@@ -14,36 +14,36 @@ use crate::runner::step;
 use crate::test::{Hold, Rig, Scripted};
 
 // Real threads on real time, so every wait has this ceiling.
-const PATIENCE: Duration = Duration::from_secs(30);
+pub(super) const PATIENCE: Duration = Duration::from_secs(30);
 
 // One hour, the rig's `turn_timeout`
-const CEILING: u64 = 3600;
+pub(super) const CEILING: u64 = 3600;
 
 // The runner's loop as a test drives it: one pass at a time, and each
 // call's end recorded as it comes back.
-struct Driven<'a> {
+pub(super) struct Driven<'a> {
     runner: &'a Mutex<Runner>,
     woken: Receiver<()>,
 }
 
 impl<'a> Driven<'a> {
-    fn new(runner: &'a Mutex<Runner>) -> Self {
+    pub(super) fn new(runner: &'a Mutex<Runner>) -> Self {
         let (wake, woken) = mpsc::channel();
         lock(runner).wake_with(wake);
         Self { runner, woken }
     }
 
-    fn pass(&self) -> Pass {
+    pub(super) fn pass(&self) -> Pass {
         advance(self.runner).unwrap()
     }
 
-    fn started(&self) {
+    pub(super) fn started(&self) {
         let pass = self.pass();
         assert!(matches!(pass, Pass::Started), "no call started: {pass:?}");
     }
 
     // Waits for the next piece of news from a call in flight, and records it.
-    fn heard(&self) -> Option<StepReport> {
+    pub(super) fn heard(&self) -> Option<StepReport> {
         loop {
             let news = lock(self.runner).next_news();
             match news {
@@ -57,7 +57,7 @@ impl<'a> Driven<'a> {
     }
 
     // Waits for the next call in flight to end, and records it.
-    fn landed(&self) -> Option<StepReport> {
+    pub(super) fn landed(&self) -> Option<StepReport> {
         loop {
             let news = lock(self.runner).next_news();
             match news {
@@ -75,7 +75,7 @@ impl<'a> Driven<'a> {
 }
 
 // An implementer on the GPU, which waits for the `gpu` lease
-const CODER: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-coder\n\
+pub(super) const CODER: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-coder\n\
                      effort: low\nusage: none\n---\n";
 
 // A running project with issue 7 open on `coder`, and the GPU lock held by

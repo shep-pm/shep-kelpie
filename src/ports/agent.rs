@@ -343,16 +343,41 @@ pub fn written_at(path: &std::path::Path) -> CallActivity {
     })
 }
 
+/// What a call waits for before its model can answer
+// wire format: changing this is a breaking change to `status`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Wait {
+    /// A lease on its model, from a gateway or kelpie's dog
+    Lease,
+    /// Its gateway answered busy, HTTP 503, and is asked again
+    Busy,
+    /// Nothing: its model has shown no output for a while, as kelpie reads it
+    Silent,
+}
+
+impl Wait {
+    /// What it waits for, in words
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Lease => "a lease on its model",
+            Self::Busy => "its gateway, which answered busy",
+            Self::Silent => "its model's first output",
+        }
+    }
+}
+
 /// The runner's hold on one call in flight, to end it past its turn's ceiling
 ///
 /// Clones share the one call. The adapter running it ends its process
 /// group once asked, however soon after the call began that is. A call that
-/// waits for a lease first says when it has it, so its ceiling counts from
-/// then.
+/// waits for a lease says so, and says when it has it, so its ceiling
+/// counts from then.
 #[derive(Clone, Default)]
 pub struct Ending {
     asked: Arc<AtomicBool>,
     began: Option<Arc<dyn Fn() + Send + Sync>>,
+    waits: Option<Arc<dyn Fn(Wait) + Send + Sync>>,
 }
 
 impl fmt::Debug for Ending {
@@ -364,11 +389,23 @@ impl fmt::Debug for Ending {
 }
 
 impl Ending {
-    /// One that runs `began` when the call has the lease it waited for
-    pub fn telling(began: impl Fn() + Send + Sync + 'static) -> Self {
+    /// One that runs `waits` when the call waits for its model, and `began`
+    /// when it has the lease it waited for
+    pub fn telling(
+        began: impl Fn() + Send + Sync + 'static,
+        waits: impl Fn(Wait) + Send + Sync + 'static,
+    ) -> Self {
         Self {
             asked: Arc::default(),
             began: Some(Arc::new(began)),
+            waits: Some(Arc::new(waits)),
+        }
+    }
+
+    /// Says the call waits for `wait` before its model can answer
+    pub fn wait(&self, wait: Wait) {
+        if let Some(waits) = &self.waits {
+            waits(wait);
         }
     }
 

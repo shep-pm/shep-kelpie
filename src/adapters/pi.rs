@@ -31,7 +31,7 @@ use crate::forwarder::{Upstream, WORKER_HOST};
 use crate::guard::FOLDER_FLAG;
 use crate::ports::{
     AgentCall, AgentError, AgentReply, Agents, CallActivity, Ending, Fence, Forward, Policy, Role,
-    Sandbox, Session, SessionId, Tools, Usage, written_at,
+    Sandbox, Session, SessionId, Tools, Usage, Wait, written_at,
 };
 use crate::profile::CREDENTIALS;
 use crate::settings::{AgentHarness, Gateways, Harness, ModelHost, ModelServer};
@@ -200,8 +200,10 @@ impl PiCli {
         let upstream = self.upstream(server)?;
         let note = format!("kelpie {}", call.label());
         let give_up = || ending.asked() || self.processes.stopping();
+        let busy = || ending.wait(Wait::Busy);
         let timing = paddock::Timing::RUNNER;
-        match paddock::Lease::take(&upstream, &call.model, &note, &give_up, timing) {
+        ending.wait(Wait::Lease);
+        match paddock::Lease::take(&upstream, &call.model, &note, &give_up, &busy, timing) {
             Ok(Some(lease)) => {
                 ending.begin();
                 Ok(Some(lease))

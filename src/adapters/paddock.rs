@@ -95,7 +95,7 @@ pub(crate) struct Lease {
 
 impl Lease {
     /// Takes a lease on `model`, labelled `note`, waiting for its grant
-    /// until `give_up` says to stop
+    /// until `give_up` says to stop, and telling `busy` of each busy answer
     ///
     /// `None` when it gave up, which hangs up and so leaves paddock's queue.
     ///
@@ -107,6 +107,7 @@ impl Lease {
         model: &str,
         note: &str,
         give_up: &dyn Fn() -> bool,
+        busy: &dyn Fn(),
         timing: Timing,
     ) -> Result<Option<Self>, String> {
         let body = json!({ "model": model, "hold": "heartbeat", "ttl": TTL, "note": note });
@@ -117,6 +118,7 @@ impl Lease {
             if status != 503 {
                 break (status, answer);
             }
+            busy();
             if !wait(timing.retry, give_up) {
                 return Ok(None);
             }
@@ -321,6 +323,7 @@ mod tests {
             "qwen",
             "kelpie #7 worker",
             &|| false,
+            &|| {},
             QUICK,
         );
         let lease = lease.unwrap().unwrap();
@@ -342,8 +345,13 @@ mod tests {
         let server = StandInEndpoint::start([])
             .like_paddock("pk", &[])
             .with_takes([Take::Status(503, BUSY)]);
-        let lease = Lease::take(&gateway(&server), "qwen", "n", &|| false, QUICK).unwrap();
+        let busy = AtomicUsize::new(0);
+        let told = || {
+            busy.fetch_add(1, Ordering::SeqCst);
+        };
+        let lease = Lease::take(&gateway(&server), "qwen", "n", &|| false, &told, QUICK).unwrap();
         assert!(lease.is_some());
+        assert_eq!(busy.load(Ordering::SeqCst), 1, "each busy answer is told");
         let takes = calls(&server)
             .iter()
             .filter(|l| l.starts_with("POST"))
@@ -351,7 +359,7 @@ mod tests {
         assert_eq!(takes, 2);
 
         let wrong = gateway(&server).with_key(GatewayKey::for_test("other"));
-        let err = Lease::take(&wrong, "qwen", "n", &|| false, QUICK).unwrap_err();
+        let err = Lease::take(&wrong, "qwen", "n", &|| false, &|| {}, QUICK).unwrap_err();
         assert_eq!(
             err,
             "`POST /paddock/leases` answered HTTP 401, unauthorized"
@@ -360,7 +368,8 @@ mod tests {
         let server = StandInEndpoint::start([])
             .like_paddock("pk", &[])
             .with_takes([Take::Status(400, bad)]);
-        let err = Lease::take(&gateway(&server), "qwen", "n", &|| false, QUICK).unwrap_err();
+        let err =
+            Lease::take(&gateway(&server), "qwen", "n", &|| false, &|| {}, QUICK).unwrap_err();
         assert!(
             err.ends_with("bad_lease_request: ttl is at most 1h"),
             "{err}"
@@ -376,7 +385,7 @@ mod tests {
             let looks = AtomicUsize::new(0);
             let give_up = || looks.fetch_add(1, Ordering::SeqCst) >= 3;
             let started = Instant::now();
-            let lease = Lease::take(&gateway(&server), "qwen", "n", &give_up, QUICK);
+            let lease = Lease::take(&gateway(&server), "qwen", "n", &give_up, &|| {}, QUICK);
             assert!(matches!(lease, Ok(None)), "{lease:?}");
             assert!(started.elapsed() < Duration::from_secs(5));
             assert!(!calls(&server).iter().any(|l| l.starts_with("DELETE")));

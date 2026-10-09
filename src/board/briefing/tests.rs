@@ -8,6 +8,7 @@ fn files(names: &[&str]) -> Vec<String> {
 
 fn item(issue: u64, session: Session, files: Files) -> Item {
     Item {
+        waiting: None,
         issue,
         title: format!("Issue {issue}"),
         phase: "implementing".into(),

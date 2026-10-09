@@ -102,6 +102,10 @@ pub struct WorkItem {
     /// The implementer its worker runs on, chosen when it opened and kept
     /// until it ends. Each turn runs that agent's file as it then stands.
     pub agent: AgentName,
+    /// Whether its issue's `agent:` label ends in `!`, which keeps it on
+    /// `agent`: its first turn never falls back to another implementer
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
     /// The worker's session, chosen before its first turn
     pub session: SessionId,
     /// Where the worker's turn stands
@@ -579,6 +583,7 @@ mod tests {
                 "worktree": "/k/wt/shep/42",
                 "build": "/k/targets/shep/42",
                 "agent": "opus-high",
+                "pinned": true,
                 "session": "5e55",
                 "turn": { "state": "running", "since": 9 },
                 "pull_request": 51,

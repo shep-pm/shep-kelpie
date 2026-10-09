@@ -145,6 +145,7 @@ fn a_new_work_item_waits_on_any_account_its_roles_spend() {
     // A local implementer, with the Claude reviewer every project has by default.
     let (rig, runner) = named("shep", BESIDE_QWEN);
     rig.forge.list_ready(7, false);
+    rig.forge.label(7, "agent:coder");
     assert!(dispatched(&step(&runner).unwrap()));
     assert_eq!(rig.meter.reads(), 1);
 
@@ -152,6 +153,7 @@ fn a_new_work_item_waits_on_any_account_its_roles_spend() {
     rig.meter.set(Rig::utilization(20, 0));
     rig.ask(&runner, "drop", Some("7"));
     rig.forge.list_ready(8, false);
+    rig.forge.label(8, "agent:coder");
     let (kind, reason) = held(step(&runner).unwrap());
     assert_eq!(kind, HoldKind::Allowance);
     assert!(
@@ -369,10 +371,16 @@ fn a_review_round_on_a_local_agent_runs_on_that_agent_under_its_lease() {
 }
 
 #[test]
-fn beside_a_local_implementer_listed_first_an_unlabelled_issue_runs_on_claude_and_its_window() {
+fn beside_a_local_implementer_listed_first_the_issue_writer_labels_an_issue_and_claude_paces_it() {
     let (rig, runner) = named("rotom", "implementers = [\"coder\", \"sonnet-high\"]\n");
     rig.forge.list_ready(7, false);
     rig.meter.set(Rig::utilization(0, 1));
+    rig.claude
+        .script([Scripted::Say("{\"agent\": \"sonnet-high\"}")]);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Labelled { issue: 7, .. })
+    ));
     assert!(dispatched(&step(&runner).unwrap()));
 
     rig.clock.advance(RECHECK_SECS);
@@ -459,4 +467,26 @@ fn a_role_with_priced_and_unpriced_calls_counts_both() {
     assert_eq!((worker.calls, worker.unpriced_calls), (3, 1));
     assert_eq!(worker.tokens.input, 1 + 10 + 5);
     assert_eq!(worker.cost_usd, Some(Cost(5 + 3).usd()));
+}
+
+#[test]
+fn the_issue_writer_waits_on_claudes_window_when_no_listed_role_spends_claude() {
+    let (rig, runner) = named(
+        "eevee",
+        "implementers = [\"coder\", \"codex\"]\nreviewers = [\"coder-review\"]\n",
+    );
+    rig.forge.list_ready(7, false);
+    rig.codex_meter.set(Rig::utilization(0, 0));
+    rig.meter.set(Rig::utilization(0, 55));
+    let (kind, _) = held(step(&runner).unwrap());
+    assert_eq!(kind, HoldKind::Window);
+    assert_eq!(rig.claude.all_calls(), [], "no issue writer call");
+
+    rig.clock.advance(RECHECK_SECS);
+    rig.meter.set(Rig::utilization(0, 1));
+    rig.claude.script([Scripted::Say("{\"agent\": \"coder\"}")]);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Labelled { issue: 7, .. })
+    ));
 }

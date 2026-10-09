@@ -127,9 +127,9 @@ impl Runner {
         Some(line)
     }
 
-    /// Writes the line for the project manager's call that came back as
-    /// `result`
-    pub(super) fn pm_line(&mut self, open: &Open, result: &Result<AgentReply, AgentError>) {
+    /// Writes the line for a call no work item records, the project
+    /// manager's or the issue writer's, that came back as `result`
+    pub(super) fn plain_line(&mut self, open: &Open, result: &Result<AgentReply, AgentError>) {
         let Some(ended) = ended(result) else {
             return;
         };

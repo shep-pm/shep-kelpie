@@ -96,17 +96,31 @@ _Avoid_: proxy, router
 
 **Implementer**:
 An agent a project lists to build its work items. An issue's `agent:<name>`
-label picks one, and an issue without one runs on the **default
-implementer**, the first listed that is not a local model. A work item
-keeps the implementer it opened on.
+label picks one. With several listed, the issue writer labels an issue
+without one before the board opens it; with one, it runs on that one, the
+**default implementer**, the first listed, which may be a local model. A
+work item keeps the implementer it opened on, unless its first turn **falls
+back**: with `agents.fallback_after` set, a first turn that waited that long
+for its model moves to the next implementer listed. A label ending in `!`
+**pins** the work item, which never falls back.
 _Avoid_: worker model, local worker
+
+**Waiting for model**:
+A worker's turn that has not yet heard from its model: asking for a lease on
+it, told its gateway is busy, or silent past `agents.fallback_after` (ten
+minutes with that off). `status` and the board show since when, and why.
+Its first output clears it.
+_Avoid_: stalled, hung
 
 **Issue writer**:
 The agent that turns a request into an issue: it researches, scopes the work
 to one pull request or splits it, writes the acceptance criteria and labels
 the implementer. `shep kelpie issue "<request>"` runs it headless and files
 the issue for the maintainer to read; with `--interactive` it runs in the
-maintainer's terminal and files it ready for a worker.
+maintainer's terminal and files it ready for a worker. With several
+implementers listed, the runner also asks it to pick the implementer for a
+ready issue with no `agent:` label, and puts that label on the issue itself.
+`agents.issue_writer` names its agent file.
 _Avoid_: planner, planning call
 
 **Reviewer**:

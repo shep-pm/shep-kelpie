@@ -49,7 +49,10 @@ impl Runner {
         (kelpie.gateways()).check_listed(&book, listed.chain(reviewers))?;
         let webhook = kelpie.webhook;
         let mut changed = changed((&self.settings, &self.webhook), (&settings, &webhook));
-        if agents != self.agents || lineup != self.lineup || book != self.book {
+        let (was, now) = (&self.settings.agents, &settings.agents);
+        let writer =
+            (was.issue_writer != now.issue_writer) || (was.fallback_after != now.fallback_after);
+        if agents != self.agents || lineup != self.lineup || book != self.book || writer {
             changed.push("agents");
         }
         if gpu_metrics_url != self.gpu.url() {
@@ -73,9 +76,13 @@ impl Runner {
         crate::skills::check(&settings.skills, &self.paths.skills)?;
         let skills = (settings.skills != self.settings.skills)
             .then(|| Skills::load(&settings.skills, &self.paths.skills));
+        let new_implementers = agents.implementer_names() != self.agents.implementer_names();
         self.settings = settings;
         self.lineup = lineup;
         self.agents = agents;
+        if new_implementers {
+            self.make_agent_labels();
+        }
         if book != self.book {
             self.notes.extend(book.skipped());
         }
@@ -318,5 +325,78 @@ mod tests {
         assert!(err.contains("worker.instructions_file"), "{err}");
         assert_eq!(runner.settings().worker.instructions_file, None);
         assert!(Path::new(&rig.settings_file()).exists());
+    }
+
+    #[test]
+    fn each_listed_implementers_agent_label_is_made_on_open_and_on_a_new_list_only() {
+        let rig = Rig::new("shep");
+        rig.forge.set_repo_labels(&["bug", "Agent:Sonnet-high"]);
+        let runner = rig.open().unwrap();
+        assert_eq!(rig.forge.repo_labels_now(), ["bug", "Agent:Sonnet-high"]);
+
+        rig.implementers(&["sonnet-high", "opus-high"]);
+        let mut runner = runner.lock().unwrap();
+        runner
+            .reread(rig.settings(), rig.kelpie_settings())
+            .unwrap();
+        let made = ["bug", "Agent:Sonnet-high", "agent:opus-high"];
+        assert_eq!(rig.forge.repo_labels_now(), made);
+
+        rig.implementers(&["opus-high"]);
+        runner
+            .reread(rig.settings(), rig.kelpie_settings())
+            .unwrap();
+        assert_eq!(rig.forge.repo_labels_now(), made, "none is removed");
+    }
+
+    #[test]
+    fn a_fresh_repo_gets_the_default_implementers_label_when_the_runner_opens() {
+        let rig = Rig::new("shep");
+        rig.open().unwrap();
+        assert_eq!(rig.forge.repo_labels_now(), ["agent:sonnet-high"]);
+    }
+
+    #[test]
+    fn the_issue_writer_or_fallback_alone_is_a_change() {
+        let rig = Rig::new("shep");
+        let scribe = "---\nrole: issue-writer\nharness: claude-code\nmodel: claude-sonnet-5-5\n\
+                      effort: low\n---\nWrite issues.\n";
+        rig.write_agent("scribe", scribe);
+        let runner = rig.open().unwrap();
+        let named = settings_with(&rig, |s| {
+            s.replace(
+                "\nimplementers = ",
+                "\nissue_writer = \"scribe\"\nimplementers = ",
+            )
+        });
+        let line = runner.lock().unwrap().reread(named, rig.kelpie_settings());
+        assert_eq!(
+            line.unwrap().as_deref(),
+            Some("settings changed: agents now in effect")
+        );
+        let runner_settings = runner
+            .lock()
+            .unwrap()
+            .settings()
+            .agents
+            .issue_writer
+            .clone();
+        assert_eq!(runner_settings.as_str(), "scribe");
+        let next = settings_with(&rig, |s| {
+            s.replace(
+                "\nimplementers = ",
+                "\nfallback_after = 15\nimplementers = ",
+            )
+        });
+        let mut runner = runner.lock().unwrap();
+        let line = runner.reread(next, rig.kelpie_settings()).unwrap();
+        assert_eq!(
+            line.as_deref(),
+            Some("settings changed: agents now in effect")
+        );
+        assert_eq!(
+            runner.settings().agents.fallback_after.map(|m| m.get()),
+            Some(15)
+        );
     }
 }

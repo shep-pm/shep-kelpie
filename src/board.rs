@@ -27,6 +27,9 @@ pub const READY: &str = "ready-for-agent";
 /// The prefix of the label that names the implementer an issue runs on
 pub const AGENT_LABEL: &str = "agent:";
 
+/// What ends an `agent:` label that pins its work item to the agent it names
+pub const PIN: char = '!';
+
 /// The prefix of the label that named the worker's model before `agent:`
 const OLD_WORKER_LABEL: &str = "worker:";
 
@@ -180,6 +183,15 @@ pub enum Skip {
         #[serde(skip_serializing_if = "Option::is_none")]
         unknown: Option<u64>,
     },
+    /// It has no `agent:` label, and waits for the issue writer to pick
+    /// one, or, with `ruling`, for the maintainer to answer that ruling
+    Unlabelled {
+        /// The issue
+        issue: u64,
+        /// The ruling it waits on, since the issue writer could not pick
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ruling: Option<u64>,
+    },
     /// An adopted pull request that could not start this poll, and still waits
     Adopt {
         /// The pull request
@@ -203,7 +215,8 @@ impl Skip {
             | Self::Failed { issue, .. }
             | Self::Rework { issue, .. }
             | Self::Overlap { issue, .. }
-            | Self::PathsUnread { issue, .. } => *issue,
+            | Self::PathsUnread { issue, .. }
+            | Self::Unlabelled { issue, .. } => *issue,
             Self::Adopt { .. } => 0,
         }
     }
@@ -315,7 +328,8 @@ fn label_error(labels: &[String], implementers: &[AgentName]) -> Option<LabelErr
 
 /// The implementer an issue's `agent:<name>` label names, if it has one
 ///
-/// The prefix is read in any case, so `Agent:opus-high` is a label too.
+/// The prefix is read in any case, so `Agent:opus-high` is a label too, and
+/// a `!` at its end, which pins the work item to it, is not the name's.
 ///
 /// # Errors
 ///
@@ -337,6 +351,7 @@ pub fn agent_label(
         return Err(LabelError::Several);
     }
     let value = &label[AGENT_LABEL.len()..];
+    let value = value.strip_suffix(PIN).unwrap_or(value);
     match implementers.iter().find(|name| name.as_str() == value) {
         Some(name) => Ok(Some(name.clone())),
         None => Err(LabelError::NotListed {
@@ -344,6 +359,16 @@ pub fn agent_label(
             listed: implementers.iter().map(AgentName::to_string).collect(),
         }),
     }
+}
+
+/// Whether an issue's `agent:` label ends in `!`, which keeps its work item
+/// on that implementer: it never falls back to another
+pub fn pinned(labels: &[String]) -> bool {
+    labels.iter().any(|l| {
+        l.get(..AGENT_LABEL.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(AGENT_LABEL))
+            && l.ends_with(PIN)
+    })
 }
 
 /// An issue's `worker:` label, which kelpie no longer reads, if it has one
@@ -661,7 +686,20 @@ mod tests {
             agent_label(&labels(&["worker:opus-high"]), &listed()),
             Ok(None)
         );
-        for bad in ["agent:", "agent:Opus-high", "agent:opus-low"] {
+        let pin = labels(&[READY, "Agent:opus-high!"]);
+        assert_eq!(
+            agent_label(&pin, &listed()).unwrap().unwrap().as_str(),
+            "opus-high"
+        );
+        assert!(pinned(&pin));
+        assert!(!pinned(&labels(&[READY, "agent:opus-high", "bug!"])));
+        for bad in [
+            "agent:",
+            "agent:Opus-high",
+            "agent:opus-low",
+            "agent:!",
+            "agent:opus-high!!",
+        ] {
             assert!(
                 matches!(
                     agent_label(&labels(&[bad]), &listed()),

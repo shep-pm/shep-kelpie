@@ -148,6 +148,12 @@ pub struct WorkItemStatus<'a> {
     pub worktree: &'a Path,
     /// The implementer its worker runs on
     pub agent: &'a AgentName,
+    /// Whether its `agent:` label pins it to that implementer
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
+    /// Its worker's turn in flight, while that waits for its model
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<super::flight::Waiting>,
     /// The worker's session, which the maintainer can resume by hand
     pub session: &'a SessionId,
     /// Where the worker's turn stands
@@ -206,6 +212,8 @@ impl<'a> WorkItemStatus<'a> {
             adopted: item.adopted,
             worktree: &item.worktree,
             agent: &item.agent,
+            pinned: item.pinned,
+            waiting: None,
             session: &item.session,
             turn: &item.turn,
             phase: &item.phase,

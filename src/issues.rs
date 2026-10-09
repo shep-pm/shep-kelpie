@@ -1,7 +1,7 @@
 //! The issue writer: a request becomes issues an agent can build from
 //!
-//! `shep kelpie issue "<request>"` runs the `issue-writer` agent on its
-//! own, in a detached checkout of `origin/main`, and files what it writes
+//! `shep kelpie issue "<request>"` runs the agent `agents.issue_writer`
+//! names on its own, in a detached checkout of `origin/main`, and files what it writes
 //! as `ready-for-human` for the maintainer to read. Its session reads the
 //! repo, and its guard runs only the commands that file, label and link
 //! issues, and git's read-only ones. It ends with a list of what it filed,
@@ -22,7 +22,7 @@ use std::process::Command;
 use serde::Deserialize;
 
 use crate::adapters::{SystemClock, claude_settings};
-use crate::agents::{Agents, ISSUE_WRITER, Role, Runs};
+use crate::agents::{Agents, Role, Runs};
 use crate::board::{AGENT_LABEL, READY, agent_label};
 use crate::guard::IssueRules;
 use crate::ports::Clock;
@@ -37,11 +37,13 @@ use crate::worktree;
 
 mod prompt;
 
-pub use prompt::instructions;
+pub use prompt::{implementers, instructions};
 
 /// What the issue writer runs on, from its agent file
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Writer {
+    /// Its agent file's name, `agents.issue_writer`
+    pub name: AgentName,
     /// Its model and effort, on Claude Code
     pub model: RoleModel,
     /// Its file's body: its prompt
@@ -49,25 +51,25 @@ pub struct Writer {
 }
 
 impl Writer {
-    /// The `issue-writer` agent in `agents`
+    /// The agent `name` in `agents`, as `agents.issue_writer` names it
     ///
     /// # Errors
     ///
-    /// A message when `agents` has no `issue-writer`, or its file is another role's.
-    pub fn of(agents: &Agents) -> Result<Self, String> {
-        let name = AgentName::kelpies(ISSUE_WRITER);
-        let agent = agents.get(&name).ok_or_else(|| {
-            format!("there is no `{ISSUE_WRITER}` agent: `shep kelpie add` writes kelpie's own")
+    /// A message when `agents` has no `name`, or its file is another role's.
+    pub fn of(agents: &Agents, name: &AgentName) -> Result<Self, String> {
+        let agent = agents.get(name).ok_or_else(|| {
+            format!("there is no `{name}` agent: write `agents/{name}.md` in kelpie's home")
         })?;
         let (Role::IssueWriter, Runs::Session { model, .. }, Some(prompt)) =
             (agent.role, &agent.runs, &agent.prompt)
         else {
             return Err(format!(
-                "agent file `{ISSUE_WRITER}.md` is a {}'s: its role must be `issue-writer`",
+                "agent file `{name}.md` is a {}'s: its role must be `issue-writer`",
                 agent.role.as_str()
             ));
         };
         Ok(Self {
+            name: name.clone(),
             model: model.clone(),
             prompt: prompt.clone(),
         })
@@ -115,29 +117,60 @@ impl Mode {
 ///
 /// A message naming the label the forge would not read or make.
 pub fn make_labels(forge: &dyn Forge, project: &Project<'_>, mode: Mode) -> Result<(), String> {
-    let repo = project.remote;
+    let status = crate::flock::add::LABELS
+        .into_iter()
+        .find(|l| l.name == mode.status());
+    let agents = agent_labels(project.agents);
+    let wanted = status
+        .into_iter()
+        .chain(agents.iter().map(AgentLabel::new_label));
+    make_missing(forge, project.remote, wanted)
+}
+
+/// An implementer's `agent:<name>` label, as kelpie makes it on a repo
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentLabel {
+    name: String,
+    about: String,
+}
+
+impl AgentLabel {
+    /// The label to make
+    pub fn new_label(&self) -> NewLabel<'_> {
+        NewLabel {
+            name: &self.name,
+            color: "c5def5",
+            description: &self.about,
+        }
+    }
+}
+
+/// The `agent:` label of each implementer `agents` lists
+pub fn agent_labels(agents: &RoleAgents) -> Vec<AgentLabel> {
+    (agents.implementers.iter())
+        .map(|i| AgentLabel {
+            name: format!("{AGENT_LABEL}{}", i.name),
+            about: format!("Built by kelpie's {} agent", i.name),
+        })
+        .collect()
+}
+
+/// Makes each of `wanted` that `repo` lacks, in any case, and leaves every
+/// label it has as it is
+///
+/// # Errors
+///
+/// A message naming the label the forge would not read or make.
+pub fn make_missing<'a>(
+    forge: &dyn Forge,
+    repo: &ForgeSlug,
+    wanted: impl IntoIterator<Item = NewLabel<'a>>,
+) -> Result<(), String> {
     let slug = repo.as_str();
     let have = forge
         .repo_labels(repo)
         .map_err(|e| format!("cannot read {slug}'s labels: {e}"))?;
-    let status = crate::flock::add::LABELS
-        .into_iter()
-        .find(|l| l.name == mode.status());
-    let agents: Vec<(String, String)> = (project.agents.implementers.iter())
-        .map(|i| {
-            (
-                format!("{AGENT_LABEL}{}", i.name),
-                format!("Built by kelpie's {} agent", i.name),
-            )
-        })
-        .collect();
-    let wanted = status
-        .into_iter()
-        .chain(agents.iter().map(|(name, about)| NewLabel {
-            name,
-            color: "c5def5",
-            description: about,
-        }));
+    let wanted = wanted.into_iter();
     for label in wanted.filter(|l| !have.iter().any(|h| h.eq_ignore_ascii_case(l.name))) {
         forge
             .create_label(repo, &label)
@@ -240,7 +273,7 @@ pub fn headless(
     let ran = agents
         .prepare(&call)
         .and_then(|()| agents.run(&call, &Ending::default()));
-    record(project, &call, &ran, started);
+    record(project, writer, &call, &ran, started);
     let resume = |why: String| {
         format!(
             "{why}. Its checkout is kept: `cd {} && claude --resume {}` picks the session up",
@@ -272,6 +305,7 @@ pub fn headless(
 // written is told and let go, since what was filed stands either way.
 fn record(
     project: &Project<'_>,
+    writer: &Writer,
     call: &AgentCall,
     ran: &Result<ports::AgentReply, ports::AgentError>,
     started: ports::Timestamp,
@@ -279,7 +313,7 @@ fn record(
     let Some(ended) = usage::ended(ran) else {
         return;
     };
-    let draft = usage::Draft::of(call, ISSUE_WRITER, usage::CallKind::Issues, started);
+    let draft = usage::Draft::of(call, writer.name.as_str(), usage::CallKind::Issues, started);
     let spent = ran.as_ref().ok().map(usage::Spent::from);
     // A fresh session, so the call cost all of it.
     let line = draft.line(

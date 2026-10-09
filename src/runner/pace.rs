@@ -138,6 +138,17 @@ impl Runner {
         Ok(Pace::Clear)
     }
 
+    /// Paces the issue writer's call on its account, Claude's since it runs
+    /// on Claude Code alone, when no listed role spends that account and so
+    /// [`Runner::pace_dispatch`] has not read it
+    pub(super) fn pace_writer(&mut self) -> Result<Pace, StateError> {
+        let claude = Limit::Account(Account::Claude);
+        if self.spent_accounts().contains(&Account::Claude) {
+            return Ok(Pace::Clear);
+        }
+        self.pace(Scope::Dispatch, &claude)
+    }
+
     // Each implementer's limit, then each listed reviewer's that runs sessions.
     fn spent_limits(&self) -> impl Iterator<Item = &Limit> {
         let sessions = self.lineup.iter().filter_map(|r| r.runs.session());

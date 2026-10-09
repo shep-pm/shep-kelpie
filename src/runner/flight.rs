@@ -25,7 +25,7 @@ use super::replies::answer_replies;
 use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport};
 use super::review::run_review_call;
 use super::trigger::lock;
-use crate::ports::{AgentCall, AgentError, AgentReply, Ending, RoundStage, Timestamp};
+use crate::ports::{AgentCall, AgentError, AgentReply, Ending, RoundStage, Timestamp, Wait};
 use crate::settings::Harness;
 use crate::state::StateError;
 use crate::usage::{CallKind, Draft};
@@ -47,6 +47,8 @@ pub(super) struct Flights {
     flying: BTreeMap<u64, Flight>,
     // The project manager's call, its ceiling and its hold
     pm: Option<(Timestamp, Ending)>,
+    // The issue writer's call labelling an issue
+    labelling: Option<label::Labelling>,
     // Every call's line in the usage ledger, as it started
     ledger: InFlight,
     send: Sender<News>,
@@ -61,6 +63,7 @@ impl Default for Flights {
         Self {
             flying: BTreeMap::new(),
             pm: None,
+            labelling: None,
             ledger: InFlight::default(),
             send,
             news,
@@ -73,7 +76,12 @@ impl Flights {
     /// Whether no call is in flight, the project manager's included
     #[cfg(test)]
     fn idle(&self) -> bool {
-        self.flying.is_empty() && self.pm.is_none()
+        self.flying.is_empty() && self.pm.is_none() && self.labelling.is_none()
+    }
+
+    /// The issue the issue writer is labelling, while it is
+    pub(super) fn labelling(&self) -> Option<u64> {
+        self.labelling.as_ref().map(|l| l.issue)
     }
 
     /// Whether `issue`'s work item has a call in flight
@@ -113,7 +121,11 @@ impl Flights {
             issue: None,
             role: CallRole::Pm,
         });
-        items.chain(pm).collect()
+        let labelling = self.labelling.iter().map(|l| CallRunning {
+            issue: Some(l.issue),
+            role: CallRole::IssueWriter,
+        });
+        items.chain(pm).chain(labelling).collect()
     }
 
     /// The calls in flight as the usage ledger knows them
@@ -146,6 +158,14 @@ struct Flight {
     // Whether this call starts over a session that died before it began
     again: bool,
     watched: Watched,
+    // Whether a worker's turn is its work item's first, with no session to keep
+    first: bool,
+    // When the call began, past the lease it waited for
+    began_at: Option<Timestamp>,
+    // What the call last said it waits for, and since when
+    told: Option<(Timestamp, Wait)>,
+    // Where a first turn that waited too long moves
+    fallback: waiting::Fallback,
 }
 
 // What a call's thread sends the runner
@@ -156,6 +176,11 @@ enum News {
     },
     // The project manager's call ended
     Pm(End),
+    // The issue writer's call labelling an issue ended
+    Labelled {
+        issue: u64,
+        end: End,
+    },
     // A local round queued for the GPU or began to run. The call waits until
     // `_seen` drops, once the stage is saved, so its time is charged right.
     Stage {
@@ -168,6 +193,11 @@ enum News {
     Began {
         issue: u64,
         _seen: Sender<()>,
+    },
+    // The call waits for its model
+    Waits {
+        issue: u64,
+        wait: Wait,
     },
 }
 
@@ -226,6 +256,11 @@ impl Tell {
         self.until_heard(|seen| News::Began { issue, _seen: seen });
     }
 
+    fn waits(&self, wait: Wait) {
+        let issue = self.issue;
+        self.send(News::Waits { issue, wait });
+    }
+
     // Sends the news `news` makes, and waits until the runner has heard it.
     fn until_heard(&self, news: impl FnOnce(Sender<()>) -> News) {
         let (seen, heard) = mpsc::channel();
@@ -241,6 +276,7 @@ enum Launch {
         call: AgentCall,
         deadline: Timestamp,
         again: bool,
+        first: bool,
     },
     Review(ReviewCall),
 }
@@ -258,12 +294,15 @@ impl Runner {
         let now = self.ports.clock.now();
         let turns = (self.flights.flying.values())
             .filter(|flight| !flight.ending.asked())
-            .filter_map(|flight| flight.deadline);
+            .filter_map(|flight| flight.deadline)
+            .chain(self.fallback_due());
         let pm = (self.flights.pm.iter())
             .filter(|(_, ending)| !ending.asked())
             .map(|(deadline, _)| *deadline);
+        let labelling = (self.flights.labelling.iter()).filter_map(label::Labelling::ceiling);
         turns
             .chain(pm)
+            .chain(labelling)
             .map(|deadline| Duration::from_secs(deadline.0.saturating_sub(now.0)))
             .min()
     }
@@ -281,6 +320,9 @@ impl Runner {
             && *deadline <= now
         {
             ending.end();
+        }
+        if let Some(labelling) = &self.flights.labelling {
+            labelling.end_overdue(now);
         }
     }
 
@@ -323,7 +365,10 @@ impl Runner {
             && flight.deadline.is_some()
         {
             flight.deadline = Some(Timestamp(now.0.saturating_add(flight.left)));
+            flight.began_at = Some(now);
+            flight.told = None;
         }
+        self.board_changed();
     }
 
     // Begins what is due next, starting the call it names. `start_over` is
@@ -333,12 +378,21 @@ impl Runner {
         let launch = match begin {
             Begin::Idle => return Ok(Pass::Idle),
             Begin::Report(report) => return Ok(Pass::Report(report)),
-            Begin::Call { call, deadline } => Launch::Turn {
+            Begin::Call {
+                call,
+                deadline,
+                first,
+            } => Launch::Turn {
                 call,
                 deadline,
                 again: start_over.is_some(),
+                first,
             },
             Begin::Review(action) => Launch::Review(action),
+            Begin::Label(issue) => {
+                let report = self.ask_writer(&issue)?;
+                return Ok(report.map_or(Pass::Started, Pass::Report));
+            }
         };
         let issue = self.focus.expect("a call is a work item's");
         self.launch(issue, launch);
@@ -352,18 +406,30 @@ impl Runner {
             news: self.flights.send.clone(),
             wake: self.flights.wake.clone(),
         };
-        let ending = Ending::telling({
-            let tell = tell.clone();
-            move || tell.began()
-        });
+        let ending = Ending::telling(
+            {
+                let tell = tell.clone();
+                move || tell.began()
+            },
+            {
+                let tell = tell.clone();
+                move |wait| tell.waits(wait)
+            },
+        );
         // A turn's harness, which a turn that cannot start names
-        let (deadline, again, harness) = match &launch {
+        let (deadline, again, first, harness) = match &launch {
             Launch::Turn {
                 call,
                 deadline,
                 again,
-            } => (Some(*deadline), *again, Some(call.harness.harness())),
-            Launch::Review(_) => (None, false, None),
+                first,
+            } => (
+                Some(*deadline),
+                *again,
+                *first,
+                Some(call.harness.harness()),
+            ),
+            Launch::Review(_) => (None, false, false, None),
         };
         let role = harness.map_or("reviewer", |_| "worker");
         let now = self.ports.clock.now();
@@ -426,6 +492,10 @@ impl Runner {
             ending,
             again,
             watched,
+            first,
+            began_at: None,
+            told: None,
+            fallback: waiting::Fallback::Stays,
         };
         self.flights.flying.insert(issue, flight);
         self.board_changed();
@@ -449,6 +519,10 @@ impl Runner {
                 Pass::Report(report) => Ok(Some(report)),
                 Pass::Idle | Pass::Started => Ok(None),
             };
+        }
+        if let Some(moved) = self.fell_back(issue, &result) {
+            self.flights.flying.remove(&issue);
+            return moved;
         }
         let ended = self.on(Some(issue)).end_turn(result);
         self.flights.flying.remove(&issue);
@@ -521,6 +595,7 @@ fn one_pass(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
         }
     }
     lock(runner).end_overdue();
+    lock(runner).fall_back();
     let alerts = Arc::clone(&lock(runner).ports.alerts);
     if let Some(posted) = post_due(runner, alerts.as_ref()) {
         return posted.map(Pass::Report);
@@ -551,6 +626,11 @@ fn hear(runner: &Mutex<Runner>, news: News) -> Result<Option<StepReport>, StateE
             runner.began(issue);
             return Ok(None);
         }
+        News::Waits { issue, wait } => {
+            runner.told(issue, wait);
+            return Ok(None);
+        }
+        News::Labelled { issue, end } => return runner.label_ended(issue, end),
         News::Ended { issue, end } => (issue, end),
         News::Pm(end) => {
             runner.flights.pm = None;
@@ -558,7 +638,7 @@ fn hear(runner: &Mutex<Runner>, news: News) -> Result<Option<StepReport>, StateE
             return match end {
                 End::Turn(result) => {
                     if let Some(open) = &open {
-                        runner.pm_line(open, &result);
+                        runner.plain_line(open, &result);
                     }
                     runner.pm_ended(result)
                 }
@@ -650,5 +730,9 @@ fn step_once(runner: &Mutex<Runner>) -> Result<Option<StepReport>, StateError> {
     }
 }
 
+pub(super) mod label;
 #[cfg(test)]
 mod tests;
+mod waiting;
+
+pub(super) use waiting::Waiting;

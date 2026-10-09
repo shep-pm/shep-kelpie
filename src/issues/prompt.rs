@@ -38,14 +38,15 @@ pub fn instructions(writer: &Writer, project: &Project<'_>, mode: Mode) -> Strin
     )
 }
 
-// The listed implementers, the default first, as an `agent:` label names them.
-fn implementers(agents: &RoleAgents) -> String {
+/// The listed implementers, the default first, as an `agent:` label names them
+pub fn implementers(agents: &RoleAgents) -> String {
     let default = &agents.default_implementer;
     let line = |i: &Implementer| {
-        let what = match i.is_local() {
-            true => ", a local model, which runs only the issues labelled for it",
-            false if i.name == default.name => ", the default",
-            false => "",
+        let what = match (i.name == default.name, i.is_local()) {
+            (true, true) => ", the default, a local model",
+            (true, false) => ", the default",
+            (false, true) => ", a local model",
+            (false, false) => "",
         };
         format!(
             "- `{}`: {} at {} effort{what}",

@@ -37,6 +37,35 @@ pub enum StepReport {
         /// Older ready issues the board passed over, and why
         skipped: Vec<Skip>,
     },
+    /// The issue writer labelled an issue for the implementer it picked
+    Labelled {
+        /// The issue
+        issue: u64,
+        /// The implementer its label names
+        agent: AgentName,
+    },
+    /// The issue writer could not label an issue, so a ruling asks the
+    /// maintainer to, and the board passes it over until it is answered
+    Unlabelled {
+        /// The issue
+        issue: u64,
+        /// The ruling's id
+        id: u64,
+        /// The question, with the triggers that answer it
+        question: String,
+    },
+    /// A work item's first turn waited for its model past
+    /// `agents.fallback_after`, and moved to the next implementer listed
+    FellBack {
+        /// The work item's issue
+        issue: u64,
+        /// The implementer its first turn waited on
+        from: AgentName,
+        /// The implementer its next turn runs on
+        to: AgentName,
+        /// How long it waited, in seconds
+        waited: u64,
+    },
     /// A pull request kelpie opened asked for a rework, which opened a work
     /// item
     Reworked {
@@ -620,12 +649,17 @@ impl StepReport {
 pub(super) enum Begin {
     Idle,
     Report(StepReport),
-    /// A worker's turn, ended at `deadline` if it runs that long
+    /// A worker's turn, ended at `deadline` if it runs that long. `first`
+    /// is its work item's first, which has no session to keep.
     Call {
         call: AgentCall,
         deadline: Timestamp,
+        first: bool,
     },
     Review(ReviewCall),
+    /// The issue writer's call to label an issue the board would open with
+    /// no `agent:` label
+    Label(crate::board::ReadyIssue),
 }
 
 /// A review call, which runs in flight like a turn

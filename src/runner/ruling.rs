@@ -55,6 +55,9 @@ pub enum RuleError {
     NotAQuestion(u64),
     /// The ruling is not a merge ruling, and was given a rework
     NotAMerge(u64),
+    /// The ruling asks for an issue's label, which no note can give, and
+    /// was given a no
+    YesOnly(u64),
     /// The `ready-for-human` label could not come off this pull request
     Unlabel(u64, String),
     /// The worktree could not be brought to the head a yes accepted
@@ -78,6 +81,11 @@ impl fmt::Display for RuleError {
             Self::NotAMerge(id) => write!(
                 f,
                 "ruling {id} is not a merge ruling, so it takes a yes, or a no with a note"
+            ),
+            Self::YesOnly(id) => write!(
+                f,
+                "ruling {id} waits on an issue's `agent:` label, which no worker can take a \
+                 note for: label the issue, then answer yes"
             ),
             Self::Unlabel(number, e) => {
                 write!(f, "cannot take the `{HUMAN}` label off #{number}: {e}")
@@ -467,6 +475,7 @@ fn stuck_comment(reason: &Stuck) -> String {
         Stuck::TurnTimeout { .. } => {
             "The work on this pull request ran too long and was stopped.".to_owned()
         }
+        Stuck::Unlabelled { .. } => "No implementer was picked for this issue.".to_owned(),
         Stuck::TurnFailed { .. } => {
             "The work on this pull request hit an error and stopped.".to_owned()
         }
@@ -539,6 +548,9 @@ fn decide(
             });
         }
         (Answer::Rework(_), _) => return Err(RuleError::NotAMerge(id)),
+        (Answer::No(_), RulingKind::Stuck(Stuck::Unlabelled { .. })) => {
+            return Err(RuleError::YesOnly(id));
+        }
         // A fix turn resumes in its round, which checks it pushed.
         (Answer::Yes, RulingKind::Stuck(Stuck::TurnTimeout { phase })) => {
             return Ok(Move::Turn {
@@ -593,6 +605,8 @@ fn decide(
             since: now,
         },
         (Answer::Yes, RulingKind::Stuck(Stuck::Closed)) => Phase::Done { merged: false },
+        // No work item is parked on it, so an answer only clears it.
+        (Answer::Yes, RulingKind::Stuck(Stuck::Unlabelled { .. })) => Phase::Implement,
         (Answer::Yes, RulingKind::Stuck(Stuck::LocalModelSpilled { review, .. })) => {
             Phase::Review(review)
         }
@@ -763,6 +777,15 @@ pub(super) fn question(id: u64, issue: u64, number: Option<u64>, kind: &RulingKi
                 return format!(
                     "The worker's turn on {about} failed: {}. {yes} tries that step again, \
                      and {no} stops the work item{kept}.",
+                    why.trim()
+                );
+            }
+            Stuck::Unlabelled { why } => {
+                return format!(
+                    "The issue writer could not pick an implementer for {about}: {}. Label \
+                     it `agent:<name>` for one `agents.implementers` lists, then answer {yes}: \
+                     the board takes it once this is answered, and an issue still unlabelled \
+                     goes to the issue writer again.",
                     why.trim()
                 );
             }
