@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use serde_json::json;
 
-use crate::board::READY;
+use crate::board::{READY, TRIAGE};
 use crate::ports::{Checks, Finding, Severity};
 use crate::runner::coderabbit::tests::{fixed, hold_a_finding, summoned};
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
@@ -112,14 +112,15 @@ fn finished(report: Option<StepReport>) -> bool {
 }
 
 #[test]
-fn under_auto_an_unfixed_confirmed_finding_files_one_issue_on_the_board() {
+fn under_file_an_unfixed_confirmed_finding_files_one_issue_for_triage() {
     let found = [racy()];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
 
     assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
     let [issue] = rig.forge.created().try_into().unwrap();
     assert_eq!(issue.title, "looks racy");
-    assert_eq!(issue.labels, [READY]);
+    assert_eq!(issue.labels, [TRIAGE]);
+    assert!(issue.body.contains("waits on triage"), "{}", issue.body);
     assert!(issue.body.contains("#71"), "{}", issue.body);
     assert!(issue.body.contains("`src/lib.rs:9`"), "{}", issue.body);
     assert!(
@@ -127,9 +128,34 @@ fn under_auto_an_unfixed_confirmed_finding_files_one_issue_on_the_board() {
         "{}",
         issue.body
     );
-    assert!(finished(after_merge(&runner)));
+    assert!(
+        finished(after_merge(&runner)),
+        "#900 is not on the board, so nothing opens it"
+    );
     assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
     assert_eq!(rig.forge.created().len(), 1, "filed once, not again");
+}
+
+#[test]
+fn a_repo_without_the_triage_label_gets_it_once_and_the_findings_are_filed() {
+    let found = [racy(), finding("src/main.rs", "leaks a handle")];
+    let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
+    rig.forge.set_repo_labels(&["bug"]);
+
+    assert_eq!(after_merge(&runner), filed(&[900, 901], &[], 0));
+    assert_eq!(rig.forge.repo_labels_now(), ["bug", TRIAGE]);
+    let labels: Vec<_> = rig.forge.created().into_iter().map(|i| i.labels).collect();
+    assert_eq!(labels, [[TRIAGE], [TRIAGE]]);
+}
+
+#[test]
+fn a_triage_label_the_repo_has_in_another_case_is_left_as_it_is() {
+    let found = [racy()];
+    let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
+    rig.forge.set_repo_labels(&["Needs-Triage"]);
+
+    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert_eq!(rig.forge.repo_labels_now(), ["Needs-Triage"]);
 }
 
 #[test]
@@ -385,7 +411,9 @@ fn a_forge_that_keeps_refusing_is_retried_for_hours_and_then_the_maintainer_is_a
     rig.forge.set_issues_down(false);
     rig.ask(&runner, "rule", Some(&format!("{id} yes")));
     assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
-    assert!(ends_beside_900(&runner));
+    let [issue] = rig.forge.created().try_into().unwrap();
+    assert_eq!(issue.labels, [TRIAGE], "a yes to try again triages nothing");
+    assert!(finished(after_merge(&runner)));
 }
 
 #[test]
@@ -603,9 +631,14 @@ fn under_ask_the_findings_are_a_ruling_first_and_a_yes_files_them() {
         "the merged pull request is left alone"
     );
 
+    rig.forge.set_repo_labels(&["bug", READY]);
     rig.ask(&runner, "rule", Some(&format!("{id} yes")));
     assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
-    assert_eq!(rig.forge.created().len(), 1);
+    let [issue] = rig.forge.created().try_into().unwrap();
+    assert_eq!(issue.labels, [READY], "the yes was its triage");
+    assert!(!issue.body.contains("triage"), "{}", issue.body);
+    let unmade = ["bug", READY];
+    assert_eq!(rig.forge.repo_labels_now(), unmade, "no triage label made");
     assert!(ends_beside_900(&runner));
     let status = rig.ask(&runner, "status", None);
     let open = status["work_items"].as_array().unwrap();
