@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use super::api::{ApiError, GithubApi, IssuedToken, Signer};
 use super::{App, Apps, Owner, StoreError};
@@ -140,7 +140,10 @@ pub struct AppTokens {
     api: Box<dyn GithubApi>,
     signer: Box<dyn Signer>,
     clock: Box<dyn Clock + Sync>,
+    // The map is held only to read or write it; each flight is held across
+    // the calls to GitHub for its App and repo.
     kept: Mutex<Kept>,
+    flights: Mutex<BTreeMap<(u64, String), Arc<Mutex<()>>>>,
 }
 
 impl fmt::Debug for AppTokens {
@@ -165,6 +168,7 @@ impl AppTokens {
             signer,
             clock,
             kept: Mutex::new(Kept::default()),
+            flights: Mutex::default(),
         }
     }
 
@@ -182,17 +186,27 @@ impl GithubApp for AppTokens {
         let owner = Owner::of(repo).map_err(TokenError::Owner)?;
         let app = (self.apps.get(&owner).map_err(TokenError::Store)?)
             .ok_or_else(|| TokenError::NoApp(owner.clone()))?;
-        let now = self.clock.now();
-        // Held across the calls, so two askers never mint for one installation at once.
-        let mut kept = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
         let key = (app.id, repo.as_str().to_ascii_lowercase());
-        let installation = kept.installations.get(&key).copied();
+        // One flight per App and repo, held across the calls: two askers for
+        // one repo never mint at once, and a slow answer stalls no other repo.
+        let flight = {
+            let mut flights = self.flights.lock().unwrap_or_else(PoisonError::into_inner);
+            Arc::clone(flights.entry(key.clone()).or_default())
+        };
+        let _flight = flight.lock().unwrap_or_else(PoisonError::into_inner);
+        let now = self.clock.now();
         let token_key = |id: u64| (key.0, key.1.clone(), id);
-        if let Some(issued) = installation.and_then(|id| kept.tokens.get(&token_key(id)))
-            && now.0.saturating_add(REMINT_BEFORE) < issued.expires_at.0
-        {
-            return Ok(issued.token.clone());
-        }
+        let installation = {
+            let kept = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
+            let installation = kept.installations.get(&key).copied();
+            let issued = installation.and_then(|id| kept.tokens.get(&token_key(id)));
+            if let Some(issued) = issued
+                && now.0.saturating_add(REMINT_BEFORE) < issued.expires_at.0
+            {
+                return Ok(issued.token.clone());
+            }
+            installation
+        };
         let jwt = self.jwt(&app, &owner, now)?;
         let id = match installation {
             Some(id) => id,
@@ -207,12 +221,14 @@ impl GithubApp for AppTokens {
             Ok(issued) => issued,
             // The App was taken off the repo, or its installation is gone.
             Err(e @ ApiError::Refused(401 | 404)) => {
+                let mut kept = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
                 kept.tokens.remove(&token_key(id));
                 kept.installations.remove(&key);
                 return Err(e.into());
             }
             Err(e) => return Err(e.into()),
         };
+        let mut kept = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
         kept.tokens.insert(token_key(id), issued.clone());
         kept.installations.insert(key, id);
         Ok(issued.token)

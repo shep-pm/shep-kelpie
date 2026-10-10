@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use super::FakeClock;
 use crate::github::tokens::Jwt;
 use crate::github::{
-    ApiError, AppTokens, Apps, Conversion, GithubApi, InstallationToken, IssuedToken, Pem, Signer,
+    ApiError, AppTokens, Apps, Call, Conversion, GithubApi, InstallationToken, IssuedToken, Pem,
+    Signer,
 };
 use crate::ports::{Clock, Timestamp};
 use crate::settings::ForgeSlug;
@@ -23,6 +24,8 @@ pub(crate) enum Asked {
     Installation(String),
     /// An installation's token, and the repo it was asked to reach
     AccessToken(u64, String),
+    /// A write, and the token it was made with
+    Write(String, Call),
 }
 
 #[derive(Debug, Default)]
@@ -35,6 +38,7 @@ struct Hub {
     asked: Vec<Asked>,
     jwts: Vec<String>,
     minted: u32,
+    issues: u64,
 }
 
 /// GitHub as kelpie's App sees it: one code converts to an App owned by
@@ -158,6 +162,21 @@ impl GithubApi for FakeGithub {
             token: InstallationToken::new(format!("ghs_test{}", hub.minted)),
             expires_at: Timestamp(self.clock.now().0 + Self::LIFETIME),
         })
+    }
+
+    // A new issue answers with the next number from 900, clear of any a test opens by hand.
+    fn write(&self, token: &InstallationToken, call: &Call) -> Result<String, ApiError> {
+        let mut hub = self.hub.lock().unwrap();
+        hub.asked
+            .push(Asked::Write(token.expose().to_owned(), call.clone()));
+        if let Some(error) = hub.failures.pop_front() {
+            return Err(error);
+        }
+        if call.path.ends_with("/issues") {
+            hub.issues += 1;
+            return Ok(format!(r#"{{"number":{}}}"#, 899 + hub.issues));
+        }
+        Ok("{}".to_owned())
     }
 }
 

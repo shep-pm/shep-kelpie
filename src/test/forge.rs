@@ -67,6 +67,7 @@ pub(crate) struct FakeForge {
     default_branch: Arc<Mutex<String>>,
     repo_labels: Arc<Mutex<Vec<String>>>,
     pushes: Arc<AtomicBool>,
+    owner_is_user: Arc<AtomicBool>,
     bot_seen: Arc<AtomicBool>,
     viewer_down: Arc<Mutex<Option<ForgeError>>>,
     // Every call made, and the board's reads among them
@@ -146,6 +147,7 @@ impl FakeForge {
             default_branch: Arc::new(Mutex::new("main".to_owned())),
             repo_labels: Arc::default(),
             pushes: Arc::new(AtomicBool::new(true)),
+            owner_is_user: Arc::default(),
             bot_seen: Arc::new(AtomicBool::new(true)),
             viewer_down: Arc::default(),
             asked: Arc::default(),
@@ -177,6 +179,11 @@ impl FakeForge {
     /// Whether the account may push to the repo, which it may until a test says not
     pub(crate) fn set_can_push(&self, pushes: bool) {
         self.pushes.store(pushes, Ordering::SeqCst);
+    }
+
+    /// Whether the repo's owner is a user, which it is not until a test says so
+    pub(crate) fn set_owner_is_user(&self, user: bool) {
+        self.owner_is_user.store(user, Ordering::SeqCst);
     }
 
     /// Whether a review bot has ever commented on the repo, which it has until a test says not
@@ -573,6 +580,11 @@ impl Forge for FakeForge {
     fn can_push(&self, _repo: &ForgeSlug) -> Result<bool, ForgeError> {
         self.ask()?;
         Ok(self.pushes.load(Ordering::SeqCst))
+    }
+
+    fn owner_is_user(&self, _repo: &ForgeSlug) -> Result<bool, ForgeError> {
+        self.ask()?;
+        Ok(self.owner_is_user.load(Ordering::SeqCst))
     }
 
     fn review_bot_seen(&self, _repo: &ForgeSlug, _login: Login<'_>) -> Result<bool, ForgeError> {

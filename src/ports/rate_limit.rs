@@ -140,6 +140,10 @@ impl Forge for RateHeld {
         self.call(|f| f.create_label(repo, label))
     }
 
+    fn owner_is_user(&self, repo: &ForgeSlug) -> Result<bool, ForgeError> {
+        self.call(|f| f.owner_is_user(repo))
+    }
+
     fn can_push(&self, repo: &ForgeSlug) -> Result<bool, ForgeError> {
         self.call(|f| f.can_push(repo))
     }

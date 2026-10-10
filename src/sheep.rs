@@ -20,12 +20,14 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::adapters::{
-    ClaudeCli, Curl, Gh, GpuCurl, LocalReviewer, ShepLeases, SystemClock, stop_calls,
+    ClaudeCli, Curl, CurlGithub, Gh, GpuCurl, LocalReviewer, Openssl, ShepLeases, SystemClock,
+    stop_calls,
 };
 use crate::coderabbit::CodeRabbit;
 use crate::codex::Codex;
 use crate::cubic::Cubic;
 use crate::flock::control;
+use crate::github::{AppTokens, AppVoice, Apps};
 use crate::lease::Epoch;
 use crate::lease::saved::BookFile;
 use crate::lease::wire::{Asker, GRANT};
@@ -167,6 +169,12 @@ fn serve(project: &str) -> Result<(), Exit> {
     let epoch = Epoch(u64::from(std::process::id()));
     let book = BookFile::new(kelpie_home.join(crate::dog::BOOK));
     let leases = Arc::new(ShepLeases::new(shepherd.clone(), Asker::new(epoch), book));
+    let app_tokens = Arc::new(AppTokens::new(
+        Apps::under(&kelpie_home),
+        Box::new(CurlGithub),
+        Box::new(Openssl),
+        Box::new(SystemClock),
+    ));
     let ports = Ports {
         agents: Arc::new(Routed::new(
             Arc::new(claude.clone()),
@@ -174,6 +182,7 @@ fn serve(project: &str) -> Result<(), Exit> {
             Arc::new(claude.codex(codex_home.clone())),
         )),
         forge: Box::new(Gh),
+        voice: Arc::new(AppVoice::new(app_tokens, Box::new(CurlGithub))),
         meter: Box::new(claude.meter()),
         codex_meter: Box::new(claude.codex_meter(codex_home)),
         reviewer: Arc::new(reviewer.clone()),

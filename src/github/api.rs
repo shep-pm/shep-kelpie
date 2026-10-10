@@ -10,7 +10,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use super::tokens::{InstallationToken, Jwt};
-use crate::ports::Timestamp;
+use crate::ports::{NewLabel, Timestamp};
 use crate::settings::ForgeSlug;
 
 /// An App's private key in PEM, as the conversion hands it back
@@ -135,6 +135,125 @@ pub trait GithubApi: Send + Sync {
         installation: u64,
         repo: &ForgeSlug,
     ) -> Result<IssuedToken, ApiError>;
+
+    /// Makes `call` as the App whose installation `token` is, and returns
+    /// the answer's body
+    ///
+    /// # Errors
+    ///
+    /// [`ApiError`] when GitHub cannot be reached or does not take the call.
+    fn write(&self, token: &InstallationToken, call: &Call) -> Result<String, ApiError>;
+}
+
+/// How a write is sent
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verb {
+    /// `POST`
+    Post,
+    /// `DELETE`
+    Delete,
+}
+
+/// One write kelpie makes as its App, in the shape GitHub's REST
+/// documentation gives for it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Call {
+    /// How it is sent
+    pub verb: Verb,
+    /// Its path under the API's root, such as `/repos/o/n/issues/4/comments`
+    pub path: String,
+    /// Its JSON body, when it has one
+    pub body: Option<String>,
+}
+
+impl Call {
+    /// A comment on issue or pull request `thread`,
+    /// `POST /repos/{owner}/{repo}/issues/{thread}/comments`
+    pub fn comment(repo: &ForgeSlug, thread: u64, body: &str) -> Self {
+        Self::post(
+            format!("/repos/{}/issues/{thread}/comments", repo.as_str()),
+            serde_json::json!({ "body": body }),
+        )
+    }
+
+    /// A new issue, `POST /repos/{owner}/{repo}/issues`
+    pub fn issue(repo: &ForgeSlug, title: &str, body: &str, labels: &[&str]) -> Self {
+        Self::post(
+            format!("/repos/{}/issues", repo.as_str()),
+            serde_json::json!({ "title": title, "body": body, "labels": labels }),
+        )
+    }
+
+    /// A new label on the repo, `POST /repos/{owner}/{repo}/labels`
+    pub fn label(repo: &ForgeSlug, label: &NewLabel<'_>) -> Self {
+        Self::post(
+            format!("/repos/{}/labels", repo.as_str()),
+            serde_json::json!({
+                "name": label.name,
+                "color": label.color,
+                "description": label.description,
+            }),
+        )
+    }
+
+    /// `label` put on issue `number`,
+    /// `POST /repos/{owner}/{repo}/issues/{number}/labels`
+    pub fn put_label(repo: &ForgeSlug, number: u64, label: &str) -> Self {
+        Self::post(
+            format!("/repos/{}/issues/{number}/labels", repo.as_str()),
+            serde_json::json!({ "labels": [label] }),
+        )
+    }
+
+    /// `label` taken off issue `number`,
+    /// `DELETE /repos/{owner}/{repo}/issues/{number}/labels/{name}`
+    pub fn take_label(repo: &ForgeSlug, number: u64, label: &str) -> Self {
+        Self {
+            verb: Verb::Delete,
+            path: format!(
+                "/repos/{}/issues/{number}/labels/{}",
+                repo.as_str(),
+                path_segment(label)
+            ),
+            body: None,
+        }
+    }
+
+    fn post(path: String, body: Value) -> Self {
+        Self {
+            verb: Verb::Post,
+            path,
+            body: Some(body.to_string()),
+        }
+    }
+}
+
+// `text` as one path segment: all but letters, digits and `-_.~` is
+// percent-encoded, so a label's `:` or space cannot end the segment.
+fn path_segment(text: &str) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(char::from(byte));
+            }
+            byte => {
+                let _ = write!(out, "%{byte:02X}");
+            }
+        }
+    }
+    out
+}
+
+/// The number in a new issue's answer
+///
+/// # Errors
+///
+/// [`ApiError::Unreadable`] when it has none.
+pub fn parse_number(body: &str) -> Result<u64, ApiError> {
+    let v: Value = serde_json::from_str(body).map_err(|_| ApiError::Unreadable("number"))?;
+    v["number"].as_u64().ok_or(ApiError::Unreadable("number"))
 }
 
 /// Signs with an App's private key: RS256, an RSA signature over SHA-256

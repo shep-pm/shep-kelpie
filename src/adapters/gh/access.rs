@@ -17,6 +17,19 @@ pub(super) fn can_push(repo: &ForgeSlug) -> Result<bool, ForgeError> {
     ])?)
 }
 
+pub(super) fn owner_is_user(repo: &ForgeSlug) -> Result<bool, ForgeError> {
+    let path = format!("users/{}", repo.owner());
+    parse_owner_type(&gh(&["api", &path, "--jq", ".type"])?)
+}
+
+fn parse_owner_type(stdout: &[u8]) -> Result<bool, ForgeError> {
+    match String::from_utf8_lossy(stdout).trim() {
+        "User" => Ok(true),
+        "Organization" => Ok(false),
+        _ => Err(unreadable(stdout)),
+    }
+}
+
 // GitHub's search finds a bot's comments by its app name, which is the
 // GraphQL login.
 pub(super) fn review_bot_seen(repo: &ForgeSlug, login: Login<'_>) -> Result<bool, ForgeError> {
@@ -58,6 +71,14 @@ fn parse_found(stdout: &[u8]) -> Result<bool, ForgeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // `gh api users/<owner> --jq .type` prints the type and a newline.
+    #[test]
+    fn an_owner_is_a_user_or_an_organization_and_nothing_else() {
+        assert!(parse_owner_type(b"User\n").unwrap());
+        assert!(!parse_owner_type(b"Organization\n").unwrap());
+        assert!(parse_owner_type(b"Bot\n").is_err());
+    }
 
     // Recorded from gh 2.96: `gh repo view <repo> --json viewerPermission`
     // on this repo, as its maintainer, and on cli/cli, as a stranger.

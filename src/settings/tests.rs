@@ -108,6 +108,27 @@ fn the_remote_may_be_left_to_the_checkout_s_origin() {
 }
 
 #[test]
+fn the_maintainer_is_a_github_login_and_may_be_left_out() {
+    assert_eq!(parse(EXAMPLE).unwrap().git.maintainer, None);
+    for (written, login) in [("octocat", "octocat"), ("@Octo-Cat", "Octo-Cat")] {
+        let text = EXAMPLE.replace(
+            "issues = \"ask\"\n",
+            &format!("issues = \"ask\"\nmaintainer = \"{written}\"\n"),
+        );
+        let maintainer = parse(&text).unwrap().git.maintainer;
+        assert_eq!(maintainer.unwrap().as_str(), login);
+    }
+    for bad in ["", "-octo", "octo cat", "octo/cat"] {
+        let text = EXAMPLE.replace(
+            "issues = \"ask\"\n",
+            &format!("issues = \"ask\"\nmaintainer = \"{bad}\"\n"),
+        );
+        let err = parse_err(&text);
+        assert!(err.contains("must be a GitHub login"), "{bad:?}: {err}");
+    }
+}
+
+#[test]
 fn the_issues_setting_asks_files_or_skips_and_asks_when_absent() {
     for (value, filing) in [
         ("ask", Filing::Ask),
