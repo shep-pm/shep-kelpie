@@ -23,7 +23,7 @@ use crate::pacer::Scope;
 use crate::ports::{AgentCall, AgentError, AgentReply, Role, Session, Tools};
 use crate::skills::Step;
 use crate::state::StateError;
-use crate::work_item::{Phase, WorkItem};
+use crate::work_item::{Phase, Seat, WorkItem};
 
 /// How long a retro gets, in seconds
 pub(super) const CEILING: u64 = 15 * 60;
@@ -62,9 +62,10 @@ impl Runner {
     /// Starts the retro of the work item `finish` is ending, unless it has
     /// asked already or has none to ask
     ///
-    /// Returns the call to run, or `Begin::Idle` to wait while the runner
-    /// drains, and `None` when the end goes on at once: the retro is off,
-    /// was asked, has no session to look back on, or cannot start (logged).
+    /// Returns the call to run, and `None` when the end goes on at once: the
+    /// retro is off, was asked, has no session to look back on, or cannot
+    /// start (logged). A draining runner starts no call, and an upgrade or a
+    /// pause waits on a merged item's end, so it skips the retro.
     ///
     /// # Errors
     ///
@@ -75,17 +76,22 @@ impl Runner {
         if item.retro || !ran || self.skills.off(Step::Retro) {
             return Ok(None);
         }
-        if self.draining {
-            return Ok(Some(Begin::Idle));
-        }
         let issue = item.issue;
-        let call = match self.pace_worker(Scope::Turn)?.holds() {
-            Some(_) => Err("the pacer holds the worker's account".to_owned()),
-            None => self.retro_call(),
+        let call = if self.draining {
+            Err("the runner is draining".to_owned())
+        } else {
+            match self.pace_worker(Scope::Turn)?.holds() {
+                Some(_) => Err("the pacer holds the worker's account".to_owned()),
+                None => self.retro_call(),
+            }
         };
         // Marked before the call starts: a stop or a crash in the middle of
-        // it does not ask again.
-        self.update(|item| item.retro = true)?;
+        // it does not ask again. The slot goes with it, so the board is not
+        // held back for as long as the retro runs.
+        self.update(|item| {
+            item.retro = true;
+            item.seat = Seat::Without;
+        })?;
         match call {
             Ok(call) => Ok(Some(Begin::Retro(call))),
             Err(why) => {

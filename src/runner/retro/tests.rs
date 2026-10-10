@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::ports::{AgentCall, AgentError, Role, Session, Tools};
+use crate::ports::{AgentCall, AgentError, Checks, Role, Session, Tools};
+use crate::runner::flight::advance;
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::settings::Harness;
 use crate::test::{Hold, NO_RETRO, Rig, Scripted};
@@ -290,4 +291,52 @@ fn a_retro_skill_that_cannot_load_runs_kelpies_own_prompt() {
     );
     assert_eq!(retro.tools, Tools::Retro);
     assert_eq!(saved(&rig).len(), 1);
+}
+
+#[test]
+fn a_retro_in_flight_holds_no_slot_so_the_next_issue_opens() {
+    // Under `auto` the item never parks, so it keeps its slot to the end.
+    let (rig, runner, head) = Rig::with_pull_request_set("koji", |rig| {
+        rig.retro_on();
+        rig.merge_auto();
+    });
+    rig.forge.set_checks(&head, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::MarkedReady { .. })
+    ));
+    let hold = Hold::default();
+    rig.claude.script([Scripted::Hold(hold.clone())]);
+    rig.clock.advance(CHECKS_SETTLE);
+    std::thread::scope(|scope| {
+        let retro = scope.spawn(|| step(&runner));
+        let began = hold.entered(PATIENCE);
+        rig.forge.list_ready(8, false);
+        // The merge notice goes first, then the board.
+        let passes: Vec<String> = (0..3)
+            .filter(|_| began)
+            .map(|_| format!("{:?}", advance(&runner).unwrap()))
+            .collect();
+        hold.release();
+        retro.join().unwrap().unwrap();
+        assert!(began, "the retro never began");
+        assert!(
+            passes.iter().any(|p| p.contains("Dispatched { issue: 8")),
+            "{passes:#?}"
+        );
+    });
+}
+
+#[test]
+fn a_runner_that_drains_skips_the_retro_and_still_ends_the_merged_item() {
+    let (rig, runner) = parked_with_retro();
+    rig.ask(&runner, "drain", None);
+    merge(&rig, &runner);
+
+    assert_eq!(retro_calls(&rig), []);
+    assert_eq!(saved(&rig), Vec::<PathBuf>::new());
+    assert!(!rig.worktree_7().exists());
+    let notes = notes(&runner);
+    assert!(notes.contains("#7: no retro"), "{notes}");
+    assert!(notes.contains("draining"), "{notes}");
 }
