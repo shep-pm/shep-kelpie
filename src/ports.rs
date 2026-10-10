@@ -38,7 +38,7 @@ pub use gpu::{Gpu, GpuError, GpuMetrics};
 pub use leased::{Leased, LocalLeases};
 pub use local_paths::Guarded;
 pub use model_seat::ModelSeat;
-pub use rate_limit::{ForgeHold, RateHeld};
+pub use rate_limit::{ForgeHold, RateHeld, Say};
 pub use reviewer::{Reviewer, ReviewerError, RoundStage};
 pub use routed::Routed;
 pub use sandbox::{Forward, Policy, Sandbox, SandboxError, Unreadable};

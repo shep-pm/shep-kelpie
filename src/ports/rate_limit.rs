@@ -4,7 +4,7 @@
 //! with its rate limit used up holds every later call until the limit
 //! resets, read once from the forge, or for [`FALLBACK`] when the forge
 //! cannot say. A held call fails at once with [`ForgeError::Held`], and
-//! the hold is told once, through [`ForgeHold::take_told`].
+//! each hold is said once, as it begins, through [`RateHeld`]'s [`Say`].
 
 use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -48,55 +48,44 @@ pub(super) fn time_of(at: Timestamp) -> String {
 
 /// Until when the forge is held, shared by [`RateHeld`] and its runner
 #[derive(Debug, Clone, Default)]
-pub struct ForgeHold(Arc<Mutex<Hold>>);
-
-#[derive(Debug, Default)]
-struct Hold {
-    until: Option<Timestamp>,
-    // The log line each hold makes, until the runner takes it
-    told: Vec<String>,
-}
+pub struct ForgeHold(Arc<Mutex<Option<Timestamp>>>);
 
 impl ForgeHold {
-    fn lock(&self) -> std::sync::MutexGuard<'_, Hold> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
     /// Until when every forge call is held, while that is after `now`
     pub fn until(&self, now: Timestamp) -> Option<Timestamp> {
-        let mut hold = self.lock();
-        if hold.until.is_some_and(|until| until <= now) {
-            hold.until = None;
+        let mut until = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if until.is_some_and(|until| until <= now) {
+            *until = None;
         }
-        hold.until
+        *until
     }
 
-    /// The log line of each hold since the last take
-    pub fn take_told(&self) -> Vec<String> {
-        std::mem::take(&mut self.lock().told)
-    }
-
-    fn hold(&self, until: Timestamp, error: &ForgeError) {
-        let mut hold = self.lock();
-        hold.until = Some(until);
-        hold.told.push(format!(
-            "the forge's rate limit is used up ({error}), so kelpie makes no forge call until {}",
-            time_of(until)
-        ));
+    fn hold(&self, until: Timestamp) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(until);
     }
 }
+
+/// Where [`RateHeld`] says a hold began, once for each
+pub type Say = Box<dyn Fn(String) + Send + Sync>;
 
 /// A forge whose calls are held while its rate limit is used up
 pub struct RateHeld {
     forge: Box<dyn Forge>,
     clock: Arc<dyn Clock>,
     hold: ForgeHold,
+    say: Say,
 }
 
 impl RateHeld {
-    /// `forge`, holding its calls in `hold` by `clock`'s time
-    pub fn new(forge: Box<dyn Forge>, clock: Arc<dyn Clock>, hold: ForgeHold) -> Self {
-        Self { forge, clock, hold }
+    /// `forge`, holding its calls in `hold` by `clock`'s time, and telling
+    /// `say` as each hold begins
+    pub fn new(forge: Box<dyn Forge>, clock: Arc<dyn Clock>, hold: ForgeHold, say: Say) -> Self {
+        Self {
+            forge,
+            clock,
+            hold,
+            say,
+        }
     }
 
     fn call<T>(
@@ -115,7 +104,12 @@ impl RateHeld {
                 Ok(Some(reset)) if reset > now => reset,
                 _ => Timestamp(now.0.saturating_add(FALLBACK)),
             };
-            self.hold.hold(until, error);
+            self.hold.hold(until);
+            (self.say)(format!(
+                "the forge's rate limit is used up ({error}), so kelpie makes no forge call \
+                 until {}",
+                time_of(until)
+            ));
         }
         result
     }

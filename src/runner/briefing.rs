@@ -65,12 +65,12 @@ pub(super) struct Watched {
     pub(super) idle: bool,
 }
 
-/// Writes `runner`'s board if it is due, asking git with the lock let go
 // Whether `after` holds an entry `before` did not, or holds one differently
 fn learned<T: PartialEq>(before: &BTreeMap<u64, T>, after: &BTreeMap<u64, T>) -> bool {
     (after.iter()).any(|(issue, now)| before.get(issue) != Some(now))
 }
 
+/// Writes `runner`'s board if it is due, asking git with the lock let go
 pub(super) fn brief(runner: &Mutex<Runner>) {
     let job = lock(runner).board_job();
     if let Some(job) = job {

@@ -6,6 +6,8 @@
 //! a forge that refuses it leaves a note and never stops the work item.
 //! Each listed implementer's `agent:` label is made where the repo lacks it.
 
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
 use super::Runner;
 
 /// The label on an issue while a work item holds it
@@ -58,9 +60,30 @@ impl Runner {
     ///
     /// Each note is handed out once.
     pub fn take_notes(&mut self) -> Vec<String> {
-        let mut notes = std::mem::take(&mut self.notes);
-        notes.extend(self.forge_hold.take_told());
-        notes
+        self.notes.take()
+    }
+}
+
+/// What the runner carried on without, oldest first, kept in memory until
+/// `take_notes` hands it out, and shared with the forge's rate-limit hold
+#[derive(Debug, Clone, Default)]
+pub(super) struct Notes(Arc<Mutex<Vec<String>>>);
+
+impl Notes {
+    fn lock(&self) -> MutexGuard<'_, Vec<String>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub(super) fn push(&self, note: String) {
+        self.lock().push(note);
+    }
+
+    pub(super) fn extend(&self, notes: impl IntoIterator<Item = String>) {
+        self.lock().extend(notes);
+    }
+
+    fn take(&self) -> Vec<String> {
+        std::mem::take(&mut *self.lock())
     }
 }
 

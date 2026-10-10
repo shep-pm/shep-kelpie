@@ -147,6 +147,30 @@ fn a_used_up_rate_limit_holds_every_forge_call_until_it_resets_and_says_so_once(
 }
 
 #[test]
+fn the_hold_is_told_in_turn_with_the_notes_after_it() {
+    let rig = Rig::new("acme");
+    let runner = rig.open().unwrap();
+    runner.lock().unwrap().take_notes();
+    rig.forge
+        .set_used_up(Some(Timestamp(rig.clock.now().0 + 1800)));
+    wake(&runner);
+    // A stray file in the answers folder is a note of its own, made with no forge call.
+    let answers = rig.paths().answers;
+    std::fs::create_dir_all(&answers).unwrap();
+    std::fs::write(answers.join("stray"), "").unwrap();
+    wake(&runner);
+
+    let notes = runner.lock().unwrap().take_notes();
+
+    assert_eq!(notes.len(), 2, "{notes:?}");
+    assert!(
+        notes[0].starts_with("the forge's rate limit is used up"),
+        "{notes:?}"
+    );
+    assert!(notes[1].contains("stray"), "{notes:?}");
+}
+
+#[test]
 fn a_rate_limit_whose_reset_the_forge_cannot_say_holds_for_ten_minutes() {
     let rig = Rig::new("acme");
     let runner = rig.open().unwrap();
