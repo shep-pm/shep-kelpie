@@ -61,8 +61,10 @@ pub struct SavedLease {
     /// What it is for
     pub kind: LeaseKind,
     /// Who holds it and since when, if anyone
+    #[serde(deserialize_with = "named_held")]
     pub held: Option<SavedHeld>,
     /// Who waits, next first
+    #[serde(deserialize_with = "named_queue")]
     pub queue: Vec<SavedHolder>,
     /// Its review window, for a kind that has one
     pub window: Option<SavedWindow>,
@@ -114,6 +116,51 @@ impl From<SavedHolder> for Holder {
             SavedHolder::Runner { project, epoch } => Self::Runner { project, epoch },
         }
     }
+}
+
+// A holder as the file has it, its project's name not yet checked.
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase", deny_unknown_fields)]
+enum FileHolder {
+    Maintainer,
+    Runner { project: String, epoch: Epoch },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileHeld {
+    holder: FileHolder,
+    since: Timestamp,
+}
+
+// A runner whose project no longer takes its name, such as one named for a
+// folder kelpie has since claimed, is dropped from the book alone.
+fn named(holder: FileHolder) -> Option<SavedHolder> {
+    match holder {
+        FileHolder::Maintainer => Some(SavedHolder::Maintainer),
+        FileHolder::Runner { project, epoch } => match ProjectName::try_from(project.as_str()) {
+            Ok(project) => Some(SavedHolder::Runner { project, epoch }),
+            Err(e) => {
+                println!("dropping {project:?} from the book: {e}");
+                None
+            }
+        },
+    }
+}
+
+fn named_held<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<SavedHeld>, D::Error> {
+    let held = Option::<FileHeld>::deserialize(d)?;
+    Ok(held.and_then(|held| {
+        Some(SavedHeld {
+            holder: named(held.holder)?,
+            since: held.since,
+        })
+    }))
+}
+
+fn named_queue<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<SavedHolder>, D::Error> {
+    let queue = Vec::<FileHolder>::deserialize(d)?;
+    Ok(queue.into_iter().filter_map(named).collect())
 }
 
 /// A review window's state
@@ -415,6 +462,40 @@ mod tests {
                 "{bad}: {err}"
             );
         }
+    }
+
+    // `github` became one of kelpie's own names, which no project may take.
+    #[test]
+    fn a_runner_whose_name_is_taken_is_dropped_and_the_rest_of_the_book_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = file_in(dir.path());
+        let runner = |project: &str| json!({ "runner": { "project": project, "epoch": 1 } });
+        let book = json!({
+            "version": 1,
+            "leases": [
+                { "kind": "stand-in-1", "held": { "holder": runner("github"), "since": 7 },
+                  "queue": [runner("github"), runner("koji"), "maintainer"], "window": null },
+                { "kind": "stand-in-2", "held": { "holder": runner("koji"), "since": 8 },
+                  "queue": [], "window": null },
+            ],
+        });
+        fs::write(file.path(), book.to_string()).unwrap();
+
+        let loaded = file.load().unwrap().unwrap();
+
+        let koji = SavedHolder::Runner {
+            project: ProjectName::try_from("koji").unwrap(),
+            epoch: Epoch(1),
+        };
+        assert_eq!(loaded.leases[0].held, None);
+        assert_eq!(
+            loaded.leases[0].queue,
+            [koji.clone(), SavedHolder::Maintainer]
+        );
+        assert_eq!(
+            loaded.leases[1].held.as_ref().map(|h| &h.holder),
+            Some(&koji)
+        );
     }
 
     #[test]
