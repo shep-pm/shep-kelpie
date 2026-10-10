@@ -62,6 +62,8 @@ pub enum ReworkError {
     ReviewBot(&'static str, u64, ForgeError),
     /// The branch's head on `origin` could not be read, with the reason
     Head(String, String),
+    /// `finish` holds the board back, so nothing new is taken on
+    Finishing,
     /// The work item could not be saved
     State(StateError),
 }
@@ -97,6 +99,7 @@ impl fmt::Display for ReworkError {
                 write!(f, "cannot read {bot}'s reviews of #{number}: {e}")
             }
             Self::Head(branch, e) => write!(f, "cannot read the head of `{branch}`: {e}"),
+            Self::Finishing => f.write_str(super::finishing::NOTHING_NEW),
             Self::State(e) => e.fmt(f),
         }
     }
@@ -127,6 +130,9 @@ impl Runner {
     /// the change cannot be saved. A refusal changes nothing. A label or
     /// save that fails after the triage labels began coming off leaves them off.
     pub fn rework(&mut self, number: u64) -> Result<AgentName, ReworkError> {
+        if !self.picks() {
+            return Err(ReworkError::Finishing);
+        }
         if !self.slot_free() {
             return Err(ReworkError::InFlight(self.slot_issues()));
         }

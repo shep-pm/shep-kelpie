@@ -21,17 +21,6 @@ const ATTACHED: &str = r#"{"work_items":[{"issue":7,"phase":{"state":"implement"
 const MERGING: &str = r#"{"work_items":[{"issue":7,"phase":{"state":"merge","head":"abc"}}],
     "draining":{"calls":[],"ceiling":3600}}"#;
 
-// What a pause asked of the shepherd, by action, with a stop as `stop`
-fn asked(writes: &[Request]) -> Vec<String> {
-    (writes.iter())
-        .filter_map(|w| match w {
-            Request::Trigger { action, .. } => Some(action.clone()),
-            Request::Stop { .. } => Some("stop".to_owned()),
-            _ => None,
-        })
-        .collect()
-}
-
 async fn paused(
     shepherd: &FakeShepherd,
     patience: Patience,

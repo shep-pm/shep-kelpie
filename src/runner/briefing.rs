@@ -258,6 +258,7 @@ impl Runner {
                 .issues_where(|i| !i.parked() && i.seat == Seat::Held)
                 .len(),
             parked: self.parked_count(),
+            run: self.run_status(),
             main: answers.main,
             items,
             rulings: (self.state.rulings.iter())

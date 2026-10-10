@@ -154,6 +154,17 @@ impl Runner {
         }
     }
 
+    /// Forgets a pick wake still due, since the board picks nothing while
+    /// the runner finishes. A wake in flight still answers, and its pick
+    /// waits unused.
+    pub(super) fn pm_forget_pick(&mut self) {
+        let due = self.pm.due.len();
+        self.pm.due.retain(|wake| !matches!(wake, Wake::Pick(_)));
+        if self.pm.due.len() < due {
+            self.pm.asked_pick = false;
+        }
+    }
+
     /// The ready issues the project manager holds back, out of `takeable`,
     /// those the board could start. With no work item open, a hold over
     /// every one of them has nothing to wait for, so it goes.

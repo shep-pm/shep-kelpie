@@ -32,7 +32,8 @@ _Avoid_: harness (the working name before 2026-09-25), control room
 A repo under kelpie, with its settings, board and state file. It runs while
 its runner's sheep runs: you start it, or pause it, which waits for its
 calls and any merge in flight to end and then stops that sheep. A wait that
-runs out, an interrupt or a refused stop leaves it running. Its settings
+runs out, an interrupt or a refused stop leaves it running. Or you finish
+it, and it stops itself once its open work items end. Its settings
 (merge authority, CI, agents, pacing) live on it, each in a table of its own.
 _Avoid_: shift
 
@@ -326,3 +327,10 @@ rulings. Not a ruling: it has no id and takes no answer.
 **Draining**:
 A runner told to start no new call, while the calls it has running go on to
 their end. `shep kelpie upgrade` drains each runner before it restarts it.
+
+**Finishing**:
+A runner whose board picks nothing new while its open work items run on to
+their end, merged, closed, dropped or stopped by a `no`, after which it
+stops its own sheep as a pause does. It outlasts a restart but not a pause, and `shep kelpie start`
+ends it.
+_Avoid_: winding down

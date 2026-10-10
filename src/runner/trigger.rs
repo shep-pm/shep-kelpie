@@ -20,9 +20,9 @@ use crate::state::{Finished, LeaseHeld, Ruling, StateError, Waiting};
 use crate::work_item::{Attached, BotSkipped, Phase, QwenTally, Spend, Split, Turn, WorkItem};
 
 /// The triggers a runner answers
-pub const ACTIONS: [&str; 14] = [
+pub const ACTIONS: [&str; 17] = [
     "status", "add", "rework", "adopt", "rule", "gate", "drop", "timings", "attach", "detach",
-    "tell", "pm", "drain", "undrain",
+    "tell", "pm", "drain", "undrain", "finish", "start", "pausing",
 ];
 
 /// How many finished work items `timings` totals when given no count
@@ -104,6 +104,10 @@ pub struct Status<'a> {
     /// The calls still running, while `drain` holds back new ones
     #[serde(skip_serializing_if = "Option::is_none")]
     pub draining: Option<super::Draining>,
+    /// Whether `finish` holds the board back, or the runner finished and
+    /// waits for its sheep to stop
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run: Option<super::Run>,
 }
 
 /// The local model's placement, as Ollama's `/api/ps` last said
@@ -251,6 +255,9 @@ enum Request {
     PmDetach(u32),
     Drain,
     Undrain,
+    Finish,
+    Start,
+    Pausing,
 }
 
 /// Answers one trigger with a JSON body: the status, or `{"error": ...}`
@@ -268,7 +275,9 @@ enum Request {
 /// same pids and answers [`PmAttaching`](super::PmAttaching) for `attach`,
 /// and every other action takes nothing. `drain` holds back every new call
 /// and answers the status with the calls still running, and `undrain` lets
-/// calls start again.
+/// calls start again. `finish` holds the board back until the open work
+/// items end, `start` lets it pick again, and `pausing`, which `pause` sends
+/// before its stop, clears the saved `finishing` so the runner comes back picking.
 pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> String {
     let error = |message: String| serde_json::json!({ "error": message }).to_string();
     let request = match read(action, params.map(str::trim).filter(|p| !p.is_empty())) {
@@ -307,6 +316,9 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
             runner.undrain();
             Ok(())
         }
+        Request::Finish => runner.begin_finishing().map_err(|e| e.to_string()),
+        Request::Start => runner.cancel_finishing().map_err(|e| e.to_string()),
+        Request::Pausing => runner.pausing().map_err(|e| e.to_string()),
         Request::Add(issue) => runner.add(issue).map(drop).map_err(|e| e.to_string()),
         Request::Rework(number) => runner.rework(number).map(drop).map_err(|e| e.to_string()),
         Request::Adopt(number) => runner.adopt(number).map_err(|e| e.to_string()),
@@ -391,6 +403,9 @@ fn read(action: &str, params: Option<&str>) -> Result<Request, String> {
         ("drop", None) => Ok(Request::Drop(None)),
         ("drain", None) => Ok(Request::Drain),
         ("undrain", None) => Ok(Request::Undrain),
+        ("finish", None) => Ok(Request::Finish),
+        ("start", None) => Ok(Request::Start),
+        ("pausing", None) => Ok(Request::Pausing),
         (_, None) => Ok(Request::Status),
     }
 }

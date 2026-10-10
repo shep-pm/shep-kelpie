@@ -557,7 +557,8 @@ fn unstarted(harness: Option<Harness>, e: &std::io::Error) -> End {
 /// do yields to the next. A report that waits, such as a forge that cannot
 /// be read, is returned only when no other work item did anything. A
 /// ruling answered while the runner was stopped is acted on first. A ruling
-/// is posted, and a reply handled, while the runner drains too.
+/// is posted, and a reply handled, while the runner drains too. A runner
+/// finishing with no work item left open reports that it finished.
 ///
 /// # Errors
 ///
@@ -604,6 +605,11 @@ fn one_pass(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
     }
     if let Some(answered) = answer_replies(runner, alerts.as_ref()) {
         return answered.map(Pass::Report);
+    }
+    // After the posts, so a merge's notice goes before the word it finished.
+    let finished = lock(runner).finished_now()?;
+    if let Some(report) = finished {
+        return Ok(Pass::Report(report));
     }
     lock(runner).begin(None)
 }

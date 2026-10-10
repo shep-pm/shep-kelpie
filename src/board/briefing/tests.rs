@@ -52,6 +52,7 @@ fn a_board_with_an_idle_worker_a_review_call_and_a_ruling_reads_whole() {
         pending_rulings: 2,
         held: 2,
         parked: 1,
+        run: None,
         main: None,
         items: vec![
             item(
@@ -182,6 +183,7 @@ fn quoting(body: &str) -> String {
         pending_rulings: 2,
         held: 2,
         parked: 0,
+        run: None,
         main: None,
         items: vec![seven, eight],
         rulings: Vec::new(),

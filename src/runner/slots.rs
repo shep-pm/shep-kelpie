@@ -125,7 +125,7 @@ impl Runner {
 
     // Whether the board may open a work item on this pass
     pub(super) fn board_open(&self) -> bool {
-        self.slot_free() && !self.parked_full()
+        self.picks() && self.slot_free() && !self.parked_full()
     }
 
     // Gives a slot freed outside a save, as by a larger `concurrency.active_items`, to an
