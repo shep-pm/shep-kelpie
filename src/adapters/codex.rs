@@ -497,9 +497,10 @@ fn argv(
     for feature in off {
         argv.extend(["--disable".into(), feature.into()]);
     }
+    // A retro changes nothing, so no `apply_patch` of it is let through.
     let hooks = match &call.reach.fence {
-        Some(fence) => hooks(fence),
-        None => no_writes(),
+        Some(fence) if call.tools != Tools::Retro => hooks(fence),
+        _ => no_writes(),
     };
     // Codex runs a hook only once it is trusted; kelpie wrote these itself.
     argv.push("--dangerously-bypass-hook-trust".into());

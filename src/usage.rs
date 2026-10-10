@@ -74,6 +74,8 @@ pub enum CallKind {
     Compact,
     /// The issue writer's run
     Issues,
+    /// The worker's retro turn, once its work item has finished
+    Retro,
 }
 
 /// How a call ended

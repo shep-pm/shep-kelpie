@@ -109,7 +109,7 @@ impl Runner {
         if matches!(&item.phase, Phase::Review(review) if summoning(review)) {
             self.leave_round();
         }
-        match self.finish(false).map_err(DropError::State)? {
+        match self.cleanup(false).map_err(DropError::State)? {
             Begin::Report(StepReport::GateFailed { reason, .. }) => Err(DropError::Cleanup(reason)),
             _ => Ok(()),
         }
@@ -345,10 +345,19 @@ impl Runner {
         self.withdraw(issue, number, true, reason)
     }
 
+    // Ends a work item that finished, after its worker has been asked for a
+    // retro once: that turn needs the worktree this removes.
+    pub(super) fn finish(&mut self, merged: bool) -> Result<Begin, StateError> {
+        match self.retro()? {
+            Some(begin) => Ok(begin),
+            None => self.cleanup(merged),
+        }
+    }
+
     // Removes the worktree, branch and build folder, then the work
     // item, and records its issue so the board never takes it again. A pull
     // request left unmerged is handed back to the maintainer first.
-    pub(super) fn finish(&mut self, merged: bool) -> Result<Begin, StateError> {
+    fn cleanup(&mut self, merged: bool) -> Result<Begin, StateError> {
         // First, since the findings sit in the build folder this removes.
         if merged && let Some(begin) = self.follow_ups()? {
             return Ok(begin);

@@ -205,7 +205,9 @@ fn argv(call: &AgentCall) -> Vec<OsString> {
     let mut argv: Vec<OsString> = vec!["-p".into(), call.prompt.as_str().into()];
     argv.extend(profile(call));
     argv.extend(["--output-format".into(), "json".into()]);
-    if call.role == Role::Worker {
+    // A retro is a worker's session that may change nothing, so it is asked
+    // like any call whose edits nothing allows.
+    if call.role == Role::Worker && call.tools == crate::ports::Tools::Work {
         argv.extend(["--permission-mode".into(), "bypassPermissions".into()]);
     }
     argv.extend(session(call));
@@ -490,6 +492,15 @@ mod tests {
         assert_eq!(argv[argv.len() - 2..], ["--resume", "abc"]);
         assert!(!argv.iter().any(|a| a == "--append-system-prompt-file"));
         assert!(!argv.iter().any(|a| a == "--session-id"));
+    }
+
+    #[test]
+    fn a_retro_resumes_the_workers_session_without_bypassing_permissions() {
+        let mut retro = call(Role::Worker, resume("abc"));
+        retro.tools = crate::ports::Tools::Retro;
+        let argv = strings(&retro);
+        assert!(!argv.iter().any(|a| a == "bypassPermissions"), "{argv:?}");
+        assert_eq!(argv[argv.len() - 2..], ["--resume", "abc"]);
     }
 
     #[test]

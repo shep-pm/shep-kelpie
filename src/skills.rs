@@ -41,7 +41,7 @@ pub enum Step {
     Pr,
     /// A session reset's handoff
     Reset,
-    /// A retro for the lessons file
+    /// A finished work item's retro
     Retro,
 }
 
@@ -189,6 +189,15 @@ impl Skills {
             .then(|| rules(Step::Tests))
     }
 
+    /// Whether the project set `step` to `none`, so it runs no skill and no
+    /// prompt of kelpie's. A skill that failed to load is not off: kelpie's
+    /// own prompt runs in its place.
+    pub fn off(&self, step: Step) -> bool {
+        self.steps
+            .iter()
+            .any(|s| s.step == step && s.skill.is_none() && s.fallback.is_none())
+    }
+
     /// `step`'s slash command, such as `/mattpocock:tdd`, if it has a skill
     pub fn command(&self, step: Step) -> Option<&str> {
         self.steps
@@ -279,7 +288,12 @@ fn rules(step: Step) -> String {
              - Run no /code-review or other review of your own: kelpie reviews the pull \
              request once you push.\n"
         }
-        Step::Triage | Step::Spec | Step::Reset | Step::Retro => IN_REPLY,
+        Step::Triage | Step::Spec | Step::Reset => IN_REPLY,
+        Step::Retro => {
+            "- Record each decision you made in the skill's place in your reply.\n\
+             - Your reply is the retro's report. Edit no file and run no command: kelpie \
+             saves the report unread and applies none of it.\n"
+        }
     };
     format!("{HEADLESS}{own}")
 }

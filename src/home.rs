@@ -24,12 +24,13 @@ const SHEP_DEFAULT: &str = ".shep";
 pub const OLD: &str = ".kelpie";
 
 /// Kelpie's own entries in its home, which no project may be named for
-pub const OWN: [&str; 11] = [
+pub const OWN: [&str; 12] = [
     "agents",
     "builds",
     "codex",
     "dog",
     "relay",
+    "retro-reports",
     "rulings",
     "settings.toml",
     "tools",

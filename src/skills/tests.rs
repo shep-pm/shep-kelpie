@@ -10,7 +10,10 @@ use crate::test::{Rig, Scripted};
 
 // Appends a `[skills]` table to the rig's settings, read when a runner next opens
 fn choose(rig: &Rig, table: &str) {
-    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.skills]\n{table}"));
+    rig.edit_settings(|s| {
+        let s = s.replace(crate::test::NO_RETRO, "");
+        format!("{s}\n[app.dogs.kelpie.skills]\n{table}")
+    });
 }
 
 // A plugin folder whose manifest names it `name`

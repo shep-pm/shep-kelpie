@@ -61,6 +61,26 @@ const ISSUES_DENY: [&str; 13] = [
     "ExitWorktree",
 ];
 
+/// The tools a finished worker's retro never uses: commands, sub-agents, every
+/// file writer, the web, and the rest a worker is denied. It reads its
+/// worktree and replies with the report, which kelpie saves.
+const RETRO_DENY: [&str; 14] = [
+    "Agent",
+    "Task",
+    "Bash",
+    "Edit",
+    "Write",
+    "MultiEdit",
+    "NotebookEdit",
+    "WebFetch",
+    "WebSearch",
+    "Monitor",
+    "RemoteTrigger",
+    "Workflow",
+    "EnterWorktree",
+    "ExitWorktree",
+];
+
 /// The only tools the project manager's session has, as `--tools` takes them
 pub(crate) const PM_TOOLS: &str = "Read,Glob,Grep,Edit,Write";
 
@@ -155,6 +175,11 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
             permissions["allow"] = json!([rule("Edit", &notes)]);
             pm_hooks(fence)
         }
+        // Headless, a tool nothing allows is refused, and the retro skill calls another.
+        Tools::Retro => {
+            permissions["allow"] = json!(["Skill"]);
+            hooks(fence)
+        }
         Tools::Work | Tools::Review | Tools::Answer => hooks(fence),
     };
     trimmed(json!({
@@ -196,6 +221,7 @@ fn tool_denies(tools: Tools, reach: &Reach) -> impl Iterator<Item = &'static str
         Tools::Answer => &NO_TOOLS,
         Tools::Issues => &ISSUES_DENY,
         Tools::Pm => &PM_DENY,
+        Tools::Retro => &RETRO_DENY,
     };
     // An answer that may read a folder keeps Read and nothing else.
     let reads = tools == Tools::Answer && !reach.read.is_empty();
@@ -419,7 +445,7 @@ mod tests {
             // file denies `NotebookEdit` through `trimmed`, so that one is asserted. Kelpie's
             // sandbox holds the writes of the other three, so no deny is asserted for them yet.
             Tools::Review => &["Edit", "Write", "MultiEdit"],
-            Tools::Answer | Tools::Issues => &[],
+            Tools::Answer | Tools::Issues | Tools::Retro => &[],
         }
     }
 
@@ -431,7 +457,8 @@ mod tests {
             Tools::Review => Some(Tools::Answer),
             Tools::Answer => Some(Tools::Issues),
             Tools::Issues => Some(Tools::Pm),
-            Tools::Pm => None,
+            Tools::Pm => Some(Tools::Retro),
+            Tools::Retro => None,
         }
     }
 
@@ -467,6 +494,7 @@ mod tests {
             Tools::Answer,
             Tools::Issues,
             Tools::Pm,
+            Tools::Retro,
         ] {
             let s = settings(tools, &Reach::default());
             for key in [
@@ -485,6 +513,7 @@ mod tests {
                 Tools::Answer => &NO_TOOLS,
                 Tools::Issues => &ISSUES_DENY,
                 Tools::Pm => &PM_DENY,
+                Tools::Retro => &RETRO_DENY,
             };
             assert_eq!(s["permissions"]["deny"], deny_with_trim(own), "{tools:?}");
             // What kelpie's own calls use stays, unless the role denies it itself.

@@ -23,12 +23,13 @@ use super::drain::{CallRole, CallRunning};
 use super::in_flight::InFlight;
 use super::replies::answer_replies;
 use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport};
+use super::retro;
 use super::review::run_review_call;
 use super::trigger::lock;
 use crate::ports::{AgentCall, AgentError, AgentReply, Ending, RoundStage, Timestamp, Wait};
 use crate::settings::Harness;
 use crate::state::StateError;
-use crate::usage::{CallKind, Draft};
+use crate::usage::{CallKind, Draft, Line};
 
 /// What one pass of the runner's loop did
 #[derive(Debug)]
@@ -97,7 +98,17 @@ impl Flights {
     pub(super) fn runs_turn(&self, issue: u64) -> bool {
         self.flying
             .get(&issue)
-            .is_some_and(|f| f.deadline.is_some())
+            .is_some_and(|f| f.deadline.is_some() && !f.retro)
+    }
+
+    /// Forgets `issue`'s call in flight, once its end is heard
+    pub(super) fn landed(&mut self, issue: u64) {
+        self.flying.remove(&issue);
+    }
+
+    /// Whether `issue`'s call in flight is its work item's retro
+    pub(super) fn runs_retro(&self, issue: u64) -> bool {
+        self.flying.get(&issue).is_some_and(|f| f.retro)
     }
 
     /// Ends `issue`'s call in flight, as its ceiling would
@@ -160,6 +171,8 @@ struct Flight {
     watched: Watched,
     // Whether a worker's turn is its work item's first, with no session to keep
     first: bool,
+    // Whether it is a finished work item's retro, not a turn of its worker
+    retro: bool,
     // When the call began, past the lease it waited for
     began_at: Option<Timestamp>,
     // What the call last said it waits for, and since when
@@ -277,6 +290,7 @@ enum Launch {
         deadline: Timestamp,
         again: bool,
         first: bool,
+        retro: bool,
     },
     Review(ReviewCall),
 }
@@ -387,7 +401,18 @@ impl Runner {
                 deadline,
                 again: start_over.is_some(),
                 first,
+                retro: false,
             },
+            Begin::Retro(call) => {
+                let now = self.ports.clock.now();
+                Launch::Turn {
+                    call,
+                    deadline: Timestamp(now.0.saturating_add(retro::CEILING)),
+                    again: false,
+                    first: false,
+                    retro: true,
+                }
+            }
             Begin::Review(action) => Launch::Review(action),
             Begin::Label(issue) => {
                 let report = self.ask_writer(&issue)?;
@@ -423,6 +448,7 @@ impl Runner {
                 deadline,
                 again,
                 first,
+                ..
             } => (
                 Some(*deadline),
                 *again,
@@ -431,6 +457,7 @@ impl Runner {
             ),
             Launch::Review(_) => (None, false, false, None),
         };
+        let retro = matches!(launch, Launch::Turn { retro: true, .. });
         let role = harness.map_or("reviewer", |_| "worker");
         let now = self.ports.clock.now();
         let watched = Watched {
@@ -443,7 +470,12 @@ impl Runner {
         };
         let draft = match &launch {
             Launch::Turn { call, .. } => {
-                Draft::of(call, &self.ledger_worker(issue), CallKind::Turn, now)
+                let kind = if retro {
+                    CallKind::Retro
+                } else {
+                    CallKind::Turn
+                };
+                Draft::of(call, &self.ledger_worker(issue), kind, now)
             }
             Launch::Review(ReviewCall::Session(call)) => {
                 Draft::of(call, &self.ledger_reviewer(issue), CallKind::Review, now)
@@ -493,6 +525,7 @@ impl Runner {
             again,
             watched,
             first,
+            retro,
             began_at: None,
             told: None,
             fallback: waiting::Fallback::Stays,
@@ -665,6 +698,14 @@ fn hear(runner: &Mutex<Runner>, news: News) -> Result<Option<StepReport>, StateE
     // A call's line goes in only once its end is saved: one not saved runs
     // again, and its session's cost by then takes in this call's.
     match end {
+        End::Turn(result) if runner.flights.runs_retro(issue) => {
+            let line = open.and_then(|open| runner.turn_line(&open, &result));
+            runner.retro_ended(issue, result);
+            if let Some(line) = line {
+                runner.ledger.append(&Line::Call(line));
+            }
+            Ok(None)
+        }
         End::Turn(result) => {
             let line = open.and_then(|open| runner.turn_line(&open, &result));
             let unreported = result.is_err();
