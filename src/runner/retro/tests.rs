@@ -173,6 +173,20 @@ fn a_retro_that_fails_is_logged_and_skipped_without_holding_up_the_end() {
 }
 
 #[test]
+fn a_retro_whose_call_panics_is_skipped_and_does_not_end_the_runner() {
+    let (rig, runner) = parked_with_retro();
+    rig.claude.script([Scripted::Kill]);
+    merge(&rig, &runner);
+
+    assert_eq!(retro_calls(&rig).len(), 1, "it is not retried");
+    assert_eq!(saved(&rig), Vec::<PathBuf>::new());
+    assert!(!rig.worktree_7().exists());
+    let notes = notes(&runner);
+    assert!(notes.contains("#7: the retro is skipped"), "{notes}");
+    assert!(notes.contains("panicked"), "{notes}");
+}
+
+#[test]
 fn a_retro_that_comes_back_empty_saves_nothing() {
     let (rig, runner) = parked_with_retro();
     rig.claude.script([Scripted::Say("  \n")]);

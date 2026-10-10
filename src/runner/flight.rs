@@ -706,6 +706,14 @@ fn hear(runner: &Mutex<Runner>, news: News) -> Result<Option<StepReport>, StateE
             }
             Ok(None)
         }
+        // A panicking retro is skipped as a failed one is: it must not end the runner.
+        End::Panicked(_) if runner.flights.runs_retro(issue) => {
+            if let Some(open) = &open {
+                runner.panicked_line(open);
+            }
+            runner.retro_ended(issue, Err(AgentError::Setup("its call panicked".into())));
+            Ok(None)
+        }
         End::Turn(result) => {
             let line = open.and_then(|open| runner.turn_line(&open, &result));
             let unreported = result.is_err();
