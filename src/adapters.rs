@@ -1,5 +1,5 @@
-//! The real ports: the system clock, `gh`, `curl`, the `claude` command
-//! line, its `/usage`, the local review
+//! The real ports: the system clock, `gh`, `curl`, the GitHub App's calls,
+//! the `claude` command line, its `/usage`, the local review
 //! round, the machine's sandbox programs, and the dog's
 //! leases over the shepherd channel
 
@@ -13,6 +13,7 @@ mod codex_usage;
 mod curl;
 mod forwarder;
 pub(crate) mod gh;
+mod github;
 mod gpu;
 mod host;
 mod leases;
@@ -35,6 +36,7 @@ pub use codex::CodexCli;
 pub use codex_usage::CodexMeter;
 pub use curl::Curl;
 pub use gh::Gh;
+pub use github::{CurlGithub, Openssl};
 pub use gpu::GpuCurl;
 pub use host::SystemHost;
 pub use leases::ShepLeases;

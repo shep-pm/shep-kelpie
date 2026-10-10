@@ -523,6 +523,11 @@ impl ForgeSlug {
     pub fn name(&self) -> &str {
         self.0.split_once('/').map_or(&self.0, |(_, name)| name)
     }
+
+    /// The repo's owner, a user or an organization
+    pub fn owner(&self) -> &str {
+        self.0.split_once('/').map_or(&self.0, |(owner, _)| owner)
+    }
 }
 
 impl TryFrom<String> for ForgeSlug {

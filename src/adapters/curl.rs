@@ -68,7 +68,7 @@ impl Alerts for Curl {
 
 // Runs curl on `config`, whose `write-out` prints the HTTP status last, and
 // returns what it printed before the status, and the status.
-fn run(config: &str) -> Result<(String, u16), AlertError> {
+pub(super) fn run(config: &str) -> Result<(String, u16), AlertError> {
     let mut child = crate::spawn::command("curl")
         .args(["--config", "-"])
         .stdin(Stdio::piped())

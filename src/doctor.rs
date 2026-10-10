@@ -5,6 +5,7 @@
 //! it can make is a test alert, and only when asked.
 
 mod gateways;
+mod github;
 pub mod host;
 mod machine;
 mod project;
@@ -17,10 +18,13 @@ use std::process::ExitCode;
 use shep_client::Client;
 
 use self::host::Host;
-use crate::adapters::{ClaudeCli, Curl, Gh, LocalReviewer, SystemClock, SystemHost};
+use crate::adapters::{
+    ClaudeCli, Curl, CurlGithub, Gh, LocalReviewer, Openssl, SystemClock, SystemHost,
+};
 use crate::agents::Agents;
 use crate::coderabbit::CodeRabbit;
 use crate::flock;
+use crate::github::{AppTokens, Apps, GithubApp};
 use crate::ports::{Alerts, Clock, Forge, Meter, Reviewer};
 use crate::review_bot::Profile;
 use crate::runner::ProjectName;
@@ -149,6 +153,8 @@ pub struct Probes<'a> {
     pub codex_meter: &'a dyn Fn(&Path) -> Box<dyn Meter>,
     /// The forge
     pub forge: &'a dyn Forge,
+    /// Kelpie's GitHub App
+    pub github: &'a dyn GithubApp,
     /// The local round's reviewer
     pub reviewer: &'a dyn Reviewer,
     /// The pull request reviewer a project turns on
@@ -294,10 +300,17 @@ pub fn main(args: &[String]) -> ExitCode {
         let codex_meter = |codex_home: &Path| {
             Box::new(claude.codex_meter(codex_home.to_owned())) as Box<dyn Meter>
         };
+        let github = AppTokens::new(
+            Apps::under(&kelpie_home),
+            Box::new(CurlGithub),
+            Box::new(Openssl),
+            Box::new(SystemClock),
+        );
         let probes = Probes {
             meter: &meter,
             codex_meter: &codex_meter,
             forge: &Gh,
+            github: &github,
             reviewer: &LocalReviewer::default(),
             review_bot: &CodeRabbit,
             alerts: &Curl,

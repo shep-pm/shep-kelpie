@@ -5,11 +5,12 @@ use serde_json::{Map, Value, json};
 
 use super::*;
 use crate::flock::Launch;
+use crate::github::AppTokens;
 use crate::ports::{ForgeError, MeterError, Visibility};
 use crate::shepherd::SHEP_VERSION;
 use crate::test::{
-    FakeAlerts, FakeClock, FakeForge, FakeMeter, FakeReviewer, FakeShepherd, git, project_table,
-    unreachable_url,
+    FakeAlerts, FakeClock, FakeForge, FakeGithub, FakeMeter, FakeReviewer, FakeShepherd, git,
+    project_table, unreachable_url,
 };
 use crate::tools::Tools;
 
@@ -33,10 +34,12 @@ impl Host for FakeHost {
 
 /// A shepherd holding one project, `koji`, on a machine with every piece in
 /// place: a public repo with kelpie's labels, a logged-in `claude` and `gh`,
-/// a sandbox, a webhook, the local round off and no review bot listed
+/// a sandbox, a webhook, kelpie's App installed on koji and golbat, the local round off and
+/// no review bot listed
 struct Scene {
     shepherd: FakeShepherd,
     forge: FakeForge,
+    app: AppTokens,
     meter: FakeMeter,
     codex_meter: FakeMeter,
     reviewer: FakeReviewer,
@@ -63,10 +66,15 @@ impl Scene {
         shepherd.holds_dog("kelpie", true);
         let clock = FakeClock::at(1_000);
         let home = shepherd.scratch("home");
+        let kelpie_home = shepherd.scratch("kelpie");
+        let github = FakeGithub::new(clock.clone(), "shep-pm");
+        github.registered(&kelpie_home, "shep-pm/koji");
+        github.install("shep-pm/golbat", 8);
         let scene = Self {
             old_home: home.join(".kelpie"),
             home,
-            kelpie_home: shepherd.scratch("kelpie"),
+            app: github.tokens(&kelpie_home),
+            kelpie_home,
             forge,
             meter: FakeMeter::idle(),
             codex_meter: FakeMeter::idle(),
@@ -111,6 +119,7 @@ impl Scene {
             meter: &self.meter,
             codex_meter: &|_: &Path| Box::new(self.codex_meter.clone()) as Box<dyn Meter>,
             forge: &self.forge,
+            github: &self.app,
             reviewer: &self.reviewer,
             review_bot: &CodeRabbit,
             alerts: &self.alerts,
@@ -233,12 +242,14 @@ async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
             "golbat: push access",
             "golbat: labels",
             "golbat: coderabbit",
+            "golbat: github app",
             "golbat: reviewers",
             "golbat: rulings",
             "koji: checkout",
             "koji: implementers",
             "koji: push access",
             "koji: labels",
+            "koji: github app",
             "koji: reviewers",
             "koji: rulings",
         ]
@@ -445,6 +456,7 @@ async fn no_shepherd_is_a_missing_shepherd_naming_its_home() {
         meter: &scene.meter,
         codex_meter: &|_: &Path| Box::new(scene.codex_meter.clone()) as Box<dyn Meter>,
         forge: &scene.forge,
+        github: &scene.app,
         reviewer: &scene.reviewer,
         review_bot: &CodeRabbit,
         alerts: &scene.alerts,
@@ -869,3 +881,5 @@ async fn a_project_folder_left_in_the_old_home_is_missing_for_that_project_alone
     assert!(!subjects(&report).contains(&"golbat: old home"));
     assert!(!report.passed());
 }
+
+mod github;

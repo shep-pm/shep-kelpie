@@ -118,6 +118,7 @@ pub(super) fn checks(
     if let Some(repo) = &remote {
         let coderabbit = coderabbit_listed(&settings, &book, here.home);
         lines.extend(forge_lines(&at, repo, &settings, coderabbit, probes));
+        lines.push(super::github::app(at("github app"), repo, probes.github));
     }
     lines.push(reviewers(at("reviewers"), &settings, (&book, here), probes));
     if let Some(kelpie) = kelpie.filter(|_| spends_codex(&settings, &book, here)) {
