@@ -11,8 +11,8 @@ use crate::ports::{Finding, Timestamp};
 pub struct FollowUps {
     /// The findings still to file
     pub findings: Vec<Finding>,
-    /// Whether the maintainer said yes to filing them, or the project is on
-    /// `auto` and nobody is asked
+    /// Whether the maintainer said yes to the `follow-up` ruling that asks
+    /// before filing them, which files them `ready-for-agent`
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ruled: bool,
     /// When the forge first refused to take them, since it last took one

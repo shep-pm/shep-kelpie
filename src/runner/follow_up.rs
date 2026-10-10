@@ -6,8 +6,9 @@
 //! reads that file once and files only findings it sent the worker itself,
 //! in its own words: a line the worker invents or rewrites files nothing.
 //! `git.issues` decides what follows: under `file` each finding is filed at
-//! once, under `ask` the maintainer is asked first, and under `skip` nothing
-//! is filed and the findings stay in the review. A finding an open issue already holds
+//! once as `needs-triage`, under `ask` the maintainer is asked first and a
+//! yes files them `ready-for-agent`, and under `skip` nothing is filed and the
+//! findings stay in the review. A finding an open issue already holds
 //! gets a comment on that issue instead of a second one.
 
 use std::path::Path;
@@ -15,8 +16,8 @@ use std::path::Path;
 use super::Runner;
 use super::report::{Begin, StepReport};
 use super::review::findings;
-use crate::board::READY;
-use crate::ports::{Finding, ForgeError, OpenIssue, Severity};
+use crate::board::{READY, TRIAGE};
+use crate::ports::{Finding, ForgeError, NewLabel, OpenIssue, Severity};
 use crate::settings::Filing;
 use crate::state::{RulingKind, StateError};
 use crate::work_item::FollowUps;
@@ -37,6 +38,14 @@ const REASON_LIMIT: usize = 300;
 
 // The fewest characters of a finding's `what` a body may match on
 const MIN_BODY_MATCH: usize = 12;
+
+// Made on a repo that lacks it before the first follow-up filed with it,
+// since the forge refuses an issue that names a label the repo does not have.
+const TRIAGE_LABEL: NewLabel<'static> = NewLabel {
+    name: TRIAGE,
+    color: "d876e3",
+    description: "Kelpie filed this follow-up unread; it waits on the maintainer",
+};
 
 impl Runner {
     // What `finish` does first for a merged pull request. Returns None when
@@ -81,10 +90,15 @@ impl Runner {
     }
 
     // One finding at a time, each taken off the work item once it is filed,
-    // so a failure part way retries only what is left.
+    // so a failure part way retries only what is left. Only a yes on the
+    // `follow-up` ruling puts them on the board: that yes is their triage.
     fn file_follow_ups(&mut self, number: u64) -> Result<Begin, StateError> {
         let item = self.current().expect("a follow-up is of a work item");
         let issue = item.issue;
+        let triaged = item.follow_ups.as_ref().is_some_and(|p| p.ruled);
+        let label = if triaged { READY } else { TRIAGE };
+        // READY is on every repo `add` set up, so only TRIAGE may need making.
+        let mut labelled = triaged;
         let repo = self.remote.clone();
         let mut open = match self.ports.forge.open_issues(&repo) {
             Ok(open) => open,
@@ -103,11 +117,19 @@ impl Runner {
                     posted.map(|_| commented.push(on))
                 }
                 None => {
-                    let body = issue_body(number, &finding);
+                    if !labelled {
+                        let forge = self.ports.forge.as_ref();
+                        let made = crate::issues::make_missing(forge, &repo, [TRIAGE_LABEL]);
+                        if let Err(reason) = made {
+                            return self.forge_refused(number, reason);
+                        }
+                        labelled = true;
+                    }
+                    let body = issue_body(number, &finding, triaged);
                     let made = self
                         .ports
                         .forge
-                        .create_issue(&repo, &title, &body, &[READY]);
+                        .create_issue(&repo, &title, &body, &[label]);
                     made.map(|made| {
                         opened.push(made);
                         open.push(OpenIssue {
@@ -222,8 +244,15 @@ fn already_filed<'a>(
     })
 }
 
-fn issue_body(number: u64, finding: &Finding) -> String {
-    report(number, "this", finding)
+fn issue_body(number: u64, finding: &Finding, triaged: bool) -> String {
+    let body = report(number, "this", finding);
+    if triaged {
+        return body;
+    }
+    format!(
+        "{body}\nNobody has read this yet. It waits on triage, and kelpie takes it \
+         only once it is labelled `{READY}`.\n"
+    )
 }
 
 fn comment_body(number: u64, finding: &Finding) -> String {

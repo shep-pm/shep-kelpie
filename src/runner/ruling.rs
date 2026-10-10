@@ -146,6 +146,12 @@ impl Runner {
             (Answer::No(_), RulingKind::FollowUp { .. }) => Some(false),
             _ => None,
         };
+        // A yes to the ruling that asks before filing is the findings' triage.
+        // One to a refusal only tries again, and triages nothing.
+        let triaged = matches!(
+            (&answer, &ruling.kind),
+            (Answer::Yes, RulingKind::FollowUp { refused: None, .. })
+        );
         let accepts = match (&answer, &ruling.kind) {
             (Answer::Yes, RulingKind::AgentFiles { head, .. }) => Some(head.clone()),
             _ => None,
@@ -200,7 +206,7 @@ impl Runner {
         if let Some(item) = next.work_items.iter_mut().find(|item| parked_on(item)) {
             if let (Some(filed), Some(pending)) = (follow_up, item.follow_ups.as_mut()) {
                 if filed {
-                    pending.ruled = true;
+                    pending.ruled |= triaged;
                     pending.first_refused = None;
                 } else {
                     pending.findings.clear();

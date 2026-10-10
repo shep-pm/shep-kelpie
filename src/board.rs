@@ -24,6 +24,9 @@ pub mod briefing;
 /// The label that puts an issue on the board
 pub const READY: &str = "ready-for-agent";
 
+/// The label of an issue nobody has read yet, which stays off the board
+pub const TRIAGE: &str = "needs-triage";
+
 /// The prefix of the label that names the implementer an issue runs on
 pub const AGENT_LABEL: &str = "agent:";
 
