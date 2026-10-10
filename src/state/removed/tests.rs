@@ -31,6 +31,7 @@ fn saved_with(dir: &Path, old: impl FnOnce(&mut Value)) -> StateStore {
         title: "Fix a thing".into(),
         pull_request: Some(91),
         merged: true,
+        closed: false,
         at: Timestamp(100),
         wall: 50,
         seconds: Seconds::of(&[(TimingPhase::Worker, 40), (TimingPhase::Ci, 10)]),

@@ -178,7 +178,13 @@ mod tests {
         assert_eq!(of(summoned), TimingPhase::Review);
         assert_eq!(of(Phase::Ruling { id: 1 }), TimingPhase::Ruling);
         assert_eq!(of(merge), TimingPhase::Merge);
-        assert_eq!(of(Phase::Done { merged: true }), TimingPhase::Merge);
+        assert_eq!(
+            of(Phase::Done {
+                merged: true,
+                closed: false
+            }),
+            TimingPhase::Merge
+        );
         for between_steps in [Phase::Implement, review, fixing] {
             assert_eq!(of(between_steps), TimingPhase::Other);
         }

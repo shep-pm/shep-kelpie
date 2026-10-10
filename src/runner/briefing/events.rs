@@ -59,6 +59,12 @@ fn closed(item: &WorkItem, now: &ProjectState) -> String {
         (Some(f), Some(pr)) if f.merged => {
             format!("#{}: PR #{pr} merged, work item done", item.issue)
         }
+        (Some(f), _) if f.closed => {
+            format!(
+                "#{}: issue closed with no change, work item done",
+                item.issue
+            )
+        }
         _ => format!("#{}: work item dropped", item.issue),
     }
 }

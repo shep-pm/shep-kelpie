@@ -11,6 +11,7 @@
 use std::time::Duration;
 
 use crate::ports::Timestamp;
+use crate::runner::closed::end_closed;
 use crate::runner::report::{Begin, StepReport};
 use crate::runner::ruling::park;
 use crate::runner::{Names, Runner};
@@ -89,8 +90,10 @@ impl Runner {
     }
 
     // A turn ended with no pull request kelpie knows of, or on a rework or
-    // an adoption with nothing pushed, and with no question. The forge is asked again, since the turn's end may have
-    // missed one; with none open, the worker is sent back once, and the
+    // an adoption with nothing pushed, and with no question. The forge is
+    // asked again, since the turn's end may have missed one. With none open,
+    // an issue closed with no change, and no open pull request closing it,
+    // ends the work item; otherwise the worker is sent back once, and the
     // next turn that stops short parks it on a ruling, whose yes sends it
     // back again. A forge that cannot be asked is tried again next step.
     pub(super) fn stopped_short(&mut self) -> Result<Begin, StateError> {
@@ -103,15 +106,31 @@ impl Runner {
                 return Ok(Begin::Report(StepReport::GateFailed { issue, reason }));
             }
         };
-        let pushed_nothing = awaits_a_push(item);
-        let found = open
-            .iter()
+        let (pushed_nothing, known) = (awaits_a_push(item), item.pull_request.is_some());
+        let found = (open.iter())
             .find(|pr| pr.head == item.branch)
-            .filter(|_| !pushed_nothing);
+            .filter(|_| !pushed_nothing)
+            .map(|pr| pr.number);
+        // A pull request on another branch that closes the issue is work too.
+        let claimed = open.iter().any(|pr| pr.closes.contains(&issue));
+        let closed = match found {
+            None if !known && !claimed => self.closed_with_no_change(issue),
+            _ => Ok(false),
+        };
         let mut next = self.state.clone();
+        match closed {
+            Ok(false) => {}
+            Ok(true) => {
+                end_closed(&mut next, issue);
+                self.save(next)?;
+                self.say_closed(issue, None);
+                return self.begin_item(false);
+            }
+            Err(reason) => return Ok(Begin::Report(StepReport::GateFailed { issue, reason })),
+        }
         let item = next.item_mut(issue).expect("the work item checked above");
-        if let Some(pr) = found {
-            item.pull_request = Some(pr.number);
+        if let Some(number) = found {
+            item.pull_request = Some(number);
             item.phase = Phase::Review(Review::first());
             self.save(next)?;
             return self.begin_item(false);

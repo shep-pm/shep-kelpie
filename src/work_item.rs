@@ -193,7 +193,8 @@ pub struct WorkItem {
     pub merge_refused: bool,
     /// Whether a worker turn already ended with no pull request and no
     /// question, and kelpie sent the worker back once. The next such turn
-    /// parks it on a ruling.
+    /// parks it on a ruling. Cleared when a question the worker asked is
+    /// answered.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sent_back: bool,
     /// Whether a worker turn ended with uncommitted files and nothing
@@ -411,6 +412,10 @@ pub enum Phase {
     Done {
         /// Whether the pull request merged, so its branch on the forge goes too
         merged: bool,
+        /// Whether its issue was closed while its branch held no commit, so
+        /// it ends with no pull request and nothing to keep
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        closed: bool,
     },
 }
 
@@ -757,8 +762,18 @@ mod tests {
             json!({ "state": "merge", "head": "c0ffee", "readied": null, "auto": true })
         );
         assert_eq!(
-            value(Phase::Done { merged: true }),
+            value(Phase::Done {
+                merged: true,
+                closed: false
+            }),
             json!({ "state": "done", "merged": true })
+        );
+        assert_eq!(
+            value(Phase::Done {
+                merged: false,
+                closed: true
+            }),
+            json!({ "state": "done", "merged": false, "closed": true })
         );
         assert_eq!(
             serde_json::to_value(Turn::Next {

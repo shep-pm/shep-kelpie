@@ -47,6 +47,7 @@ fn finished(issue: u64, merged: bool, worker: u64, reviewer: u64, wall: u64) -> 
         title: format!("Issue {issue}"),
         pull_request: Some(issue + 100),
         merged,
+        closed: false,
         wall,
         units: worker + reviewer,
         cost_usd: (worker + reviewer) as f64 / 1000.0,
@@ -77,6 +78,7 @@ fn a_report_gives_each_merged_pull_request_its_medians_and_the_other_roles() {
         finished(2, true, 1000, 1000, 600),
         finished(3, true, 8000, 2000, 7200),
         finished(4, false, 500, 0, 60),
+        finished(5, false, 40, 0, 30),
         call(1000, Some(1), Role::Worker, CallKind::Turn, 4000),
         call(1001, Some(2), Role::Worker, CallKind::Turn, 2000),
         call(1002, Some(3), Role::Worker, CallKind::Turn, 10_000),
@@ -94,7 +96,10 @@ fn a_report_gives_each_merged_pull_request_its_medians_and_the_other_roles() {
     if let Line::Finished(item) = &mut lines[3] {
         item.reviewer.unpriced_calls = 1;
     }
-    if let Line::Call(call) = &mut lines[10] {
+    if let Line::Finished(item) = &mut lines[4] {
+        (item.closed, item.pull_request) = (true, None);
+    }
+    if let Line::Call(call) = &mut lines[11] {
         (call.unpriced, call.cost_usd) = (true, None);
     }
     let baselines = [Baseline {
@@ -121,9 +126,11 @@ fn a_report_gives_each_merged_pull_request_its_medians_and_the_other_roles() {
             "dollars count priced calls only: 2 calls of 1 merged item report no cost, the \
              median's dollars included",
             "loaded: 5,823 units, $1.17 + 1 unpriced call per merged pull request, counting \
-             every call: the project manager's, the issue writer's and dropped work items' too",
+             every call: the project manager's, the issue writer's, and those of work items \
+             dropped or closed with no change too",
             "baseline control room (a week): 8,000 units per merged pull request; kelpie / \
              baseline, below 1 is cheaper: 0.73 loaded, 0.50 median",
+            "closed with no change: 1 work item, 40 units, $0.04",
             "dropped: 1 work item, 500 units, $0.50 + 1 unpriced call",
             "",
             "project manager: 2 calls (1 compaction), 700 units, $1.00",

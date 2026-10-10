@@ -36,6 +36,7 @@ mod attach;
 mod briefing;
 mod claim;
 mod claude_files;
+mod closed;
 #[cfg(test)]
 mod coderabbit;
 mod dispatch;
@@ -278,6 +279,9 @@ pub struct Runner {
     // When each work item parked on a merge ruling last read the review bots
     // its pass went on without, kept in memory only
     late_reads: BTreeMap<u64, Timestamp>,
+    // When each work item parked with no pull request last read its issue,
+    // kept in memory only
+    parked_reads: BTreeMap<u64, Timestamp>,
 }
 
 impl Runner {
@@ -395,6 +399,7 @@ impl Runner {
             draining: false,
             left: left::Seen::default(),
             late_reads: BTreeMap::new(),
+            parked_reads: BTreeMap::new(),
         };
         runner.settle_older_bots()?;
         runner.settle_labels();
@@ -836,7 +841,7 @@ mod tests {
         drop(runner);
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
-        assert_eq!(saved["version"], 17);
+        assert_eq!(saved["version"], 18);
         assert_eq!(
             saved["events"][2]["what"], "project paused",
             "old events stay"

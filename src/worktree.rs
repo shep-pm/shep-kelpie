@@ -293,6 +293,57 @@ pub fn remove_view(repo: &Path, view: &Path) -> Result<(), WorktreeError> {
     git(repo, ["worktree", "prune"]).map(drop)
 }
 
+/// Whether a work item's branch or worktree holds work `origin/main` lacks:
+/// a commit on `branch` or at the worktree's head, or a file not committed
+///
+/// Fetches `origin/main` first. A branch or worktree that is not there
+/// holds none.
+///
+/// # Errors
+///
+/// [`WorktreeError`] naming the git command that failed.
+pub fn holds_work(repo: &Path, worktree: &Path, branch: &str) -> Result<bool, WorktreeError> {
+    git(repo, ["fetch", "--quiet", "origin", BASE])?;
+    let mut tips = Vec::new();
+    let full_ref = format!("refs/heads/{branch}");
+    if has_ref(repo, &full_ref)? {
+        tips.push(full_ref);
+    }
+    if worktree.exists() {
+        if !uncommitted(repo, worktree)?.is_empty() {
+            return Ok(true);
+        }
+        tips.push(head(repo, worktree)?);
+    }
+    if tips.is_empty() {
+        return Ok(false);
+    }
+    let base = format!("^origin/{BASE}");
+    let mut args = vec!["rev-list", "--count", base.as_str()];
+    args.extend(tips.iter().map(String::as_str));
+    Ok(git(repo, args)? != "0")
+}
+
+/// Whether `full_ref` is in `repo`, telling a ref that is not there from a
+/// git that cannot answer
+fn has_ref(repo: &Path, full_ref: &str) -> Result<bool, WorktreeError> {
+    // `show-ref --verify` answers a missing ref with exit 1.
+    let args = ["show-ref", "--verify", "--quiet", full_ref];
+    let output = in_repo(repo)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| WorktreeError::Spawn(e.to_string()))?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(WorktreeError::Git {
+            args: args.join(" "),
+            stderr: String::from_utf8_lossy(&output.stderr).into(),
+        }),
+    }
+}
+
 /// Whether `full_ref` is a branch on `origin` right now, asked of the remote
 fn on_origin(repo: &Path, full_ref: &str) -> Result<bool, WorktreeError> {
     Ok(!git(repo, ["ls-remote", "--heads", "origin", full_ref])?.is_empty())
@@ -403,7 +454,15 @@ fn status_names(status: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::status_names;
+    use super::{git, has_ref, status_names};
+
+    #[test]
+    fn a_missing_ref_is_absent_but_a_folder_git_cannot_read_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(has_ref(dir.path(), "refs/heads/kelpie/7").is_err());
+        git(dir.path(), ["init", "--quiet"]).unwrap();
+        assert!(!has_ref(dir.path(), "refs/heads/kelpie/7").unwrap());
+    }
 
     #[test]
     fn a_status_names_every_changed_staged_renamed_and_new_path() {

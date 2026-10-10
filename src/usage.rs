@@ -215,7 +215,8 @@ impl From<RoleTally> for RoleLine {
     }
 }
 
-/// A finished work item, merged or dropped, and what it spent
+/// A finished work item, merged, closed with no change or dropped, and what
+/// it spent
 // wire format: changing this is a breaking change to the usage ledger
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FinishedLine {
@@ -229,6 +230,10 @@ pub struct FinishedLine {
     pub pull_request: Option<u64>,
     /// Whether the pull request merged
     pub merged: bool,
+    /// Whether its issue was closed with no change, so it ended with no
+    /// pull request
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub closed: bool,
     /// Seconds from its creation to `at`
     pub wall: u64,
     /// Every role's units together
@@ -258,6 +263,7 @@ impl FinishedLine {
             title: record.title.clone(),
             pull_request: record.pull_request,
             merged: record.merged,
+            closed: record.closed,
             wall: record.wall,
             units: tally.units(),
             cost_usd: tally.cost().usd(),

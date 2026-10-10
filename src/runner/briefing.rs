@@ -478,7 +478,8 @@ fn phase_text(phase: &Phase, now: Timestamp) -> String {
         Phase::Ci { since, .. } => format!("waiting on CI for {}", age(now, *since)),
         Phase::Ruling { id } => format!("parked on ruling {id}"),
         Phase::Merge { .. } => "merging".into(),
-        Phase::Done { merged: true } => "merged, cleaning up".into(),
-        Phase::Done { merged: false } => "ending, cleaning up".into(),
+        Phase::Done { merged: true, .. } => "merged, cleaning up".into(),
+        Phase::Done { closed: true, .. } => "issue closed with no change, cleaning up".into(),
+        Phase::Done { .. } => "ending, cleaning up".into(),
     }
 }

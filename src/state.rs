@@ -25,7 +25,8 @@ use crate::ports::{Finding, SessionId, Timestamp};
 use crate::settings::Account;
 use crate::work_item::{Attached, Known, Phase, Review, Seconds, Tally, Turn, WorkItem};
 
-/// The state file's format version. 17 added a work item's `pinned` and the
+/// The state file's format version. 18 added `closed` to the `done` phase
+/// and to a finished work item, 17 added a work item's `pinned` and the
 /// `unlabelled` stuck reason, 16 added a work item's `ci_fix_turns` count and
 /// the still-red stuck reason's `fix_turns`, 15 added a work item's `late_from` and
 /// the merge ruling's `late_fix` and `nits`, 14 added a work item's `nit_fix_heads`
@@ -38,7 +39,7 @@ use crate::work_item::{Attached, Known, Phase, Review, Seconds, Tally, Turn, Wor
 /// kinds to six, 8 added the project manager's session, notes and attach, 7
 /// a work item's `attached`, 6 folded the timing phases to six, and 5 added
 /// the board's events, each of which an older kelpie refuses
-const VERSION: u32 = 17;
+const VERSION: u32 = 18;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -228,6 +229,10 @@ pub struct Finished {
     pub pull_request: Option<u64>,
     /// Whether the pull request merged
     pub merged: bool,
+    /// Whether its issue was closed with no change, so it ended with no
+    /// pull request
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub closed: bool,
     /// When it finished
     pub at: Timestamp,
     /// Seconds from its creation to `at`
