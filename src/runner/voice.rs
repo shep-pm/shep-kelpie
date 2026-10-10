@@ -28,11 +28,17 @@ impl Runner {
         if let Some(login) = &self.settings.git.maintainer {
             return Some(login.as_str().to_owned());
         }
-        let user = self
-            .ports
-            .forge
-            .owner_is_user(&self.remote)
-            .unwrap_or(false);
+        // Asked once a run; an answer that failed is asked again next time.
+        let user = match self.owner_is_user.get() {
+            Some(user) => *user,
+            None => {
+                let asked = self.ports.forge.owner_is_user(&self.remote);
+                if let Ok(user) = asked {
+                    let _ = self.owner_is_user.set(user);
+                }
+                asked.unwrap_or(false)
+            }
+        };
         user.then(|| self.remote.owner().to_owned())
     }
 

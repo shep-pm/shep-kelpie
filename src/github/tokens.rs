@@ -194,6 +194,9 @@ impl GithubApp for AppTokens {
         // one repo never mint at once, and a slow answer stalls no other repo.
         let flight = {
             let mut flights = self.flights.lock().unwrap_or_else(PoisonError::into_inner);
+            // A flight nobody holds or waits on is dropped, so the map holds
+            // only the repos in flight now.
+            flights.retain(|k, flight| *k == key || Arc::strong_count(flight) > 1);
             Arc::clone(flights.entry(key.clone()).or_default())
         };
         let _flight = flight.lock().unwrap_or_else(PoisonError::into_inner);

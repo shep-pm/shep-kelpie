@@ -123,6 +123,23 @@ fn the_maintainer_defaults_to_the_owner_of_a_user_s_repo_and_to_nobody_for_an_or
 }
 
 #[test]
+fn the_repo_s_owner_is_asked_about_once_however_many_rulings_are_posted() {
+    let (rig, runner, _) = Rig::parked_set("shep", |rig| {
+        rig.with_app();
+        rig.forge.set_owner_is_user(true);
+    });
+    rig.ask(&runner, "rule", Some("1 no not yet"));
+    rig.claude.script([Scripted::Say(ASKS)]);
+    step(&runner).unwrap(); // the fix turn asks a question: a second ruling
+
+    let mentions = (rig.github.comments().into_iter())
+        .filter(|(_, body)| body.starts_with("@shep-pm "))
+        .count();
+    assert_eq!(mentions, 2, "the merge ruling and the question");
+    assert_eq!(rig.forge.owner_reads(), 1);
+}
+
+#[test]
 fn with_no_app_a_ruling_posts_as_it_always_did() {
     let rig = Rig::new("shep");
     let (_runner, asked) = asking_on_a_pull_request(&rig);

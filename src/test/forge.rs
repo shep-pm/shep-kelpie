@@ -68,6 +68,7 @@ pub(crate) struct FakeForge {
     repo_labels: Arc<Mutex<Vec<String>>>,
     pushes: Arc<AtomicBool>,
     owner_is_user: Arc<AtomicBool>,
+    owner_reads: Arc<AtomicUsize>,
     bot_seen: Arc<AtomicBool>,
     viewer_down: Arc<Mutex<Option<ForgeError>>>,
     // Every call made, and the board's reads among them
@@ -148,6 +149,7 @@ impl FakeForge {
             repo_labels: Arc::default(),
             pushes: Arc::new(AtomicBool::new(true)),
             owner_is_user: Arc::default(),
+            owner_reads: Arc::default(),
             bot_seen: Arc::new(AtomicBool::new(true)),
             viewer_down: Arc::default(),
             asked: Arc::default(),
@@ -184,6 +186,11 @@ impl FakeForge {
     /// Whether the repo's owner is a user, which it is not until a test says so
     pub(crate) fn set_owner_is_user(&self, user: bool) {
         self.owner_is_user.store(user, Ordering::SeqCst);
+    }
+
+    /// How many times the repo's owner was asked about
+    pub(crate) fn owner_reads(&self) -> usize {
+        self.owner_reads.load(Ordering::SeqCst)
     }
 
     /// Whether a review bot has ever commented on the repo, which it has until a test says not
@@ -584,6 +591,7 @@ impl Forge for FakeForge {
 
     fn owner_is_user(&self, _repo: &ForgeSlug) -> Result<bool, ForgeError> {
         self.ask()?;
+        self.owner_reads.fetch_add(1, Ordering::SeqCst);
         Ok(self.owner_is_user.load(Ordering::SeqCst))
     }
 

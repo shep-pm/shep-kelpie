@@ -333,8 +333,9 @@ Every other ruling still asks.
 **Notice**:
 What kelpie sends after a merge under `auto`, a work item closed with no
 change, a withdrawn merge ruling or a finished runner, through the same
-webhook as rulings, and as a comment on the work item's thread where an App
-covers the repo. Not a ruling: it has no id and takes no answer.
+webhook as rulings. All but the finished runner's are also a comment on the
+work item's thread where an App covers the repo. Not a ruling: it has no id
+and takes no answer.
 
 **Draining**:
 A runner told to start no new call, while the calls it has running go on to
