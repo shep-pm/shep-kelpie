@@ -65,7 +65,8 @@ pub fn report(
         let unpriced = calls.iter().filter(|call| call.unpriced).count();
         out.push(format!(
             "loaded: {} units, {}{} per merged pull request, counting every call: the \
-             project manager's, the issue writer's and dropped work items' too",
+             project manager's, the issue writer's, and those of work items dropped or \
+             closed with no change too",
             thousands(loaded.round() as u64),
             money(dollars),
             unpriced_note(unpriced)
@@ -73,27 +74,36 @@ pub fn report(
         let median = median(merged.iter().map(|i| i.units as f64).collect()).unwrap_or(0.0);
         out.extend(baselines.iter().map(|b| against(b, loaded, median)));
     }
-    let dropped: Vec<&FinishedLine> = (finished.iter().copied())
-        .filter(|item| !item.merged && after(item.at))
-        .collect();
-    if !dropped.is_empty() {
-        let units = dropped.iter().map(|item| item.units).sum();
-        let dollars = dropped.iter().map(|item| item.cost_usd).sum();
-        let unpriced: u32 = dropped.iter().map(|item| unpriced_of(item)).sum();
-        out.push(format!(
-            "dropped: {}, {} units, {}{}",
-            count(dropped.len(), "work item"),
-            thousands(units),
-            money(dollars),
-            unpriced_note(unpriced as usize)
-        ));
-    }
+    let ended = |closed: bool| -> Vec<&FinishedLine> {
+        (finished.iter().copied())
+            .filter(|item| !item.merged && item.closed == closed && after(item.at))
+            .collect()
+    };
+    out.extend(not_merged("closed with no change", &ended(true)));
+    out.extend(not_merged("dropped", &ended(false)));
     out.push(String::new());
     out.push(totals("project manager", &calls, Role::Pm));
     out.push(totals("issue writer", &calls, Role::IssueWriter));
     let recorded: BTreeSet<u64> = finished.iter().map(|item| item.issue).collect();
     out.extend(unrecorded(&calls, &recorded));
     out
+}
+
+// What the work items that ended unmerged as `what` spent, if any did
+fn not_merged(what: &str, items: &[&FinishedLine]) -> Option<String> {
+    if items.is_empty() {
+        return None;
+    }
+    let units = items.iter().map(|item| item.units).sum();
+    let dollars = items.iter().map(|item| item.cost_usd).sum();
+    let unpriced: u32 = items.iter().map(|item| unpriced_of(item)).sum();
+    Some(format!(
+        "{what}: {}, {} units, {}{}",
+        count(items.len(), "work item"),
+        thousands(units),
+        money(dollars),
+        unpriced_note(unpriced as usize)
+    ))
 }
 
 fn row(cells: [&str; 9]) -> String {

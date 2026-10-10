@@ -292,6 +292,10 @@ pub enum StepReport {
         pull_request: Option<u64>,
         /// Whether the pull request merged
         merged: bool,
+        /// Whether its issue was closed with no change, so it ended with no
+        /// pull request
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        closed: bool,
         /// What its Claude calls cost, by role
         spend: Box<Spend>,
         /// Its qwen rounds

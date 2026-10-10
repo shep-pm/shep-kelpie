@@ -586,6 +586,8 @@ pub fn advance(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
 fn one_pass(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
     lock(runner).beat();
     lock(runner).let_go_of_the_gone();
+    // Before any answer is taken, so none resumes a worker on a closed issue.
+    lock(runner).read_parked()?;
     super::left::answer_left(runner);
     loop {
         let news = lock(runner).next_news();

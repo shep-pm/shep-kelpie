@@ -95,7 +95,7 @@ impl Runner {
         };
         if matches!(
             item.phase,
-            Phase::Merge { .. } | Phase::Done { merged: true }
+            Phase::Merge { .. } | Phase::Done { merged: true, .. }
         ) || matches!(item.phase, Phase::Ruling { id } if follow_up_parked(id))
         {
             return Err(DropError::Merging(item.issue));
@@ -284,7 +284,10 @@ impl Runner {
         let item = self
             .current_in(&mut next)
             .expect("a merge is of a work item");
-        item.phase = Phase::Done { merged: true };
+        item.phase = Phase::Done {
+            merged: true,
+            closed: false,
+        };
         if notice {
             next.notices.push(Notice {
                 issue,
@@ -369,11 +372,13 @@ impl Runner {
         }
         let now = self.ports.clock.now();
         let timings = item.split(now, self.timing_phase(item));
+        let closed = matches!(item.phase, Phase::Done { closed: true, .. });
         let record = Finished {
             issue: item.issue,
             title: item.title.clone(),
             pull_request: item.pull_request,
             merged,
+            closed,
             at: now,
             wall: timings.wall,
             seconds: timings.seconds.clone(),
@@ -384,6 +389,7 @@ impl Runner {
             issue: item.issue,
             pull_request: item.pull_request,
             merged,
+            closed,
             spend: Box::new(item.spend()),
             qwen: item.qwen,
             timings,
@@ -402,6 +408,7 @@ impl Runner {
         self.ledger.append(&crate::usage::Line::Finished(line));
         self.mark_held(issue, false);
         self.late_reads.remove(&issue);
+        self.parked_reads.remove(&issue);
         Ok(Begin::Report(report))
     }
 }

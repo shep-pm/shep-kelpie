@@ -123,7 +123,12 @@ impl Runner {
             Ok(PullRequestState::Open) => {}
             // The maintainer merged it by hand, which is their own ruling.
             Ok(PullRequestState::Merged) => {
-                self.update(|item| item.phase = Phase::Done { merged: true })?;
+                self.update(|item| {
+                    item.phase = Phase::Done {
+                        merged: true,
+                        closed: false,
+                    }
+                })?;
                 return self.finish(true);
             }
             Ok(PullRequestState::Closed) => {

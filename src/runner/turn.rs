@@ -154,7 +154,7 @@ impl Runner {
             Phase::Ci { .. } => return self.check_ci(),
             Phase::Ruling { id } => return self.late_while_parked(*id),
             Phase::Merge { .. } => return self.merge(),
-            Phase::Done { merged } => return self.finish(*merged),
+            Phase::Done { merged, .. } => return self.finish(*merged),
         }
         // Only a turn that has not begun waits on the pacer: one already
         // running carries on, since a turn is never interrupted, and start_over

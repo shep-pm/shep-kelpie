@@ -76,6 +76,7 @@ fn finished(issue: u64, merged: bool, pairs: &[(TimingPhase, u64)]) -> Finished 
         title: format!("Issue {issue}"),
         pull_request: Some(issue + 60),
         merged,
+        closed: false,
         at: crate::ports::Timestamp(Rig::EPOCH + issue),
         wall: seconds.total(),
         seconds,

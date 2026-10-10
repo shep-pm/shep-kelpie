@@ -175,6 +175,8 @@ impl Runner {
         );
         // Any answer to a refused merge gives the next one its catch-up again.
         let refusal_answered = matches!(ruling.kind, RulingKind::Stuck(Stuck::MergeRefused { .. }));
+        // An answered question gives the next turn that stops short its nudge again.
+        let answered = matches!(ruling.kind, RulingKind::Question { .. });
         // Only the ruling the work item is parked on moves it. Any other,
         // which nothing leaves behind today, is answered by clearing it.
         let parked_on = |item: &WorkItem| item.phase == Phase::Ruling { id };
@@ -230,6 +232,9 @@ impl Runner {
             };
             if refusal_answered {
                 item.merge_refused = false;
+            }
+            if answered {
+                item.sent_back = false;
             }
             let worker = match moved {
                 Move::Phase(phase) => {
@@ -582,11 +587,17 @@ fn decide(
             Answer::No(_),
             RulingKind::Stuck(Stuck::TurnTimeout { .. } | Stuck::TurnFailed { .. })
             | RulingKind::AgentFiles { .. },
-        ) => Phase::Done { merged: false },
+        ) => Phase::Done {
+            merged: false,
+            closed: false,
+        },
         (Answer::Yes, RulingKind::AgentFiles { phase, .. }) => phase,
         (Answer::Yes, RulingKind::ForeignChange { known, .. }) => return Ok(Move::Accept(known)),
         // The pull request is merged, so a no has no worker to send a note to.
-        (Answer::Yes | Answer::No(_), RulingKind::FollowUp { .. }) => Phase::Done { merged: true },
+        (Answer::Yes | Answer::No(_), RulingKind::FollowUp { .. }) => Phase::Done {
+            merged: true,
+            closed: false,
+        },
         // A no's fix is new code, unreviewed: it goes through a pass of the
         // review again before CI, whatever other ruling this answers.
         (Answer::No(note), _) => {
@@ -610,7 +621,10 @@ fn decide(
             head: None,
             since: now,
         },
-        (Answer::Yes, RulingKind::Stuck(Stuck::Closed)) => Phase::Done { merged: false },
+        (Answer::Yes, RulingKind::Stuck(Stuck::Closed)) => Phase::Done {
+            merged: false,
+            closed: false,
+        },
         // No work item is parked on it, so an answer only clears it.
         (Answer::Yes, RulingKind::Stuck(Stuck::Unlabelled { .. })) => Phase::Implement,
         (Answer::Yes, RulingKind::Stuck(Stuck::LocalModelSpilled { review, .. })) => {

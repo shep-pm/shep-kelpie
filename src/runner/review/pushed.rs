@@ -111,7 +111,12 @@ impl Runner {
         let number = number.expect("review runs on a pull request");
         match self.ports.forge.pull_request(&self.remote, number) {
             Ok(pr) if pr.state == PullRequestState::Merged => {
-                self.update(|item| item.phase = Phase::Done { merged: true })?;
+                self.update(|item| {
+                    item.phase = Phase::Done {
+                        merged: true,
+                        closed: false,
+                    }
+                })?;
                 self.finish(true)
             }
             Ok(pr) if pr.state == PullRequestState::Closed => {
