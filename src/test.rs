@@ -34,6 +34,7 @@ mod cubic;
 mod elsewhere;
 mod endpoint;
 mod forge;
+mod github;
 mod leases;
 mod reviewer;
 mod sandbox;
@@ -45,6 +46,7 @@ pub(crate) use claude::{FakeClaude, Hold, LEFT_BEHIND, Scripted, Seen};
 pub(crate) use elsewhere::Elsewhere;
 pub(crate) use endpoint::{Answer, StandInEndpoint, Take, unreachable_url};
 pub(crate) use forge::FakeForge;
+pub(crate) use github::{Asked, FakeGithub, FakeSigner, PEM};
 pub(crate) use leases::{FakeLeases, Told};
 pub(crate) use reviewer::{FakeReviewer, ScriptedRound};
 pub(crate) use sandbox::OpenSandbox;
@@ -616,7 +618,7 @@ impl Rig {
             review_bots,
             alerts: Arc::new(self.alerts.clone()),
             leases: Arc::new(self.leases.clone()),
-            clock: Box::new(self.clock.clone()),
+            clock: Arc::new(self.clock.clone()),
         };
         let paths = self.paths();
         Runner::open(
@@ -692,6 +694,12 @@ impl Rig {
             Some(StepReport::Ruling { id: 1, .. })
         ));
         (rig, runner, head)
+    }
+
+    /// Moves the clock on to the board's next read, past the first three
+    /// waits of a step that failed
+    pub(crate) fn next_look(&self) {
+        self.clock.advance(crate::runner::BOARD_POLL.as_secs());
     }
 
     /// Steps once and, if nothing happened, waits out CI's settling and

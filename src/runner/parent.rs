@@ -122,8 +122,11 @@ mod tests {
             given_up,
         };
         assert_eq!(step(&runner).unwrap(), Some(refused(false)));
+        rig.next_look();
         assert_eq!(step(&runner).unwrap(), Some(refused(false)));
+        rig.next_look();
         assert_eq!(step(&runner).unwrap(), Some(refused(true)));
+        rig.next_look();
         assert!(matches!(
             step(&runner).unwrap(),
             Some(StepReport::Dispatched { issue: 6, .. })

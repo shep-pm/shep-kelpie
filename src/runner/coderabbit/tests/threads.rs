@@ -14,6 +14,7 @@ fn a_forge_that_keeps_refusing_to_resolve_lets_the_pass_go_on_after_three_steps(
     rig.claude.script([Scripted::Push("flag.txt", "named\n")]);
     step(&runner).unwrap(); // the fix turn
     for _ in 0..2 {
+        rig.next_look();
         assert!(matches!(
             step(&runner).unwrap(),
             Some(StepReport::GateFailed { .. })
@@ -24,6 +25,7 @@ fn a_forge_that_keeps_refusing_to_resolve_lets_the_pass_go_on_after_three_steps(
             "tried again"
         );
     }
+    rig.next_look();
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::ThreadsLeftOpen {
@@ -84,6 +86,7 @@ fn one_refusal_then_a_resolve_goes_on_as_usual() {
         Some(StepReport::GateFailed { .. })
     ));
     rig.forge.coderabbit.set_resolve_down(false);
+    rig.next_look();
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::FixPushed { .. })

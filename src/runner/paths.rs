@@ -35,7 +35,7 @@ impl TryFrom<&str> for ProjectName {
             return Err(ProjectNameError(value.to_owned()));
         }
         // A project's folder sits beside kelpie's own in kelpie's home.
-        if crate::home::OWN.contains(&value) {
+        if crate::home::is_own(value) {
             return Err(ProjectNameError(value.to_owned()));
         }
         Ok(Self(value.to_owned()))

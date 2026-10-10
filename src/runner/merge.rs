@@ -710,6 +710,7 @@ mod tests {
         assert!(rig.worktree_7().exists());
 
         rig.forge.set_merges_down(false);
+        rig.next_look();
         assert!(finished(step(&runner).unwrap()));
         assert_eq!(rig.forge.merges(), [(71, head)]);
     }

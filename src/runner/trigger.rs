@@ -12,7 +12,7 @@ use super::pace::PacerStatus;
 use super::{Answer, Runner};
 use crate::board::Skip;
 use crate::lease::gpu::LockHolder;
-use crate::ports::{ModelSeat, SessionId};
+use crate::ports::{ModelSeat, SessionId, Timestamp};
 use crate::review_bot::Bot;
 use crate::settings::{AgentName, Merging};
 use crate::skills::StepSkill;
@@ -108,6 +108,10 @@ pub struct Status<'a> {
     /// waits for its sheep to stop
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run: Option<super::Run>,
+    /// Until when the runner makes no forge call, the forge's rate limit
+    /// used up, in seconds since the Unix epoch; left out when it makes them
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forge_held_until: Option<Timestamp>,
 }
 
 /// The local model's placement, as Ollama's `/api/ps` last said
@@ -335,6 +339,15 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
         }
         (Err(e), _) => error(e),
     }
+}
+
+/// Whether `action` asks the runner's loop for a pass
+///
+/// `status` and `timings` only ask, and `drain` only sets what the next
+/// pass reads, so none wakes the loop: a drain's wait asks `drain` and
+/// `status` twice a second. `undrain` wakes it, to start the calls it lets go.
+pub fn wakes(action: &str) -> bool {
+    !matches!(action, "status" | "timings" | "drain")
 }
 
 fn read(action: &str, params: Option<&str>) -> Result<Request, String> {

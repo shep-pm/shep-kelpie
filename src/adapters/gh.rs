@@ -4,6 +4,7 @@ mod access;
 mod board;
 mod issues;
 mod queue;
+mod rate_limit;
 mod review;
 pub(crate) mod review_bot;
 
@@ -14,7 +15,7 @@ use serde::Deserialize;
 use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::ports::{
     Checks, Forge, ForgeError, Issue, NewLabel, OpenIssue, PullRequest, PullRequestState,
-    QueueStanding, Reviewed, Visibility,
+    QueueStanding, Reviewed, Timestamp, Visibility,
 };
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
@@ -226,6 +227,10 @@ impl Forge for Gh {
             "--disable-auto",
         ];
         gh(&args).map(drop)
+    }
+
+    fn rate_limit_reset(&self) -> Result<Option<Timestamp>, ForgeError> {
+        rate_limit::rate_limit_reset()
     }
 }
 

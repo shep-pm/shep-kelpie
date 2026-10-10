@@ -3,9 +3,10 @@
 //! The runner's flock entry needs `channel = true`, and
 //! `shutdown_with_message = true` so a stop reaches it as a message.
 //! Triggers are answered at once. The runner's loop runs on a thread of its
-//! own, woken by each trigger, by each call in flight that ends, and by a
-//! look at the board every minute, or more often while a ruling waits on a
-//! reply on the webhook's topic. It starts each agent call and goes on, and
+//! own, woken by each trigger that asks for work, by each call in flight
+//! that ends, and by a look at the board every minute, or more often while
+//! a ruling waits on a reply on the webhook's topic or a failed step waits
+//! to run again. It starts each agent call and goes on, and
 //! never waits on one. A runner that finished asks the shepherd to stop its
 //! own sheep, as `shep kelpie pause` would.
 
@@ -30,7 +31,8 @@ use crate::lease::saved::BookFile;
 use crate::lease::wire::{Asker, GRANT};
 use crate::ports::{Leases, Ports, Routed, SandboxError};
 use crate::runner::{
-    ACTIONS, Pass, ProjectName, ProjectPaths, READ_EVERY, Runner, advance, answer,
+    ACTIONS, BOARD_POLL, Pass, ProjectName, ProjectPaths, READ_EVERY, Runner, advance, answer,
+    wakes,
 };
 use crate::shep_home;
 use crate::shepherd;
@@ -40,11 +42,6 @@ use crate::upgrade::restart::{Interrupt, Patience};
 ///
 /// With [`JOIN_BOUND`], 1.5s, inside shep's default `kill_timeout` of 1.6s.
 const FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
-
-// How often an idle runner looks at the board, or at its pull request's CI.
-// A look is at most two `gh` calls, 120 an hour, against GitHub's 5,000 an
-// hour for the maintainer's login.
-const BOARD_POLL: Duration = Duration::from_secs(60);
 
 // How long a stopping runner waits for its loop's thread, whose pass waits
 // only on short git and gh calls. With the flush after it, it fits inside
@@ -185,7 +182,7 @@ fn serve(project: &str) -> Result<(), Exit> {
         review_bots: vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)],
         alerts: Arc::new(Curl),
         leases: Arc::clone(&leases) as Arc<dyn Leases>,
-        clock: Box::new(SystemClock),
+        clock: Arc::new(SystemClock),
     };
     let finished: OnFinished = {
         let (shep_home, project) = (shep_home.clone(), project.clone());
@@ -218,9 +215,7 @@ fn serve(project: &str) -> Result<(), Exit> {
         let runner = Arc::clone(&runner);
         let wake = wake.clone();
         shepherd.on_action(action, move |params, name| {
-            let reply = answer(&runner, name, params);
-            let _ = wake.send(());
-            reply
+            on_trigger(&runner, name, params, &wake)
         });
     }
     // A grant lands in the lease adapter, and the step it wakes reads it.
@@ -276,6 +271,20 @@ fn serve(project: &str) -> Result<(), Exit> {
         ),
         _ => Ok(()),
     }
+}
+
+// Answers the trigger `action`, and wakes the loop for one that asks for a pass.
+fn on_trigger(
+    runner: &Mutex<Runner>,
+    action: &str,
+    params: Option<&str>,
+    wake: &Sender<()>,
+) -> String {
+    let reply = answer(runner, action, params);
+    if wakes(action) {
+        let _ = wake.send(());
+    }
+    reply
 }
 
 /// Why the runner stops
@@ -407,10 +416,10 @@ impl Worker {
     }
 }
 
-// Runs passes while there is anything to do, then sleeps until a trigger,
-// a call's end, the next ceiling of a call in flight, or the next look at
-// the board, or at the webhook's topic while a ruling waits on a reply
-// there. A turn cut short by a restart is resumed on the first pass.
+// Runs passes while there is anything to do, then sleeps until a trigger
+// that asks for work, a call's end, the next ceiling of a call in flight,
+// the next look at the board or retry of a failed step, or the next read
+// of the webhook's topic while a ruling waits on a reply there. A turn cut short by a restart is resumed on the first pass.
 fn work(
     runner: &Arc<Mutex<Runner>>,
     hooks: &mut Hooks,
@@ -440,16 +449,7 @@ fn work(
             Ok(Pass::Idle) => {}
             Err(e) => eprintln!("cannot save what a pass did: {e}"),
         }
-        let (awaits_reply, ceiling) = {
-            let runner = runner.lock().unwrap_or_else(PoisonError::into_inner);
-            (runner.awaits_reply(), runner.next_ceiling())
-        };
-        let look = if awaits_reply {
-            Duration::from_secs(READ_EVERY)
-        } else {
-            BOARD_POLL
-        };
-        let wait = ceiling.map_or(look, |ceiling| ceiling.min(look));
+        let wait = wait_after_pass(&runner.lock().unwrap_or_else(PoisonError::into_inner));
         if let Err(RecvTimeoutError::Disconnected) = woken.recv_timeout(wait) {
             return;
         }
@@ -458,6 +458,17 @@ fn work(
             (hooks.on_wake)(runner);
         }
     }
+}
+
+// How long the loop sleeps after a pass with nothing left to do, unless woken
+fn wait_after_pass(runner: &Runner) -> Duration {
+    let look = if runner.awaits_reply() {
+        Duration::from_secs(READ_EVERY)
+    } else {
+        BOARD_POLL
+    };
+    let soonest = [runner.next_ceiling(), runner.next_look()];
+    (soonest.into_iter().flatten()).fold(look, Duration::min)
 }
 
 #[cfg(test)]
@@ -537,6 +548,52 @@ mod tests {
             assert!(Instant::now() < deadline, "never saw {what}");
             std::thread::yield_now();
         }
+    }
+
+    // The loop runs a pass only when woken or when its wait runs out.
+    #[test]
+    fn status_and_drain_during_a_drain_wake_nothing_and_ask_the_forge_nothing_but_undrain_wakes() {
+        let rig = Rig::new("shep");
+        let runner = rig.open().unwrap();
+        let (wake, woken) = mpsc::channel();
+        let asked = rig.forge.asked();
+        on_trigger(&runner, "drain", None, &wake);
+        for _ in 0..20 {
+            on_trigger(&runner, "status", None, &wake);
+            on_trigger(&runner, "drain", None, &wake);
+        }
+        on_trigger(&runner, "timings", None, &wake);
+        assert!(woken.try_recv().is_err(), "an ask woke the loop");
+        assert_eq!(rig.forge.asked(), asked);
+
+        on_trigger(&runner, "undrain", None, &wake);
+        assert!(woken.try_recv().is_ok(), "`undrain` did not wake the loop");
+        on_trigger(&runner, "add", Some("7"), &wake);
+        assert!(woken.try_recv().is_ok(), "`add` did not wake the loop");
+    }
+
+    // A minute on from its last board read, a runner whose one slot is held
+    // by a drained work item has nothing the board may do.
+    #[test]
+    fn an_idle_runner_whose_board_is_shut_sleeps_rather_than_spins() {
+        let rig = Rig::new("shep");
+        let runner = rig.open().unwrap();
+        advance(&runner).unwrap();
+        rig.ask(&runner, "drain", None);
+        rig.ask(&runner, "add", Some("7"));
+        rig.clock.advance(BOARD_POLL.as_secs() * 3);
+        let mut passes = 0;
+        let mut slept = Duration::ZERO;
+        // A fake minute of the loop: a pass, then the wait it computes.
+        while slept < BOARD_POLL {
+            advance(&runner).unwrap();
+            passes += 1;
+            let wait = wait_after_pass(&runner.lock().unwrap());
+            assert!(wait >= Duration::from_secs(1), "a wait of {wait:?}");
+            rig.clock.advance(wait.as_secs());
+            slept += wait;
+        }
+        assert!(passes <= 2, "{passes} passes in a minute");
     }
 
     #[test]

@@ -64,6 +64,7 @@ fn a_review_requesting_changes_starts_a_rework_once() {
         ..requesting_changes()
     };
     rig.forge.review(71, newer);
+    rig.next_look();
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::Reworked { .. })
@@ -195,6 +196,7 @@ fn a_label_that_will_not_come_off_starts_nothing_until_it_does() {
     );
 
     rig.forge.set_labels_down(false);
+    rig.next_look();
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::Reworked { .. })

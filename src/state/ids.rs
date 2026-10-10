@@ -89,7 +89,7 @@ impl RulingIds {
             .flatten()
             .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
             .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|name| !name.starts_with('.') && !crate::home::OWN.contains(&name.as_str()))
+            .filter(|name| !name.starts_with('.') && !crate::home::is_own(name))
             .collect();
         names.sort();
         names

@@ -396,6 +396,7 @@ mod tests {
         assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
 
         rig.forge.set_board_down(false);
+        rig.next_look();
         assert!(matches!(
             step(&runner).unwrap(),
             Some(StepReport::Dispatched { issue: 2, .. })
@@ -506,6 +507,7 @@ mod tests {
         rig.forge.open_pull_request(40, "kelpie/32", &[32]);
         assert_eq!(step(&runner).unwrap(), None);
         rig.forge.set_state(40, PullRequestState::Merged);
+        rig.next_look();
         assert_eq!(step(&runner).unwrap(), None);
         assert_eq!(
             rig.ask(&runner, "status", None)["skipped"],
@@ -513,6 +515,7 @@ mod tests {
         );
 
         rig.forge.close_issue(32);
+        rig.next_look();
         assert!(matches!(
             step(&runner).unwrap(),
             Some(StepReport::Dispatched { issue: 8, .. })

@@ -406,6 +406,8 @@ impl Runner {
         let woke_for = flying.wakes.iter().map(prompt::reason).collect();
         let picking = flying.wakes.iter().any(|w| matches!(w, Wake::Pick(_)));
         let (acted, dropped) = self.act(&answer, picking)?;
+        // Its pick or hold is taken on the board's next read.
+        self.looks.board_moved();
         Ok(Some(StepReport::PmAnswered {
             session: flying.session,
             woke_for,
