@@ -84,6 +84,7 @@ pub fn report(
     out.push(String::new());
     out.push(totals("project manager", &calls, Role::Pm));
     out.push(totals("issue writer", &calls, Role::IssueWriter));
+    out.extend(retros(&calls));
     let recorded: BTreeSet<u64> = finished.iter().map(|item| item.issue).collect();
     out.extend(unrecorded(&calls, &recorded));
     out
@@ -227,6 +228,27 @@ fn totals(name: &str, calls: &[&CallLine], role: Role) -> String {
         money(dollars),
         unpriced_note(unpriced)
     )
+}
+
+// The retros of finished work items, totalled apart from the builds they
+// followed, if any ran
+fn retros(calls: &[&CallLine]) -> Option<String> {
+    let mine: Vec<&&CallLine> = (calls.iter())
+        .filter(|call| call.kind == CallKind::Retro)
+        .collect();
+    if mine.is_empty() {
+        return None;
+    }
+    let units = mine.iter().map(|call| call.units).sum();
+    let dollars = mine.iter().filter_map(|call| call.cost_usd).sum();
+    let unpriced = mine.iter().filter(|call| call.unpriced).count();
+    Some(format!(
+        "retro: {}, {} units, {}{}",
+        count(mine.len(), "call"),
+        thousands(units),
+        money(dollars),
+        unpriced_note(unpriced)
+    ))
 }
 
 // Work items' calls with no finished line for them: open still, or run

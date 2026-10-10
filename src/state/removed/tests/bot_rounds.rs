@@ -323,7 +323,7 @@ fn a_file_with_a_bot_round_saves_as_the_current_version_with_none() {
     store.save(&state).unwrap();
     let saved = std::fs::read_to_string(dir.path().join("state.json")).unwrap();
     let saved: Value = serde_json::from_str(&saved).unwrap();
-    assert_eq!(saved["version"], 19);
+    assert_eq!(saved["version"], 20);
     assert_eq!(saved["work_items"][0]["phase"]["state"], "review");
     assert_eq!(saved["work_items"][0].get("coderabbit"), None);
     assert_eq!(store.load().unwrap().unwrap(), state);

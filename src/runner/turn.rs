@@ -266,6 +266,18 @@ impl Runner {
         session: Session,
         prompt: Option<String>,
     ) -> Result<AgentCall, String> {
+        let call = self.worker_call(item, session, prompt)?;
+        self.prepared(call)
+    }
+
+    // The worker's call for `item`, with its worktree, build folder, settings
+    // path and instructions made, before its harness has written anything.
+    pub(super) fn worker_call(
+        &self,
+        item: &WorkItem,
+        session: Session,
+        prompt: Option<String>,
+    ) -> Result<AgentCall, String> {
         let start = if item.rework || item.adopted {
             Start::Pushed
         } else {
@@ -308,7 +320,7 @@ impl Runner {
                     .invoke(Step::Implement, &first_prompt(item.issue, &issue))
             }
         };
-        self.prepared(AgentCall {
+        Ok(AgentCall {
             role: Role::Worker,
             harness,
             issue: item.issue,

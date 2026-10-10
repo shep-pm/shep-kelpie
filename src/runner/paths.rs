@@ -92,6 +92,9 @@ pub struct ProjectPaths {
     pub worker: PathBuf,
     /// The folder for the plugins that hold each step's skill
     pub skills: PathBuf,
+    /// Where the retros workers wrote when their work items finished are
+    /// kept unread, one file each, which every project shares
+    pub retro_reports: PathBuf,
     /// Kelpie's own tools for showing a work item's UI, which every project shares
     pub tools: Tools,
     /// Kelpie's home, which holds every folder here
@@ -122,6 +125,7 @@ impl ProjectPaths {
             pm: folder.join("pm"),
             worker: folder.join("worker"),
             skills: folder.join("skills"),
+            retro_reports: kelpie_home.join("retro-reports/unverified"),
             tools: Tools::under(kelpie_home),
             kelpie_home: kelpie_home.to_owned(),
             shep_home: shep_home.to_owned(),

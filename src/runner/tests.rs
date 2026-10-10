@@ -66,7 +66,7 @@ fn a_project_saved_paused_reads_the_board_on_its_first_pass() {
     drop(runner);
     let saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
-    assert_eq!(saved["version"], 19);
+    assert_eq!(saved["version"], 20);
     assert_eq!(
         saved["events"][2]["what"], "project paused",
         "old events stay"

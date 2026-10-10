@@ -99,6 +99,9 @@ pub enum Tools {
     /// The project manager's: reading its working folder, and adding to
     /// the end of [`PM_NOTES`] there, which a hook holds it to
     Pm,
+    /// A finished worker's retro: reading and searching its worktree, with
+    /// no file written, no command and no crew. Its reply is the report.
+    Retro,
 }
 
 /// The project manager's own notes, the one file in its folder it may change

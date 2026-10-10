@@ -61,8 +61,32 @@ const ISSUES_DENY: [&str; 13] = [
     "ExitWorktree",
 ];
 
+/// The tools a finished worker's retro never uses: commands, sub-agents, every
+/// file writer, the web, and the rest a worker is denied. It reads its
+/// worktree and replies with the report, which kelpie saves.
+const RETRO_DENY: [&str; 14] = [
+    "Agent",
+    "Task",
+    "Bash",
+    "Edit",
+    "Write",
+    "MultiEdit",
+    "NotebookEdit",
+    "WebFetch",
+    "WebSearch",
+    "Monitor",
+    "RemoteTrigger",
+    "Workflow",
+    "EnterWorktree",
+    "ExitWorktree",
+];
+
 /// The only tools the project manager's session has, as `--tools` takes them
 pub(crate) const PM_TOOLS: &str = "Read,Glob,Grep,Edit,Write";
+
+/// The only tools a finished worker's retro has, as `--tools` takes them: it
+/// reads its worktree and calls the skills the retro skill names
+pub(crate) const RETRO_TOOLS: &str = "Read,Glob,Grep,Skill";
 
 /// What the project manager never uses, denied as well in case `--tools`
 /// lets one through: commands, sub-agents, skills, messages, the web, and
@@ -129,8 +153,13 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
     if let (Tools::Issues | Tools::Pm, Some(fence)) = (tools, &reach.fence) {
         deny.extend(reads_only(&fence.guard.worktree, &reach.read));
     }
+    // Headless, a tool nothing allows is refused, and the retro skill calls another.
+    let allow = (tools == Tools::Retro).then(|| json!(["Skill"]));
     let Some(fence) = &reach.fence else {
         let mut permissions = json!({ "deny": deny });
+        if let Some(allow) = allow {
+            permissions["allow"] = allow;
+        }
         if !reach.read.is_empty() {
             // Read outside the working folder is refused under `-p` unless the folder is added.
             permissions["additionalDirectories"] = json!(reach.read);
@@ -138,6 +167,9 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
         return trimmed(json!({ "permissions": permissions }));
     };
     let mut permissions = json!({ "deny": deny });
+    if let Some(allow) = allow {
+        permissions["allow"] = allow;
+    }
     if !reach.read.is_empty() {
         permissions["additionalDirectories"] = json!(reach.read);
     }
@@ -155,7 +187,7 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
             permissions["allow"] = json!([rule("Edit", &notes)]);
             pm_hooks(fence)
         }
-        Tools::Work | Tools::Review | Tools::Answer => hooks(fence),
+        Tools::Work | Tools::Review | Tools::Answer | Tools::Retro => hooks(fence),
     };
     trimmed(json!({
         // Kelpie's sandbox holds the whole process, and on macOS Claude Code's
@@ -196,6 +228,7 @@ fn tool_denies(tools: Tools, reach: &Reach) -> impl Iterator<Item = &'static str
         Tools::Answer => &NO_TOOLS,
         Tools::Issues => &ISSUES_DENY,
         Tools::Pm => &PM_DENY,
+        Tools::Retro => &RETRO_DENY,
     };
     // An answer that may read a folder keeps Read and nothing else.
     let reads = tools == Tools::Answer && !reach.read.is_empty();
@@ -348,6 +381,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::ports::{Fence, Guard};
     use crate::trim::deny_with_trim;
 
     #[test]
@@ -390,6 +424,38 @@ mod tests {
     }
 
     #[test]
+    fn a_retro_may_call_a_skill_with_or_without_a_fence() {
+        let fenced = Reach {
+            read: Vec::new(),
+            fence: Some(Box::new(Fence {
+                write: Vec::new(),
+                no_write: Vec::new(),
+                no_read: Vec::new(),
+                read: Vec::new(),
+                hosts: Vec::new(),
+                no_commands: Vec::new(),
+                env: Default::default(),
+                sockets: Vec::new(),
+                guard: Guard {
+                    kelpie: "/k/kelpie".into(),
+                    worktree: "/k/wt".into(),
+                    build: "/k/build".into(),
+                    git_common_dir: "/k/git".into(),
+                    folders: Vec::new(),
+                    issues: None,
+                },
+                hooks: Vec::new(),
+            })),
+        };
+        for reach in [Reach::default(), fenced] {
+            let s = settings(Tools::Retro, &reach);
+            assert_eq!(s["permissions"]["allow"], json!(["Skill"]));
+        }
+        let review = settings(Tools::Review, &Reach::default());
+        assert!(review["permissions"].get("allow").is_none());
+    }
+
+    #[test]
     fn an_answer_reads_nothing_unless_its_sandbox_lists_a_folder() {
         let none = settings(Tools::Answer, &Reach::default());
         assert_eq!(none["permissions"]["deny"], deny_with_trim(&NO_TOOLS));
@@ -419,7 +485,7 @@ mod tests {
             // file denies `NotebookEdit` through `trimmed`, so that one is asserted. Kelpie's
             // sandbox holds the writes of the other three, so no deny is asserted for them yet.
             Tools::Review => &["Edit", "Write", "MultiEdit"],
-            Tools::Answer | Tools::Issues => &[],
+            Tools::Answer | Tools::Issues | Tools::Retro => &[],
         }
     }
 
@@ -431,7 +497,8 @@ mod tests {
             Tools::Review => Some(Tools::Answer),
             Tools::Answer => Some(Tools::Issues),
             Tools::Issues => Some(Tools::Pm),
-            Tools::Pm => None,
+            Tools::Pm => Some(Tools::Retro),
+            Tools::Retro => None,
         }
     }
 
@@ -467,6 +534,7 @@ mod tests {
             Tools::Answer,
             Tools::Issues,
             Tools::Pm,
+            Tools::Retro,
         ] {
             let s = settings(tools, &Reach::default());
             for key in [
@@ -485,6 +553,7 @@ mod tests {
                 Tools::Answer => &NO_TOOLS,
                 Tools::Issues => &ISSUES_DENY,
                 Tools::Pm => &PM_DENY,
+                Tools::Retro => &RETRO_DENY,
             };
             assert_eq!(s["permissions"]["deny"], deny_with_trim(own), "{tools:?}");
             // What kelpie's own calls use stays, unless the role denies it itself.

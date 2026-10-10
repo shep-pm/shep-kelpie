@@ -76,6 +76,7 @@ mod question;
 mod replies;
 mod report;
 mod reread;
+mod retro;
 mod review;
 mod review_bot;
 mod rework;
@@ -646,6 +647,7 @@ impl Runner {
             rebased: false,
             held: Vec::new(),
             follow_ups: None,
+            retro: false,
             summary: None,
             timings: Some(Timings::starting(self.ports.clock.now())),
             attached: None,

@@ -131,6 +131,12 @@ fn each_kind_of_call_gets_its_own_tools() {
     assert_eq!(argv[at + 1], "read,grep,find,ls");
     assert!(!argv.iter().any(|a| a == "--extension"));
 
+    let mut retro = w.call(URL, Role::Worker, Session::Resume(id(FRESH_ID)));
+    retro.tools = Tools::Retro;
+    let argv = strings(&retro);
+    let at = argv.iter().position(|a| a == "--tools").unwrap();
+    assert_eq!(argv[at + 1], "read,grep,find,ls");
+
     let mut review = w.call(URL, Role::Reviewer, Session::New(id(FRESH_ID)));
     assert!(strings(&review).iter().any(|a| a == "--no-tools"));
     review.reach.read = vec![w.path("extra")];

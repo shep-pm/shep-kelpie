@@ -37,7 +37,7 @@ pub struct StepSkills {
     /// A session reset's handoff, `handoff` by default
     #[serde(default)]
     pub reset: Option<SkillChoice>,
-    /// A retro for the lessons file, `retro` by default
+    /// A finished work item's retro, `retro` by default
     #[serde(default)]
     pub retro: Option<SkillChoice>,
 }

@@ -218,6 +218,10 @@ pub struct WorkItem {
     /// merges. None until then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub follow_ups: Option<FollowUps>,
+    /// Whether its retro was started, which is never done twice: a retro
+    /// cut short by a stop is not asked for again
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retro: bool,
     /// The worker's last turn's closing message, on one line and cut short
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
