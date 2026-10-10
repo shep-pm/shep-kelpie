@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 
 use std::time::Duration;
 
+use super::super::tests::Driven;
 use crate::ports::{AgentError, Role, Tools};
 use crate::runner::{Pass, StepReport, advance, step};
 use crate::settings::Harness;
@@ -263,7 +264,8 @@ fn add_refuses_an_issue_the_issue_writer_is_labelling() {
     rig.forge.list_ready(7, false);
     let hold = Hold::default();
     rig.claude.script([Scripted::Hold(hold.clone())]);
-    assert!(matches!(advance(&runner).unwrap(), Pass::Started));
+    let driven = Driven::new(&runner);
+    driven.started();
     assert!(hold.entered(PATIENCE), "the call never began");
     assert_eq!(
         rig.ask(&runner, "add", Some("7")),
@@ -276,6 +278,12 @@ fn add_refuses_an_issue_the_issue_writer_is_labelling() {
     );
     hold.release();
     assert!(hold.answered(PATIENCE), "the call never answered");
+    // The stand-in has replied, but the runner has not yet taken the result in
+    assert_eq!(
+        driven.heard(),
+        None,
+        "the hand label stands, so nothing is reported"
+    );
     rig.claude.script([Scripted::Say("done")]);
     assert_eq!(
         dispatched_on(step(&runner).unwrap()),
