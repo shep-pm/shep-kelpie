@@ -87,7 +87,9 @@ impl Runner {
         self.seat_waiting()?;
         let mut waiting = None;
         let now = self.ports.clock.now();
-        for slot in self.rotation() {
+        let rotation = self.rotation();
+        self.looks.keep_only(&rotation);
+        for slot in rotation {
             if !self.looks.due(slot, now) {
                 continue;
             }
@@ -122,7 +124,7 @@ impl Runner {
     // waiting for a slot, oldest first, then the board while it may open
     // one, from the one after the last to act, so one that keeps acting
     // cannot starve the rest
-    fn rotation(&self) -> Vec<Slot> {
+    pub(super) fn rotation(&self) -> Vec<Slot> {
         let items = (self.state.work_items.iter())
             .filter(|i| {
                 !self.flights.flying(i.issue) && i.attached.is_none() && i.seat != Seat::Waiting

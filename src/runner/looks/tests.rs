@@ -1,5 +1,7 @@
 //! How often a pass reads the forge, through the runner's stand-ins
 
+use std::time::Duration;
+
 use crate::ports::{Clock, Timestamp};
 use crate::runner::{BOARD_POLL, Pass, StepReport, advance, step};
 use crate::test::Rig;
@@ -154,4 +156,54 @@ fn a_rate_limit_whose_reset_the_forge_cannot_say_holds_for_ten_minutes() {
 
     let held = rig.ask(&runner, "status", None)["forge_held_until"].clone();
     assert_eq!(held, rig.clock.now().0 + 600);
+}
+
+// After an idle pass, nothing the runner waits on is due already, so the
+// loop sleeps rather than spins.
+
+#[test]
+fn a_board_shut_by_a_full_slot_sets_no_wait_past_its_last_read() {
+    let rig = Rig::new("acme");
+    let runner = rig.open().unwrap();
+    wake(&runner);
+    rig.ask(&runner, "drain", None);
+    rig.ask(&runner, "add", Some("7"));
+    rig.clock.advance(3 * BOARD_POLL.as_secs());
+
+    assert_eq!(wake(&runner), None);
+
+    assert_eq!(runner.lock().unwrap().next_look(), None);
+}
+
+#[test]
+fn a_hold_longer_than_a_minute_waits_for_its_end_not_the_board_read() {
+    let rig = Rig::new("acme");
+    let runner = rig.open().unwrap();
+    rig.forge
+        .set_used_up(Some(Timestamp(rig.clock.now().0 + 1800)));
+    wake(&runner);
+    rig.clock.advance(BOARD_POLL.as_secs() + 1);
+
+    assert_eq!(wake(&runner), None);
+
+    let wait = runner.lock().unwrap().next_look();
+    assert_eq!(wait, Some(Duration::from_secs(1800 - 61)));
+}
+
+#[test]
+fn the_wait_of_a_work_item_that_ended_sets_no_wait() {
+    let (rig, runner, _) = Rig::with_pull_request("acme");
+    rig.forge.set_down(true);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::GateFailed { issue: 7, .. })
+    ));
+    rig.forge.set_down(false);
+    rig.ask(&runner, "drop", Some("7"));
+    assert_eq!(step(&runner).unwrap(), None);
+    rig.clock.advance(20);
+
+    let wait = runner.lock().unwrap().next_look();
+
+    assert_eq!(wait, Some(Duration::from_secs(BOARD_POLL.as_secs() - 20)));
 }

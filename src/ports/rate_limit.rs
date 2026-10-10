@@ -21,11 +21,12 @@ use crate::settings::ForgeSlug;
 const FALLBACK: u64 = 10 * 60;
 
 /// What gh says when a limit is used up, lowercased: the REST and GraphQL
-/// primary limits, and the secondary limit
-const USED_UP: [&str; 3] = [
+/// primary limits, the secondary limit, and an HTTP 429 answer
+const USED_UP: [&str; 4] = [
     "api rate limit exceeded",
     "api rate limit already exceeded",
     "secondary rate limit",
+    "http 429",
 ];
 
 /// Whether `error` is the forge saying its rate limit is used up
@@ -255,5 +256,38 @@ impl Forge for RateHeld {
     // Free of the limits, and asked only once a call finds them used up.
     fn rate_limit_reset(&self) -> Result<Option<Timestamp>, ForgeError> {
         self.forge.rate_limit_reset()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The first is from the live runner's log; the rest are GitHub's
+    // documented messages, as gh prints a failed call.
+    #[test]
+    fn each_of_ghs_used_up_answers_is_a_used_up_limit() {
+        let said = [
+            "GraphQL: API rate limit already exceeded for user ID 1.",
+            "gh: API rate limit exceeded for user ID 1. (HTTP 403)",
+            "gh: You have exceeded a secondary rate limit. Please wait a few minutes before you \
+             try again. (HTTP 403)",
+            "gh: Too Many Requests (HTTP 429)",
+        ];
+        for stderr in said {
+            assert!(used_up(&ForgeError::Failed(stderr.into())), "{stderr}");
+        }
+    }
+
+    #[test]
+    fn any_other_failure_is_not() {
+        let other = [
+            ForgeError::Failed("gh: Not Found (HTTP 404)".into()),
+            ForgeError::Failed("error connecting to api.github.com".into()),
+            ForgeError::Unreadable("API rate limit exceeded".into()),
+        ];
+        for error in other {
+            assert!(!used_up(&error), "{error}");
+        }
     }
 }

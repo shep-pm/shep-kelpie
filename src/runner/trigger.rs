@@ -343,15 +343,11 @@ pub fn answer(runner: &Mutex<Runner>, action: &str, params: Option<&str>) -> Str
 
 /// Whether `action` asks the runner's loop for a pass
 ///
-/// `status` and `timings` only ask, and `drain`, `undrain` and `pausing`
-/// only set what the next pass reads, so none wakes the loop: a drain's
-/// wait asks `drain` twice a second. Calls `undrain` lets start begin on
-/// the loop's next wake, within a [`super::BOARD_POLL`].
+/// `status` and `timings` only ask, and `drain` only sets what the next
+/// pass reads, so none wakes the loop: a drain's wait asks `drain` and
+/// `status` twice a second. `undrain` wakes it, to start the calls it lets go.
 pub fn wakes(action: &str) -> bool {
-    !matches!(
-        action,
-        "status" | "timings" | "drain" | "undrain" | "pausing"
-    )
+    !matches!(action, "status" | "timings" | "drain")
 }
 
 fn read(action: &str, params: Option<&str>) -> Result<Request, String> {

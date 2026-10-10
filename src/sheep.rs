@@ -449,17 +449,7 @@ fn work(
             Ok(Pass::Idle) => {}
             Err(e) => eprintln!("cannot save what a pass did: {e}"),
         }
-        let (awaits_reply, soonest) = {
-            let runner = runner.lock().unwrap_or_else(PoisonError::into_inner);
-            let soonest = [runner.next_ceiling(), runner.next_look()];
-            (runner.awaits_reply(), soonest.into_iter().flatten().min())
-        };
-        let look = if awaits_reply {
-            Duration::from_secs(READ_EVERY)
-        } else {
-            BOARD_POLL
-        };
-        let wait = soonest.map_or(look, |soonest| soonest.min(look));
+        let wait = wait_after_pass(&runner.lock().unwrap_or_else(PoisonError::into_inner));
         if let Err(RecvTimeoutError::Disconnected) = woken.recv_timeout(wait) {
             return;
         }
@@ -468,6 +458,17 @@ fn work(
             (hooks.on_wake)(runner);
         }
     }
+}
+
+// How long the loop sleeps after a pass with nothing left to do, unless woken
+fn wait_after_pass(runner: &Runner) -> Duration {
+    let look = if runner.awaits_reply() {
+        Duration::from_secs(READ_EVERY)
+    } else {
+        BOARD_POLL
+    };
+    let soonest = [runner.next_ceiling(), runner.next_look()];
+    (soonest.into_iter().flatten()).fold(look, Duration::min)
 }
 
 #[cfg(test)]
@@ -551,7 +552,7 @@ mod tests {
 
     // The loop runs a pass only when woken or when its wait runs out.
     #[test]
-    fn status_and_drain_during_a_drain_wake_nothing_and_ask_the_forge_nothing() {
+    fn status_and_drain_during_a_drain_wake_nothing_and_ask_the_forge_nothing_but_undrain_wakes() {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
         let (wake, woken) = mpsc::channel();
@@ -562,12 +563,37 @@ mod tests {
             on_trigger(&runner, "drain", None, &wake);
         }
         on_trigger(&runner, "timings", None, &wake);
-        on_trigger(&runner, "undrain", None, &wake);
         assert!(woken.try_recv().is_err(), "an ask woke the loop");
         assert_eq!(rig.forge.asked(), asked);
 
+        on_trigger(&runner, "undrain", None, &wake);
+        assert!(woken.try_recv().is_ok(), "`undrain` did not wake the loop");
         on_trigger(&runner, "add", Some("7"), &wake);
         assert!(woken.try_recv().is_ok(), "`add` did not wake the loop");
+    }
+
+    // A minute on from its last board read, a runner whose one slot is held
+    // by a drained work item has nothing the board may do.
+    #[test]
+    fn an_idle_runner_whose_board_is_shut_sleeps_rather_than_spins() {
+        let rig = Rig::new("shep");
+        let runner = rig.open().unwrap();
+        advance(&runner).unwrap();
+        rig.ask(&runner, "drain", None);
+        rig.ask(&runner, "add", Some("7"));
+        rig.clock.advance(BOARD_POLL.as_secs() * 3);
+        let mut passes = 0;
+        let mut slept = Duration::ZERO;
+        // A fake minute of the loop: a pass, then the wait it computes.
+        while slept < BOARD_POLL {
+            advance(&runner).unwrap();
+            passes += 1;
+            let wait = wait_after_pass(&runner.lock().unwrap());
+            assert!(wait >= Duration::from_secs(1), "a wait of {wait:?}");
+            rig.clock.advance(wait.as_secs());
+            slept += wait;
+        }
+        assert!(passes <= 2, "{passes} passes in a minute");
     }
 
     #[test]
