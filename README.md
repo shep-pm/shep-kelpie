@@ -48,6 +48,7 @@ You need these on your machine:
 - `node` and `npm`: `tools install` runs them, and so does every agent's sandbox
 - on Linux, `bwrap` and `socat`, which the sandbox needs
 - `git`, and `gh` signed in to the account that opens the pull requests
+- `curl` and `openssl`, which reach GitHub as kelpie's App and sign its tokens
 - `pi` or `codex`, only to run an agent on that harness (see [Agents](#agents))
 - a GitHub repo whose default branch is `main`, and a checkout of it
 
@@ -140,7 +141,21 @@ On a repo without those four labels, `add` makes them. The runner puts `in-progr
 
 The checkout is the project's repo, and shep-kelpie runs `git fetch`, `git worktree` and `git branch` against its `.git`. Its worktrees, build folders and state go under `$SHEP_HOME/kelpie/<project>`, never inside it. Add from a clone you don't work in if you'd rather keep your own checkout out of it.
 
-### 5. Check the machine
+### 5. Register kelpie's GitHub App
+
+shep-kelpie is moving its rulings and notices onto GitHub, posted as an App of its own that you register for yourself, so they reach you through GitHub's notifications. This release registers the App and checks it can act on your repos; posting through it and reading your answers come next (#397 and #398). For the account that owns the repo:
+
+```sh
+shep kelpie github setup
+```
+
+For a repo an organization owns, `shep kelpie github setup --org <org>`. It opens GitHub's page for a new App, filled in: the name `kelpie-<owner>`, no webhook, and only these permissions: issues and pull requests to write, metadata to read. Click to create it, and GitHub sends you back to shep-kelpie, which keeps the App and opens the page that installs it. Install it on the repos shep-kelpie works. If the browser does not open, the command prints the address to open by hand.
+
+App names are shared by all of GitHub, so if yours is taken, stop with Ctrl-C and run again with `--name <another name>`. Run it once for each owner: an App you register yourself installs only on the account that owns it. Running it again for an owner that has one says so and changes nothing, unless you give `--replace`. Before replacing, delete the old App on GitHub (its owner's settings, Developer settings, GitHub Apps), since its name is still taken while it exists, or give the new one `--name`. `shep kelpie github setup --help` lists the flags.
+
+shep-kelpie keeps the App's private key in its home, `$SHEP_HOME/kelpie` or the folder `KELPIE_HOME` names, under `github/<owner>`, readable by you alone, and no worker can read it. The App cannot push, change code or merge: merging stays on your own `gh` login.
+
+### 6. Check the machine
 
 ```sh
 shep kelpie doctor
@@ -156,6 +171,7 @@ ok       scratch: checkout: /path/to/checkout is a git checkout with an origin
 ok       scratch: implementers: an issue with no `agent:` label runs on sonnet-high
 ok       scratch: push access: may push to shep-pm/shep
 ok       scratch: labels: shep-pm/shep has `ready-for-agent`, `ready-for-human`, `in-progress`
+ok       scratch: github app: kelpie's App is installed on shep-pm/shep and mints a token
 ok       scratch: reviewers: each pull request is read by defect-hunter
 ok       scratch: rulings: no webhook, so rulings reach you only in the log, `status` and `shep kelpie rule`
 nothing a project needs is missing
@@ -170,7 +186,7 @@ ok       scratch: rulings: rulings post to the ntfy webhook
 nothing a project needs is missing
 ```
 
-### 6. Open the sandbox to your registries
+### 7. Open the sandbox to your registries
 
 A worker's sandbox reaches `github.com`, `api.github.com` and the model's API, and nothing else. `add` leaves `allowed_domains` empty, so a first issue on a repo with a cold cache can't fetch crates or npm packages. The project's table is stored on its runner sheep, so edit it in `shep lookout`:
 
@@ -188,7 +204,7 @@ allowed_domains = ["crates.io", "index.crates.io", "static.crates.io"]
 
 For npm, that is `registry.npmjs.org`. A change reaches a running runner at its next wake.
 
-### 7. Start it, and label a first issue
+### 8. Start it, and label a first issue
 
 ```sh
 shep kelpie start
@@ -198,9 +214,9 @@ It starts the project's runner, and the project runs while it does: `shep start 
 
 Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria, or have the issue writer write it (see [Writing issues](#writing-issues)). The runner gives it to a worker, which opens a draft pull request. Then the review runs, each listed reviewer once, then CI. Last, you get a ruling before the merge. `shep kelpie status` shows every project. [The board](#the-board) says what decides whether, and when, an issue starts.
 
-### 8. Answer a ruling
+### 9. Answer a ruling
 
-A ruling reaches the webhook you set in step 5, or waits in `status` and `shep kelpie rule`. Answer it from the terminal:
+A ruling reaches the webhook you set in step 6, or waits in `status` and `shep kelpie rule`. Answer it from the terminal:
 
 ```sh
 shep kelpie rule          # lists the rulings waiting
@@ -210,7 +226,7 @@ shep kelpie rule 14 no rename the flag
 
 On ntfy you can also reply in the topic, after a one-time `shep kelpie totp`. [Rulings](#rulings) has the six kinds and how to answer each.
 
-### 9. Pause, and find the log
+### 10. Pause, and find the log
 
 ```sh
 shep kelpie pause
@@ -643,6 +659,7 @@ shep kelpie issue "<request>"   # issues for you to read, or --interactive
 shep kelpie attach 7   # steer issue 7's worker in this terminal
 shep kelpie upgrade --ref main
 shep kelpie tools install
+shep kelpie github setup   # once per repo owner, with --org <org> for an organization
 shep kelpie totp       # once, to answer rulings from ntfy
 shep kelpie lease status
 ```
@@ -659,7 +676,7 @@ Every trigger a person sends the runner is also a verb: `add <issue>`, `rework <
 
 `add` names the project after the repo, or `shep kelpie add <name>`. It makes the four labels where the repo lacks them, writes kelpie's own agent files where they are missing, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. Running `add` again changes nothing. `start`, `pause` and `finish` find the project from the checkout, or take its name.
 
-`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's checkout, implementers and labels, CodeRabbit where a project lists it, each project's reviewers, in order, with any command or endpoint among them checked as a runner's start checks it, Codex's usage for a project that spends it, and which webhook, if any, rulings post to. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
+`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's checkout, implementers and labels, that kelpie's GitHub App is installed on each project's repo and mints a token there, CodeRabbit where a project lists it, each project's reviewers, in order, with any command or endpoint among them checked as a runner's start checks it, Codex's usage for a project that spends it, and which webhook, if any, rulings post to. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it. The GitHub App's line is `unsure` when GitHub is out of reach, busy or rate limited, and, until kelpie posts through the App, when the owner has no App yet.
 
 ### Leases
 
@@ -698,10 +715,11 @@ A key kelpie no longer reads, such as `review.reviewers`, `coderabbit` or `plann
 shep-kelpie keeps everything under `$SHEP_HOME/kelpie`, or the folder `KELPIE_HOME` names:
 
 - `agents`, `builds`, `codex`, `rulings`, `tools`, `totp` and `upgrade`, shared by every project
+- `github`, with a folder for each owner's App: its id, slug and client id in `app.json`, and its private key in `key.pem`, readable by you alone
 - `dog`, with the dog's book and its door, `lease.sock`. The adopted dog gets `SHEP_HOME` and no `KELPIE_HOME` from shep, so it is always under `$SHEP_HOME/kelpie`, even with `KELPIE_HOME` set for your own commands
 - `<project>`, with the project's `state.json`, `board.md`, worker files, `worktrees` and `builds`, and `pm`, the project manager's folder
 
-So a project can't be named for one of shep-kelpie's own folders. Socket paths must stay under 104 bytes, so a runner with a long `SHEP_HOME` refuses to start and names the path that is too long. Keep a shepherd's `SHEP_HOME` short.
+So a project can't be named for one of shep-kelpie's own folders, in any case, since a macOS volume reads `Github` as `github`. Socket paths must stay under 104 bytes, so a runner with a long `SHEP_HOME` refuses to start and names the path that is too long. Keep a shepherd's `SHEP_HOME` short.
 
 A runner or the dog refuses to start while `~/.kelpie` still holds its files from before shep-kelpie's home moved under `$SHEP_HOME`. The message names the folder and says what to do with it: move `projects/<project>`, which holds the project's state, to `$SHEP_HOME/kelpie/<project>`, and delete `wt/<project>`, `targets/<project>`, `shots/<project>` and `playwright/<project>`. Kelpie makes worktrees and builds again, so delete `wt` and `targets` once the project has no open work item: an open work item's state holds the old folder's path, and kelpie cannot move it. Kelpie's state for a project now goes in `$SHEP_HOME/kelpie/<project>/` by default, or under `KELPIE_HOME` when that is set. `shep kelpie doctor` reports a project whose folder is still there, and `shep kelpie add` warns when it registers one. A runner refused this way stays stopped, with the reason in `shep bleats <project>`, until you clear it and run `shep kelpie start <project>`. A runner added before this release restarts instead, until you run `shep kelpie add` again in its checkout. A runner added before this release has no stop code in its flock entry, so it still restarts under shep's backoff until its `stop_exit_codes` is set to `[78]`, which lookout's settings pane can do.
 

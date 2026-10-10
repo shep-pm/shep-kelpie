@@ -38,6 +38,10 @@
 //! the commands it lists. With `--record` too it is the PostToolUse hook
 //! that records what the session filed and read in that ledger.
 //!
+//! `shep kelpie github setup [--org <org>] [--name <app name>] [--replace]`:
+//! registers kelpie's GitHub App for the maintainer's account or an
+//! organization, and opens the page that installs it.
+//!
 //! `shep kelpie tools install`: installs the sandbox runtime every agent runs
 //! in, under kelpie's home.
 //!
@@ -138,6 +142,7 @@ fn main() -> ExitCode {
         }
         [command, rest @ ..] if command == "doctor" => shep_kelpie::doctor::main(rest),
         [command, rest @ ..] if command == "upgrade" => shep_kelpie::upgrade::main(rest),
+        [command, rest @ ..] if command == "github" => shep_kelpie::github::setup::main(rest),
         [command] if command == "version" => version(false),
         [command, flag] if command == "version" && flag == "--json" => version(true),
         [role, flag, file] if role == "confine" && flag == APPEND => {
@@ -165,7 +170,7 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
             eprintln!(
-                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | finish | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie upgrade [--now] --ref <git ref> | --release <version> | --binary <path> | --rollback\n       shep-kelpie version [--json]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
+                "usage: shep-kelpie add [<project>] | add <issue>\n       shep-kelpie start | pause | finish | status\n       shep-kelpie rule [<id> <answer>]\n       shep-kelpie rework <pr> | adopt <pr>\n       shep-kelpie gate [<issue>] | drop [<issue>]\n       shep-kelpie doctor [<project>] [--test-alert]\n       shep-kelpie upgrade [--now] --ref <git ref> | --release <version> | --binary <path> | --rollback\n       shep-kelpie version [--json]\n       shep-kelpie runner <project>\n{}\n       shep-kelpie confine <folder>...\n       shep-kelpie guard <git common dir> <worktree>\n       shep-kelpie github setup [--org <org>] [--name <app name>] [--replace]\n       shep-kelpie tools install\n       shep-kelpie totp [--rotate | --unlock]\n\nAdopted as `kelpie`, the same verbs run as `shep kelpie <verb>`, and `--` reaches `lease run`.\n\n{}\n\n{}",
                 shep_kelpie::lease::cli::USAGE,
                 shep_kelpie::flock::USAGE,
                 shep_kelpie::flock::rule::HELP

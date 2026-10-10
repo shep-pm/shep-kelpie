@@ -20,15 +20,22 @@ const UNDER_SHEP: &str = "kelpie";
 // shep's own default when `SHEP_HOME` is unset (shep-core's `DEFAULT_HOME_DIR`).
 const SHEP_DEFAULT: &str = ".shep";
 
+/// Whether `name` is one of kelpie's own entries in its home, in any case,
+/// since a case-insensitive volume reads `Github` as `github`
+pub fn is_own(name: &str) -> bool {
+    OWN.iter().any(|own| own.eq_ignore_ascii_case(name))
+}
+
 /// The folder kelpie kept everything in before it moved under shep's home
 pub const OLD: &str = ".kelpie";
 
 /// Kelpie's own entries in its home, which no project may be named for
-pub const OWN: [&str; 11] = [
+pub const OWN: [&str; 12] = [
     "agents",
     "builds",
     "codex",
     "dog",
+    "github",
     "relay",
     "rulings",
     "settings.toml",
@@ -411,6 +418,15 @@ mod tests {
         assert!(error.contains(&old.display().to_string()), "{error}");
         assert!(error.contains("dog/book.json"), "{error}");
         assert!(error.contains(&dog.display().to_string()), "{error}");
+    }
+
+    #[test]
+    fn kelpies_own_names_match_in_any_case() {
+        for name in ["github", "Github", "GITHUB", "Totp"] {
+            assert!(is_own(name), "{name}");
+            assert!(ProjectName::try_from(name).is_err(), "{name}");
+        }
+        assert!(!is_own("githubs"));
     }
 
     #[test]

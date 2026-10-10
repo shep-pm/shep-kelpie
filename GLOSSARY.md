@@ -285,6 +285,14 @@ carries it, or asking for a full review in a comment. For cubic it is the
 marking a draft ready where its file says it reviews on ready. Only kelpie's
 code summons, in the listed bot's round of a review pass.
 
+**App**:
+Kelpie's GitHub App, one per repo owner, which the maintainer registers
+with `shep kelpie github setup` and installs on the repos kelpie works. Its
+private key stays in kelpie's home, and kelpie acts as the App with an
+installation token minted from it, one per repo. Merging stays on the maintainer's
+own `gh` login.
+_Avoid_: bot account, kelpie's account
+
 **Pacing**:
 How kelpie spends each **account** (`claude`, `codex`, or `none` for a local
 model) against its usage windows: a daily **allowance** of the weekly

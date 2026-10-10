@@ -20,6 +20,7 @@ pub mod dog;
 pub mod fence;
 pub mod flock;
 pub mod forwarder;
+pub mod github;
 pub mod guard;
 pub mod home;
 pub mod issues;
