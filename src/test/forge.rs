@@ -11,7 +11,7 @@ use super::coderabbit::FakeCodeRabbit;
 use crate::board::{Blocker, OpenPullRequest, READY, ReadyIssue, SubIssues};
 use crate::ports::{
     Checks, Forge, ForgeError, Issue, MaintainerReview, NewLabel, OpenIssue, PullRequest,
-    PullRequestState, QueueStanding, Reviewed, Visibility,
+    PullRequestState, QueueStanding, Reviewed, Timestamp, Visibility,
 };
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
@@ -69,6 +69,11 @@ pub(crate) struct FakeForge {
     pushes: Arc<AtomicBool>,
     bot_seen: Arc<AtomicBool>,
     viewer_down: Arc<Mutex<Option<ForgeError>>>,
+    // Every call made, and the board's reads among them
+    asked: Arc<AtomicUsize>,
+    board_reads: Arc<AtomicUsize>,
+    // Set while the forge is down
+    down: Arc<Mutex<Option<Down>>>,
     /// Pull requests' labels, and what CodeRabbit posts
     pub(crate) coderabbit: FakeCodeRabbit,
 }
@@ -84,6 +89,10 @@ struct FakePullRequest {
     from_fork: bool,
     author: String,
 }
+
+/// What every call fails with while the forge is down, and when its rate
+/// limit resets where it can say
+type Down = (String, Option<Timestamp>);
 
 /// An issue kelpie opened on the fake forge
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,6 +152,9 @@ impl FakeForge {
             pushes: Arc::new(AtomicBool::new(true)),
             bot_seen: Arc::new(AtomicBool::new(true)),
             viewer_down: Arc::default(),
+            asked: Arc::default(),
+            board_reads: Arc::default(),
+            down: Arc::default(),
             coderabbit: FakeCodeRabbit::default(),
         }
     }
@@ -524,6 +536,37 @@ impl FakeForge {
         }
     }
 
+    /// How many calls the runner made, each counted as it was asked
+    pub(crate) fn asked(&self) -> usize {
+        self.asked.load(Ordering::SeqCst)
+    }
+
+    /// How many times the board's ready issues were read
+    pub(crate) fn board_reads(&self) -> usize {
+        self.board_reads.load(Ordering::SeqCst)
+    }
+
+    /// Makes every call fail as gh does once the rate limit is used up,
+    /// with `reset` as when it resets where the forge can say
+    pub(crate) fn set_used_up(&self, reset: Option<Timestamp>) {
+        let said = "GraphQL: API rate limit already exceeded for user ID 1.";
+        *self.down.lock().unwrap() = Some((said.to_owned(), reset));
+    }
+
+    /// Makes every call fail as gh does with no network, or lets every call through again
+    pub(crate) fn set_down(&self, down: bool) {
+        let said = "error connecting to api.github.com";
+        *self.down.lock().unwrap() = down.then(|| (said.to_owned(), None));
+    }
+
+    fn ask(&self) -> Result<(), ForgeError> {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        match &*self.down.lock().unwrap() {
+            Some((said, _)) => Err(ForgeError::Failed(said.clone())),
+            None => Ok(()),
+        }
+    }
+
     fn board(&self) -> Result<(), ForgeError> {
         if self.board_down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("the board is down".into()));
@@ -534,19 +577,23 @@ impl FakeForge {
 
 impl Forge for FakeForge {
     fn visibility(&self, _repo: &ForgeSlug) -> Result<Visibility, ForgeError> {
+        self.ask()?;
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(*self.visibility.lock().unwrap())
     }
 
     fn default_branch(&self, _repo: &ForgeSlug) -> Result<String, ForgeError> {
+        self.ask()?;
         Ok(self.default_branch.lock().unwrap().clone())
     }
 
     fn repo_labels(&self, _repo: &ForgeSlug) -> Result<Vec<String>, ForgeError> {
+        self.ask()?;
         Ok(self.repo_labels.lock().unwrap().clone())
     }
 
     fn create_label(&self, _repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError> {
+        self.ask()?;
         let mut labels = self.repo_labels.lock().unwrap();
         if labels.iter().any(|l| l == label.name) {
             return Err(ForgeError::Failed(format!(
@@ -559,14 +606,17 @@ impl Forge for FakeForge {
     }
 
     fn can_push(&self, _repo: &ForgeSlug) -> Result<bool, ForgeError> {
+        self.ask()?;
         Ok(self.pushes.load(Ordering::SeqCst))
     }
 
     fn review_bot_seen(&self, _repo: &ForgeSlug, _login: Login<'_>) -> Result<bool, ForgeError> {
+        self.ask()?;
         Ok(self.bot_seen.load(Ordering::SeqCst))
     }
 
     fn issue(&self, _repo: &ForgeSlug, number: u64) -> Result<Issue, ForgeError> {
+        self.ask()?;
         if self.missing.lock().unwrap().contains(&number) {
             return Err(ForgeError::Failed(format!("no issue #{number}")));
         }
@@ -592,6 +642,8 @@ impl Forge for FakeForge {
     }
 
     fn ready_issues(&self, _repo: &ForgeSlug) -> Result<Vec<ReadyIssue>, ForgeError> {
+        self.board_reads.fetch_add(1, Ordering::SeqCst);
+        self.ask()?;
         self.board()?;
         let ready = self.ready.lock().unwrap().clone();
         let closed = self.closed.lock().unwrap().clone();
@@ -609,6 +661,7 @@ impl Forge for FakeForge {
     }
 
     fn open_pull_requests(&self, _repo: &ForgeSlug) -> Result<Vec<OpenPullRequest>, ForgeError> {
+        self.ask()?;
         self.board()?;
         let prs = self.pull_requests.lock().unwrap();
         let open = self.open.lock().unwrap().clone();
@@ -623,6 +676,7 @@ impl Forge for FakeForge {
     }
 
     fn pull_request(&self, _repo: &ForgeSlug, number: u64) -> Result<PullRequest, ForgeError> {
+        self.ask()?;
         let pr = self.opened(number)?;
         let lagging = self.lagging.lock().unwrap().get(&number).cloned();
         let head = match lagging {
@@ -642,6 +696,7 @@ impl Forge for FakeForge {
     }
 
     fn reviewed(&self, _repo: &ForgeSlug, number: u64) -> Result<Reviewed, ForgeError> {
+        self.ask()?;
         if self.unreadable.lock().unwrap().contains(&number) {
             return Err(ForgeError::Failed(format!("#{number} is unreadable")));
         }
@@ -668,6 +723,7 @@ impl Forge for FakeForge {
     }
 
     fn viewer(&self) -> Result<String, ForgeError> {
+        self.ask()?;
         self.viewer_reads.fetch_add(1, Ordering::SeqCst);
         match &*self.viewer_down.lock().unwrap() {
             Some(error) => Err(error.clone()),
@@ -676,6 +732,7 @@ impl Forge for FakeForge {
     }
 
     fn comment(&self, _repo: &ForgeSlug, number: u64, body: &str) -> Result<(), ForgeError> {
+        self.ask()?;
         if self.comments_down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("comments are down".into()));
         }
@@ -707,12 +764,14 @@ impl Forge for FakeForge {
     }
 
     fn post_comment(&self, repo: &ForgeSlug, number: u64, body: &str) -> Result<u64, ForgeError> {
+        self.ask()?;
         self.comment(repo, number, body)?;
         let at = self.comments.lock().unwrap().len() - 1;
         Ok(9000 + at as u64)
     }
 
     fn open_issues(&self, _repo: &ForgeSlug) -> Result<Vec<OpenIssue>, ForgeError> {
+        self.ask()?;
         if let Some(why) = &*self.issues_down.lock().unwrap() {
             return Err(ForgeError::Failed(why.clone()));
         }
@@ -727,6 +786,7 @@ impl Forge for FakeForge {
         body: &str,
         labels: &[&str],
     ) -> Result<u64, ForgeError> {
+        self.ask()?;
         self.issues_up()?;
         if let Some(left) = self.creates_left.lock().unwrap().as_mut() {
             if *left == 0 {
@@ -758,6 +818,7 @@ impl Forge for FakeForge {
     }
 
     fn close_issue(&self, _repo: &ForgeSlug, number: u64, comment: &str) -> Result<(), ForgeError> {
+        self.ask()?;
         self.issues_up()?;
         if self.closes_down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("closing is refused".into()));
@@ -771,6 +832,7 @@ impl Forge for FakeForge {
     }
 
     fn mark_ready(&self, _repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
+        self.ask()?;
         self.opened(number)?;
         let mut prs = self.pull_requests.lock().unwrap();
         prs.get_mut(&number).expect("checked above").draft = false;
@@ -785,6 +847,7 @@ impl Forge for FakeForge {
         label: &str,
         on: bool,
     ) -> Result<(), ForgeError> {
+        self.ask()?;
         if self.labels_down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("labels are down".into()));
         }
@@ -804,6 +867,7 @@ impl Forge for FakeForge {
         label: &str,
         on: bool,
     ) -> Result<(), ForgeError> {
+        self.ask()?;
         if self.labels_down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("labels are down".into()));
         }
@@ -823,17 +887,20 @@ impl Forge for FakeForge {
         number: u64,
         login: Login<'_>,
     ) -> Result<Activity, ForgeError> {
+        self.ask()?;
         self.opened(number)?;
         self.coderabbit.activity(number, login.rest)
     }
 
     fn resolve_thread(&self, _repo: &ForgeSlug, thread: &str) -> Result<(), ForgeError> {
+        self.ask()?;
         self.coderabbit.resolve(thread)
     }
 
     // Refuses what GitHub refuses: a draft, a pull request that is not open,
     // and a head that moved since the caller looked.
     fn merge(&self, repo: &ForgeSlug, number: u64, head: &str) -> Result<(), ForgeError> {
+        self.ask()?;
         if self.merges_down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("merges are down".into()));
         }
@@ -863,14 +930,25 @@ impl Forge for FakeForge {
     }
 
     fn merge_queue(&self, _repo: &ForgeSlug, number: u64) -> Result<QueueStanding, ForgeError> {
+        self.ask()?;
         self.opened(number)?;
         Ok(self.standing(number))
     }
 
     fn disable_auto_merge(&self, _repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
+        self.ask()?;
         self.opened(number)?;
         self.disarm(number);
         Ok(())
+    }
+
+    fn rate_limit_reset(&self) -> Result<Option<Timestamp>, ForgeError> {
+        Ok(self
+            .down
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|(_, reset)| *reset))
     }
 }
 

@@ -601,7 +601,7 @@ impl Rig {
             review_bots,
             alerts: Arc::new(self.alerts.clone()),
             leases: Arc::new(self.leases.clone()),
-            clock: Box::new(self.clock.clone()),
+            clock: Arc::new(self.clock.clone()),
         };
         let paths = self.paths();
         Runner::open(
@@ -677,6 +677,12 @@ impl Rig {
             Some(StepReport::Ruling { id: 1, .. })
         ));
         (rig, runner, head)
+    }
+
+    /// Moves the clock on to the board's next read, past the first three
+    /// waits of a step that failed
+    pub(crate) fn next_look(&self) {
+        self.clock.advance(crate::runner::BOARD_POLL.as_secs());
     }
 
     /// Steps once and, if nothing happened, waits out CI's settling and

@@ -263,6 +263,8 @@ Issues labelled `ready-for-agent` are the board. What decides whether, and when,
 
 On a pull request kelpie opened, `ready-for-agent` or a review requesting changes starts a rework of it, the same as `shep kelpie rework <pr>`. On any other open pull request of kelpie's account, `ready-for-agent` adopts it, the same as `shep kelpie adopt <pr>`. Adoptions and reworks go before any issue. Kelpie puts `ready-for-human` on each pull request it hands back.
 
+The runner reads the board from GitHub at most once a minute, however often something wakes it, and at once after something that changes what the board would see, such as a work item ending, a ruling answered, an `add` or an `adopt`. `status`, `drain` and `undrain` answer without making it read anything, so `upgrade` and `pause` can ask them twice a second while they wait. A work item's step or a board read that fails is tried again after 15 seconds, then twice as long each time up to 10 minutes. When GitHub says the account's rate limit is used up, the runner makes no GitHub call until the limit resets, says so once in its log, and `status` shows when under `forge_held_until`.
+
 ### Building
 
 A worker builds its work item inline, in a worktree of its own cut from `origin/main`, on the agent its issue's `agent:` label names or the project's default implementer. It commits, pushes, opens a draft pull request that ends `Resolves #<issue>`, and ends its turn. When the repo has a pull request template, it fills that. A project's `worker.instructions_file` adds rules the repo's own docs don't carry.

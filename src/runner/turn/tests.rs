@@ -787,6 +787,7 @@ fn a_pull_request_the_turns_end_missed_goes_to_review_instead() {
     ));
     rig.forge.set_board_down(false);
     rig.forge.open_pull_request(70, "kelpie/7", &[7]);
+    rig.next_look();
     step(&runner).unwrap();
     let item = &rig.ask(&runner, "status", None)["work_item"];
     assert_eq!(item["pull_request"], 70);

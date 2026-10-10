@@ -368,6 +368,7 @@ fn a_forge_that_cannot_open_issues_holds_the_work_item_and_the_retry_files_once(
     );
 
     rig.forge.set_issues_down(false);
+    rig.next_look();
     assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
     assert!(finished(after_merge(&runner)));
     assert_eq!(rig.forge.created().len(), 1);
@@ -388,11 +389,12 @@ fn a_forge_that_keeps_refusing_is_retried_for_hours_and_then_the_maintainer_is_a
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
     rig.forge.set_issues_down(true);
 
-    for _ in 0..20 {
-        assert!(matches!(
-            after_merge(&runner),
-            Some(StepReport::GateFailed { .. })
-        ));
+    assert!(matches!(
+        after_merge(&runner),
+        Some(StepReport::GateFailed { .. })
+    ));
+    for _ in 0..19 {
+        assert_eq!(after_merge(&runner), None, "tried again inside its wait");
     }
     rig.clock.advance(5 * 60 * 60);
     assert!(
@@ -602,6 +604,7 @@ fn a_merged_item_on_its_follow_up_ruling_holds_back_no_new_work() {
 
     // Neither `concurrency.pending_rulings` nor its merged branch's files hold #8 back.
     rig.forge.list_ready(8, false);
+    rig.next_look();
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::Dispatched { issue: 8, .. })

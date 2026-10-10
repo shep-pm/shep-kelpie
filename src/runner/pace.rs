@@ -270,6 +270,7 @@ mod tests {
         assert_eq!(rig.meter.reads(), 0, "nothing to dispatch, nothing to read");
 
         rig.forge.list_ready(7, false);
+        rig.next_look();
         assert!(dispatched(&step(&runner).unwrap()));
         assert_eq!(rig.meter.reads(), 1);
     }

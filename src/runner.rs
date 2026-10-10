@@ -15,7 +15,9 @@ use crate::agents::{Agents, AgentsError};
 use crate::board::{LabelError, Skip, agent_label, old_worker_label, pinned};
 use crate::local_paths::LocalPaths;
 use crate::pacer::Assessment;
-use crate::ports::{ForgeError, Guarded, Leased, Ports, SessionId, Timestamp, Visibility};
+use crate::ports::{
+    ForgeError, ForgeHold, Guarded, Leased, Ports, RateHeld, SessionId, Timestamp, Visibility,
+};
 use crate::review_bot::{Bot, Profile};
 use crate::settings::{
     Account, AgentName, ForgeSlug, ListedReviewer, RoleAgents, Settings, SettingsError,
@@ -60,6 +62,7 @@ mod ledger_tests;
 mod left;
 #[cfg(test)]
 mod limits_tests;
+mod looks;
 mod merge;
 mod older_bots;
 #[cfg(test)]
@@ -100,6 +103,7 @@ pub use gpu::GpuStatus;
 pub use in_flight::Stopping;
 pub use ledger::count_stopped;
 pub use left::leave as leave_answer;
+pub use looks::BOARD_POLL;
 pub use merge::DropError;
 pub use pace::PacerStatus;
 pub use paths::{ProjectName, ProjectNameError, ProjectPaths};
@@ -110,7 +114,7 @@ pub use rework::{HUMAN, ReworkError};
 pub use ruling::{Answer, RuleError};
 pub use timings::{Totals, settle};
 use trigger::issue_list;
-pub use trigger::{ACTIONS, Status, WorkItemStatus, answer};
+pub use trigger::{ACTIONS, Status, WorkItemStatus, answer, wakes};
 pub use trigger::{GateError, WhichItem};
 pub use words::{Wants, read_answer};
 
@@ -292,6 +296,10 @@ pub struct Runner {
     // When each work item parked with no pull request last read its issue,
     // kept in memory only
     parked_reads: BTreeMap<u64, Timestamp>,
+    // When the board was last read and each failing step runs again, in memory only
+    looks: looks::Looks,
+    // Until when every forge call is held, the forge's rate limit used up
+    forge_hold: ForgeHold,
 }
 
 impl Runner {
@@ -315,7 +323,10 @@ impl Runner {
     ) -> Result<Self, OpenError> {
         let checkout = settings.git.checkout.as_path();
         let local = LocalPaths::new([home, paths.kelpie_home.as_path(), checkout]);
-        ports.forge = Box::new(Guarded::new(ports.forge, local.clone()));
+        let forge_hold = ForgeHold::default();
+        let guarded = Box::new(Guarded::new(ports.forge, local.clone()));
+        let clock = Arc::clone(&ports.clock);
+        ports.forge = Box::new(RateHeld::new(guarded, clock, forge_hold.clone()));
         let leases = Arc::clone(&ports.local_leases);
         ports.agents = Arc::new(Leased::new(Arc::clone(&ports.agents), leases));
         let gpu = gpu::GpuWatch::start(
@@ -411,6 +422,8 @@ impl Runner {
             left: left::Seen::default(),
             late_reads: BTreeMap::new(),
             parked_reads: BTreeMap::new(),
+            looks: looks::Looks::default(),
+            forge_hold,
         };
         runner.settle_older_bots()?;
         runner.settle_labels();
@@ -492,6 +505,7 @@ impl Runner {
             pm: self.pm_status(),
             draining: self.draining_status(),
             run: self.run_status(),
+            forge_held_until: self.forge_hold.until(now),
         }
     }
 
@@ -649,6 +663,9 @@ impl Runner {
         self.charge(&mut next);
         self.note_changes(&mut next);
         self.store.save(&next)?;
+        if looks::board_moved(&self.state, &next) {
+            self.looks.board_moved();
+        }
         self.state = next;
         Ok(())
     }

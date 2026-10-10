@@ -279,6 +279,7 @@ fn a_full_review_the_forge_would_not_post_is_asked_again_and_never_twice() {
         Some(StepReport::GateFailed { .. })
     ));
     rig.forge.set_comments_down(false);
+    rig.next_look();
     assert_eq!(step(&runner).unwrap(), summoned_80(&head));
     drop(runner);
     let runner = rig.open().unwrap();

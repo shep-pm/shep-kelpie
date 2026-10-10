@@ -183,6 +183,7 @@ fn a_reply_naming_no_listed_implementer_raises_a_ruling_and_the_board_waits() {
     );
 
     rig.forge.label(7, "agent:sonnet-high");
+    rig.next_look();
     rig.claude.script([Scripted::Say("done")]);
     assert_eq!(dispatched_on(step(&runner).unwrap()), "sonnet-high");
     let status = rig.ask(&runner, "status", None);

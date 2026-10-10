@@ -58,7 +58,9 @@ impl Runner {
     ///
     /// Each note is handed out once.
     pub fn take_notes(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.notes)
+        let mut notes = std::mem::take(&mut self.notes);
+        notes.extend(self.forge_hold.take_told());
+        notes
     }
 }
 

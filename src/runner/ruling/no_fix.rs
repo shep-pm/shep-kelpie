@@ -95,6 +95,7 @@ fn a_failed_hand_back_keeps_the_note_fix_for_the_retry() {
         "{report:?}"
     );
     rig.forge.set_labels_down(false);
+    rig.next_look();
     let Some(StepReport::Ruling {
         id: 2, question, ..
     }) = step(&runner).unwrap()

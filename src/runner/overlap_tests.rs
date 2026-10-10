@@ -148,6 +148,7 @@ fn a_parked_branch_whose_files_are_unknown_holds_every_ready_issue() {
         &rig.repo(),
         &["update-ref", "refs/heads/kelpie/7", head.trim()],
     );
+    rig.next_look();
     assert_eq!(step(&runner).unwrap(), None, "the board reads #7's files");
     assert_eq!(dispatched(step(&runner).unwrap()), (10, vec![]));
 }

@@ -61,7 +61,7 @@ fn first_prompt(number: u64, issue: &Issue) -> String {
 }
 
 /// What a step can work on
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Slot {
     /// The open work item for this issue
     Item(u64),
@@ -86,7 +86,11 @@ impl Runner {
         }
         self.seat_waiting()?;
         let mut waiting = None;
+        let now = self.ports.clock.now();
         for slot in self.rotation() {
+            if !self.looks.due(slot, now) {
+                continue;
+            }
             let begin = match slot {
                 Slot::Item(issue) => {
                     self.focus = Some(issue);
@@ -94,9 +98,12 @@ impl Runner {
                 }
                 Slot::Board => {
                     self.focus = None;
+                    self.looks.reading_board(now);
                     self.dispatch()?
                 }
             };
+            let held = self.forge_hold.until(now);
+            self.looks.stepped(slot, &begin, now, held);
             match begin {
                 Begin::Idle => {}
                 Begin::Report(report) if report.waits() => {
