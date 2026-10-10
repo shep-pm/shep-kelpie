@@ -289,7 +289,7 @@ code summons, in the listed bot's round of a review pass.
 Kelpie's GitHub App, one per repo owner, which the maintainer registers
 with `shep kelpie github setup` and installs on the repos kelpie works. Its
 private key stays in kelpie's home, and kelpie acts as the App with an
-**installation token** minted from it. Merging stays on the maintainer's
+installation token minted from it, one per repo. Merging stays on the maintainer's
 own `gh` login.
 _Avoid_: bot account, kelpie's account
 

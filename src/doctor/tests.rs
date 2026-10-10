@@ -39,6 +39,7 @@ impl Host for FakeHost {
 struct Scene {
     shepherd: FakeShepherd,
     forge: FakeForge,
+    github: FakeGithub,
     app: AppTokens,
     meter: FakeMeter,
     codex_meter: FakeMeter,
@@ -74,6 +75,7 @@ impl Scene {
             old_home: home.join(".kelpie"),
             home,
             app: github.tokens(&kelpie_home),
+            github,
             kelpie_home,
             forge,
             meter: FakeMeter::idle(),

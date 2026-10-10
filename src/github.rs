@@ -1,23 +1,9 @@
-//! Kelpie's GitHub App: one per repo owner, registered by the maintainer
-//!
-//! `shep kelpie github setup` registers an App under the maintainer's account
-//! or an organization through GitHub's app manifest flow ([`setup`]), and
-//! [`Apps`] keeps what came back. [`GithubApp`] hands out an installation
-//! token for a repo, minted from the App's private key ([`tokens`]).
-//!
-//! ## Where an App is kept
-//!
-//! - `<kelpie home>/github/<owner>/app.json`: the App's id, slug, client id
-//!   and owner
-//! - `<kelpie home>/github/<owner>/key.pem`: its private key, readable by
-//!   the maintainer alone, in a folder only they may use
-//!
-//! A worker's sandbox denies kelpie's home around its own folders, so no
-//! worker reads either file, and kelpie never puts the key in a variable.
+//! Kelpie's GitHub App, one per repo owner: [`setup`] registers it,
+//! [`Apps`] keeps it in kelpie's home, and [`GithubApp`] mints its tokens
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -46,8 +32,12 @@ pub struct Owner(String);
 
 impl Owner {
     /// The owner of `repo`
-    pub fn of(repo: &ForgeSlug) -> Self {
-        Self(repo.owner().to_ascii_lowercase())
+    ///
+    /// # Errors
+    ///
+    /// Why the owner is not a GitHub login, as [`Owner::try_from`] says.
+    pub fn of(repo: &ForgeSlug) -> Result<Self, String> {
+        Self::try_from(repo.owner())
     }
 
     /// The login, in lower case
@@ -105,34 +95,30 @@ impl App {
 /// never the key in it
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoreError {
-    /// The file or its folder could not be read or written
-    Io(PathBuf, io::ErrorKind),
-    /// `app.json` does not hold an App kelpie wrote
-    Malformed(PathBuf),
-    /// Someone other than its owner may read or write the key or its folder
+    /// The key or a folder above it is a link, someone else's, or open to
+    /// others, so it may have been read or replaced
     Exposed(PathBuf),
-    /// GitHub named an owner that is not a GitHub login
-    Owner(String),
+    /// A file could not be read or written, or is not what kelpie wrote, with why
+    Unusable(String),
 }
 
 impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io(path, kind) => write!(f, "cannot use {}: {kind}", path.display()),
-            Self::Malformed(path) => write!(
-                f,
-                "{} is not an App kelpie wrote: `shep kelpie github setup --replace` writes it again",
-                path.display()
-            ),
             Self::Exposed(path) => write!(
                 f,
-                "{} may be used by others: `chmod 700` the folder and `chmod 600` the key, and \
-                 register the App again with `--replace` if someone else may have read it",
+                "{} may be used by others: it must be yours, not a link, and `chmod 700` for a \
+                 folder or `chmod 600` for the key; register the App again with `--replace` if \
+                 someone else may have read it",
                 path.display()
             ),
-            Self::Owner(why) => f.write_str(why),
+            Self::Unusable(why) => f.write_str(why),
         }
     }
+}
+
+fn unusable(path: &Path, e: &io::Error) -> StoreError {
+    StoreError::Unusable(format!("cannot use {}: {}", path.display(), e.kind()))
 }
 
 impl core::error::Error for StoreError {}
@@ -155,37 +141,37 @@ impl Apps {
     ///
     /// # Errors
     ///
-    /// [`StoreError`] when its files cannot be read, or anyone but their
-    /// owner may read the key or use its folder.
+    /// [`StoreError`] when its files cannot be read, or the key or a folder
+    /// above it is exposed.
     pub fn get(&self, owner: &Owner) -> Result<Option<App>, StoreError> {
         let record = self.record(owner);
         let text = match fs::read_to_string(&record) {
             Ok(text) => text,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(StoreError::Io(record, e.kind())),
+            Err(e) => return Err(unusable(&record, &e)),
         };
         for path in [self.folder.clone(), self.owned(owner), self.key(owner)] {
-            let mode = fs::metadata(&path)
-                .map_err(|e| StoreError::Io(path.clone(), e.kind()))?
-                .mode();
-            if mode & 0o077 != 0 {
-                return Err(StoreError::Exposed(path));
-            }
+            private(&path)?;
         }
-        serde_json::from_str(&text)
-            .map(Some)
-            .map_err(|_| StoreError::Malformed(record))
+        serde_json::from_str(&text).map(Some).map_err(|_| {
+            StoreError::Unusable(format!(
+                "{} is not an App kelpie wrote: `shep kelpie github setup --replace` writes it again",
+                record.display()
+            ))
+        })
     }
 
     /// Keeps the App GitHub converted, in place of any App its owner had
     ///
-    /// The key goes in first, so an App on record always has its key.
+    /// The folders are made the maintainer's alone first, and the key goes
+    /// in before the record, so an App on record always has its key.
     ///
     /// # Errors
     ///
-    /// [`StoreError`] when GitHub's owner is not a login, or a file cannot be written.
+    /// [`StoreError`] when GitHub's owner is not a login, a folder is
+    /// someone else's or a link, or a file cannot be written.
     pub fn save(&self, conversion: &Conversion) -> Result<App, StoreError> {
-        let owner = Owner::try_from(conversion.owner.as_str()).map_err(StoreError::Owner)?;
+        let owner = Owner::try_from(conversion.owner.as_str()).map_err(StoreError::Unusable)?;
         let app = App {
             id: conversion.id,
             slug: conversion.slug.clone(),
@@ -193,7 +179,15 @@ impl Apps {
             owner: conversion.owner.clone(),
         };
         let folder = self.owned(&owner);
-        private_dir(&folder).map_err(|e| StoreError::Io(folder.clone(), e.kind()))?;
+        private_dir(&folder).map_err(|e| unusable(&folder, &e))?;
+        for path in [&self.folder, &folder] {
+            let meta = fs::symlink_metadata(path).map_err(|e| unusable(path, &e))?;
+            if meta.file_type().is_symlink() || meta.uid() != nix::unistd::getuid().as_raw() {
+                return Err(StoreError::Exposed(path.clone()));
+            }
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+                .map_err(|e| unusable(path, &e))?;
+        }
         let record = serde_json::to_string_pretty(&app).expect("an App serializes");
         put(&self.key(&owner), conversion.pem.expose().as_bytes())?;
         put(&self.record(&owner), record.as_bytes())?;
@@ -214,10 +208,19 @@ impl Apps {
     }
 }
 
+// Refuses `path` when it is a link, someone else's, or open to others.
+fn private(path: &Path) -> Result<(), StoreError> {
+    let meta = fs::symlink_metadata(path).map_err(|e| unusable(path, &e))?;
+    let theirs = meta.uid() != nix::unistd::getuid().as_raw();
+    if meta.file_type().is_symlink() || theirs || meta.mode() & 0o077 != 0 {
+        return Err(StoreError::Exposed(path.to_owned()));
+    }
+    Ok(())
+}
+
 // Writes `bytes` beside `path`, readable by its owner alone, syncs it and
 // renames it over `path`.
 fn put(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
-    let io = |e: io::Error| StoreError::Io(path.to_owned(), e.kind());
     let fresh = path.with_extension(format!("new.{}", std::process::id()));
     let _ = fs::remove_file(&fresh);
     let written = OpenOptions::new()
@@ -228,7 +231,7 @@ fn put(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
         .and_then(|mut file| file.write_all(bytes).and_then(|()| file.sync_all()))
         .and_then(|()| fs::rename(&fresh, path));
     let _ = fs::remove_file(&fresh);
-    written.map_err(io)
+    written.map_err(|e| unusable(path, &e))
 }
 
 #[cfg(test)]

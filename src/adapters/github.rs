@@ -2,8 +2,9 @@
 //!
 //! Each call reaches curl as a config on its stdin, as the webhook's do, so
 //! no process listing shows a JWT. `openssl` reads the key from its file and
-//! the JWT's header and claims from its stdin; the key never passes through
-//! kelpie's memory or any variable.
+//! the JWT's header and claims from its stdin, so signing never loads the key
+//! into kelpie. The key is in kelpie's memory only during setup, between the
+//! conversion's answer and its file; it is never in a variable or an argument.
 
 use std::io::Write;
 use std::path::Path;
@@ -28,33 +29,39 @@ pub struct CurlGithub;
 impl GithubApi for CurlGithub {
     fn convert(&self, code: &str) -> Result<Conversion, ApiError> {
         let url = format!("{API}/app-manifests/{code}/conversions");
-        match call(&url, None, true)? {
+        match call(&url, None, Some(""))? {
             (body, 201) => api::parse_conversion(&body),
-            (_, status) => Err(ApiError::Refused(status)),
+            (body, status) => Err(api::refusal(status, &body)),
         }
     }
 
     fn installation(&self, jwt: &Jwt, repo: &ForgeSlug) -> Result<Option<u64>, ApiError> {
         let url = format!("{API}/repos/{}/installation", repo.as_str());
-        match call(&url, Some(jwt), false)? {
+        match call(&url, Some(jwt), None)? {
             (body, 200) => api::parse_installation(&body).map(Some),
             (_, 404) => Ok(None),
-            (_, status) => Err(ApiError::Refused(status)),
+            (body, status) => Err(api::refusal(status, &body)),
         }
     }
 
-    fn access_token(&self, jwt: &Jwt, installation: u64) -> Result<IssuedToken, ApiError> {
+    fn access_token(
+        &self,
+        jwt: &Jwt,
+        installation: u64,
+        repo: &ForgeSlug,
+    ) -> Result<IssuedToken, ApiError> {
         let url = format!("{API}/app/installations/{installation}/access_tokens");
-        match call(&url, Some(jwt), true)? {
+        match call(&url, Some(jwt), Some(&api::token_request(repo)))? {
             (body, 201) => api::parse_token(&body),
-            (_, status) => Err(ApiError::Refused(status)),
+            (body, status) => Err(api::refusal(status, &body)),
         }
     }
 }
 
-// One call to `url`, a `POST` with an empty body when `post`, and what it
-// answered with its status.
-fn call(url: &str, jwt: Option<&Jwt>, post: bool) -> Result<(String, u16), ApiError> {
+// One call to `url`, a `POST` of `post` when there is one, and what it
+// answered with its status. A redirect is never followed, so a JWT goes
+// nowhere but GitHub's API.
+fn call(url: &str, jwt: Option<&Jwt>, post: Option<&str>) -> Result<(String, u16), ApiError> {
     let mut lines = vec![
         ("url", url.to_owned()),
         ("proto", "=https".to_owned()),
@@ -68,8 +75,9 @@ fn call(url: &str, jwt: Option<&Jwt>, post: bool) -> Result<(String, u16), ApiEr
     if let Some(jwt) = jwt {
         lines.push(("header", format!("Authorization: Bearer {}", jwt.expose())));
     }
-    if post {
-        lines.push(("data-raw", String::new()));
+    if let Some(body) = post {
+        lines.push(("header", "Content-Type: application/json".to_owned()));
+        lines.push(("data-raw", body.to_owned()));
     }
     curl::run(&curl::render(&lines)).map_err(|e| match e {
         AlertError::Unreachable(code) => ApiError::Unreachable(format!("curl exited {code}")),

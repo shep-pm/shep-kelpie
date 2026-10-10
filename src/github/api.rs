@@ -69,8 +69,24 @@ pub enum ApiError {
     Unreachable(String),
     /// GitHub answered with this HTTP status, not the one the call wants
     Refused(u16),
+    /// GitHub answered 429, or 403 saying a rate limit was passed
+    RateLimited,
+    /// GitHub answered 301: the repo was renamed or moved, and kelpie never
+    /// follows a redirect with a JWT
+    Moved,
     /// GitHub's answer lacked the field named
     Unreadable(&'static str),
+}
+
+impl ApiError {
+    /// Whether asking again later may succeed with nothing changed
+    pub fn passes(&self) -> bool {
+        match self {
+            Self::Unreachable(_) | Self::RateLimited => true,
+            Self::Refused(status) => *status >= 500,
+            Self::Moved | Self::Unreadable(_) => false,
+        }
+    }
 }
 
 impl fmt::Display for ApiError {
@@ -78,6 +94,10 @@ impl fmt::Display for ApiError {
         match self {
             Self::Unreachable(why) => write!(f, "cannot reach GitHub: {why}"),
             Self::Refused(status) => write!(f, "GitHub answered HTTP {status}"),
+            Self::RateLimited => f.write_str("GitHub's rate limit for the App is spent for now"),
+            Self::Moved => f.write_str(
+                "GitHub says the repo moved: put its new `owner/name` in the project's `git.remote`",
+            ),
             Self::Unreadable(field) => write!(f, "GitHub's answer has no readable `{field}`"),
         }
     }
@@ -103,12 +123,18 @@ pub trait GithubApi: Send + Sync {
     /// [`ApiError`] when GitHub cannot be reached or refuses the App's `jwt`.
     fn installation(&self, jwt: &Jwt, repo: &ForgeSlug) -> Result<Option<u64>, ApiError>;
 
-    /// A new token for `installation`, `POST /app/installations/{id}/access_tokens`
+    /// A new token for `installation` that reaches `repo` alone,
+    /// `POST /app/installations/{id}/access_tokens` with `{"repositories": [<name>]}`
     ///
     /// # Errors
     ///
     /// [`ApiError`] when GitHub cannot be reached or refuses the App's `jwt`.
-    fn access_token(&self, jwt: &Jwt, installation: u64) -> Result<IssuedToken, ApiError>;
+    fn access_token(
+        &self,
+        jwt: &Jwt,
+        installation: u64,
+        repo: &ForgeSlug,
+    ) -> Result<IssuedToken, ApiError>;
 }
 
 /// Signs with an App's private key: RS256, an RSA signature over SHA-256
@@ -119,6 +145,22 @@ pub trait Signer: Send + Sync {
     ///
     /// Why the key could not sign.
     fn sign(&self, key: &Path, input: &[u8]) -> Result<Vec<u8>, String>;
+}
+
+/// The error for an answer of `status` that is not the call's success,
+/// telling a rate limit from a refusal by `body`
+pub fn refusal(status: u16, body: &str) -> ApiError {
+    match status {
+        301 => ApiError::Moved,
+        429 => ApiError::RateLimited,
+        403 if body.to_ascii_lowercase().contains("rate limit") => ApiError::RateLimited,
+        status => ApiError::Refused(status),
+    }
+}
+
+/// The body of an access token's request, which limits the token to `repo`
+pub fn token_request(repo: &ForgeSlug) -> String {
+    serde_json::json!({ "repositories": [repo.name()] }).to_string()
 }
 
 /// The App in a conversion's answer

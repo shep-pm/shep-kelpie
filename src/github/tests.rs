@@ -28,9 +28,14 @@ fn mode(path: &Path) -> u32 {
 
 // One GET of `target` on the local page at `port`: its status and body.
 fn get(port: u16, target: &str) -> (u16, String) {
+    get_as(port, target, &format!("127.0.0.1:{port}"))
+}
+
+// One GET of `target` on the local page at `port`, for `host`.
+fn get_as(port: u16, target: &str, host: &str) -> (u16, String) {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
     stream.set_read_timeout(Some(PATIENCE)).unwrap();
-    write!(stream, "GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").unwrap();
+    write!(stream, "GET {target} HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
     let mut answer = String::new();
     stream.read_to_string(&mut answer).unwrap();
     let status = answer[9..12].parse().unwrap();
@@ -38,22 +43,31 @@ fn get(port: u16, target: &str) -> (u16, String) {
     (status, body)
 }
 
-#[test]
-fn a_callback_with_another_state_is_refused_and_the_right_one_keeps_the_app() {
-    let home = tempfile::tempdir().unwrap();
-    let github = FakeGithub::new(FakeClock::at(1_000), "Maintainer");
+// Serves the flow for `maintainer` on a free port in a thread: the port,
+// and what `serve` ends with.
+fn serving(home: &Path, github: &FakeGithub) -> (u16, mpsc::Receiver<std::io::Result<App>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let (done, ended) = mpsc::channel();
-    let (api, apps) = (github.clone(), Apps::under(home.path()));
+    let (api, apps) = (github.clone(), Apps::under(home));
     std::thread::spawn(move || {
+        let owner = Owner::try_from("maintainer").unwrap();
         let flow = Flow {
             name: "kelpie-maintainer",
-            org: None,
+            owner: &owner,
+            org: false,
             state: STATE,
         };
         let _ = done.send(serve(&listener, &flow, &api, &apps));
     });
+    (port, ended)
+}
+
+#[test]
+fn a_callback_with_another_state_or_host_is_refused_and_the_right_one_keeps_the_app() {
+    let home = tempfile::tempdir().unwrap();
+    let github = FakeGithub::new(FakeClock::at(1_000), "Maintainer");
+    let (port, ended) = serving(home.path(), &github);
 
     let (status, page) = get(port, "/");
     assert_eq!(status, 200);
@@ -71,9 +85,19 @@ fn a_callback_with_another_state_is_refused_and_the_right_one_keeps_the_app() {
         assert_eq!(status, 400, "{wrong}");
         assert!(body.contains("refused"), "{body}");
     }
+    let right = format!("/callback?code=abc123&state={STATE}");
+    for host in [
+        "evil.example:80",
+        &format!("127.0.0.1:{}", port + 1),
+        "127.0.0.1",
+    ] {
+        let (status, body) = get_as(port, &right, host);
+        assert_eq!(status, 400, "{host}");
+        assert!(body.contains("refused"), "{body}");
+    }
     assert_eq!(github.asked(), [], "a refused code is never converted");
 
-    let (status, body) = get(port, &format!("/callback?code=abc123&state={STATE}"));
+    let (status, body) = get_as(port, &right, &format!("localhost:{port}"));
     assert_eq!(status, 200);
     assert!(
         body.contains("https://github.com/apps/kelpie-maintainer/installations/new"),
@@ -103,11 +127,68 @@ fn a_callback_with_another_state_is_refused_and_the_right_one_keeps_the_app() {
 }
 
 #[test]
+fn a_failed_conversion_or_another_owners_app_keeps_nothing_and_the_flow_waits_on() {
+    let home = tempfile::tempdir().unwrap();
+    let github = FakeGithub::new(FakeClock::at(1_000), "maintainer");
+    let (port, ended) = serving(home.path(), &github);
+    let right = format!("/callback?code=abc123&state={STATE}");
+
+    github.fail_next(ApiError::Refused(422));
+    let (status, body) = get(port, &right);
+    assert_eq!(status, 502);
+    assert!(body.contains("GitHub answered HTTP 422"), "{body}");
+
+    github.converts_for("someone-else");
+    let (status, body) = get(port, &right);
+    assert_eq!(status, 502);
+    assert!(
+        body.contains("kelpie-maintainer for someone-else, not maintainer"),
+        "{body}"
+    );
+    assert!(!home.path().join("github/someone-else").exists());
+    assert!(!home.path().join("github/maintainer").exists());
+
+    assert_eq!(get(port, &right).0, 200);
+    let app = ended.recv_timeout(PATIENCE).unwrap().unwrap();
+    assert_eq!(app.owner, "maintainer");
+    assert_eq!(github.asked().len(), 3);
+}
+
+#[test]
+fn saving_makes_the_folders_private_and_refuses_a_link() {
+    let home = tempfile::tempdir().unwrap();
+    let github = FakeGithub::new(FakeClock::at(0), "shep-pm");
+    let folder = home.path().join("github/shep-pm");
+    std::fs::create_dir_all(&folder).unwrap();
+    for open in [home.path().join("github"), folder.clone()] {
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let apps = Apps::under(home.path());
+
+    let app = apps.save(&github.conversion()).unwrap();
+
+    assert_eq!(mode(&folder), 0o700);
+    assert_eq!(mode(&home.path().join("github")), 0o700);
+    let owner = Owner::try_from("shep-pm").unwrap();
+    assert_eq!(apps.get(&owner), Ok(Some(app)));
+
+    let elsewhere = tempfile::tempdir().unwrap();
+    std::fs::remove_dir_all(&folder).unwrap();
+    std::os::unix::fs::symlink(elsewhere.path(), &folder).unwrap();
+    assert_eq!(
+        apps.save(&github.conversion()),
+        Err(StoreError::Exposed(folder))
+    );
+    assert_eq!(std::fs::read_dir(elsewhere.path()).unwrap().count(), 0);
+}
+
+#[test]
 fn an_org_s_manifest_goes_to_the_org_s_new_app_page() {
     let org = Owner::try_from("shep-pm").unwrap();
     let flow = Flow {
         name: "kelpie-shep-pm",
-        org: Some(&org),
+        owner: &org,
+        org: true,
         state: STATE,
     };
     assert_eq!(
@@ -137,7 +218,7 @@ fn setup_again_for_an_owner_with_an_app_stops_unless_replacing() {
     let home = tempfile::tempdir().unwrap();
     let apps = Apps::under(home.path());
     let owner = Owner::try_from("shep-pm").unwrap();
-    assert_eq!(may_register(&apps, &owner, false), Ok(()));
+    assert_eq!(may_register(&apps, &owner, false), Ok(None));
     FakeGithub::new(FakeClock::at(0), "shep-pm").registered(home.path(), "shep-pm/koji");
 
     let why = may_register(&apps, &owner, false).unwrap_err();
@@ -147,7 +228,18 @@ fn setup_again_for_an_owner_with_an_app_stops_unless_replacing() {
         "{why}"
     );
     assert!(why.contains("`--replace`"), "{why}");
-    assert_eq!(may_register(&apps, &owner, true), Ok(()));
+    assert!(why.contains("delete kelpie-shep-pm"), "{why}");
+    assert!(why.contains("`--name`"), "{why}");
+    assert_eq!(may_register(&apps, &owner, true), Ok(None));
+
+    let key = home.path().join("github/shep-pm/key.pem");
+    std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let warning = may_register(&apps, &owner, true).unwrap().unwrap();
+    assert!(warning.starts_with("warning: "), "{warning}");
+    assert!(
+        warning.contains("key.pem may be used by others"),
+        "{warning}"
+    );
 }
 
 #[test]
@@ -166,7 +258,7 @@ fn a_token_is_kept_until_five_minutes_before_it_lapses_then_minted_again() {
         github.asked(),
         [
             Asked::Installation("shep-pm/koji".to_owned()),
-            Asked::AccessToken(7)
+            Asked::AccessToken(7, r#"{"repositories":["koji"]}"#.to_owned())
         ]
     );
 
@@ -177,10 +269,72 @@ fn a_token_is_kept_until_five_minutes_before_it_lapses_then_minted_again() {
     assert_eq!(second.expose(), "ghs_test2");
     assert_eq!(
         github.asked().last(),
-        Some(&Asked::AccessToken(7)),
+        Some(&Asked::AccessToken(
+            7,
+            r#"{"repositories":["koji"]}"#.to_owned()
+        )),
         "the installation is known, so only a token is asked for"
     );
     assert_eq!(github.asked().len(), 3);
+}
+
+#[test]
+fn each_repo_gets_a_token_of_its_own_and_a_lost_installation_is_asked_for_again() {
+    let home = tempfile::tempdir().unwrap();
+    let clock = FakeClock::at(1_000_000);
+    let github = FakeGithub::new(clock.clone(), "shep-pm");
+    github.registered(home.path(), "shep-pm/koji");
+    github.install("shep-pm/golbat", 7);
+    let tokens = github.tokens(home.path());
+
+    let koji = tokens.token(&slug("shep-pm/koji")).unwrap();
+    let golbat = tokens.token(&slug("shep-pm/golbat")).unwrap();
+
+    assert_ne!(koji, golbat, "one installation, a token per repo");
+    let body = |name: &str| format!(r#"{{"repositories":["{name}"]}}"#);
+    assert_eq!(github.asked()[3], Asked::AccessToken(7, body("golbat")));
+
+    clock.advance(FakeGithub::LIFETIME);
+    github.fail_next(ApiError::Refused(404));
+    let err = tokens.token(&slug("shep-pm/koji")).unwrap_err();
+    assert_eq!(err, TokenError::Api(ApiError::Refused(404)));
+    tokens.token(&slug("shep-pm/koji")).unwrap();
+    assert_eq!(
+        github.asked()[5..],
+        [
+            Asked::Installation("shep-pm/koji".to_owned()),
+            Asked::AccessToken(7, body("koji"))
+        ],
+        "the installation was dropped and asked for again"
+    );
+}
+
+#[test]
+fn an_owner_that_is_no_login_is_refused_before_any_file_is_read() {
+    let home = tempfile::tempdir().unwrap();
+    let github = FakeGithub::new(FakeClock::at(0), "shep-pm");
+    let err = github
+        .tokens(home.path())
+        .token(&slug("../koji"))
+        .unwrap_err();
+    assert_eq!(err.to_string(), r#"".." is not a GitHub login"#);
+}
+
+#[test]
+fn a_redirect_or_a_rate_limit_is_told_from_a_refusal() {
+    assert_eq!(api::refusal(301, ""), ApiError::Moved);
+    assert!(ApiError::Moved.to_string().contains("`git.remote`"));
+    assert_eq!(api::refusal(429, ""), ApiError::RateLimited);
+    let limited = r#"{"message":"API rate limit exceeded for installation ID 7."}"#;
+    assert_eq!(api::refusal(403, limited), ApiError::RateLimited);
+    let denied = r#"{"message":"Resource not accessible by integration"}"#;
+    assert_eq!(api::refusal(403, denied), ApiError::Refused(403));
+    assert!(ApiError::Refused(502).passes() && ApiError::RateLimited.passes());
+    assert!(!ApiError::Refused(401).passes() && !ApiError::Moved.passes());
+    assert_eq!(
+        api::token_request(&slug("shep-pm/koji")),
+        r#"{"repositories":["koji"]}"#
+    );
 }
 
 #[test]

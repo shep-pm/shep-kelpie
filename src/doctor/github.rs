@@ -2,7 +2,7 @@
 //! owner, installed on it, that mints a token
 
 use super::Line;
-use crate::github::{ApiError, GithubApp, TokenError};
+use crate::github::{GithubApp, TokenError};
 use crate::settings::ForgeSlug;
 
 /// The line for `repo`'s App, under `subject`
@@ -13,7 +13,8 @@ pub(super) fn app(subject: String, repo: &ForgeSlug, github: &dyn GithubApp) -> 
             subject,
             format!("kelpie's App is installed on {slug} and mints a token"),
         ),
-        Err(TokenError::NoApp(owner)) => Line::missing(
+        // Nothing uses the App yet; #397 makes this MISSING when kelpie posts through it.
+        Err(TokenError::NoApp(owner)) => Line::unsure(
             subject,
             format!("kelpie has no GitHub App for {owner}"),
             format!(
@@ -26,11 +27,9 @@ pub(super) fn app(subject: String, repo: &ForgeSlug, github: &dyn GithubApp) -> 
             format!("{} is not installed on {slug}", app.slug),
             format!("install it there from {}", app.install_url()),
         ),
-        Err(TokenError::Api(ApiError::Unreachable(why))) => Line::unsure(
-            subject,
-            format!("cannot reach GitHub: {why}"),
-            "run doctor again",
-        ),
+        Err(TokenError::Api(e)) if e.passes() => {
+            Line::unsure(subject, e.to_string(), "run doctor again")
+        }
         Err(e) => Line::missing(
             subject,
             format!("no token mints: {e}"),

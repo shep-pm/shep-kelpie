@@ -1,6 +1,6 @@
 //! A stand-in GitHub for kelpie's App, and a signer that needs no key
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -21,12 +21,17 @@ pub(crate) const PEM: &str =
 pub(crate) enum Asked {
     Convert(String),
     Installation(String),
-    AccessToken(u64),
+    /// An installation's token, and the repo it was asked to reach
+    AccessToken(u64, String),
 }
 
 #[derive(Debug, Default)]
 struct Hub {
     installed: BTreeMap<String, u64>,
+    // What the next calls answer in place of their success, in turn
+    failures: VecDeque<ApiError>,
+    // The owner the next conversion hands back in place of the stand-in's
+    convert_owner: Option<String>,
     asked: Vec<Asked>,
     jwts: Vec<String>,
     minted: u32,
@@ -73,6 +78,16 @@ impl FakeGithub {
             .insert(repo.to_owned(), id);
     }
 
+    /// Makes the next call answer `error`, after any failures already set
+    pub(crate) fn fail_next(&self, error: ApiError) {
+        self.hub.lock().unwrap().failures.push_back(error);
+    }
+
+    /// Makes the next conversion hand back an App owned by `owner`
+    pub(crate) fn converts_for(&self, owner: &str) {
+        self.hub.lock().unwrap().convert_owner = Some(owner.to_owned());
+    }
+
     pub(crate) fn asked(&self) -> Vec<Asked> {
         self.hub.lock().unwrap().asked.clone()
     }
@@ -101,12 +116,19 @@ impl FakeGithub {
 
 impl GithubApi for FakeGithub {
     fn convert(&self, code: &str) -> Result<Conversion, ApiError> {
-        self.hub
-            .lock()
-            .unwrap()
-            .asked
-            .push(Asked::Convert(code.to_owned()));
-        Ok(self.conversion())
+        let mut hub = self.hub.lock().unwrap();
+        hub.asked.push(Asked::Convert(code.to_owned()));
+        if let Some(error) = hub.failures.pop_front() {
+            return Err(error);
+        }
+        let owner = hub
+            .convert_owner
+            .take()
+            .unwrap_or_else(|| self.owner.clone());
+        Ok(Conversion {
+            owner,
+            ..self.conversion()
+        })
     }
 
     fn installation(&self, jwt: &Jwt, repo: &ForgeSlug) -> Result<Option<u64>, ApiError> {
@@ -114,13 +136,25 @@ impl GithubApi for FakeGithub {
         hub.asked
             .push(Asked::Installation(repo.as_str().to_owned()));
         hub.jwts.push(jwt.expose().to_owned());
+        if let Some(error) = hub.failures.pop_front() {
+            return Err(error);
+        }
         Ok(hub.installed.get(repo.as_str()).copied())
     }
 
-    fn access_token(&self, jwt: &Jwt, installation: u64) -> Result<IssuedToken, ApiError> {
+    fn access_token(
+        &self,
+        jwt: &Jwt,
+        installation: u64,
+        repo: &ForgeSlug,
+    ) -> Result<IssuedToken, ApiError> {
         let mut hub = self.hub.lock().unwrap();
-        hub.asked.push(Asked::AccessToken(installation));
+        let body = crate::github::api::token_request(repo);
+        hub.asked.push(Asked::AccessToken(installation, body));
         hub.jwts.push(jwt.expose().to_owned());
+        if let Some(error) = hub.failures.pop_front() {
+            return Err(error);
+        }
         hub.minted += 1;
         Ok(IssuedToken {
             token: InstallationToken::new(format!("ghs_test{}", hub.minted)),

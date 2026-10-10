@@ -2,8 +2,8 @@
 //!
 //! A token is asked for with a JWT the App signs: RS256, issued 60 seconds
 //! back so a clock running ahead of GitHub's still passes, and lapsing nine
-//! minutes on, inside GitHub's ten. Each token is kept until five minutes
-//! before GitHub lets it lapse, then minted again.
+//! minutes on, inside GitHub's ten. Each token reaches one repo alone, and
+//! is kept until five minutes before GitHub lets it lapse, then minted again.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -71,6 +71,8 @@ impl fmt::Debug for Jwt {
 /// Why no token could be had for a repo
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenError {
+    /// The repo's owner is not a GitHub login, with why
+    Owner(String),
     /// Kelpie has no App for the repo's owner
     NoApp(Owner),
     /// The owner's App is not installed on the repo
@@ -91,6 +93,7 @@ pub enum TokenError {
 impl fmt::Display for TokenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Owner(why) => f.write_str(why),
             Self::NoApp(owner) => write!(f, "kelpie has no GitHub App for {owner}"),
             Self::NotInstalled { app, repo } => {
                 write!(f, "{} is not installed on {}", app.slug, repo.as_str())
@@ -122,10 +125,12 @@ pub trait GithubApp: Send + Sync {
     fn token(&self, repo: &ForgeSlug) -> Result<InstallationToken, TokenError>;
 }
 
+// Each repo's installation, by `owner/name` in lower case, and each token
+// by the installation and repo it reaches.
 #[derive(Debug, Default)]
 struct Kept {
     installations: BTreeMap<String, u64>,
-    tokens: BTreeMap<u64, IssuedToken>,
+    tokens: BTreeMap<(u64, String), IssuedToken>,
 }
 
 /// [`GithubApp`] over the Apps in kelpie's home
@@ -173,7 +178,7 @@ impl AppTokens {
 
 impl GithubApp for AppTokens {
     fn token(&self, repo: &ForgeSlug) -> Result<InstallationToken, TokenError> {
-        let owner = Owner::of(repo);
+        let owner = Owner::of(repo).map_err(TokenError::Owner)?;
         let app = (self.apps.get(&owner).map_err(TokenError::Store)?)
             .ok_or_else(|| TokenError::NoApp(owner.clone()))?;
         let now = self.clock.now();
@@ -181,7 +186,7 @@ impl GithubApp for AppTokens {
         let mut kept = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
         let key = repo.as_str().to_ascii_lowercase();
         let installation = kept.installations.get(&key).copied();
-        if let Some(issued) = installation.and_then(|id| kept.tokens.get(&id))
+        if let Some(issued) = installation.and_then(|id| kept.tokens.get(&(id, key.clone())))
             && now.0.saturating_add(REMINT_BEFORE) < issued.expires_at.0
         {
             return Ok(issued.token.clone());
@@ -196,9 +201,18 @@ impl GithubApp for AppTokens {
                 })?
             }
         };
-        let issued = self.api.access_token(&jwt, id)?;
-        kept.installations.insert(key, id);
-        kept.tokens.insert(id, issued.clone());
+        let issued = match self.api.access_token(&jwt, id, repo) {
+            Ok(issued) => issued,
+            // The App was taken off the repo, or its installation is gone.
+            Err(e @ ApiError::Refused(401 | 404)) => {
+                kept.installations.remove(&key);
+                kept.tokens.remove(&(id, key));
+                return Err(e.into());
+            }
+            Err(e) => return Err(e.into()),
+        };
+        kept.installations.insert(key.clone(), id);
+        kept.tokens.insert((id, key), issued.clone());
         Ok(issued.token)
     }
 }

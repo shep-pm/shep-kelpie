@@ -1,4 +1,5 @@
 use super::*;
+use crate::github::ApiError;
 
 #[tokio::test]
 async fn an_installed_app_that_mints_a_token_is_ok() {
@@ -12,8 +13,9 @@ async fn an_installed_app_that_mints_a_token_is_ok() {
     );
 }
 
+// Nothing uses the App until kelpie posts through it.
 #[tokio::test]
-async fn an_owner_with_no_app_is_missing_and_names_setup() {
+async fn an_owner_with_no_app_is_unsure_and_names_setup() {
     let scene = Scene::new().await;
     scene.runs("golbat", |t| {
         t["git"]["remote"] = json!("someone-else/golbat");
@@ -21,11 +23,42 @@ async fn an_owner_with_no_app_is_missing_and_names_setup() {
 
     let report = scene.report().await;
 
-    let (what, fix) = missing(&report, "golbat: github app");
+    let Verdict::Unsure { what, next } = verdict(&report, "golbat: github app") else {
+        panic!("{:#?}", report.render());
+    };
     assert_eq!(what, "kelpie has no GitHub App for someone-else");
-    assert!(fix.contains("`shep kelpie github setup`"), "{fix}");
-    assert!(fix.contains("`--org someone-else`"), "{fix}");
-    assert!(!report.passed());
+    assert!(next.contains("`shep kelpie github setup`"), "{next}");
+    assert!(next.contains("`--org someone-else`"), "{next}");
+    assert!(report.passed());
+}
+
+#[tokio::test]
+async fn github_busy_or_out_of_reach_is_unsure_and_a_refused_app_is_missing() {
+    let scene = Scene::new().await;
+    for (error, said) in [
+        (ApiError::Refused(502), "GitHub answered HTTP 502"),
+        (ApiError::RateLimited, "rate limit"),
+        (
+            ApiError::Unreachable("curl exited 6".into()),
+            "cannot reach GitHub",
+        ),
+    ] {
+        scene.github.fail_next(error);
+        let report = scene.report().await;
+        let Verdict::Unsure { what, .. } = verdict(&report, "koji: github app") else {
+            panic!("{:#?}", report.render());
+        };
+        assert!(what.contains(said), "{what}");
+    }
+
+    scene.github.fail_next(ApiError::Refused(401));
+    let report = scene.report().await;
+    let (what, fix) = missing(&report, "koji: github app");
+    assert_eq!(what, "no token mints: GitHub answered HTTP 401");
+    assert!(
+        fix.contains("`shep kelpie github setup --replace`"),
+        "{fix}"
+    );
 }
 
 #[tokio::test]

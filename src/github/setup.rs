@@ -3,17 +3,17 @@
 //! Kelpie listens on a free port of 127.0.0.1 and serves one page, which
 //! posts the App's manifest to GitHub's new-App page with a random `state`.
 //! The maintainer creates the App there, and GitHub sends the browser back
-//! to kelpie with a code and that `state`. Kelpie refuses a code that comes
-//! with any other `state`, converts the right one into the App and its key,
-//! keeps them in [`Apps`], and opens the page that installs the App.
+//! to kelpie with a code and that `state`. Kelpie refuses a request for any
+//! other host, and a code that comes with any other `state`; it converts the
+//! right one into the App and its key, keeps them in [`Apps`] when the App
+//! is the asked owner's, and opens the page that installs the App.
 
-use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{ExitCode, Stdio};
 use std::time::Duration;
 
-use super::api::{ApiError, GithubApi};
+use super::api::GithubApi;
 use super::{App, Apps, Owner, StoreError};
 use crate::adapters::{CurlGithub, Gh};
 use crate::ports::Forge;
@@ -32,36 +32,25 @@ const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 const USAGE: &str = "usage: shep kelpie github setup [--org <org>] [--name <app name>] [--replace]";
 
-/// Why setup ended without an App
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SetupError {
-    /// The local listener failed, with the OS's reason
-    Io(io::ErrorKind),
-    /// GitHub would not convert the code
-    Api(ApiError),
-    /// The App could not be kept
-    Store(StoreError),
-}
+const HELP: &str = "\
+Registers kelpie's GitHub App for one repo owner, and opens the page that installs it.
 
-impl fmt::Display for SetupError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Io(kind) => write!(f, "kelpie's local page failed: {kind}"),
-            Self::Api(e) => write!(f, "GitHub did not hand the App over: {e}"),
-            Self::Store(e) => write!(f, "the App could not be kept: {e}"),
-        }
-    }
-}
-
-impl core::error::Error for SetupError {}
+  --org <org>         register it under this organization, not your own account
+  --name <app name>   the App's name, `kelpie-<owner>` when left out; names are
+                      unique across GitHub
+  --replace           register a new App in place of the one kelpie keeps for
+                      the owner; delete the old one on GitHub first, or give
+                      `--name`";
 
 /// One run of the flow
 #[derive(Debug)]
 pub struct Flow<'a> {
     /// The App's name, which GitHub refuses when another App has it
     pub name: &'a str,
-    /// The organization to register it under, or the maintainer's own account
-    pub org: Option<&'a Owner>,
+    /// The account the App is for
+    pub owner: &'a Owner,
+    /// Whether the owner is an organization, named with `--org`
+    pub org: bool,
     /// The value GitHub must send back, which no one else knows
     pub state: &'a str,
 }
@@ -87,8 +76,8 @@ impl Flow<'_> {
     /// GitHub's new-App page the manifest is posted to
     pub fn new_app_url(&self) -> String {
         let at = match self.org {
-            Some(org) => format!("organizations/{org}/settings"),
-            None => "settings".to_owned(),
+            true => format!("organizations/{}/settings", self.owner),
+            false => "settings".to_owned(),
         };
         format!("https://github.com/{at}/apps/new?state={}", self.state)
     }
@@ -103,33 +92,54 @@ impl Flow<'_> {
             html(&self.manifest(port))
         )
     }
+
+    // Converts `code` and keeps the App, when it is the asked owner's.
+    fn keep(&self, code: &str, api: &dyn GithubApi, apps: &Apps) -> Result<App, String> {
+        let conversion = api
+            .convert(code)
+            .map_err(|e| format!("GitHub did not hand the App over: {e}"))?;
+        if !conversion.owner.eq_ignore_ascii_case(self.owner.as_str()) {
+            return Err(format!(
+                "GitHub registered {} for {}, not {}, so kelpie kept nothing: delete it from \
+                 {}'s settings on GitHub",
+                conversion.slug, conversion.owner, self.owner, conversion.owner
+            ));
+        }
+        apps.save(&conversion)
+            .map_err(|e| format!("the App could not be kept: {e}"))
+    }
 }
 
 /// Serves the flow on `listener` until GitHub sends back a code with the
-/// flow's `state`, then converts it with `api` and keeps the App in `apps`
+/// flow's `state` and the App it converts to is kept
 ///
-/// A code that comes with another `state`, or none, is refused and the
-/// flow waits on.
+/// A request for another host, a code with another `state`, and a code
+/// that does not end in a kept App are each refused, and the flow waits on.
 ///
 /// # Errors
 ///
-/// [`SetupError`] when the listener fails, GitHub will not convert the
-/// code, or the App cannot be kept.
+/// The listener's error when it fails.
 pub fn serve(
     listener: &TcpListener,
     flow: &Flow<'_>,
     api: &dyn GithubApi,
     apps: &Apps,
-) -> Result<App, SetupError> {
-    let port = listener
-        .local_addr()
-        .map_err(|e| SetupError::Io(e.kind()))?
-        .port();
+) -> io::Result<App> {
+    let port = listener.local_addr()?.port();
+    let hosts = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
     loop {
-        let (mut stream, _) = listener.accept().map_err(|e| SetupError::Io(e.kind()))?;
-        let Some(target) = request_target(&mut stream) else {
+        let (mut stream, _) = listener.accept()?;
+        let Some((target, host)) = request(&mut stream) else {
             continue;
         };
+        if !hosts.contains(&host) {
+            respond(
+                &mut stream,
+                400,
+                "refused: kelpie answers only on 127.0.0.1",
+            );
+            continue;
+        }
         let (path, query) = target.split_once('?').unwrap_or((&target, ""));
         if path == "/" {
             respond(&mut stream, 200, &flow.page(port));
@@ -154,28 +164,28 @@ pub fn serve(
                 continue;
             }
         };
-        let kept = api
-            .convert(code)
-            .map_err(SetupError::Api)
-            .and_then(|conversion| apps.save(&conversion).map_err(SetupError::Store));
-        match &kept {
+        match flow.keep(code, api, apps) {
             Ok(app) => {
-                let url = app.install_url();
                 let body = format!(
                     "Kelpie keeps {}. Next, <a href=\"{}\">install it</a> on the repos kelpie works.",
                     html(&app.slug),
-                    html(&url)
+                    html(&app.install_url())
                 );
                 respond(&mut stream, 200, &body);
+                return Ok(app);
             }
-            Err(e) => respond(&mut stream, 502, &html(&e.to_string())),
+            Err(why) => {
+                eprintln!("{why}. Open http://127.0.0.1:{port}/ to try again, or Ctrl-C to stop");
+                let again = "<a href=\"/\">Try again</a>";
+                respond(&mut stream, 502, &format!("{}. {again}", html(&why)));
+            }
         }
-        return kept;
     }
 }
 
-// The request's target, such as `/callback?code=..`, from a `GET` line.
-fn request_target(stream: &mut TcpStream) -> Option<String> {
+// The request's target, such as `/callback?code=..`, from a `GET` line, and
+// its `Host` header.
+fn request(stream: &mut TcpStream) -> Option<(String, String)> {
     stream.set_read_timeout(Some(READ_TIMEOUT)).ok()?;
     let mut head = Vec::new();
     let mut buf = [0u8; 1024];
@@ -184,11 +194,18 @@ fn request_target(stream: &mut TcpStream) -> Option<String> {
         head.extend_from_slice(&buf[..n]);
     }
     let head = String::from_utf8_lossy(&head);
-    let mut parts = head.lines().next()?.split(' ');
-    match (parts.next(), parts.next()) {
-        (Some("GET"), Some(target)) => Some(target.to_owned()),
-        _ => None,
-    }
+    let mut lines = head.lines();
+    let mut parts = lines.next()?.split(' ');
+    let target = match (parts.next(), parts.next()) {
+        (Some("GET"), Some(target)) => target.to_owned(),
+        _ => return None,
+    };
+    let host = lines.find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("host")
+            .then(|| value.trim().to_owned())
+    })?;
+    Some((target, host))
 }
 
 fn respond(stream: &mut TcpStream, status: u16, body: &str) {
@@ -215,33 +232,60 @@ fn html(text: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-/// Refuses a setup for `owner` while kelpie keeps an App for it, unless `replace`
+/// Refuses a setup for `owner` while kelpie keeps an App for it, unless
+/// `replace`, and warns of a kept App that is exposed when replacing it
 ///
 /// # Errors
 ///
-/// A message naming the App kept and `--replace`, or why the Apps cannot be read.
-pub fn may_register(apps: &Apps, owner: &Owner, replace: bool) -> Result<(), String> {
+/// A message naming the App kept and how to replace it, or why the Apps
+/// cannot be read.
+pub fn may_register(apps: &Apps, owner: &Owner, replace: bool) -> Result<Option<String>, String> {
     match apps.get(owner) {
         Ok(Some(app)) if !replace => Err(format!(
             "kelpie already has a GitHub App for {owner}, {}. It installs from {}. \
-             `--replace` registers a new one in its place",
+             `--replace` registers a new one in its place: App names are unique on GitHub, so \
+             delete {} from {owner}'s settings on GitHub first, or give the new one `--name`",
             app.slug,
-            app.install_url()
+            app.install_url(),
+            app.slug
         )),
-        Ok(_) => Ok(()),
-        Err(_) if replace => Ok(()),
+        Ok(_) => Ok(None),
+        Err(e @ StoreError::Exposed(_)) if replace => Ok(Some(format!("warning: {e}"))),
+        Err(e) if replace => Ok(Some(format!("warning: the App kept for {owner}: {e}"))),
         Err(e) => Err(e.to_string()),
     }
 }
 
+/// What the command line asked for
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Asked {
+    Setup {
+        org: Option<Owner>,
+        name: Option<String>,
+        replace: bool,
+    },
+    Help,
+}
+
+/// Arguments that are not `setup`'s
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BadArgs;
+
 /// Runs `shep kelpie github setup [--org <org>] [--name <name>] [--replace]`
 pub fn main(args: &[String]) -> ExitCode {
-    match run(args) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(why) if why == USAGE => {
-            eprintln!("{USAGE}");
-            ExitCode::from(2)
+    let (org, name, replace) = match read_args(args) {
+        Ok(Asked::Setup { org, name, replace }) => (org, name, replace),
+        Ok(Asked::Help) => {
+            println!("{USAGE}\n\n{HELP}");
+            return ExitCode::SUCCESS;
         }
+        Err(BadArgs) => {
+            eprintln!("{USAGE}");
+            return ExitCode::from(2);
+        }
+    };
+    match run(org, name, replace) {
+        Ok(()) => ExitCode::SUCCESS,
         Err(why) => {
             eprintln!("shep kelpie github setup: {why}");
             ExitCode::FAILURE
@@ -249,18 +293,20 @@ pub fn main(args: &[String]) -> ExitCode {
     }
 }
 
-fn run(args: &[String]) -> Result<(), String> {
-    let (org, name, replace) = read_args(args)?;
+fn run(org: Option<Owner>, name: Option<String>, replace: bool) -> Result<(), String> {
     let owner = match &org {
         Some(org) => org.clone(),
-        None => Owner::try_from(
-            Gh.viewer()
-                .map_err(|e| format!("`gh` cannot say who you are: {e}"))?
-                .as_str(),
-        )?,
+        None => {
+            let login = Gh
+                .viewer()
+                .map_err(|e| format!("`gh` cannot say who you are: {e}"))?;
+            Owner::try_from(login.as_str())?
+        }
     };
     let apps = Apps::under(&crate::home::kelpie_home()?);
-    may_register(&apps, &owner, replace)?;
+    if let Some(warning) = may_register(&apps, &owner, replace)? {
+        eprintln!("{warning}");
+    }
     let name = name.unwrap_or_else(|| format!("kelpie-{owner}"));
     let state = draw_state().map_err(|e| format!("cannot draw a random state: {e}"))?;
     let listener =
@@ -268,7 +314,8 @@ fn run(args: &[String]) -> Result<(), String> {
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let flow = Flow {
         name: &name,
-        org: org.as_ref(),
+        owner: &owner,
+        org: org.is_some(),
         state: &state,
     };
     let start = format!("http://127.0.0.1:{port}/");
@@ -278,7 +325,8 @@ fn run(args: &[String]) -> Result<(), String> {
          Ctrl-C and run again with `--name <another name>`."
     );
     open(&start);
-    let app = serve(&listener, &flow, &CurlGithub, &apps).map_err(|e| e.to_string())?;
+    let app = serve(&listener, &flow, &CurlGithub, &apps)
+        .map_err(|e| format!("kelpie's local page failed: {e}"))?;
     println!(
         "kelpie keeps {} for {}. Install it on the repos kelpie works from {}",
         app.slug,
@@ -289,25 +337,30 @@ fn run(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn read_args(args: &[String]) -> Result<(Option<Owner>, Option<String>, bool), String> {
+fn read_args(args: &[String]) -> Result<Asked, BadArgs> {
     let [sub, rest @ ..] = args else {
-        return Err(USAGE.to_owned());
+        return Err(BadArgs);
     };
+    if matches!(sub.as_str(), "--help" | "-h") || rest.iter().any(|a| a == "--help" || a == "-h") {
+        return Ok(Asked::Help);
+    }
     if sub != "setup" {
-        return Err(USAGE.to_owned());
+        return Err(BadArgs);
     }
     let (mut org, mut name, mut replace) = (None, None, false);
     let mut rest = rest.iter();
     while let Some(flag) = rest.next() {
-        let mut value = || rest.next().filter(|v| !v.trim().is_empty()).ok_or(USAGE);
+        let mut value = || rest.next().filter(|v| !v.trim().is_empty()).ok_or(BadArgs);
         match flag.as_str() {
             "--replace" if !replace => replace = true,
-            "--org" if org.is_none() => org = Some(Owner::try_from(value()?.as_str())?),
+            "--org" if org.is_none() => {
+                org = Some(Owner::try_from(value()?.as_str()).map_err(|_| BadArgs)?);
+            }
             "--name" if name.is_none() => name = Some(value()?.clone()),
-            _ => return Err(USAGE.to_owned()),
+            _ => return Err(BadArgs),
         }
     }
-    Ok((org, name, replace))
+    Ok(Asked::Setup { org, name, replace })
 }
 
 // 128 random bits in hex.
@@ -329,4 +382,36 @@ fn open(url: &str) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(line: &str) -> Vec<String> {
+        line.split(' ').map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn help_is_asked_for_and_wrong_flags_are_not_setup() {
+        assert_eq!(read_args(&args("--help")), Ok(Asked::Help));
+        assert_eq!(read_args(&args("setup --org shep-pm -h")), Ok(Asked::Help));
+        assert_eq!(
+            read_args(&args("setup --replace --org Shep-PM --name k")),
+            Ok(Asked::Setup {
+                org: Some(Owner::try_from("shep-pm").unwrap()),
+                name: Some("k".to_owned()),
+                replace: true,
+            })
+        );
+        for bad in [
+            "setup --org",
+            "setup --org ../x",
+            "setup --replace --replace",
+            "install",
+        ] {
+            assert_eq!(read_args(&args(bad)), Err(BadArgs), "{bad}");
+        }
+        assert!(HELP.contains("--org") && HELP.contains("--name") && HELP.contains("--replace"));
+    }
 }
