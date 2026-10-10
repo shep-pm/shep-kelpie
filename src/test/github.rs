@@ -71,11 +71,8 @@ impl FakeGithub {
 
     /// Installs the App on `repo` as installation `id`
     pub(crate) fn install(&self, repo: &str, id: u64) {
-        self.hub
-            .lock()
-            .unwrap()
-            .installed
-            .insert(repo.to_owned(), id);
+        let repo = repo.to_ascii_lowercase();
+        self.hub.lock().unwrap().installed.insert(repo, id);
     }
 
     /// Makes the next call answer `error`, after any failures already set
@@ -139,7 +136,8 @@ impl GithubApi for FakeGithub {
         if let Some(error) = hub.failures.pop_front() {
             return Err(error);
         }
-        Ok(hub.installed.get(repo.as_str()).copied())
+        let repo = repo.as_str().to_ascii_lowercase();
+        Ok(hub.installed.get(&repo).copied())
     }
 
     fn access_token(

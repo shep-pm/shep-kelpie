@@ -380,6 +380,7 @@ fn no_app_or_no_install_says_which() {
         err.to_string(),
         "kelpie-shep-pm is not installed on Shep-PM/golbat"
     );
+    tokens.token(&slug("Shep-PM/Koji")).unwrap();
 }
 
 #[test]
@@ -575,4 +576,51 @@ fn the_apps_key_never_reaches_a_worker() {
             }
         }
     }
+}
+
+// openssl would wait forever on a FIFO's open, and doctor with it.
+#[test]
+fn a_key_that_is_no_regular_file_is_refused_before_it_is_signed_with() {
+    let home = tempfile::tempdir().unwrap();
+    let github = FakeGithub::new(FakeClock::at(0), "shep-pm");
+    github.registered(home.path(), "shep-pm/koji");
+    let key = home.path().join("github/shep-pm/key.pem");
+    std::fs::remove_file(&key).unwrap();
+    let owner_only = nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR;
+    nix::unistd::mkfifo(&key, owner_only).unwrap();
+
+    let err = github
+        .tokens(home.path())
+        .token(&slug("shep-pm/koji"))
+        .unwrap_err();
+
+    let TokenError::Store(StoreError::Unusable(why)) = err else {
+        panic!("{err:?}");
+    };
+    assert!(why.contains("key.pem is not a regular file"), "{why}");
+    assert_eq!(github.asked(), []);
+}
+
+#[test]
+fn a_replaced_app_never_hands_out_the_old_apps_token() {
+    let home = tempfile::tempdir().unwrap();
+    let github = FakeGithub::new(FakeClock::at(1_000_000), "shep-pm");
+    github.registered(home.path(), "shep-pm/koji");
+    let tokens = github.tokens(home.path());
+    let koji = slug("shep-pm/koji");
+    let old = tokens.token(&koji).unwrap();
+
+    let replaced = Conversion {
+        id: 43,
+        ..github.conversion()
+    };
+    Apps::under(home.path()).save(&replaced).unwrap();
+    let new = tokens.token(&koji).unwrap();
+
+    assert_ne!(new, old);
+    assert_eq!(
+        github.asked()[2],
+        Asked::Installation("shep-pm/koji".to_owned()),
+        "the new App's installation is asked for afresh"
+    );
 }

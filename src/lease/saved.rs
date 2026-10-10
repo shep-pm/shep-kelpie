@@ -470,11 +470,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = file_in(dir.path());
         let runner = |project: &str| json!({ "runner": { "project": project, "epoch": 1 } });
+        // `GitHub` is the same folder as `github` on a case-insensitive volume.
         let book = json!({
             "version": 1,
             "leases": [
                 { "kind": "stand-in-1", "held": { "holder": runner("github"), "since": 7 },
-                  "queue": [runner("github"), runner("koji"), "maintainer"], "window": null },
+                  "queue": [runner("GitHub"), runner("koji"), "maintainer"], "window": null },
                 { "kind": "stand-in-2", "held": { "holder": runner("koji"), "since": 8 },
                   "queue": [], "window": null },
             ],

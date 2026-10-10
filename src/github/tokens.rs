@@ -125,12 +125,13 @@ pub trait GithubApp: Send + Sync {
     fn token(&self, repo: &ForgeSlug) -> Result<InstallationToken, TokenError>;
 }
 
-// Each repo's installation, by `owner/name` in lower case, and each token
-// by the installation and repo it reaches.
+// Each App's installation on a repo, by the App's id and `owner/name` in
+// lower case, and each token by those and the installation it was minted for,
+// so a replaced App's tokens are never handed out.
 #[derive(Debug, Default)]
 struct Kept {
-    installations: BTreeMap<String, u64>,
-    tokens: BTreeMap<(u64, String), IssuedToken>,
+    installations: BTreeMap<(u64, String), u64>,
+    tokens: BTreeMap<(u64, String, u64), IssuedToken>,
 }
 
 /// [`GithubApp`] over the Apps in kelpie's home
@@ -184,9 +185,10 @@ impl GithubApp for AppTokens {
         let now = self.clock.now();
         // Held across the calls, so two askers never mint for one installation at once.
         let mut kept = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
-        let key = repo.as_str().to_ascii_lowercase();
+        let key = (app.id, repo.as_str().to_ascii_lowercase());
         let installation = kept.installations.get(&key).copied();
-        if let Some(issued) = installation.and_then(|id| kept.tokens.get(&(id, key.clone())))
+        let token_key = |id: u64| (key.0, key.1.clone(), id);
+        if let Some(issued) = installation.and_then(|id| kept.tokens.get(&token_key(id)))
             && now.0.saturating_add(REMINT_BEFORE) < issued.expires_at.0
         {
             return Ok(issued.token.clone());
@@ -205,14 +207,14 @@ impl GithubApp for AppTokens {
             Ok(issued) => issued,
             // The App was taken off the repo, or its installation is gone.
             Err(e @ ApiError::Refused(401 | 404)) => {
+                kept.tokens.remove(&token_key(id));
                 kept.installations.remove(&key);
-                kept.tokens.remove(&(id, key));
                 return Err(e.into());
             }
             Err(e) => return Err(e.into()),
         };
-        kept.installations.insert(key.clone(), id);
-        kept.tokens.insert((id, key), issued.clone());
+        kept.tokens.insert(token_key(id), issued.clone());
+        kept.installations.insert(key, id);
         Ok(issued.token)
     }
 }
@@ -243,4 +245,16 @@ pub(crate) fn base64url(bytes: &[u8]) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A lazy `derive(Debug)` would print the JWT into a log.
+    #[test]
+    fn debug_never_shows_a_jwt() {
+        let jwt = Jwt("eyJhbGciOi.s3cr3t.sig".to_owned());
+        assert_eq!(format!("{jwt:?}"), "Jwt(..)");
+    }
 }

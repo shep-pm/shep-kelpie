@@ -145,14 +145,21 @@ impl Apps {
     /// above it is exposed.
     pub fn get(&self, owner: &Owner) -> Result<Option<App>, StoreError> {
         let record = self.record(owner);
-        let text = match fs::read_to_string(&record) {
-            Ok(text) => text,
+        match fs::symlink_metadata(&record) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(unusable(&record, &e)),
-        };
-        for path in [self.folder.clone(), self.owned(owner), self.key(owner)] {
-            private(&path)?;
+            Ok(meta) if !meta.is_file() => return Err(not_a_file(&record)),
+            Ok(_) => {}
         }
+        for folder in [&self.folder, &self.owned(owner)] {
+            private(folder)?;
+        }
+        let key = self.key(owner);
+        private(&key)?;
+        if !fs::symlink_metadata(&key).is_ok_and(|meta| meta.is_file()) {
+            return Err(not_a_file(&key));
+        }
+        let text = fs::read_to_string(&record).map_err(|e| unusable(&record, &e))?;
         serde_json::from_str(&text).map(Some).map_err(|_| {
             StoreError::Unusable(format!(
                 "{} is not an App kelpie wrote: `shep kelpie github setup --replace` writes it again",
@@ -206,6 +213,14 @@ impl Apps {
     fn record(&self, owner: &Owner) -> PathBuf {
         self.owned(owner).join(RECORD)
     }
+}
+
+// A key or record that is not a regular file, which a read could wait on forever.
+fn not_a_file(path: &Path) -> StoreError {
+    StoreError::Unusable(format!(
+        "{} is not a regular file: `shep kelpie github setup --replace` writes it again",
+        path.display()
+    ))
 }
 
 // Refuses `path` when it is a link, someone else's, or open to others.

@@ -3,8 +3,8 @@
 //! Each call reaches curl as a config on its stdin, as the webhook's do, so
 //! no process listing shows a JWT. `openssl` reads the key from its file and
 //! the JWT's header and claims from its stdin, so signing never loads the key
-//! into kelpie. The key is in kelpie's memory only during setup, between the
-//! conversion's answer and its file; it is never in a variable or an argument.
+//! into kelpie. Setup holds the key, from the conversion's answer to its
+//! file; it never goes in a process argument or an environment variable.
 
 use std::io::Write;
 use std::path::Path;
