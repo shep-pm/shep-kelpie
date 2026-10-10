@@ -140,6 +140,41 @@ fn the_repo_s_owner_is_asked_about_once_however_many_rulings_are_posted() {
 }
 
 #[test]
+fn a_ruling_posted_when_the_owner_cannot_be_asked_goes_up_unmentioned_and_says_so() {
+    let rig = Rig::new("shep");
+    rig.with_app();
+    rig.forge.set_owner_is_user(true);
+    rig.forge.set_owner_unreadable(true);
+
+    let (runner, asked) = asking_before_a_pull_request(&rig);
+
+    let StepReport::Asked { comment_failed, .. } = asked else {
+        panic!("not a question: {asked:?}");
+    };
+    let why = comment_failed.expect("the step says the mention was lost");
+    assert!(
+        why.starts_with("posted without mentioning the maintainer"),
+        "{why}"
+    );
+    assert_eq!(
+        rig.github.comments(),
+        [(7, format!("{QUESTION}\n\n{HOW_TO_ANSWER}"))]
+    );
+    assert_eq!(rig.ask(&runner, "status", None)["rulings"][0]["id"], 1);
+
+    // Asked again at the next ruling, once the forge answers, it mentions them.
+    rig.forge.set_owner_unreadable(false);
+    rig.ask(&runner, "rule", Some("1 answer use --dry-run"));
+    rig.claude.script([Scripted::Say(ASKS)]);
+    step(&runner).unwrap();
+    let comments = rig.github.comments();
+    assert!(
+        comments.last().unwrap().1.starts_with("@shep-pm "),
+        "{comments:?}"
+    );
+}
+
+#[test]
 fn with_no_app_a_ruling_posts_as_it_always_did() {
     let rig = Rig::new("shep");
     let (_runner, asked) = asking_on_a_pull_request(&rig);

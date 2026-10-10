@@ -69,6 +69,7 @@ pub(crate) struct FakeForge {
     pushes: Arc<AtomicBool>,
     owner_is_user: Arc<AtomicBool>,
     owner_reads: Arc<AtomicUsize>,
+    owner_unreadable: Arc<AtomicBool>,
     bot_seen: Arc<AtomicBool>,
     viewer_down: Arc<Mutex<Option<ForgeError>>>,
     // Every call made, and the board's reads among them
@@ -150,6 +151,7 @@ impl FakeForge {
             pushes: Arc::new(AtomicBool::new(true)),
             owner_is_user: Arc::default(),
             owner_reads: Arc::default(),
+            owner_unreadable: Arc::default(),
             bot_seen: Arc::new(AtomicBool::new(true)),
             viewer_down: Arc::default(),
             asked: Arc::default(),
@@ -186,6 +188,11 @@ impl FakeForge {
     /// Whether the repo's owner is a user, which it is not until a test says so
     pub(crate) fn set_owner_is_user(&self, user: bool) {
         self.owner_is_user.store(user, Ordering::SeqCst);
+    }
+
+    /// Makes the forge unable to say whether the repo's owner is a user, while set
+    pub(crate) fn set_owner_unreadable(&self, unreadable: bool) {
+        self.owner_unreadable.store(unreadable, Ordering::SeqCst);
     }
 
     /// How many times the repo's owner was asked about
@@ -592,6 +599,9 @@ impl Forge for FakeForge {
     fn owner_is_user(&self, _repo: &ForgeSlug) -> Result<bool, ForgeError> {
         self.ask()?;
         self.owner_reads.fetch_add(1, Ordering::SeqCst);
+        if self.owner_unreadable.load(Ordering::SeqCst) {
+            return Err(ForgeError::Unreadable("no such user".into()));
+        }
         Ok(self.owner_is_user.load(Ordering::SeqCst))
     }
 

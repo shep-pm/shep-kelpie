@@ -591,6 +591,8 @@ impl Runner {
             }
             // A second look that keeps failing leaves the first's findings to go alone.
             (ReviewStage::SecondLook { first }, Err(reason)) => {
+                // The first look ended with these findings, which now go on alone.
+                ended = Some(first.clone());
                 item.phase = Phase::Review(Review {
                     stage: ReviewStage::Found {
                         findings: first,

@@ -24,36 +24,53 @@ impl Runner {
 
     /// The login a ruling mentions: `git.maintainer`, else the repo's owner
     /// when a user owns it, else nobody
-    pub(super) fn maintainer(&self) -> Option<String> {
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the setting is absent and the forge could not say
+    /// whether a user owns the repo: who to mention is not known.
+    pub(super) fn maintainer(&self) -> Result<Option<String>, ForgeError> {
         if let Some(login) = &self.settings.git.maintainer {
-            return Some(login.as_str().to_owned());
+            return Ok(Some(login.as_str().to_owned()));
         }
         // Asked once a run; an answer that failed is asked again next time.
         let user = match self.owner_is_user.get() {
             Some(user) => *user,
             None => {
-                let asked = self.ports.forge.owner_is_user(&self.remote);
-                if let Ok(user) = asked {
-                    let _ = self.owner_is_user.set(user);
-                }
-                asked.unwrap_or(false)
+                let user = self.ports.forge.owner_is_user(&self.remote)?;
+                let _ = self.owner_is_user.set(user);
+                user
             }
         };
-        user.then(|| self.remote.owner().to_owned())
+        Ok(user.then(|| self.remote.owner().to_owned()))
     }
 
     /// Posts ruling `id`'s comment on `thread` as the App, and returns why it
-    /// failed, if it did
+    /// failed, or went up without a mention of the maintainer, if it did
     pub(super) fn post_app_ruling(
         &self,
         thread: u64,
         id: u64,
         kind: &RulingKind,
     ) -> Option<String> {
-        let body = ruling_comment(self.maintainer().as_deref(), id, kind);
-        (self.ports.voice.comment(&self.remote, thread, &body))
-            .err()
-            .map(|e| e.to_string())
+        // A ruling still goes up when the owner cannot be asked, as the
+        // record on the thread, but it notifies no one, so that is told.
+        let (mention, unasked) = match self.maintainer() {
+            Ok(mention) => (mention, None),
+            Err(e) => (None, Some(e)),
+        };
+        let body = ruling_comment(mention.as_deref(), id, kind);
+        match (
+            self.ports.voice.comment(&self.remote, thread, &body),
+            unasked,
+        ) {
+            (Err(e), _) => Some(e.to_string()),
+            (Ok(()), Some(e)) => Some(format!(
+                "posted without mentioning the maintainer, since it could not be asked who \
+                 owns the repo: {e}"
+            )),
+            (Ok(()), None) => None,
+        }
     }
 
     /// Makes each of `wanted` the repo lacks, as the App where one covers it
