@@ -2,17 +2,17 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use serde_json::json;
 
 use super::setup::{Flow, may_register, serve};
-use super::tokens::{base64url, signing_input};
+use super::tokens::{Jwt, base64url, signing_input};
 use super::*;
 use crate::ports::{Cost, Timestamp, Usage};
 use crate::runner::step;
-use crate::test::{Asked, FakeClock, FakeGithub, PEM, Rig, Scripted};
+use crate::test::{Asked, FakeClock, FakeGithub, FakeSigner, PEM, Rig, Scripted};
 
 // Bounds every wait on the local page, so a hang fails by name.
 const PATIENCE: Duration = Duration::from_secs(10);
@@ -623,4 +623,102 @@ fn a_replaced_app_never_hands_out_the_old_apps_token() {
         Asked::Installation("shep-pm/koji".to_owned()),
         "the new App's installation is asked for afresh"
     );
+}
+
+// A GitHub whose answer about one repo's installation waits to be let go.
+struct Stalled {
+    inner: FakeGithub,
+    repo: &'static str,
+    inside: mpsc::Sender<()>,
+    release: std::sync::Mutex<mpsc::Receiver<()>>,
+}
+
+impl GithubApi for Stalled {
+    fn convert(&self, code: &str) -> Result<Conversion, ApiError> {
+        self.inner.convert(code)
+    }
+
+    fn installation(&self, jwt: &Jwt, repo: &ForgeSlug) -> Result<Option<u64>, ApiError> {
+        if repo.as_str() == self.repo {
+            self.inside.send(()).unwrap();
+            let _ = self.release.lock().unwrap().recv_timeout(PATIENCE);
+        }
+        self.inner.installation(jwt, repo)
+    }
+
+    fn access_token(
+        &self,
+        jwt: &Jwt,
+        installation: u64,
+        repo: &ForgeSlug,
+    ) -> Result<IssuedToken, ApiError> {
+        self.inner.access_token(jwt, installation, repo)
+    }
+
+    fn write(&self, token: &InstallationToken, call: &Call) -> Result<String, ApiError> {
+        self.inner.write(token, call)
+    }
+}
+
+#[test]
+fn a_slow_answer_for_one_repo_stalls_no_other_repo_s_token() {
+    let home = tempfile::tempdir().unwrap();
+    let github = FakeGithub::new(FakeClock::at(1_000_000), "shep-pm");
+    github.registered(home.path(), "shep-pm/slow");
+    github.install("shep-pm/quick", 7);
+    let (inside, entered) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let stalled = Stalled {
+        inner: github.clone(),
+        repo: "shep-pm/slow",
+        inside,
+        release: std::sync::Mutex::new(released),
+    };
+    let tokens = Arc::new(AppTokens::new(
+        Apps::under(home.path()),
+        Box::new(stalled),
+        Box::new(FakeSigner),
+        Box::new(FakeClock::at(1_000_000)),
+    ));
+    let slow = {
+        let tokens = Arc::clone(&tokens);
+        std::thread::spawn(move || tokens.token(&slug("shep-pm/slow")))
+    };
+    entered.recv_timeout(PATIENCE).unwrap();
+
+    let (done, minted) = mpsc::channel();
+    let quick = {
+        let tokens = Arc::clone(&tokens);
+        std::thread::spawn(move || done.send(tokens.token(&slug("shep-pm/quick"))))
+    };
+    let quick_token = minted.recv_timeout(Duration::from_secs(2));
+    release.send(()).unwrap();
+
+    assert!(
+        quick_token.is_ok_and(|token| token.is_ok()),
+        "another repo's token waits on the slow one's answer"
+    );
+    quick.join().unwrap().unwrap();
+    slow.join().unwrap().unwrap();
+}
+
+#[test]
+fn askers_for_one_repo_at_once_mint_one_token() {
+    let home = tempfile::tempdir().unwrap();
+    let github = FakeGithub::new(FakeClock::at(1_000_000), "shep-pm");
+    github.registered(home.path(), "shep-pm/koji");
+    let tokens = Arc::new(github.tokens(home.path()));
+    let askers: Vec<_> = (0..4)
+        .map(|_| {
+            let tokens = Arc::clone(&tokens);
+            std::thread::spawn(move || tokens.token(&slug("shep-pm/koji")).unwrap())
+        })
+        .collect();
+    let got: Vec<_> = askers.into_iter().map(|t| t.join().unwrap()).collect();
+
+    assert!(got.iter().all(|t| *t == got[0]));
+    let minted = (github.asked().iter())
+        .filter(|a| matches!(a, Asked::AccessToken(..)))
+        .count();
+    assert_eq!(minted, 1);
 }

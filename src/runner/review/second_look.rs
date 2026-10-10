@@ -131,6 +131,40 @@ fn defect_hunter_looks_twice_and_the_worker_gets_one_fix_turn() {
 }
 
 #[test]
+fn a_second_look_that_keeps_failing_still_posts_the_first_looks_round_through_the_app() {
+    let (rig, runner) = at_defect_hunter();
+    rig.with_app();
+    let overloaded = || {
+        let harness = crate::settings::Harness::ClaudeCode;
+        Scripted::Fail(crate::ports::AgentError::Failed(
+            harness,
+            "overloaded".into(),
+        ))
+    };
+    rig.claude.script([
+        Scripted::Text(MEDIUM),
+        overloaded(),
+        overloaded(),
+        overloaded(),
+        Scripted::Push("fixed.txt", "fixed\n"),
+    ]);
+
+    until_it_leaves_review(&rig, &runner);
+
+    let comments = rig.github.comments();
+    let [(thread, round)] = comments.as_slice() else {
+        panic!("the first look's round, once: {comments:?}");
+    };
+    assert_eq!(*thread, 71);
+    assert!(
+        round.contains("defect-hunter read this pull request"),
+        "{round}"
+    );
+    assert!(round.contains("found 1 thing"), "{round}");
+    assert!(round.contains("`work.txt:1`"), "{round}");
+}
+
+#[test]
 fn two_looks_that_find_nothing_end_the_review_with_no_fix_turn() {
     let (rig, runner) = at_defect_hunter();
     rig.claude

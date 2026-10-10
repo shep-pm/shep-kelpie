@@ -11,8 +11,8 @@ use std::path::Path;
 use std::process::Stdio;
 
 use super::curl;
-use crate::github::api::{self, ApiError, Conversion, GithubApi, IssuedToken, Signer};
-use crate::github::tokens::Jwt;
+use crate::github::api::{self, ApiError, Call, Conversion, GithubApi, IssuedToken, Signer, Verb};
+use crate::github::tokens::{InstallationToken, Jwt};
 use crate::ports::AlertError;
 use crate::settings::ForgeSlug;
 
@@ -56,12 +56,36 @@ impl GithubApi for CurlGithub {
             (body, status) => Err(api::refusal(status, &body)),
         }
     }
+
+    fn write(&self, token: &InstallationToken, write: &Call) -> Result<String, ApiError> {
+        let url = format!("{API}{}", write.path);
+        let bearer = Some(token.expose());
+        let sent = match write.verb {
+            Verb::Post => request(&url, bearer, None, write.body.as_deref())?,
+            Verb::Delete => request(&url, bearer, Some("DELETE"), None)?,
+        };
+        match sent {
+            (body, 200..=299) => Ok(body),
+            (body, status) => Err(api::refusal(status, &body)),
+        }
+    }
 }
 
 // One call to `url`, a `POST` of `post` when there is one, and what it
 // answered with its status. A redirect is never followed, so a JWT goes
 // nowhere but GitHub's API.
 fn call(url: &str, jwt: Option<&Jwt>, post: Option<&str>) -> Result<(String, u16), ApiError> {
+    request(url, jwt.map(Jwt::expose), None, post)
+}
+
+// One request to `url` as `verb`, curl's own choice when `None`, bearing
+// `bearer` when there is one.
+fn request(
+    url: &str,
+    bearer: Option<&str>,
+    verb: Option<&str>,
+    post: Option<&str>,
+) -> Result<(String, u16), ApiError> {
     let mut lines = vec![
         ("url", url.to_owned()),
         ("proto", "=https".to_owned()),
@@ -72,8 +96,11 @@ fn call(url: &str, jwt: Option<&Jwt>, post: Option<&str>) -> Result<(String, u16
         ("user-agent", "shep-kelpie".to_owned()),
         ("write-out", "\n%{http_code}".to_owned()),
     ];
-    if let Some(jwt) = jwt {
-        lines.push(("header", format!("Authorization: Bearer {}", jwt.expose())));
+    if let Some(bearer) = bearer {
+        lines.push(("header", format!("Authorization: Bearer {bearer}")));
+    }
+    if let Some(verb) = verb {
+        lines.push(("request", verb.to_owned()));
     }
     if let Some(body) = post {
         lines.push(("header", "Content-Type: application/json".to_owned()));

@@ -113,23 +113,19 @@ impl Runner {
                 Some(known) => {
                     let body = comment_body(number, &finding);
                     let on = known.number;
-                    let posted = self.ports.forge.post_comment(&repo, on, &body);
-                    posted.map(|_| commented.push(on))
+                    let posted = self.comment_on_issue(on, &body);
+                    posted.map(|()| commented.push(on))
                 }
                 None => {
                     if !labelled {
-                        let forge = self.ports.forge.as_ref();
-                        let made = crate::issues::make_missing(forge, &repo, [TRIAGE_LABEL]);
+                        let made = self.make_missing_labels([TRIAGE_LABEL]);
                         if let Err(reason) = made {
                             return self.forge_refused(number, reason);
                         }
                         labelled = true;
                     }
                     let body = issue_body(number, &finding, triaged);
-                    let made = self
-                        .ports
-                        .forge
-                        .create_issue(&repo, &title, &body, &[label]);
+                    let made = self.open_issue(&title, &body, &[label]);
                     made.map(|made| {
                         opened.push(made);
                         open.push(OpenIssue {

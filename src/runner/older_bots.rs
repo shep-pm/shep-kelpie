@@ -78,6 +78,7 @@ impl Runner {
         );
         let text = format!("Merge ruling {id} on {about} is withdrawn: {why}. Nothing to answer.");
         self.notes.push(text.clone());
+        self.notice_on(number.unwrap_or(issue), &text);
         let Some(webhook) = self.webhook.clone() else {
             return;
         };

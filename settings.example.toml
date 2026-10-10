@@ -31,6 +31,10 @@ merging = "ask"
 # ruling before filing them as issues, `file` files them at once, and
 # `skip` files nothing and leaves them in the review.
 issues = "ask"
+# The GitHub login kelpie mentions on a ruling it posts through its App, so
+# GitHub notifies you. Your repo's owner when absent and the owner is a
+# user; an organization's repo mentions nobody until this is set.
+# maintainer = "octocat"
 
 [app.dogs.kelpie.ci]
 # Whether the repo runs CI on pull requests, which a merge waits for green

@@ -6,10 +6,11 @@
 //! project keeps private. A post that names one is never sent.
 
 use std::fmt;
+use std::sync::Arc;
 
 use super::{
     Forge, ForgeError, Issue, NewLabel, OpenIssue, PullRequest, QueueStanding, Reviewed, Timestamp,
-    Visibility,
+    Visibility, Voice,
 };
 use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::local_paths::{LocalPaths, Surface};
@@ -59,6 +60,10 @@ impl Forge for Guarded {
     // A label's text is kelpie's own constants, which name no folder.
     fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError> {
         self.forge.create_label(repo, label)
+    }
+
+    fn owner_is_user(&self, repo: &ForgeSlug) -> Result<bool, ForgeError> {
+        self.forge.owner_is_user(repo)
     }
 
     fn can_push(&self, repo: &ForgeSlug) -> Result<bool, ForgeError> {
@@ -175,6 +180,70 @@ impl Forge for Guarded {
 
     fn rate_limit_reset(&self) -> Result<Option<Timestamp>, ForgeError> {
         self.forge.rate_limit_reset()
+    }
+}
+
+/// A voice that refuses to write any text naming something of this machine's
+pub struct GuardedVoice {
+    voice: Arc<dyn Voice>,
+    local: LocalPaths,
+}
+
+impl GuardedVoice {
+    /// `voice`, refusing writes that `local` finds something in
+    pub fn new(voice: Arc<dyn Voice>, local: LocalPaths) -> Self {
+        Self { voice, local }
+    }
+
+    fn check(&self, what: &'static str, text: &str) -> Result<(), ForgeError> {
+        match self.local.find(text, Surface::Prose) {
+            Some(leak) => Err(ForgeError::LocalPath { what, leak }),
+            None => Ok(()),
+        }
+    }
+}
+
+impl fmt::Debug for GuardedVoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GuardedVoice").finish_non_exhaustive()
+    }
+}
+
+impl Voice for GuardedVoice {
+    fn covers(&self, repo: &ForgeSlug) -> bool {
+        self.voice.covers(repo)
+    }
+
+    fn comment(&self, repo: &ForgeSlug, thread: u64, body: &str) -> Result<(), ForgeError> {
+        self.check("the comment", body)?;
+        self.voice.comment(repo, thread, body)
+    }
+
+    fn create_issue(
+        &self,
+        repo: &ForgeSlug,
+        title: &str,
+        body: &str,
+        labels: &[&str],
+    ) -> Result<u64, ForgeError> {
+        self.check("the issue's title", title)?;
+        self.check("the issue's body", body)?;
+        self.voice.create_issue(repo, title, body, labels)
+    }
+
+    // A label's text is kelpie's own constants, which name no folder.
+    fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError> {
+        self.voice.create_label(repo, label)
+    }
+
+    fn set_issue_label(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        label: &str,
+        on: bool,
+    ) -> Result<(), ForgeError> {
+        self.voice.set_issue_label(repo, number, label, on)
     }
 }
 

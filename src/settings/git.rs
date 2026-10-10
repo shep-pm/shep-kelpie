@@ -25,6 +25,42 @@ pub struct Git {
     /// request merges. `ask` when absent.
     #[serde(default)]
     pub issues: Filing,
+    /// The GitHub login kelpie mentions on a ruling it posts through its
+    /// App, so GitHub notifies them. The repo's owner when absent and the
+    /// owner is a user; nobody is mentioned for an organization's repo.
+    #[serde(default)]
+    pub maintainer: Option<GithubLogin>,
+}
+
+/// A GitHub login: letters, digits and hyphens, at most 39, not starting
+/// with a hyphen
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(try_from = "String")]
+pub struct GithubLogin(String);
+
+impl GithubLogin {
+    /// The login as written
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for GithubLogin {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let login = value.strip_prefix('@').unwrap_or(&value);
+        let allowed = |c: char| c.is_ascii_alphanumeric() || c == '-';
+        if login.is_empty()
+            || login.len() > 39
+            || login.starts_with('-')
+            || !login.chars().all(allowed)
+        {
+            return Err("must be a GitHub login");
+        }
+        Ok(Self(login.to_owned()))
+    }
 }
 
 /// Who merges a green, reviewed pull request

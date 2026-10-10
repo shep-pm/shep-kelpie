@@ -143,7 +143,7 @@ The checkout is the project's repo, and shep-kelpie runs `git fetch`, `git workt
 
 ### 5. Register kelpie's GitHub App
 
-shep-kelpie is moving its rulings and notices onto GitHub, posted as an App of its own that you register for yourself, so they reach you through GitHub's notifications. This release registers the App and checks it can act on your repos; posting through it and reading your answers come next (#397 and #398). For the account that owns the repo:
+shep-kelpie posts its rulings, notices and review rounds on GitHub as an App of its own that you register for yourself, so they reach you through GitHub's notifications: GitHub never notifies you of what your own login posts. Each ruling is a comment on the work item's pull request, or on its issue while it has none, that mentions you and says how to answer. A notice that a pull request merged is a comment on it, and each round of a reviewer of kelpie's own is posted on the pull request as it ends, with its findings or that it found none. The issues and labels shep-kelpie makes come from the App too. Answering by replying to the comment comes next (#398); until then answer with `shep kelpie rule`. Without an App, shep-kelpie posts as it always did, from your own login. For the account that owns the repo:
 
 ```sh
 shep kelpie github setup
@@ -153,7 +153,9 @@ For a repo an organization owns, `shep kelpie github setup --org <org>`. It open
 
 App names are shared by all of GitHub, so if yours is taken, stop with Ctrl-C and run again with `--name <another name>`. Run it once for each owner: an App you register yourself installs only on the account that owns it. Running it again for an owner that has one says so and changes nothing, unless you give `--replace`. Before replacing, delete the old App on GitHub (its owner's settings, Developer settings, GitHub Apps), since its name is still taken while it exists, or give the new one `--name`. `shep kelpie github setup --help` lists the flags.
 
-shep-kelpie keeps the App's private key in its home, `$SHEP_HOME/kelpie` or the folder `KELPIE_HOME` names, under `github/<owner>`, readable by you alone, and no worker can read it. The App cannot push, change code or merge: merging stays on your own `gh` login.
+shep-kelpie keeps the App's private key in its home, `$SHEP_HOME/kelpie` or the folder `KELPIE_HOME` names, under `github/<owner>`, readable by you alone, and no worker can read it. The App cannot push, change code or merge: merging stays on your own `gh` login, and so do a review bot's summons and the labels on a pull request, since a bot answers a person.
+
+A ruling mentions the login in `git.maintainer`. Left out, it is the repo's owner when a user owns the repo, and nobody when an organization does, so set `git.maintainer` for an organization's repo or its rulings notify no one.
 
 ### 6. Check the machine
 
@@ -684,7 +686,7 @@ Every trigger a person sends the runner is also a verb: `add <issue>`, `rework <
 
 `add` names the project after the repo, or `shep kelpie add <name>`. It makes the four labels where the repo lacks them, writes kelpie's own agent files where they are missing, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. Running `add` again changes nothing. `start`, `pause` and `finish` find the project from the checkout, or take its name.
 
-`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's checkout, implementers and labels, that kelpie's GitHub App is installed on each project's repo and mints a token there, CodeRabbit where a project lists it, each project's reviewers, in order, with any command or endpoint among them checked as a runner's start checks it, Codex's usage for a project that spends it, and which webhook, if any, rulings post to. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it. The GitHub App's line is `unsure` when GitHub is out of reach, busy or rate limited, and, until kelpie posts through the App, when the owner has no App yet.
+`doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's checkout, implementers and labels, that kelpie's GitHub App is installed on each project's repo and mints a token there, CodeRabbit where a project lists it, each project's reviewers, in order, with any command or endpoint among them checked as a runner's start checks it, Codex's usage for a project that spends it, and which webhook, if any, rulings post to. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it. The GitHub App's line is `unsure` when GitHub is out of reach, busy or rate limited, and when the owner has no App, since kelpie then posts as it always did.
 
 ### Leases
 

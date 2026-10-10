@@ -13,6 +13,7 @@ use crate::adapters::{GpuCurl, LocalReviewer};
 use crate::coderabbit::CodeRabbit;
 use crate::codex::Codex;
 use crate::cubic::Cubic;
+use crate::github::AppVoice;
 use crate::ports::{
     Checks, Clock, Cost, Meter, MeterError, Ports, Role, SessionId, Timestamp, Usage, Utilization,
     Window,
@@ -268,6 +269,9 @@ pub(crate) struct Rig {
     pub(crate) alerts: FakeAlerts,
     pub(crate) leases: FakeLeases,
     pub(crate) clock: FakeClock,
+    /// GitHub as kelpie's App sees it: the rig has registered no App until
+    /// [`Rig::with_app`]
+    pub(crate) github: FakeGithub,
 }
 
 impl Rig {
@@ -291,6 +295,9 @@ impl Rig {
             },
         }
     }
+
+    /// The repo the rig's project works on GitHub
+    pub(crate) const REMOTE: &str = "shep-pm/shep";
 
     /// Where the rig says the kelpie binary is
     pub(crate) const KELPIE: &str = "/opt/kelpie/bin/kelpie";
@@ -319,6 +326,7 @@ impl Rig {
                 .with_naps(|_| Duration::from_millis(100)),
             alerts: FakeAlerts::on(clock.clone()),
             leases: FakeLeases::default(),
+            github: FakeGithub::new(clock.clone(), "shep-pm"),
             clock,
             home,
         };
@@ -496,6 +504,13 @@ impl Rig {
         ProjectPaths::under(&shep.join("kelpie"), &shep, &self.project)
     }
 
+    /// Registers kelpie's App for the project's repo owner and installs it on
+    /// the repo, so a runner opened next posts through it
+    pub(crate) fn with_app(&self) {
+        let kelpie_home = self.paths().kelpie_home;
+        self.github.registered(&kelpie_home, Self::REMOTE);
+    }
+
     /// Lists CodeRabbit after the rig's reviewers, so it reads each pass last
     pub(crate) fn coderabbit_on(&self) {
         self.edit_settings(|s| {
@@ -510,6 +525,15 @@ impl Rig {
         self.edit_settings(|s| {
             assert!(s.contains(ask), "the example's `git.merging` moved");
             s.replace(ask, auto)
+        });
+    }
+
+    /// Sets the project's `git.maintainer` to `login`, read when a runner next opens
+    pub(crate) fn maintainer(&self, login: &str) {
+        let ask = "issues = \"ask\"";
+        self.edit_settings(|s| {
+            assert!(s.contains(ask), "the example's `git.issues` moved");
+            s.replace(ask, &format!("{ask}\nmaintainer = \"{login}\""))
         });
     }
 
@@ -607,9 +631,11 @@ impl Rig {
         &self,
         review_bots: Vec<Arc<dyn Profile>>,
     ) -> Result<Mutex<Runner>, OpenError> {
+        let tokens = Arc::new(self.github.tokens(&self.paths().kelpie_home));
         let ports = Ports {
             agents: Arc::new(self.claude.clone()),
             forge: Box::new(self.forge.clone()),
+            voice: Arc::new(AppVoice::new(tokens, Box::new(self.github.clone()))),
             meter: Box::new(self.meter.clone()),
             codex_meter: Box::new(self.codex_meter.clone()),
             reviewer: Arc::new(self.reviewer.clone()),

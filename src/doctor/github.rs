@@ -13,13 +13,15 @@ pub(super) fn app(subject: String, repo: &ForgeSlug, github: &dyn GithubApp) -> 
             subject,
             format!("kelpie's App is installed on {slug} and mints a token"),
         ),
-        // Nothing uses the App yet; #397 makes this MISSING when kelpie posts through it.
+        // No App is unsure, not missing: the App is optional, and without one kelpie
+        // falls back to posting from the user's own `gh` login.
         Err(TokenError::NoApp(owner)) => Line::unsure(
             subject,
             format!("kelpie has no GitHub App for {owner}"),
             format!(
                 "run `shep kelpie github setup`, with `--org {owner}` when {owner} is an \
-                 organization, then install the App on {slug} from the page it opens"
+                 organization, then install the App on {slug} from the page it opens; until \
+                 then kelpie posts as your own login, which GitHub never notifies you of"
             ),
         ),
         Err(TokenError::NotInstalled { app, .. }) => Line::missing(

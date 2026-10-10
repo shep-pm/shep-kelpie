@@ -78,6 +78,10 @@ impl Forge for Gh {
         access::can_push(repo)
     }
 
+    fn owner_is_user(&self, repo: &ForgeSlug) -> Result<bool, ForgeError> {
+        access::owner_is_user(repo)
+    }
+
     fn review_bot_seen(&self, repo: &ForgeSlug, login: Login<'_>) -> Result<bool, ForgeError> {
         access::review_bot_seen(repo, login)
     }

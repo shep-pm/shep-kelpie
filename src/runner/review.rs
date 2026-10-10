@@ -38,6 +38,7 @@ use super::Runner;
 use super::report::{Begin, ReviewCall, ReviewResult, Reviewed, Spent, StepReport};
 use super::review_bot::Resolved;
 use super::ruling::park;
+use super::voice::Round;
 use crate::agents::{DEFECT_HUNTER, QWEN};
 use crate::pacer::Scope;
 use crate::ports::{
@@ -498,6 +499,7 @@ impl Runner {
             Some(Phase::Review(review)) => review.reading.clone(),
             _ => None,
         };
+        let started_at = reading.clone();
         let read = reading
             .filter(|_| matches!(&result, ReviewResult::Findings(Ok(_))))
             .filter(|head| self.still_at(head));
@@ -576,6 +578,9 @@ impl Runner {
             .clone()
             .unwrap_or_else(|| AgentName::kelpies(if local_round { QWEN } else { DEFECT_HUNTER }));
         let unreviewed: Vec<String> = unreviewed.into_iter().map(|f: Finding| f.file).collect();
+        let reviewer_name = reviewer.as_str().to_owned();
+        // What a round that read the pull request found, to post once it is saved.
+        let mut ended: Option<Vec<Finding>> = None;
 
         let report = match (review.stage.clone(), result) {
             // The call stays due; one that keeps failing goes no further.
@@ -586,6 +591,8 @@ impl Runner {
             }
             // A second look that keeps failing leaves the first's findings to go alone.
             (ReviewStage::SecondLook { first }, Err(reason)) => {
+                // The first look ended with these findings, which now go on alone.
+                ended = Some(first.clone());
                 item.phase = Phase::Review(Review {
                     stage: ReviewStage::Found {
                         findings: first,
@@ -668,6 +675,7 @@ impl Runner {
                     if local_round {
                         item.note_local_round(&reviewer, &unreviewed);
                     }
+                    ended = Some(findings.clone());
                     // Nothing found: the pass goes on to the next reviewer at once.
                     if findings.is_empty() {
                         item.phase = self.after_round(review, now);
@@ -700,6 +708,15 @@ impl Runner {
             }
         };
         self.save(next)?;
+        if let Some(findings) = ended {
+            self.post_round(&Round {
+                number,
+                reviewer: &reviewer_name,
+                round,
+                head: started_at.as_deref(),
+                findings: &findings,
+            });
+        }
         Ok(Some(report))
     }
 }

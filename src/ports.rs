@@ -36,7 +36,7 @@ pub use agent::{
 };
 pub use gpu::{Gpu, GpuError, GpuMetrics};
 pub use leased::{Leased, LocalLeases};
-pub use local_paths::Guarded;
+pub use local_paths::{Guarded, GuardedVoice};
 pub use model_seat::ModelSeat;
 pub use rate_limit::{ForgeHold, RateHeld, Say};
 pub use reviewer::{Reviewer, ReviewerError, RoundStage};
@@ -102,6 +102,13 @@ pub trait Forge: Send {
     ///
     /// [`ForgeError`] when the forge cannot be asked or its answer read.
     fn can_push(&self, repo: &ForgeSlug) -> Result<bool, ForgeError>;
+
+    /// Whether the account that owns `repo` is a user rather than an organization
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn owner_is_user(&self, repo: &ForgeSlug) -> Result<bool, ForgeError>;
 
     /// Whether the review bot `login` has commented on any pull request of `repo`
     ///
@@ -449,6 +456,8 @@ pub enum ForgeError {
     },
     /// The forge said its rate limit was used up, so no call is made until it resets then
     Held(Timestamp),
+    /// The GitHub App's write failed, with why
+    App(String),
 }
 
 impl fmt::Display for ForgeError {
@@ -463,11 +472,66 @@ impl fmt::Display for ForgeError {
                 "not asked: the forge's rate limit is used up until {}",
                 rate_limit::time_of(*until)
             ),
+            Self::App(why) => write!(f, "the GitHub App could not post: {why}"),
         }
     }
 }
 
 impl core::error::Error for ForgeError {}
+
+/// Kelpie's own voice on the forge: what it writes for the maintainer to
+/// read, made as its GitHub App once one covers the repo
+///
+/// Its writes are the rulings, notices and review rounds posted as comments,
+/// the issues and labels kelpie makes, and the issue labels it sets. A
+/// summon and the labels on a pull request stay on the maintainer's own
+/// login through [`Forge`]: a review bot answers a person's label or comment.
+/// Where no App covers a repo the caller writes through [`Forge`] as before,
+/// so each write below is made only after [`Voice::covers`] says yes.
+pub trait Voice: Send + Sync {
+    /// Whether an App covers `repo`: its owner has one, installed on the repo
+    fn covers(&self, repo: &ForgeSlug) -> bool;
+
+    /// Posts `body` as a comment on issue or pull request `thread`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the App cannot post it.
+    fn comment(&self, repo: &ForgeSlug, thread: u64, body: &str) -> Result<(), ForgeError>;
+
+    /// Opens an issue on `repo` with these labels, and returns its number
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the App cannot open it, or its answer names no number.
+    fn create_issue(
+        &self,
+        repo: &ForgeSlug,
+        title: &str,
+        body: &str,
+        labels: &[&str],
+    ) -> Result<u64, ForgeError>;
+
+    /// Makes `label` on `repo`
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when GitHub refuses, such as when `repo` already has it.
+    fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError>;
+
+    /// Adds `label` to issue `number`, or takes it off
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when GitHub refuses or cannot be asked.
+    fn set_issue_label(
+        &self,
+        repo: &ForgeSlug,
+        number: u64,
+        label: &str,
+        on: bool,
+    ) -> Result<(), ForgeError>;
+}
 
 /// How much of one usage window the account has spent
 // wire format: changing this is a breaking change to the pacer's status
@@ -797,6 +861,8 @@ pub struct Ports {
     pub agents: Arc<dyn Agents>,
     /// The forge
     pub forge: Box<dyn Forge>,
+    /// Kelpie's own voice on the forge, its GitHub App's where one covers the repo
+    pub voice: Arc<dyn Voice>,
     /// The Claude account's usage, from `/usage`
     pub meter: Box<dyn Meter>,
     /// The Codex account's usage

@@ -1,5 +1,6 @@
 //! Kelpie's GitHub App, one per repo owner: [`setup`] registers it,
-//! [`Apps`] keeps it in kelpie's home, and [`GithubApp`] mints its tokens
+//! [`Apps`] keeps it in kelpie's home, [`GithubApp`] mints its tokens and
+//! [`AppVoice`] writes with them
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -14,9 +15,11 @@ use crate::totp::private_dir;
 pub mod api;
 pub mod setup;
 pub mod tokens;
+pub mod voice;
 
-pub use api::{ApiError, Conversion, GithubApi, IssuedToken, Pem, Signer};
+pub use api::{ApiError, Call, Conversion, GithubApi, IssuedToken, Pem, Signer, Verb};
 pub use tokens::{AppTokens, GithubApp, InstallationToken, TokenError};
+pub use voice::AppVoice;
 
 /// The folder in kelpie's home the Apps are kept in
 pub const FOLDER: &str = "github";

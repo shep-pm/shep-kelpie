@@ -319,7 +319,10 @@ impl Runner {
         let (id, _) = park(self.names(), &mut next, issue, number, kind);
         self.save(next).map_err(RuleError::State)?;
         // A comment that fails loses nothing: the ruling is saved and alerted.
-        let _ = self.post_ruling(number, id);
+        if let Some(why) = self.post_ruling(number, id) {
+            self.notes
+                .push(format!("cannot post ruling {id} on its thread: {why}"));
+        }
         Ok(())
     }
 
@@ -343,9 +346,17 @@ impl Runner {
     // Posts a saved ruling on its pull request, if it has one and has
     // anything to say there, and returns why the comment failed, if it did.
     // The pull request carries no question: the webhook does.
+    //
+    // Where an App covers the repo, the ruling is posted through it on the
+    // pull request, or on the issue while there is none, whatever its kind,
+    // and mentions the maintainer.
     pub(super) fn post_ruling(&self, number: Option<u64>, id: u64) -> Option<String> {
-        let number = number?;
         let ruling = self.state.rulings.iter().find(|r| r.id == id)?;
+        if self.app_covers() {
+            let thread = number.or(ruling.issue)?;
+            return self.post_app_ruling(thread, id, &ruling.kind);
+        }
+        let number = number?;
         let comment = comment(&ruling.kind)?;
         let posted = self.ports.forge.comment(&self.remote, number, &comment);
         posted.err().map(|e| e.to_string())
@@ -415,21 +426,16 @@ pub(super) fn park(
 // that it waits on the maintainer, with no command and nothing of kelpie's.
 // A merge ruling says nothing, since `ready-for-human` already does.
 fn comment(kind: &RulingKind) -> Option<String> {
-    let said = match kind {
+    match kind {
         RulingKind::Merge { .. } => return None,
-        RulingKind::Stuck(reason) => stuck_comment(reason),
-        RulingKind::Question { asked, .. } => asked.clone(),
-        RulingKind::AgentFiles { files, .. } => format!(
-            "This pull request changes agents' own files: {}.",
-            files.join(", ")
-        ),
-        RulingKind::ForeignChange { description, .. } => {
-            format!("This pull request was changed: {description}.")
-        }
         // Merged and done: nothing on the pull request waits on the maintainer.
         RulingKind::FollowUp { .. } => return None,
-    };
-    Some(format!("{said}\n\nWaiting on the maintainer."))
+        _ => {}
+    }
+    Some(format!(
+        "{}\n\nWaiting on the maintainer.",
+        super::voice::said(kind)
+    ))
 }
 
 // The fix turns a worker had on red runs. The cap is read live, so a
@@ -442,7 +448,7 @@ fn fix_turns_had(turns: u32) -> String {
     }
 }
 
-fn stuck_comment(reason: &Stuck) -> String {
+pub(super) fn stuck_comment(reason: &Stuck) -> String {
     match reason {
         Stuck::Rebase { why } => {
             format!("This branch could not be rebased onto main: {why}.")

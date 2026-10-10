@@ -289,8 +289,10 @@ code summons, in the listed bot's round of a review pass.
 Kelpie's GitHub App, one per repo owner, which the maintainer registers
 with `shep kelpie github setup` and installs on the repos kelpie works. Its
 private key stays in kelpie's home, and kelpie acts as the App with an
-installation token minted from it, one per repo. Merging stays on the maintainer's
-own `gh` login.
+installation token minted from it, one per repo. Kelpie's rulings, notices
+and review rounds are posted as the App, and the issues and labels it makes.
+Merging, a review bot's summons and a pull request's labels stay on the
+maintainer's own `gh` login.
 _Avoid_: bot account, kelpie's account
 
 **Pacing**:
@@ -329,8 +331,11 @@ follow `git.issues`, not it: a `follow-up` ruling comes only under `ask`.
 Every other ruling still asks.
 
 **Notice**:
-What kelpie sends after a merge under `auto`, through the same webhook as
-rulings. Not a ruling: it has no id and takes no answer.
+What kelpie sends after a merge under `auto`, a work item closed with no
+change, a withdrawn merge ruling or a finished runner, through the same
+webhook as rulings. All but the finished runner's are also a comment on the
+work item's thread where an App covers the repo. Not a ruling: it has no id
+and takes no answer.
 
 **Draining**:
 A runner told to start no new call, while the calls it has running go on to
