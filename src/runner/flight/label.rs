@@ -196,7 +196,7 @@ impl Runner {
             Err(why) => return self.unlabelled(issue, why).map(Some),
         };
         let label = format!("{AGENT_LABEL}{agent}");
-        if let Err(e) = (self.ports.forge).set_issue_label(&self.remote, issue, &label, true) {
+        if let Err(e) = self.label_issue(issue, &label, true) {
             let why = format!("the forge would not label it `{label}`: {e}");
             return self.unlabelled(issue, why).map(Some);
         }

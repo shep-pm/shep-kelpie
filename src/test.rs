@@ -521,6 +521,15 @@ impl Rig {
         });
     }
 
+    /// Sets the project's `git.maintainer` to `login`, read when a runner next opens
+    pub(crate) fn maintainer(&self, login: &str) {
+        let ask = "issues = \"ask\"";
+        self.edit_settings(|s| {
+            assert!(s.contains(ask), "the example's `git.issues` moved");
+            s.replace(ask, &format!("{ask}\nmaintainer = \"{login}\""))
+        });
+    }
+
     /// Sets the project's `git.issues` to `filing`, read when a runner next opens
     pub(crate) fn issues(&self, filing: &str) {
         let ask = "issues = \"ask\"";

@@ -27,7 +27,8 @@ use crate::board::{AGENT_LABEL, READY, agent_label};
 use crate::guard::IssueRules;
 use crate::ports::Clock;
 use crate::ports::{
-    self, AgentCall, Ending, Fence, Forge, Guard, NewLabel, Reach, Session, SessionId, Tools,
+    self, AgentCall, Ending, Fence, Forge, ForgeError, Guard, NewLabel, Reach, Session, SessionId,
+    Tools,
 };
 use crate::profile::CREDENTIALS;
 use crate::runner::{HUMAN, ProjectPaths};
@@ -166,14 +167,27 @@ pub fn make_missing<'a>(
     repo: &ForgeSlug,
     wanted: impl IntoIterator<Item = NewLabel<'a>>,
 ) -> Result<(), String> {
+    make_missing_with(forge, repo, wanted, |label| forge.create_label(repo, label))
+}
+
+/// [`make_missing`], making each label with `create`, such as through the App
+///
+/// # Errors
+///
+/// A message naming the label the forge would not read or make.
+pub fn make_missing_with<'a>(
+    forge: &dyn Forge,
+    repo: &ForgeSlug,
+    wanted: impl IntoIterator<Item = NewLabel<'a>>,
+    create: impl Fn(&NewLabel<'a>) -> Result<(), ForgeError>,
+) -> Result<(), String> {
     let slug = repo.as_str();
     let have = forge
         .repo_labels(repo)
         .map_err(|e| format!("cannot read {slug}'s labels: {e}"))?;
     let wanted = wanted.into_iter();
     for label in wanted.filter(|l| !have.iter().any(|h| h.eq_ignore_ascii_case(l.name))) {
-        forge
-            .create_label(repo, &label)
+        create(&label)
             .map_err(|e| format!("cannot make the label `{}` on {slug}: {e}", label.name))?;
     }
     Ok(())

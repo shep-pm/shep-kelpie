@@ -288,14 +288,18 @@ impl Runner {
             merged: true,
             closed: false,
         };
-        if notice {
-            next.notices.push(Notice {
-                issue,
-                pull_request: number,
-                head,
-            });
-        }
+        let notice = notice.then_some(Notice {
+            issue,
+            pull_request: number,
+            head,
+        });
+        next.notices.extend(notice.clone());
         self.save(next)?;
+        // A comment that fails is told once and not retried: the webhook's
+        // retry is the notice's, and nothing here waits on the comment.
+        if let Some(notice) = &notice {
+            self.notice_on(number, &super::voice::merged_notice(notice));
+        }
         self.finish(true)
     }
 

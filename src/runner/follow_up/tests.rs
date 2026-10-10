@@ -137,6 +137,53 @@ fn under_file_an_unfixed_confirmed_finding_files_one_issue_for_triage() {
 }
 
 #[test]
+fn with_an_app_the_follow_up_issue_and_the_label_it_needs_are_made_through_it() {
+    let rig = Rig::new("shep");
+    rig.with_app();
+    let found = [racy()];
+    let (rig, runner) = ready_in(rig, &found, &lines(&found));
+    rig.forge.set_repo_labels(&["bug"]);
+
+    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+
+    assert_eq!(
+        rig.forge.created(),
+        [],
+        "not opened as the maintainer's login"
+    );
+    assert_eq!(rig.forge.repo_labels_now(), ["bug"]);
+    let writes = rig.github.writes();
+    let tokens: Vec<_> = writes.iter().map(|(token, _)| token.as_str()).collect();
+    assert!(tokens.iter().all(|t| *t == "ghs_test1"), "{tokens:?}");
+    let body = |call: &crate::github::Call| call.body.clone().unwrap_or_default();
+    let made = |path: &str| {
+        let at = format!("/repos/shep-pm/shep/{path}");
+        (writes.iter())
+            .filter(|(_, call)| call.path == at)
+            .map(|(_, call)| body(call))
+            .collect::<Vec<_>>()
+    };
+    let labels = made("labels");
+    assert!(
+        labels.last().unwrap().contains(r#""name":"needs-triage""#),
+        "{labels:?}"
+    );
+    let [issue] = made("issues").try_into().unwrap();
+    assert!(issue.contains(r#""labels":["needs-triage"]"#), "{issue}");
+}
+
+#[test]
+fn with_no_app_the_follow_up_issue_is_opened_as_it_always_was() {
+    let found = [racy()];
+    let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
+
+    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+
+    assert_eq!(rig.forge.created().len(), 1);
+    assert_eq!(rig.github.writes(), []);
+}
+
+#[test]
 fn a_repo_without_the_triage_label_gets_it_once_and_the_findings_are_filed() {
     let found = [racy(), finding("src/main.rs", "leaks a handle")];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));

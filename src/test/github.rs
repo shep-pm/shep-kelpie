@@ -39,6 +39,8 @@ struct Hub {
     jwts: Vec<String>,
     minted: u32,
     issues: u64,
+    // Why every comment is refused, while it is
+    comments_refused: Option<ApiError>,
 }
 
 /// GitHub as kelpie's App sees it: one code converts to an App owned by
@@ -84,6 +86,11 @@ impl FakeGithub {
         self.hub.lock().unwrap().failures.push_back(error);
     }
 
+    /// Makes every comment answer `error` from now on, whatever else is asked
+    pub(crate) fn refuse_comments(&self, error: ApiError) {
+        self.hub.lock().unwrap().comments_refused = Some(error);
+    }
+
     /// Makes the next conversion hand back an App owned by `owner`
     pub(crate) fn converts_for(&self, owner: &str) {
         self.hub.lock().unwrap().convert_owner = Some(owner.to_owned());
@@ -91,6 +98,28 @@ impl FakeGithub {
 
     pub(crate) fn asked(&self) -> Vec<Asked> {
         self.hub.lock().unwrap().asked.clone()
+    }
+
+    /// Every write made as the App, in order, with the token it was made with
+    pub(crate) fn writes(&self) -> Vec<(String, Call)> {
+        (self.asked().into_iter())
+            .filter_map(|asked| match asked {
+                Asked::Write(token, call) => Some((token, call)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The text of each comment the App posted, with the issue or pull
+    /// request it went to, in order
+    pub(crate) fn comments(&self) -> Vec<(u64, String)> {
+        (self.writes().into_iter())
+            .filter_map(|(_, call)| {
+                let thread = call.path.strip_suffix("/comments")?.rsplit('/').next()?;
+                let body: serde_json::Value = serde_json::from_str(call.body.as_deref()?).ok()?;
+                Some((thread.parse().ok()?, body["body"].as_str()?.to_owned()))
+            })
+            .collect()
     }
 
     /// Every JWT a call was made with
@@ -170,6 +199,13 @@ impl GithubApi for FakeGithub {
         hub.asked
             .push(Asked::Write(token.expose().to_owned(), call.clone()));
         if let Some(error) = hub.failures.pop_front() {
+            return Err(error);
+        }
+        if let Some(error) = hub
+            .comments_refused
+            .clone()
+            .filter(|_| call.path.ends_with("/comments"))
+        {
             return Err(error);
         }
         if call.path.ends_with("/issues") {

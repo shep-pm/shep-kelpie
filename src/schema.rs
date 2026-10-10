@@ -141,7 +141,8 @@ mod tests {
             .replace("# reviewers = [\"qwen\", \"defect-hunter\"]", "reviewers = [\"qwen\"]")
             .replace("# pm = \"pm\"", "pm = \"pm\"")
             .replace("# issue_writer =", "issue_writer =")
-            .replace("# fallback_after =", "fallback_after =");
+            .replace("# fallback_after =", "fallback_after =")
+            .replace("# maintainer =", "maintainer =");
         assert!(
             text.contains("reviewers = [\"qwen\"]"),
             "the example's list moved"

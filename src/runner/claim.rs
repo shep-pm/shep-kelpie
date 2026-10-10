@@ -19,12 +19,7 @@ pub const IN_PROGRESS: &str = "in-progress";
 impl Runner {
     // Labels `issue` as held, or takes the label off, and notes a refusal
     pub(super) fn mark_held(&mut self, issue: u64, held: bool) {
-        let repo = &self.remote;
-        if let Err(e) = self
-            .ports
-            .forge
-            .set_issue_label(repo, issue, IN_PROGRESS, held)
-        {
+        if let Err(e) = self.label_issue(issue, IN_PROGRESS, held) {
             let verb = if held { "add" } else { "remove" };
             self.notes.push(format!(
                 "cannot {verb} `{IN_PROGRESS}` on issue #{issue}: {e}"
@@ -50,7 +45,7 @@ impl Runner {
     pub(super) fn make_agent_labels(&mut self) {
         let labels = crate::issues::agent_labels(&self.agents);
         let wanted = labels.iter().map(crate::issues::AgentLabel::new_label);
-        let made = crate::issues::make_missing(self.ports.forge.as_ref(), &self.remote, wanted);
+        let made = self.make_missing_labels(wanted);
         if let Err(e) = made {
             self.notes.push(e);
         }

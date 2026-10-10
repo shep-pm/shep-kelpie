@@ -125,6 +125,9 @@ pub trait GithubApp: Send + Sync {
     fn token(&self, repo: &ForgeSlug) -> Result<InstallationToken, TokenError>;
 }
 
+// An App's id and a repo's `owner/name` in lower case
+type RepoKey = (u64, String);
+
 // Each App's installation on a repo, by the App's id and `owner/name` in
 // lower case, and each token by those and the installation it was minted for,
 // so a replaced App's tokens are never handed out.
@@ -143,7 +146,7 @@ pub struct AppTokens {
     // The map is held only to read or write it; each flight is held across
     // the calls to GitHub for its App and repo.
     kept: Mutex<Kept>,
-    flights: Mutex<BTreeMap<(u64, String), Arc<Mutex<()>>>>,
+    flights: Mutex<BTreeMap<RepoKey, Arc<Mutex<()>>>>,
 }
 
 impl fmt::Debug for AppTokens {

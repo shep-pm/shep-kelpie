@@ -88,6 +88,7 @@ mod slots_tests;
 mod timings;
 mod trigger;
 mod turn;
+mod voice;
 mod words;
 mod worker_files;
 

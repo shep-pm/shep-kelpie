@@ -114,6 +114,7 @@ impl Runner {
              pull request.{withdrawn} Nothing to answer."
         );
         self.notes.push(text.clone());
+        self.notice_on(issue, &text);
         let Some(webhook) = self.webhook.clone() else {
             return;
         };
