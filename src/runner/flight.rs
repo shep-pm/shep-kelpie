@@ -106,6 +106,11 @@ impl Flights {
         self.flying.remove(&issue);
     }
 
+    /// Whether any work item has its retro in flight
+    pub(super) fn retro_running(&self) -> bool {
+        self.flying.values().any(|f| f.retro)
+    }
+
     /// Whether `issue`'s call in flight is its work item's retro
     pub(super) fn runs_retro(&self, issue: u64) -> bool {
         self.flying.get(&issue).is_some_and(|f| f.retro)

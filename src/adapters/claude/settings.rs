@@ -84,6 +84,10 @@ const RETRO_DENY: [&str; 14] = [
 /// The only tools the project manager's session has, as `--tools` takes them
 pub(crate) const PM_TOOLS: &str = "Read,Glob,Grep,Edit,Write";
 
+/// The only tools a finished worker's retro has, as `--tools` takes them: it
+/// reads its worktree and calls the skills the retro skill names
+pub(crate) const RETRO_TOOLS: &str = "Read,Glob,Grep,Skill";
+
 /// What the project manager never uses, denied as well in case `--tools`
 /// lets one through: commands, sub-agents, skills, messages, the web, and
 /// the file tool whose writes the append check cannot read
@@ -149,8 +153,13 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
     if let (Tools::Issues | Tools::Pm, Some(fence)) = (tools, &reach.fence) {
         deny.extend(reads_only(&fence.guard.worktree, &reach.read));
     }
+    // Headless, a tool nothing allows is refused, and the retro skill calls another.
+    let allow = (tools == Tools::Retro).then(|| json!(["Skill"]));
     let Some(fence) = &reach.fence else {
         let mut permissions = json!({ "deny": deny });
+        if let Some(allow) = allow {
+            permissions["allow"] = allow;
+        }
         if !reach.read.is_empty() {
             // Read outside the working folder is refused under `-p` unless the folder is added.
             permissions["additionalDirectories"] = json!(reach.read);
@@ -158,6 +167,9 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
         return trimmed(json!({ "permissions": permissions }));
     };
     let mut permissions = json!({ "deny": deny });
+    if let Some(allow) = allow {
+        permissions["allow"] = allow;
+    }
     if !reach.read.is_empty() {
         permissions["additionalDirectories"] = json!(reach.read);
     }
@@ -175,12 +187,7 @@ pub(crate) fn settings(tools: Tools, reach: &Reach) -> Value {
             permissions["allow"] = json!([rule("Edit", &notes)]);
             pm_hooks(fence)
         }
-        // Headless, a tool nothing allows is refused, and the retro skill calls another.
-        Tools::Retro => {
-            permissions["allow"] = json!(["Skill"]);
-            hooks(fence)
-        }
-        Tools::Work | Tools::Review | Tools::Answer => hooks(fence),
+        Tools::Work | Tools::Review | Tools::Answer | Tools::Retro => hooks(fence),
     };
     trimmed(json!({
         // Kelpie's sandbox holds the whole process, and on macOS Claude Code's
@@ -374,6 +381,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::ports::{Fence, Guard};
     use crate::trim::deny_with_trim;
 
     #[test]
@@ -413,6 +421,38 @@ mod tests {
             settings(Tools::Review, &extra)["permissions"]["additionalDirectories"],
             json!(["/k/extra/7"])
         );
+    }
+
+    #[test]
+    fn a_retro_may_call_a_skill_with_or_without_a_fence() {
+        let fenced = Reach {
+            read: Vec::new(),
+            fence: Some(Box::new(Fence {
+                write: Vec::new(),
+                no_write: Vec::new(),
+                no_read: Vec::new(),
+                read: Vec::new(),
+                hosts: Vec::new(),
+                no_commands: Vec::new(),
+                env: Default::default(),
+                sockets: Vec::new(),
+                guard: Guard {
+                    kelpie: "/k/kelpie".into(),
+                    worktree: "/k/wt".into(),
+                    build: "/k/build".into(),
+                    git_common_dir: "/k/git".into(),
+                    folders: Vec::new(),
+                    issues: None,
+                },
+                hooks: Vec::new(),
+            })),
+        };
+        for reach in [Reach::default(), fenced] {
+            let s = settings(Tools::Retro, &reach);
+            assert_eq!(s["permissions"]["allow"], json!(["Skill"]));
+        }
+        let review = settings(Tools::Review, &Reach::default());
+        assert!(review["permissions"].get("allow").is_none());
     }
 
     #[test]

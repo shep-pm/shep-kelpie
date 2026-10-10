@@ -236,13 +236,15 @@ fn profile(call: &AgentCall) -> Vec<OsString> {
         "--settings".into(),
         call.settings.clone().into(),
     ];
-    // The project manager's tools are an allow-list, and it loads no MCP server.
-    if call.role == Role::Pm {
-        argv.extend([
-            "--tools".into(),
-            settings::PM_TOOLS.into(),
-            "--strict-mcp-config".into(),
-        ]);
+    // The project manager's and a retro's tools are allow-lists, and neither
+    // loads an MCP server, so what a project's settings allow adds nothing.
+    let tools = match (call.role, call.tools) {
+        (Role::Pm, _) => Some(settings::PM_TOOLS),
+        (_, crate::ports::Tools::Retro) => Some(settings::RETRO_TOOLS),
+        _ => None,
+    };
+    if let Some(tools) = tools {
+        argv.extend(["--tools".into(), tools.into(), "--strict-mcp-config".into()]);
     }
     argv
 }
@@ -501,6 +503,16 @@ mod tests {
         let argv = strings(&retro);
         assert!(!argv.iter().any(|a| a == "bypassPermissions"), "{argv:?}");
         assert_eq!(argv[argv.len() - 2..], ["--resume", "abc"]);
+    }
+
+    #[test]
+    fn a_retro_runs_on_an_allow_list_of_tools_and_no_mcp_server() {
+        let mut retro = call(Role::Worker, resume("abc"));
+        retro.tools = crate::ports::Tools::Retro;
+        let argv = strings(&retro);
+        let at = argv.iter().position(|a| a == "--tools").unwrap();
+        assert_eq!(argv[at + 1], "Read,Glob,Grep,Skill");
+        assert!(argv.iter().any(|a| a == "--strict-mcp-config"));
     }
 
     #[test]

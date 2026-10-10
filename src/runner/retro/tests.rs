@@ -328,6 +328,32 @@ fn a_retro_in_flight_holds_no_slot_so_the_next_issue_opens() {
 }
 
 #[test]
+fn a_drain_waits_on_a_retro_already_running_for_its_own_ceiling() {
+    let (rig, runner, _) = Rig::parked_set("koji", |rig| {
+        rig.retro_on();
+        rig.edit_settings(|s| s.replace("turn_timeout = 60", "turn_timeout = 5"));
+    });
+    let hold = Hold::default();
+    rig.claude.script([Scripted::Hold(hold.clone())]);
+    rig.ask(&runner, "rule", Some("1 yes"));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::MarkedReady { .. })
+    ));
+    rig.clock.advance(CHECKS_SETTLE);
+    std::thread::scope(|scope| {
+        let retro = scope.spawn(|| step(&runner));
+        let began = hold.entered(PATIENCE);
+        let status = rig.ask(&runner, "drain", None);
+        hold.release();
+        retro.join().unwrap().unwrap();
+        assert!(began, "the retro never began");
+        // The worker's own ceiling is 5 minutes, shorter than the retro's.
+        assert_eq!(status["draining"]["ceiling"], super::CEILING);
+    });
+}
+
+#[test]
 fn a_runner_that_drains_skips_the_retro_and_still_ends_the_merged_item() {
     let (rig, runner) = parked_with_retro();
     rig.ask(&runner, "drain", None);

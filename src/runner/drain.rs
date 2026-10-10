@@ -64,9 +64,14 @@ impl Runner {
         }
         let pm = self.agents.pm.is_some().then_some(super::pm::CEILING);
         let labelling = (self.flights.labelling()).map(|_| super::flight::label::CEILING);
+        let retro = self
+            .flights
+            .retro_running()
+            .then_some(super::retro::CEILING);
         let ceiling = (self.turn_ceiling().as_secs())
             .max(pm.unwrap_or(0))
-            .max(labelling.unwrap_or(0));
+            .max(labelling.unwrap_or(0))
+            .max(retro.unwrap_or(0));
         Some(Draining {
             calls: self.flights.running(),
             ceiling,
