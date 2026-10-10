@@ -13,7 +13,8 @@ pub(super) fn app(subject: String, repo: &ForgeSlug, github: &dyn GithubApp) -> 
             subject,
             format!("kelpie's App is installed on {slug} and mints a token"),
         ),
-        // Kelpie posts as it always did without an App, so this is no failure.
+        // No App is unsure, not missing: the App is optional, and without one kelpie
+        // falls back to posting from the user's own `gh` login.
         Err(TokenError::NoApp(owner)) => Line::unsure(
             subject,
             format!("kelpie has no GitHub App for {owner}"),

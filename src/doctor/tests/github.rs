@@ -13,7 +13,7 @@ async fn an_installed_app_that_mints_a_token_is_ok() {
     );
 }
 
-// Without an App kelpie posts as it always did, so this does not fail the run.
+// No App is unsure: kelpie falls back to the user's own `gh` login, so it does not fail the run.
 #[tokio::test]
 async fn an_owner_with_no_app_is_unsure_and_names_setup() {
     let scene = Scene::new().await;
