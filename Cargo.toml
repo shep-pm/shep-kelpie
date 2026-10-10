@@ -21,7 +21,7 @@ jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-zon
 # Clears close-on-exec on a lease's connection, so a command run under the
 # lease holds it too, and tells the GitHub App's key is the user's own;
 # shep-core already builds this version with `fs` and `user`
-nix = { version = "0.29", default-features = false, features = ["fs", "user"] }
+nix = { version = "0.31", default-features = false, features = ["fs", "user"] }
 # The terminal QR code `shep kelpie totp` prints for an authenticator app to scan
 qrcode = { version = "0.14", default-features = false }
 # The settings' JSON Schema, in the version shep-client builds it with
