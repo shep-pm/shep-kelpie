@@ -73,7 +73,7 @@ pub(crate) struct FakeForge {
     asked: Arc<AtomicUsize>,
     board_reads: Arc<AtomicUsize>,
     // Set while the forge is down
-    down: Arc<Mutex<Option<Down>>>,
+    down: Arc<Mutex<Option<down::Down>>>,
     /// Pull requests' labels, and what CodeRabbit posts
     pub(crate) coderabbit: FakeCodeRabbit,
 }
@@ -89,10 +89,6 @@ struct FakePullRequest {
     from_fork: bool,
     author: String,
 }
-
-/// What every call fails with while the forge is down, and when its rate
-/// limit resets where it can say
-type Down = (String, Option<Timestamp>);
 
 /// An issue kelpie opened on the fake forge
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -536,37 +532,6 @@ impl FakeForge {
         }
     }
 
-    /// How many calls the runner made, each counted as it was asked
-    pub(crate) fn asked(&self) -> usize {
-        self.asked.load(Ordering::SeqCst)
-    }
-
-    /// How many times the board's ready issues were read
-    pub(crate) fn board_reads(&self) -> usize {
-        self.board_reads.load(Ordering::SeqCst)
-    }
-
-    /// Makes every call fail as gh does once the rate limit is used up,
-    /// with `reset` as when it resets where the forge can say
-    pub(crate) fn set_used_up(&self, reset: Option<Timestamp>) {
-        let said = "GraphQL: API rate limit already exceeded for user ID 1.";
-        *self.down.lock().unwrap() = Some((said.to_owned(), reset));
-    }
-
-    /// Makes every call fail as gh does with no network, or lets every call through again
-    pub(crate) fn set_down(&self, down: bool) {
-        let said = "error connecting to api.github.com";
-        *self.down.lock().unwrap() = down.then(|| (said.to_owned(), None));
-    }
-
-    fn ask(&self) -> Result<(), ForgeError> {
-        self.asked.fetch_add(1, Ordering::SeqCst);
-        match &*self.down.lock().unwrap() {
-            Some((said, _)) => Err(ForgeError::Failed(said.clone())),
-            None => Ok(()),
-        }
-    }
-
     fn board(&self) -> Result<(), ForgeError> {
         if self.board_down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("the board is down".into()));
@@ -943,13 +908,9 @@ impl Forge for FakeForge {
     }
 
     fn rate_limit_reset(&self) -> Result<Option<Timestamp>, ForgeError> {
-        Ok(self
-            .down
-            .lock()
-            .unwrap()
-            .as_ref()
-            .and_then(|(_, reset)| *reset))
+        Ok(self.reset())
     }
 }
 
+mod down;
 mod queue;
