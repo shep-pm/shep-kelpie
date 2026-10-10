@@ -25,6 +25,7 @@ mod gpu;
 mod leased;
 mod local_paths;
 mod model_seat;
+mod rate_limit;
 mod reviewer;
 mod routed;
 mod sandbox;
@@ -37,6 +38,7 @@ pub use gpu::{Gpu, GpuError, GpuMetrics};
 pub use leased::{Leased, LocalLeases};
 pub use local_paths::Guarded;
 pub use model_seat::ModelSeat;
+pub use rate_limit::{ForgeHold, RateHeld, Say};
 pub use reviewer::{Reviewer, ReviewerError, RoundStage};
 pub use routed::Routed;
 pub use sandbox::{Forward, Policy, Sandbox, SandboxError, Unreadable};
@@ -48,7 +50,7 @@ pub use sandbox::{Forward, Policy, Sandbox, SandboxError, Unreadable};
 pub struct Timestamp(pub u64);
 
 /// Tells the time
-pub trait Clock: Send {
+pub trait Clock: Send + Sync {
     /// The current time
     fn now(&self) -> Timestamp;
 }
@@ -275,6 +277,14 @@ pub trait Forge: Send {
     ///
     /// [`ForgeError`] when the forge refuses or cannot be asked.
     fn disable_auto_merge(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError>;
+
+    /// When the forge's used-up rate limits reset: the latest reset of any
+    /// limit with nothing left, or `None` when none is used up
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn rate_limit_reset(&self) -> Result<Option<Timestamp>, ForgeError>;
 }
 
 /// Where a pull request stands in the merge queue
@@ -437,6 +447,8 @@ pub enum ForgeError {
         /// What it names
         leak: Leak,
     },
+    /// The forge said its rate limit was used up, so no call is made until it resets then
+    Held(Timestamp),
 }
 
 impl fmt::Display for ForgeError {
@@ -446,6 +458,11 @@ impl fmt::Display for ForgeError {
             Self::Failed(stderr) => write!(f, "gh failed: {}", stderr.trim()),
             Self::Unreadable(output) => write!(f, "unreadable gh output: {}", output.trim()),
             Self::LocalPath { what, leak } => write!(f, "not posted: {what} names {leak}"),
+            Self::Held(until) => write!(
+                f,
+                "not asked: the forge's rate limit is used up until {}",
+                rate_limit::time_of(*until)
+            ),
         }
     }
 }
@@ -796,8 +813,8 @@ pub struct Ports {
     pub alerts: Arc<dyn Alerts>,
     /// The dog's book leases, which the runner's `grant` trigger fills
     pub leases: Arc<dyn Leases>,
-    /// The clock
-    pub clock: Box<dyn Clock>,
+    /// The clock, shared with the forge's rate-limit hold
+    pub clock: Arc<dyn Clock>,
 }
 
 impl Ports {

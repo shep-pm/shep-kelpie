@@ -856,6 +856,7 @@ fn coderabbit_that_cannot_be_read_is_tried_again_later() {
         "{reason}"
     );
     rig.forge.coderabbit.set_down(false);
+    rig.next_look();
     rig.forge.coderabbit.review(71, &head, now(&rig), &[]);
     assert_eq!(rig.threads_read(&runner), reviewed(0));
 }

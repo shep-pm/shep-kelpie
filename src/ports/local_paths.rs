@@ -8,7 +8,8 @@
 use std::fmt;
 
 use super::{
-    Forge, ForgeError, Issue, NewLabel, OpenIssue, PullRequest, QueueStanding, Reviewed, Visibility,
+    Forge, ForgeError, Issue, NewLabel, OpenIssue, PullRequest, QueueStanding, Reviewed, Timestamp,
+    Visibility,
 };
 use crate::board::{OpenPullRequest, ReadyIssue};
 use crate::local_paths::{LocalPaths, Surface};
@@ -170,6 +171,10 @@ impl Forge for Guarded {
 
     fn disable_auto_merge(&self, repo: &ForgeSlug, number: u64) -> Result<(), ForgeError> {
         self.forge.disable_auto_merge(repo, number)
+    }
+
+    fn rate_limit_reset(&self) -> Result<Option<Timestamp>, ForgeError> {
+        self.forge.rate_limit_reset()
     }
 }
 

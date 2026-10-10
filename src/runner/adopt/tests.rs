@@ -558,6 +558,7 @@ fn a_start_retried_after_a_failure_begins_at_the_head_origin_holds_now() {
 
     let moved = rig.push_by_hand("fix/timeline", "later.txt");
     rig.forge.coderabbit.set_down(false);
+    rig.next_look();
     assert_eq!(
         step(&runner).unwrap(),
         Some(StepReport::Adopted {

@@ -61,7 +61,7 @@ fn first_prompt(number: u64, issue: &Issue) -> String {
 }
 
 /// What a step can work on
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Slot {
     /// The open work item for this issue
     Item(u64),
@@ -86,7 +86,13 @@ impl Runner {
         }
         self.seat_waiting()?;
         let mut waiting = None;
-        for slot in self.rotation() {
+        let now = self.ports.clock.now();
+        let rotation = self.rotation();
+        self.looks.keep_only(&rotation);
+        for slot in rotation {
+            if !self.looks.due(slot, now) {
+                continue;
+            }
             let begin = match slot {
                 Slot::Item(issue) => {
                     self.focus = Some(issue);
@@ -94,9 +100,12 @@ impl Runner {
                 }
                 Slot::Board => {
                     self.focus = None;
+                    self.looks.reading_board(now);
                     self.dispatch()?
                 }
             };
+            let held = self.forge_hold.until(now);
+            self.looks.stepped(slot, &begin, now, held);
             match begin {
                 Begin::Idle => {}
                 Begin::Report(report) if report.waits() => {
@@ -115,7 +124,7 @@ impl Runner {
     // waiting for a slot, oldest first, then the board while it may open
     // one, from the one after the last to act, so one that keeps acting
     // cannot starve the rest
-    fn rotation(&self) -> Vec<Slot> {
+    pub(super) fn rotation(&self) -> Vec<Slot> {
         let items = (self.state.work_items.iter())
             .filter(|i| {
                 !self.flights.flying(i.issue) && i.attached.is_none() && i.seat != Seat::Waiting

@@ -161,6 +161,8 @@ impl Runner {
         end: End,
     ) -> Result<Option<StepReport>, StateError> {
         self.flights.labelling = None;
+        // The issue it labels, or rules on, is the board's to take again.
+        self.looks.board_moved();
         let open = self.flights.ledger.take(Some(issue));
         let result = match end {
             End::Turn(result) => result,

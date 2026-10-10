@@ -65,6 +65,11 @@ pub(super) struct Watched {
     pub(super) idle: bool,
 }
 
+// Whether `after` holds an entry `before` did not, or holds one differently
+fn learned<T: PartialEq>(before: &BTreeMap<u64, T>, after: &BTreeMap<u64, T>) -> bool {
+    (after.iter()).any(|(issue, now)| before.get(issue) != Some(now))
+}
+
 /// Writes `runner`'s board if it is due, asking git with the lock let go
 pub(super) fn brief(runner: &Mutex<Runner>) {
     let job = lock(runner).board_job();
@@ -208,6 +213,7 @@ impl Runner {
 
     fn write_board(&mut self, mut answers: GitAnswers) {
         let now = self.ports.clock.now();
+        let compared = (self.brief.named_from.clone(), self.brief.files.clone());
         self.brief.git = std::mem::take(&mut answers.git);
         self.brief.named = std::mem::take(&mut answers.named);
         self.brief.named_from = std::mem::take(&mut answers.bodies).into_iter().collect();
@@ -215,6 +221,11 @@ impl Runner {
         let open = self.state.open_issues();
         self.brief.files.retain(|issue, _| open.contains(issue));
         self.brief.files.extend(std::mem::take(&mut answers.files));
+        // Paths the board could not compare before may let it dispatch now.
+        let (named_from, files) = &compared;
+        if learned(named_from, &self.brief.named_from) || learned(files, &self.brief.files) {
+            self.looks.board_moved();
+        }
         let conflicts = (answers.merges.iter())
             .filter_map(|(&pair, merge)| match merge {
                 Merge::Conflicts(files) => Some((pair, files.clone())),
