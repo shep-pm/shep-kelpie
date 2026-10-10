@@ -218,6 +218,14 @@ shep kelpie pause
 
 The runner starts no new call, the calls already running finish and a merge found in flight lands, then shep stops it, so `shep ls` shows it `stopped`. It says what it waits on meanwhile. A session you attached keeps running in your terminal. A ruling still waiting can be answered with `shep kelpie rule` while it is stopped, and the runner acts on the answer when it starts. `shep kelpie start` runs it again. A merge a ruling starts in the moment between that check and the stop can still be cut short, and its work item resumes when the runner starts. If a wait runs out, you interrupt it or shep refuses the stop, the runner keeps running. A runner's log is `shep bleats <project>`, and the dog's is `shep bleats kelpie`.
 
+To wind a project down without watching it, finish it instead:
+
+```sh
+shep kelpie finish
+```
+
+`pause` stops after the calls running now, mid-item, and `drain` only holds back new calls and never stops anything. `finish` lets every open work item run on to its end, through review, CI, rulings and the merge, picks nothing new from the board, then stops the runner the way `pause` does once the last item has merged, closed or been dropped and any merge notice has been posted. An item parked on a ruling is still open, so finishing waits until its ruling is resolved. With nothing open it stops at once. Meanwhile `status` shows `run: finishing` with the items still open, `shep kelpie status` marks the project `(finishing)`, the board briefing says so, and `add <issue>`, `adopt <pr>` and `rework <pr>` are refused. Pull requests already adopted and waiting for a slot stay waiting until the next start, and `finish` names them. A runner restarted while finishing comes back finishing, and `shep kelpie start` cancels it, so the board picks again, except while the runner is already stopping itself: start it once it has stopped. A `pause` during finishing is the stronger stop: it ends finishing too, so the runner comes back picking when it starts.
+
 ## The flow
 
 ### Writing issues
@@ -627,6 +635,7 @@ shep-kelpie runs in your own shepherd, beside your other sheep. The adopted dog 
 shep kelpie add        # labels, settings, agent files, and the runner, stopped
 shep kelpie start      # starts the runner, which runs the project
 shep kelpie pause      # stops it once its calls end
+shep kelpie finish     # stops it once its open work items end, picking nothing new
 shep kelpie status     # every project
 shep kelpie doctor     # what each project still needs on this machine
 shep kelpie rule 14 yes
@@ -638,7 +647,7 @@ shep kelpie totp       # once, to answer rulings from ntfy
 shep kelpie lease status
 ```
 
-Every trigger a person sends the runner is also a verb: `add <issue>`, `rework <pr>`, `adopt <pr>`, `gate [<issue>]`, `drop [<issue>]`, `timings [<n>]`, `tell "<note>"`, `pm`, `rule`, `drain` and `undrain`. Each reaches the project whose repo holds the folder you run it in, a worktree of it included, or the one `-p <project>` names anywhere in the line. From anywhere else it lists the projects and guesses nothing. `shep trigger` still works.
+Every trigger a person sends the runner is also a verb: `add <issue>`, `rework <pr>`, `adopt <pr>`, `gate [<issue>]`, `drop [<issue>]`, `timings [<n>]`, `tell "<note>"`, `pm`, `rule`, `drain`, `undrain` and `finish`. Each reaches the project whose repo holds the folder you run it in, a worktree of it included, or the one `-p <project>` names anywhere in the line. From anywhere else it lists the projects and guesses nothing. `shep trigger` still works.
 
 - `drain` holds back every call the runner would start next, and answers the status with the calls still running under `draining`. `undrain`, or a restart, lets calls start again. `shep kelpie upgrade` drains each runner itself: see [Upgrading](#upgrading)
 - `drop [<issue>]` ends a work item without merging it. Its worktree, local branch and build folder go, and its pull request stays, labelled `ready-for-human`
@@ -648,7 +657,7 @@ Every trigger a person sends the runner is also a verb: `add <issue>`, `rework <
 
 `usage` reads the project's usage ledger, `<kelpie home>/<project>/usage.jsonl`, here, without the shepherd. Each model call adds a line to it as it ends: the runner writes the worker's turns, every reviewer's sessions and local rounds and the project manager's wakes and compactions, and `shep kelpie issue` the issue writer's headless runs (not `issue --interactive`, which is your own `claude` session). Each line has the call's four token counts, its units, its dollars where the harness reports them, and the pacer's last reading where there is one (the issue writer's and imported lines have none). A finished work item adds a line of its own. `shep kelpie usage [<project>] [--since <date>]` prints, for each merged pull request, its units, dollars and the calls those dollars leave out because their harness reported no cost, wall time, rulings and the worker's and reviewers' shares of the units, with their medians, the loaded units per merged pull request (every call, the project manager's, the issue writer's and those of work items dropped or closed with no change included, over the merged count), the work items that ended with their issue closed with no change and those dropped, then the project manager's and the issue writer's totals. Every dollar figure says how many unpriced calls it leaves out, as in `$4.20 + 3 unpriced calls`; with no project it prints every project that has a ledger. Units weigh tokens as the control room was measured: cache read 0.1, one-hour cache write 2, five-minute cache write 1.25, output 5, uncached input 1. `shep kelpie usage <project> --import <log file>` adds the turns a runner logged before the ledger, its `ended` and `asked` lines in `$SHEP_HOME/logs/<project>-0-out.log`, skipping any the ledger already holds. Baselines to compare with, such as the control room's own units per merged pull request, can go in `<kelpie home>/baselines/baselines.json`, which stays on your machine; `usage` holds each against kelpie's loaded figure and its median, as kelpie over the baseline, so below 1 is cheaper.
 
-`add` names the project after the repo, or `shep kelpie add <name>`. It makes the four labels where the repo lacks them, writes kelpie's own agent files where they are missing, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. Running `add` again changes nothing. `start` and `pause` find the project from the checkout, or take its name.
+`add` names the project after the repo, or `shep kelpie add <name>`. It makes the four labels where the repo lacks them, writes kelpie's own agent files where they are missing, and registers the runner, holding the project's settings as its `[app.dogs.kelpie]` table. Running `add` again changes nothing. `start`, `pause` and `finish` find the project from the checkout, or take its name.
 
 `doctor` changes nothing and prints one line per check, each missing piece with its fix, then exits non-zero if a project needs something it lacks. It checks that `claude` is installed and logged in, that `gh` is logged in and may push to each project's repo, the sandbox runtime every agent runs in, the shepherd's version, each project's checkout, implementers and labels, CodeRabbit where a project lists it, each project's reviewers, in order, with any command or endpoint among them checked as a runner's start checks it, Codex's usage for a project that spends it, and which webhook, if any, rulings post to. `shep kelpie doctor <project>` checks one project. `--test-alert` posts one test alert to the webhook, which is the only post it ever makes. A line marked `unsure` could not be settled, and does not fail the run: CodeRabbit is one, since a repo it has not yet reviewed looks the same as a repo without it.
 

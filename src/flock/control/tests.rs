@@ -9,6 +9,7 @@ use crate::flock::Launch;
 use crate::shepherd;
 use crate::test::FakeShepherd;
 
+mod finish;
 mod pause;
 
 // Bounds every call against a fake shepherd, so a hang fails by name.
@@ -51,6 +52,17 @@ async fn in_time<T>(call: impl Future<Output = T>) -> T {
 
 fn project(name: &str) -> ProjectName {
     ProjectName::try_from(name).unwrap()
+}
+
+// What a command asked of the shepherd, by action, with a stop as `stop`
+fn asked(writes: &[Request]) -> Vec<String> {
+    (writes.iter())
+        .filter_map(|w| match w {
+            Request::Trigger { action, .. } => Some(action.clone()),
+            Request::Stop { .. } => Some("stop".to_owned()),
+            _ => None,
+        })
+        .collect()
 }
 
 // Real sockets under a real clock: a paused one would time out the

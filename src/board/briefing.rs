@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use crate::ports::{CallActivity, Timestamp, Wait};
+use crate::runner::Run;
 use crate::state::BoardEvent;
 
 /// How long a call in flight may show nothing before the board calls it idle
@@ -42,6 +43,9 @@ pub struct Briefing<'a> {
     pub held: usize,
     /// How many open work items are parked on rulings `concurrency.pending_rulings` counts
     pub parked: usize,
+    /// Whether the runner is finishing, or finished and stopping, so the
+    /// board opens nothing new
+    pub run: Option<Run>,
     /// `origin/main`'s commit, once git has read it
     pub main: Option<String>,
     /// The open work items, oldest first
@@ -195,6 +199,17 @@ pub fn render(board: &Briefing<'_>) -> String {
         board.parked,
         board.pending_rulings
     );
+    match board.run {
+        Some(Run::Finishing) => out.push_str(
+            "The runner is finishing: the board opens nothing new, and the runner stops once \
+             the open work items end.\n\n",
+        ),
+        Some(Run::Finished) => out.push_str(
+            "The runner finished its open work items and is stopping: the board opens \
+             nothing new.\n\n",
+        ),
+        None => {}
+    }
     open_work(&mut out, board);
     rulings(&mut out, &board.rulings);
     ready_queue(&mut out, board.ready.as_ref(), now);

@@ -303,6 +303,9 @@ pub enum StepReport {
         /// Where its time went
         timings: Split,
     },
+    /// The runner was finishing and its last open work item ended, so it
+    /// stops its own sheep
+    RunFinished,
     /// Findings a merged pull request left unfixed were filed
     FollowUpsFiled {
         /// The work item's issue

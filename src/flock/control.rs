@@ -1,5 +1,5 @@
-//! `shep kelpie start`, `pause`, `status` and the triggers the other verbs
-//! send, over the shepherd's socket
+//! `shep kelpie start`, `pause`, `finish`, `status` and the triggers the
+//! other verbs send, over the shepherd's socket
 //!
 //! A project runs while its runner's sheep does: shep's own state is the
 //! run state, so `shep start <project>` runs it too. `start` first checks
@@ -7,8 +7,9 @@
 //! not running, then waits for the runner to answer, since a runner just
 //! started reads its settings before it opens its channel. `pause` drains
 //! the runner, waits for its calls and any merge to end, then stops its
-//! sheep. `rule` leaves the answer for a stopped runner to act on when it
-//! starts.
+//! sheep. `finish` lets the open work items end and picks nothing new, and
+//! the runner then stops its own sheep as `pause` does. `rule` leaves the
+//! answer for a stopped runner to act on when it starts.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -116,8 +117,10 @@ fn checkout_roots(folder: &Path) -> Vec<PathBuf> {
 /// Starts `project`'s runner when it is down, then waits for it to answer
 /// `status`, which it answers
 ///
-/// A runner still on a build from before the run state went, whose
-/// `status` says it is paused, is sent that build's own `start`.
+/// A runner whose `status` says it is finishing, or finished and not yet
+/// stopped, is sent `start`, so the board picks again. So is one still on a
+/// build from before the run state went whose `status` says it is paused,
+/// which that build's own `start` runs.
 ///
 /// # Errors
 ///
@@ -138,10 +141,10 @@ pub async fn start(client: &Client, project: &ProjectName) -> Result<Vec<String>
     let waited = tokio::time::Instant::now();
     loop {
         match trigger(client, runner, "status", None).await? {
-            Answered::Runner(body) if !paused(&body) => return Ok(vec![body]),
+            Answered::Runner(body) if !held(&body) => return Ok(vec![body]),
             Answered::Runner(_) => {
                 return match trigger(client, runner, "start", None).await? {
-                    Answered::Runner(body) => Ok(vec![body]),
+                    Answered::Runner(body) => refusal(&body).map_or(Ok(vec![body]), Err),
                     other => Err(unanswered(runner, other)),
                 };
             }
@@ -156,11 +159,86 @@ pub async fn start(client: &Client, project: &ProjectName) -> Result<Vec<String>
     }
 }
 
-// Whether a runner's `status` says it is paused, as only a build from
-// before the run state was the sheep's can.
-fn paused(body: &str) -> bool {
-    let status = serde_json::from_str::<serde_json::Value>(body);
-    status.is_ok_and(|status| status["run"] == "paused")
+// Whether a runner's `status` says it picks nothing until `start`: finishing
+// or finished, or paused, as only a build from before the run state was the
+// sheep's can be.
+fn held(body: &str) -> bool {
+    let run = run(body);
+    matches!(run.as_deref(), Some("paused" | "finishing" | "finished"))
+}
+
+// What a runner's `status` says under `run`, if anything.
+fn run(body: &str) -> Option<String> {
+    let status = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    status["run"].as_str().map(str::to_owned)
+}
+
+/// Puts `project`'s runner in finishing: its open work items run to their
+/// end, the board picks nothing new, and the runner then stops its sheep
+///
+/// With no work item open the runner stops at once. A runner still
+/// starting is waited on as `pause` waits on it, saying so to `say`. A
+/// runner that is not running is left alone, since it has nothing to
+/// finish. Pull requests adopted and still waiting for a slot stay waiting
+/// for the next `start`, and are named.
+///
+/// # Errors
+///
+/// A message when the project has no kelpie runner, it does not come up
+/// from starting within `patience`, the runner refused `finish`, with its
+/// reason, or it did not answer.
+pub async fn finish(
+    client: &Client,
+    project: &ProjectName,
+    patience: Patience,
+    say: &mut dyn FnMut(String),
+) -> Result<Vec<String>, String> {
+    let runner = kelpie_runner(client, &flock(client).await?, project).await?;
+    let name = project.as_str();
+    if !matches!(runner.status, ProcStatus::Online | ProcStatus::Starting) {
+        return Ok(vec![format!(
+            "{name}'s runner is {}, so it has nothing to finish",
+            runner.status
+        )]);
+    }
+    come_up(client, name, patience, say).await?;
+    let body = match trigger(client, name, "finish", None).await? {
+        Answered::Runner(body) => body,
+        other => return Err(unanswered(name, other)),
+    };
+    if let Some(why) = refusal(&body) {
+        return Err(why);
+    }
+    let named = |numbers: &[u64]| {
+        let named: Vec<String> = numbers.iter().map(|n| format!("#{n}")).collect();
+        named.join(", ")
+    };
+    let open = listed(&body, "work_items", "issue");
+    let mut lines = vec![match open.as_slice() {
+        [] => format!("{name} has no work item open, so its runner stops now"),
+        open => format!(
+            "{name} is finishing {}: the board picks nothing new, and the runner stops once \
+             they end. `shep kelpie start {name}` picks again",
+            named(open)
+        ),
+    }];
+    let adopted = listed(&body, "adopted", "pull_request");
+    if !adopted.is_empty() {
+        lines.push(format!(
+            "adopted and waiting for a slot, {} stay waiting until `shep kelpie start {name}`",
+            named(&adopted)
+        ));
+    }
+    Ok(lines)
+}
+
+// The `key` of each entry in the `list` a runner's `status` shows.
+fn listed(status: &str, list: &str, key: &str) -> Vec<u64> {
+    let Ok(status) = serde_json::from_str::<serde_json::Value>(status) else {
+        return Vec::new();
+    };
+    let entries = status[list].as_array().into_iter().flatten();
+    entries.filter_map(|entry| entry[key].as_u64()).collect()
 }
 
 /// Lets `project`'s runner end what it has running, then stops its sheep
@@ -170,6 +248,8 @@ fn paused(body: &str) -> bool {
 /// and bounded by `patience` the same way. Each line of what it waits on
 /// goes to `say`. A session the maintainer attached is their own process,
 /// not the runner's: it goes on, and its work item stays held until it ends.
+/// A runner finishing is sent `pausing` just before the stop, so it comes
+/// back picking, and `finish` again if the stop is refused.
 ///
 /// # Errors
 ///
@@ -197,17 +277,20 @@ pub async fn pause(
         drain::drain(client, name, patience, Purpose::Pause, &mut *say).await?;
         wait_out_merges(client, &[name], patience, Purpose::Pause, &mut *say).await?;
         Ok(match trigger(client, name, "status", None).await? {
-            Answered::Runner(body) => Some(attached(&body)),
+            Answered::Runner(body) => {
+                let finishing = run(&body).is_some_and(|run| run == "finishing");
+                Some((attached(&body), finishing))
+            }
             Answered::Down => None,
-            _ => Some(Vec::new()),
+            _ => Some((Vec::new(), false)),
         })
     };
     let drained = tokio::select! {
         drained = drained => drained,
         by = interrupted(interrupt) => Err(format!("stopped by {by} while `{name}` was pausing")),
     };
-    let attached = match drained {
-        Ok(Some(attached)) => attached,
+    let (attached, finishing) = match drained {
+        Ok(Some(found)) => found,
         // Gone while it was waited on, as a stop from elsewhere or a crash leaves it.
         Ok(None) if !up(client, name).await? => {
             return Ok(vec![format!(
@@ -215,15 +298,27 @@ pub async fn pause(
                  runs it again"
             )]);
         }
-        Ok(None) => Vec::new(),
+        Ok(None) => (Vec::new(), false),
         Err(e) => {
             let undrained = drain::undrain(client, name, Purpose::Pause).await;
             return Err(format!("{e}{undrained}"));
         }
     };
-    if let Err(e) = halt(client, name).await {
+    // A pause is the stronger stop: the runner comes back picking.
+    if finishing && let Err(e) = ask(client, name, "pausing").await {
         let undrained = drain::undrain(client, name, Purpose::Pause).await;
         return Err(format!("{e}{undrained}"));
+    }
+    if let Err(e) = halt(client, name).await {
+        let refinished = match finishing {
+            true => match ask(client, name, "finish").await {
+                Ok(()) => ", and it was sent `finish`, so it goes on finishing".to_owned(),
+                Err(why) => format!(", and it could not be sent `finish` again: {why}"),
+            },
+            false => String::new(),
+        };
+        let undrained = drain::undrain(client, name, Purpose::Pause).await;
+        return Err(format!("{e}{refinished}{undrained}"));
     }
     let mut lines: Vec<String> = attached
         .into_iter()
@@ -238,6 +333,14 @@ pub async fn pause(
         "{name}'s runner is stopped: `shep kelpie start {name}` runs it again"
     ));
     Ok(lines)
+}
+
+// Sends `name` `action`, refusing any answer but the runner's own with no error.
+async fn ask(client: &Client, name: &str, action: &str) -> Result<(), String> {
+    match trigger(client, name, action, None).await? {
+        Answered::Runner(body) => refusal(&body).map_or(Ok(()), Err),
+        other => Err(unanswered(name, other)),
+    }
 }
 
 // Whether shep shows `name` running.
@@ -335,8 +438,16 @@ pub async fn status(client: &Client) -> Result<Vec<String>, String> {
     let mut lines = Vec::new();
     for sheep in tables(client).await?.into_keys() {
         let line = match trigger(client, &sheep, "status", None).await? {
-            Answered::Runner(body) if draining(&body) => format!("{sheep} (draining): {body}"),
-            Answered::Runner(body) => format!("{sheep}: {body}"),
+            Answered::Runner(body) => {
+                let marks: Vec<String> = (draining(&body).then(|| "draining".to_owned()))
+                    .into_iter()
+                    .chain(run(&body))
+                    .collect();
+                match marks.as_slice() {
+                    [] => format!("{sheep}: {body}"),
+                    marks => format!("{sheep} ({}): {body}", marks.join(", ")),
+                }
+            }
             Answered::Starting => format!("{sheep}: starting"),
             Answered::Down => format!("{sheep}: not running"),
             Answered::TimedOut => format!("{sheep}: running, and did not answer in time"),

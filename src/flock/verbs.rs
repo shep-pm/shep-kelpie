@@ -21,9 +21,9 @@ use crate::upgrade::restart::{Interrupt, Patience};
 /// registers a checkout, `issue`, which runs the issue writer itself, and
 /// `attach` and `pm`, which run a worker's or the project manager's session
 /// here, and `usage`, which reads the usage ledger here
-pub const VERBS: [&str; 17] = [
-    "add", "start", "pause", "status", "rule", "rework", "adopt", "gate", "drop", "timings",
-    "issue", "attach", "tell", "pm", "drain", "undrain", "usage",
+pub const VERBS: [&str; 18] = [
+    "add", "start", "pause", "finish", "status", "rule", "rework", "adopt", "gate", "drop",
+    "timings", "issue", "attach", "tell", "pm", "drain", "undrain", "usage",
 ];
 
 /// What the verbs take, as their help says
@@ -31,6 +31,7 @@ pub const USAGE: &str = "\
 usage: shep kelpie add [<project>]       registers this checkout as a project
        shep kelpie add <issue>           puts an issue on the project's board
        shep kelpie start | pause         runs the project, or stops it once its calls end
+       shep kelpie finish                ends the open work items, picks nothing new, stops
        shep kelpie status                every project, or one with -p
        shep kelpie rule [<id> <answer>]
        shep kelpie rework <pr> | adopt <pr>
@@ -99,7 +100,7 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
     let send = async |action: &str, params: Option<&str>| {
         control::send(&client, &project().await?, action, params).await
     };
-    // `start`, `pause` and `add` took their project in place of `-p`.
+    // `start`, `pause`, `finish` and `add` take their project in place of `-p` too.
     let positional = |name: Option<&&str>| match (name, &named) {
         (Some(_), Some(_)) => Err(format!("name the project once\n\n{USAGE}")),
         (Some(name), None) => ProjectName::try_from(*name)
@@ -135,13 +136,17 @@ async fn run(shep_home: &Path, command: &str, args: &[String]) -> Result<Vec<Str
             };
             add::add(&client, &Gh, &launch, &name, place).await
         }
-        ("start" | "pause", [] | [_]) => {
+        ("start" | "pause" | "finish", [] | [_]) => {
             let name = match positional(args.first())? {
                 Some(name) => name,
                 None => project().await?,
             };
             match command {
                 "start" => control::start(&client, &name).await,
+                "finish" => {
+                    let say = &mut |line: String| println!("{line}");
+                    control::finish(&client, &name, Patience::default(), say).await
+                }
                 _ => {
                     let say = &mut |line: String| println!("{line}");
                     let patience = Patience::default();

@@ -6,10 +6,11 @@
 //! own, woken by each trigger, by each call in flight that ends, and by a
 //! look at the board every minute, or more often while a ruling waits on a
 //! reply on the webhook's topic. It starts each agent call and goes on, and
-//! never waits on one.
+//! never waits on one. A runner that finished asks the shepherd to stop its
+//! own sheep, as `shep kelpie pause` would.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -23,6 +24,7 @@ use crate::adapters::{
 use crate::coderabbit::CodeRabbit;
 use crate::codex::Codex;
 use crate::cubic::Cubic;
+use crate::flock::control;
 use crate::lease::Epoch;
 use crate::lease::saved::BookFile;
 use crate::lease::wire::{Asker, GRANT};
@@ -31,6 +33,8 @@ use crate::runner::{
     ACTIONS, Pass, ProjectName, ProjectPaths, READ_EVERY, Runner, advance, answer,
 };
 use crate::shep_home;
+use crate::shepherd;
+use crate::upgrade::restart::{Interrupt, Patience};
 
 /// How long queued replies get to reach the shepherd before the runner exits
 ///
@@ -183,6 +187,10 @@ fn serve(project: &str) -> Result<(), Exit> {
         leases: Arc::clone(&leases) as Arc<dyn Leases>,
         clock: Box::new(SystemClock),
     };
+    let finished: OnFinished = {
+        let (shep_home, project) = (shep_home.clone(), project.clone());
+        Box::new(move |runner| stop_own_sheep(&shep_home, &project, runner))
+    };
     let runner = Runner::open(
         project,
         settings,
@@ -229,7 +237,7 @@ fn serve(project: &str) -> Result<(), Exit> {
     let on_wake = Box::new(move |runner: &Mutex<Runner>| look.again(runner));
     let worker = Worker::spawn(
         Arc::clone(&runner),
-        on_wake,
+        Hooks { on_wake, finished },
         wake.clone(),
         woken,
         stop.clone(),
@@ -282,6 +290,60 @@ enum Stop {
 /// What the loop's thread does each time it wakes from a wait
 type OnWake = Box<dyn FnMut(&Mutex<Runner>) + Send>;
 
+/// What the loop's thread does once the runner finished, which it must not
+/// wait on, and which tells the runner if the stop fails
+type OnFinished = Box<dyn FnMut(&Arc<Mutex<Runner>>) + Send>;
+
+/// What the loop's thread runs beside its passes
+struct Hooks {
+    /// Each time it wakes from a wait, before its next pass
+    on_wake: OnWake,
+    /// Each time the runner's stop is due, once it finished
+    finished: OnFinished,
+}
+
+// Asks the shepherd, on a thread of its own, to stop `project`'s runner as
+// `pause` does: the pause sends this runner triggers, which its loop must
+// keep answering, and the stop's shutdown ends this process before it
+// returns. A stop that fails is the runner's to log, and lets `start` in.
+fn stop_own_sheep(shep_home: &Path, project: &ProjectName, runner: &Arc<Mutex<Runner>>) {
+    let (shep_home, project) = (shep_home.to_owned(), project.clone());
+    let failed = |runner: &Mutex<Runner>, why: &str| {
+        (runner.lock())
+            .unwrap_or_else(PoisonError::into_inner)
+            .stop_failed(why);
+    };
+    let held = Arc::clone(runner);
+    let stop = move || {
+        let say = &mut |line: String| eprintln!("{line}");
+        let stopped = shepherd::block_on(async {
+            let client =
+                (shepherd::connect(&shep_home).await).map_err(|e| e.describe(&shep_home))?;
+            control::pause(
+                &client,
+                &project,
+                Patience::default(),
+                Interrupt::Never,
+                say,
+            )
+            .await
+        });
+        match stopped {
+            Ok(lines) => lines.iter().for_each(|line| eprintln!("{line}")),
+            Err(e) => failed(&held, &e),
+        }
+    };
+    if let Err(e) = std::thread::Builder::new()
+        .name("finished".into())
+        .spawn(stop)
+    {
+        failed(
+            runner,
+            &format!("cannot start the thread that stops it: {e}"),
+        );
+    }
+}
+
 /// The thread that runs the runner's loop, and the means to stop it
 struct Worker {
     stopping: Arc<AtomicBool>,
@@ -294,11 +356,11 @@ struct Worker {
 impl Worker {
     /// Starts the thread, which tells `died` if it panics
     ///
-    /// `on_wake` runs each time the thread wakes from a wait, before its next
-    /// pass. Each call the runner starts tells `wake` when it ends.
+    /// The thread runs `hooks` beside its passes. Each call the runner
+    /// starts tells `wake` when it ends.
     fn spawn(
         runner: Arc<Mutex<Runner>>,
-        mut on_wake: OnWake,
+        mut hooks: Hooks,
         wake: Sender<()>,
         woken: Receiver<()>,
         died: Sender<Stop>,
@@ -312,7 +374,7 @@ impl Worker {
         let thread = std::thread::spawn(move || {
             let _ending = ending;
             // A runner with no worker thread would answer triggers and never work.
-            let run = || work(&runner, &mut on_wake, &woken, &flag);
+            let run = || work(&runner, &mut hooks, &woken, &flag);
             if catch_unwind(AssertUnwindSafe(run)).is_err() {
                 let _ = died.send(Stop::LoopDied);
             }
@@ -349,13 +411,22 @@ impl Worker {
 // a call's end, the next ceiling of a call in flight, or the next look at
 // the board, or at the webhook's topic while a ruling waits on a reply
 // there. A turn cut short by a restart is resumed on the first pass.
-fn work(runner: &Mutex<Runner>, on_wake: &mut OnWake, woken: &Receiver<()>, stopping: &AtomicBool) {
+fn work(
+    runner: &Arc<Mutex<Runner>>,
+    hooks: &mut Hooks,
+    woken: &Receiver<()>,
+    stopping: &AtomicBool,
+) {
     while !stopping.load(Ordering::SeqCst) {
-        let notes = (runner.lock())
-            .unwrap_or_else(PoisonError::into_inner)
-            .take_notes();
+        let (notes, stop) = {
+            let mut runner = runner.lock().unwrap_or_else(PoisonError::into_inner);
+            (runner.take_notes(), runner.take_stop())
+        };
         for note in notes {
             eprintln!("{note}");
+        }
+        if stop {
+            (hooks.finished)(runner);
         }
         match advance(runner) {
             Ok(Pass::Report(report)) => {
@@ -384,7 +455,7 @@ fn work(runner: &Mutex<Runner>, on_wake: &mut OnWake, woken: &Receiver<()>, stop
         }
         // A stop has only JOIN_BOUND to be let go, so it skips the wake's work.
         if !stopping.load(Ordering::SeqCst) {
-            on_wake(runner);
+            (hooks.on_wake)(runner);
         }
     }
 }
@@ -421,9 +492,31 @@ mod tests {
     }
 
     fn spawn(runner: &Arc<Mutex<Runner>>) -> Worker {
-        let (wake, woken) = mpsc::channel();
+        spawn_with(runner, mpsc::channel(), Box::new(|_| {}))
+    }
+
+    fn spawn_with(
+        runner: &Arc<Mutex<Runner>>,
+        (wake, woken): (Sender<()>, Receiver<()>),
+        finished: OnFinished,
+    ) -> Worker {
         let (died, _) = mpsc::channel();
-        Worker::spawn(Arc::clone(runner), Box::new(|_| {}), wake, woken, died)
+        let hooks = Hooks {
+            on_wake: Box::new(|_| {}),
+            finished,
+        };
+        Worker::spawn(Arc::clone(runner), hooks, wake, woken, died)
+    }
+
+    // A hook that counts the stops asked of it, each of which fails
+    fn counting() -> (Arc<AtomicUsize>, OnFinished) {
+        let stops = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&stops);
+        let hook = Box::new(move |runner: &Arc<Mutex<Runner>>| {
+            runner.lock().unwrap().stop_failed("the shepherd refused");
+            counted.fetch_add(1, Ordering::SeqCst);
+        });
+        (stops, hook)
     }
 
     // Each open work item's issue and its turn's state, as `status` shows them
@@ -457,7 +550,11 @@ mod tests {
         let (wake, woken) = mpsc::channel();
         let (died, _) = mpsc::channel();
         let runner = Arc::new(rig.open().unwrap());
-        let worker = Worker::spawn(runner, on_wake, wake.clone(), woken, died);
+        let hooks = Hooks {
+            on_wake,
+            finished: Box::new(|_| {}),
+        };
+        let worker = Worker::spawn(runner, hooks, wake.clone(), woken, died);
         wake.send(()).unwrap();
         eventually("the trigger's wake", || wakes.load(Ordering::SeqCst) == 1);
 
@@ -543,5 +640,123 @@ mod tests {
             worker.stop(JOIN_BOUND, || {}),
             "the worker slept through the stop"
         );
+    }
+
+    #[test]
+    fn finish_with_no_work_item_open_stops_the_sheep_at_once() {
+        let rig = Rig::new("shep");
+        let runner = Arc::new(rig.open().unwrap());
+        let (wake, woken) = mpsc::channel();
+        let (stops, hook) = counting();
+        let worker = spawn_with(&runner, (wake.clone(), woken), hook);
+        assert_eq!(rig.ask(&runner, "finish", None)["run"], "finishing");
+        wake.send(()).unwrap();
+        eventually("the stop", || stops.load(Ordering::SeqCst) == 1);
+        assert_eq!(rig.ask(&runner, "status", None)["run"], "finished");
+
+        // A stop that did not land is asked again by another `finish`.
+        rig.ask(&runner, "finish", None);
+        wake.send(()).unwrap();
+        eventually("the second stop", || stops.load(Ordering::SeqCst) == 2);
+        assert!(worker.stop(JOIN_BOUND, || {}));
+        assert_eq!(stops.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn finish_stops_the_sheep_only_once_the_last_work_item_ends() {
+        let rig = Rig::new("shep");
+        let runner = Arc::new(rig.open().unwrap());
+        rig.ask(&runner, "add", Some("7"));
+        let hold = Hold::default();
+        rig.claude.script([Scripted::Hold(hold.clone())]);
+        let (wake, woken) = mpsc::channel();
+        let (stops, hook) = counting();
+        let worker = spawn_with(&runner, (wake.clone(), woken), hook);
+        assert!(hold.entered(PATIENCE), "the worker's turn never began");
+        let status = rig.ask(&runner, "finish", None);
+        assert_eq!(
+            (&status["run"], &status["working"]),
+            (&"finishing".into(), &serde_json::json!([7]))
+        );
+        // Draining, so nothing starts once the turn's end is recorded.
+        rig.ask(&runner, "drain", None);
+        hold.release();
+        eventually("the turn's end", || {
+            turns(&rig, &runner) == [(7, "ended".to_owned())]
+        });
+        assert_eq!(stops.load(Ordering::SeqCst), 0, "#7 is still open");
+
+        rig.ask(&runner, "drop", Some("7"));
+        wake.send(()).unwrap();
+        eventually("the stop", || stops.load(Ordering::SeqCst) == 1);
+        assert!(worker.stop(JOIN_BOUND, || {}));
+    }
+
+    // Real sockets under a real clock, as `pause`'s own tests run.
+    #[tokio::test]
+    async fn a_finished_runner_stops_its_own_sheep_as_pause_does() {
+        use shep_client::shep_core::protocol::Request;
+
+        let mut shepherd = crate::test::FakeShepherd::new().await;
+        let launch = crate::flock::Launch {
+            kelpie: "/opt/kelpie".into(),
+            shep_home: shepherd.home().to_owned(),
+            kelpie_home: None,
+        };
+        let project = ProjectName::try_from("koji").unwrap();
+        let mut table = crate::test::project_table(include_str!("../settings.example.toml"));
+        table["git"]["checkout"] = "/src/koji".into();
+        shepherd.holds(launch.runner(&project, table), true);
+        let drained = r#"{"work_items":[],"draining":{"calls":[],"ceiling":0}}"#;
+        shepherd.says("koji", &[drained]);
+        let rig = Rig::new("koji");
+        let runner = Arc::new(rig.open().unwrap());
+
+        stop_own_sheep(shepherd.home(), &project, &runner);
+        let deadline = Instant::now() + PATIENCE;
+        while shepherd.sheep("koji").unwrap().1 {
+            assert!(Instant::now() < deadline, "the sheep never stopped");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let asked: Vec<String> = (shepherd.writes().into_iter())
+            .filter_map(|w| match w {
+                Request::Trigger { action, .. } => Some(action),
+                Request::Stop { .. } => Some("stop".to_owned()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(asked, ["status", "drain", "status", "status", "stop"]);
+    }
+
+    #[test]
+    fn start_is_refused_while_the_stop_is_under_way_and_taken_once_it_fails() {
+        let rig = Rig::new("koji");
+        let runner = Arc::new(rig.open().unwrap());
+        rig.ask(&runner, "finish", None);
+        crate::runner::step(&runner).unwrap();
+        assert!(runner.lock().unwrap().take_stop());
+        let stopping = "the runner finished and is stopping its sheep: `shep kelpie start` runs \
+                        it again once it has stopped";
+        assert_eq!(rig.ask(&runner, "start", None)["error"], stopping);
+        rig.ask(&runner, "finish", None);
+        assert!(
+            !runner.lock().unwrap().take_stop(),
+            "a second stop while one is under way"
+        );
+
+        // No shepherd answers here, so the stop fails and says so.
+        let nowhere = tempfile::tempdir().unwrap();
+        let project = ProjectName::try_from("koji").unwrap();
+        runner.lock().unwrap().take_notes();
+        stop_own_sheep(nowhere.path(), &project, &runner);
+        eventually("the failed stop", || {
+            rig.ask(&runner, "start", None).get("error").is_none()
+        });
+        let notes = runner.lock().unwrap().take_notes();
+        assert!(
+            notes[0].starts_with("the runner finished and cannot stop its sheep: cannot reach"),
+            "{notes:?}"
+        );
+        assert_eq!(rig.ask(&runner, "status", None).get("run"), None);
     }
 }
