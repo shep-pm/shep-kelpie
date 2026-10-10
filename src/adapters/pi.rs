@@ -60,7 +60,7 @@ fn tool_names(tools: Tools, reads: bool) -> Option<&'static str> {
     match tools {
         Tools::Work => Some("read,bash,edit,write,grep,find,ls"),
         // The issue writer runs on Claude Code alone, whose hook is its guard.
-        Tools::Review | Tools::Issues => Some("read,grep,find,ls"),
+        Tools::Review | Tools::Issues | Tools::Retro => Some("read,grep,find,ls"),
         // The project manager runs on Claude Code alone, so pi only ever reads for it.
         Tools::Answer | Tools::Pm if reads => Some("read"),
         Tools::Answer | Tools::Pm => None,

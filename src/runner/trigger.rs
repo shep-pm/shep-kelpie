@@ -608,6 +608,7 @@ mod tests {
     #[test]
     fn a_new_project_has_nothing_in_flight() {
         let rig = Rig::new("koji");
+        rig.retro_on();
         let runner = rig.open().unwrap();
         assert_eq!(
             rig.ask(&runner, "status", None),

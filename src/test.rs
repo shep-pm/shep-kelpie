@@ -116,6 +116,7 @@ pub(crate) fn a_work_item() -> WorkItem {
         rebased: false,
         held: Vec::new(),
         follow_ups: None,
+        retro: false,
         summary: None,
         timings: Some(Timings {
             created: Timestamp(5),
@@ -177,6 +178,9 @@ const EXAMPLE_REVIEWERS: &str = "# reviewers = [\"qwen\", \"defect-hunter\"]\n";
 
 /// The rig's reviewers: its qwen round and then its own Claude session, `claude`
 pub(crate) const RIG_REVIEWERS: &str = "reviewers = [\"qwen\", \"claude\"]\n";
+
+/// What the rig adds to its settings to run no retro
+pub(crate) const NO_RETRO: &str = "\n[app.dogs.kelpie.skills]\nretro = { kind = \"none\" }\n";
 
 /// The rig's own session reviewer, as the older Claude round ran: Sonnet 5
 /// at medium, asked for findings in kelpie's format
@@ -332,6 +336,9 @@ impl Rig {
         let settings = example
             .replace(EXAMPLE_REPO, &rig.repo().display().to_string())
             .replace(EXAMPLE_REVIEWERS, RIG_REVIEWERS);
+        // A retro is one more call at every work item's end, so most tests
+        // leave it off and a test of the retro turns it on with [`Rig::retro_on`].
+        let settings = format!("{settings}{NO_RETRO}");
         let paths = rig.paths();
         std::fs::create_dir_all(&paths.folder).unwrap();
         std::fs::write(rig.settings_file(), settings).unwrap();
@@ -503,6 +510,14 @@ impl Rig {
         self.edit_settings(|s| {
             assert!(s.contains(ask), "the example's `git.merging` moved");
             s.replace(ask, auto)
+        });
+    }
+
+    /// Lets the project run its retro, read when a runner next opens
+    pub(crate) fn retro_on(&self) {
+        self.edit_settings(|s| {
+            assert!(s.contains(NO_RETRO), "the rig's no-retro table moved");
+            s.replace(NO_RETRO, "")
         });
     }
 

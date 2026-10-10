@@ -153,6 +153,24 @@ fn a_report_gives_each_merged_pull_request_its_medians_and_the_other_roles() {
 }
 
 #[test]
+fn a_report_totals_the_retros_apart_from_the_builds() {
+    let lines = [
+        finished(1, true, 3000, 1000, 3600),
+        call(1000, Some(1), Role::Worker, CallKind::Turn, 4000),
+        call(1001, Some(1), Role::Worker, CallKind::Retro, 250),
+        call(1002, Some(2), Role::Worker, CallKind::Retro, 150),
+    ];
+    let out = report("koji", &lines, None, &[]);
+    assert!(
+        out.contains(&"retro: 2 calls, 400 units, $1.00".to_owned()),
+        "{out:#?}"
+    );
+
+    let none = report("koji", &lines[..2], None, &[]);
+    assert!(!none.iter().any(|l| l.starts_with("retro")), "{none:#?}");
+}
+
+#[test]
 fn a_ledger_line_reads_back_and_a_torn_one_is_passed_over() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("koji").join(FILE);
