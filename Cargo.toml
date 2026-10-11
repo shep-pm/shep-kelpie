@@ -21,7 +21,7 @@ jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-zon
 # Clears close-on-exec on a lease's connection, so a command run under the
 # lease holds it too, and tells the GitHub App's key is the user's own;
 # shep-core already builds this version with `fs` and `user`
-nix = { version = "0.29", default-features = false, features = ["fs", "user"] }
+nix = { version = "0.31", default-features = false, features = ["fs", "user"] }
 # Opens and renames files below a worker's folders by descriptor, so a link
 # the worker plants is refused; the safe form of what `nix` 0.29 hands back as
 # raw descriptors. `tempfile` already builds it.
