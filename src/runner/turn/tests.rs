@@ -841,8 +841,19 @@ fn step_paused_in_a_tool(rig: &Rig, runner: &Mutex<Runner>, then: Scripted) -> O
                 tool.entered(crate::test::CALL_PATIENCE),
                 "the tool call never began"
             );
-            let drained = rig.ask(runner, "drain", Some("pause"));
-            assert_eq!(drained["draining"]["at_tool"], json!([7]), "{drained}");
+            // A `drain pause` that lands while the step holds the runner's
+            // lock is answered from the posted copy, and its pause waits for a
+            // pass the step will not run until the call ends. So it asks
+            // again, as `shep kelpie pause` polls, until one reaches the runner.
+            let deadline = std::time::Instant::now() + crate::test::CALL_PATIENCE;
+            loop {
+                let drained = rig.ask(runner, "drain", Some("pause"));
+                if drained["draining"]["at_tool"] == json!([7]) {
+                    break;
+                }
+                assert!(std::time::Instant::now() < deadline, "{drained}");
+                std::thread::yield_now();
+            }
             tool.release();
         });
         step(runner).unwrap()

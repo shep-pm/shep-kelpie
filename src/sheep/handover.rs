@@ -276,40 +276,54 @@ impl Handing {
         if !self.pending() || (self.feeding)() {
             return;
         }
-        let Some(tell) = self.slot().take() else {
-            return;
-        };
-        let refuse = |why: String| {
-            eprintln!("handover refused: {why}");
-            let _ = tell.send(why);
-        };
+        // The request stays queued until the handover is made or refused, so
+        // `pending`, `withdraw` and a second `ask` never see it gone while it
+        // only waits.
         if let Err(e) = crate::runner::settle(runner) {
-            return refuse(format!("cannot save the work items' time: {e}"));
+            return self.refuse(format!("cannot save the work items' time: {e}"));
         }
         let Some(_sealed) = (self.seal)() else {
-            return refuse("a call has just ended and is being read".into());
+            return self.refuse("a call has just ended and is being read".into());
         };
         // Held through the exec, so nothing changes what was carried.
         let held = runner.lock().unwrap_or_else(PoisonError::into_inner);
         // A notice hook runs on a thread the new image would not have, and
         // the notices queued behind it would be dropped.
         if held.notices_running() {
-            *self.slot() = Some(tell);
             return;
         }
-        match held.carry_calls() {
+        // Taken before the exec, so one withdrawn by now is not made, and
+        // none is seen waiting while the exec runs.
+        let Some(tell) = self.slot().take() else {
+            return;
+        };
+        let why = match held.carry_calls() {
             Ok(turns) => {
                 let leases = held.carry_leases();
                 let build = Some(Build::this().kelpie);
-                refuse((self.exec)(&Carry {
+                (self.exec)(&Carry {
                     turns,
                     leases,
                     build,
-                }))
+                })
             }
-            Err(why) => refuse(why),
+            Err(why) => why,
+        };
+        refused(&tell, why);
+    }
+
+    // Refuses the request still queued, if one is.
+    fn refuse(&self, why: String) {
+        if let Some(tell) = self.slot().take() {
+            refused(&tell, why);
         }
     }
+}
+
+// Tells a refusal to the log and to the trigger that asked, if it still waits.
+fn refused(tell: &Sender<String>, why: String) {
+    eprintln!("handover refused: {why}");
+    let _ = tell.send(why);
 }
 
 fn error(message: &str) -> String {
