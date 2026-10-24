@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="46 67.5 456 456" width="512" height="512">
+  <title>Kelpie</title>
+  <g id="art">
+  <defs>
+    <style>
+      .ink { stroke: #3B2620; stroke-width: 7; stroke-linejoin: round; stroke-linecap: round; }
+      .coat { fill: #D9733A; }
+      .coat-dark { fill: #B85A28; }
+      .cream { fill: #FBE7CC; }
+      .pink { fill: #F6A9A3; }
+    </style>
+  </defs>
+
+  <!-- tail, curling up behind the body -->
+  <path class="coat ink" d="M322 470 C 400 478, 448 430, 438 360 C 434 336, 414 326, 404 340 C 412 400, 380 430, 322 436 Z"/>
+  <path class="cream" d="M436 362 C 434 340, 416 330, 406 342 C 410 356, 412 368, 410 380 C 420 376, 430 370, 436 362 Z"/>
+
+  <!-- body -->
+  <path class="coat ink" d="M176 392 C 150 440, 150 490, 196 496 L 316 496 C 362 490, 362 440, 336 392 Z"/>
+  <path class="cream" d="M214 404 C 222 460, 290 460, 298 404 Z"/>
+
+  <!-- paws -->
+  <ellipse class="cream ink" cx="218" cy="490" rx="30" ry="18"/>
+  <ellipse class="cream ink" cx="294" cy="490" rx="30" ry="18"/>
+  <path class="ink" fill="none" d="M210 482 L 210 496 M 226 482 L 226 496 M 286 482 L 286 496 M 302 482 L 302 496"/>
+
+  <!-- bandana -->
+  <path class="ink" fill="#2FA597" d="M172 396 Q 256 432 340 396 L 300 438 Q 256 486 212 438 Z"/>
+
+  <!-- a little sheep on the bandana -->
+  <g transform="translate(256 438) scale(0.36) translate(-262 -150)">
+    <g fill="#3B2620">
+      <rect x="236" y="168" width="14" height="34" rx="7"/>
+      <rect x="266" y="168" width="14" height="34" rx="7"/>
+      <circle cx="230" cy="150" r="25"/>
+      <circle cx="252" cy="134" r="27"/>
+      <circle cx="276" cy="138" r="25"/>
+      <circle cx="288" cy="156" r="22"/>
+      <circle cx="262" cy="164" r="24"/>
+      <circle cx="238" cy="166" r="22"/>
+    </g>
+    <g fill="#FFFFFF">
+      <circle cx="230" cy="150" r="18"/>
+      <circle cx="252" cy="134" r="20"/>
+      <circle cx="276" cy="138" r="18"/>
+      <circle cx="288" cy="156" r="15"/>
+      <circle cx="262" cy="164" r="17"/>
+      <circle cx="238" cy="166" r="15"/>
+      <circle cx="256" cy="150" r="20"/>
+    </g>
+    <ellipse class="ink" cx="306" cy="154" rx="9" ry="6" fill="#4A3833" transform="rotate(25 306 154)"/>
+    <ellipse class="ink" cx="292" cy="160" rx="15" ry="17" fill="#4A3833"/>
+    <circle cx="287" cy="157" r="3" fill="#FFFFFF"/>
+    <circle cx="298" cy="157" r="3" fill="#FFFFFF"/>
+    <circle cx="281" cy="165" r="3.5" fill="#F2777A" opacity="0.7"/>
+  </g>
+
+  <!-- head and ears, shrunk a little about the chin -->
+  <g id="head" transform="translate(256 412) scale(0.9) translate(-256 -412)">
+  <!-- ears -->
+  <path class="coat ink" d="M140 250 Q 124 130 158 58 Q 172 36 192 56 Q 232 112 250 186 Z"/>
+  <path class="pink" d="M164 218 Q 156 140 174 92 Q 180 80 188 92 Q 214 136 228 192 Z"/>
+  <path class="coat ink" d="M372 250 Q 388 130 354 58 Q 340 36 320 56 Q 280 112 262 186 Z"/>
+  <path class="pink" d="M348 218 Q 356 140 338 92 Q 332 80 324 92 Q 298 136 284 192 Z"/>
+
+  <!-- head, with cheek fluff -->
+  <path class="coat ink" d="M256 160
+    C 340 160, 398 214, 404 284
+    L 420 300 L 398 312 L 412 332 L 386 338
+    C 364 392, 314 418, 256 418
+    C 198 418, 148 392, 126 338
+    L 100 332 L 114 312 L 92 300 L 108 284
+    C 114 214, 172 160, 256 160 Z"/>
+
+  <!-- cream muzzle and eyebrow spots -->
+  <path class="cream" d="M256 252 C 228 252, 208 296, 200 330 C 192 378, 226 404, 256 404 C 286 404, 320 378, 312 330 C 304 296, 284 252, 256 252 Z"/>
+  <ellipse class="cream" cx="200" cy="244" rx="14" ry="9" transform="rotate(-12 200 244)"/>
+  <ellipse class="cream" cx="312" cy="244" rx="14" ry="9" transform="rotate(12 312 244)"/>
+  <path class="coat-dark" d="M256 168 C 246 190, 246 220, 256 248 C 266 220, 266 190, 256 168 Z" opacity="0.55"/>
+
+  <!-- eyes -->
+  <ellipse cx="196" cy="290" rx="22" ry="27" fill="#2A1A16"/>
+  <ellipse cx="316" cy="290" rx="22" ry="27" fill="#2A1A16"/>
+  <circle cx="204" cy="279" r="8.5" fill="#FFFFFF"/>
+  <circle cx="324" cy="279" r="8.5" fill="#FFFFFF"/>
+  <circle cx="189" cy="300" r="4" fill="#FFFFFF"/>
+  <circle cx="309" cy="300" r="4" fill="#FFFFFF"/>
+
+  <!-- cheeks -->
+  <ellipse cx="162" cy="338" rx="22" ry="12" fill="#F2777A" opacity="0.45"/>
+  <ellipse cx="350" cy="338" rx="22" ry="12" fill="#F2777A" opacity="0.45"/>
+
+  <!-- tongue, mouth, nose -->
+  <path class="ink" fill="#EF7586" d="M244 366 C 242 392, 270 392, 268 366 Z"/>
+  <path class="ink" fill="none" d="M256 346 L 256 362 M 232 358 Q 244 374 256 362 Q 268 374 280 358"/>
+  <path fill="#2A1A16" d="M234 326 Q 256 314 278 326 Q 276 344 256 350 Q 236 344 234 326 Z"/>
+  <ellipse cx="248" cy="326" rx="7" ry="3.5" fill="#FFFFFF" opacity="0.7"/>
+
+  </g>
+  </g>
+</svg>
