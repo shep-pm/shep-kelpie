@@ -17,6 +17,7 @@ use super::api::GithubApi;
 use super::{App, Apps, Owner, StoreError};
 use crate::adapters::{CurlGithub, Gh};
 use crate::ports::Forge;
+use crate::random;
 
 /// The App's homepage
 const HOMEPAGE: &str = "https://github.com/shep-pm/shep-kelpie";
@@ -342,7 +343,7 @@ fn run(org: Option<Owner>, name: Option<String>, replace: bool) -> Result<(), St
         eprintln!("{warning}");
     }
     let name = name.unwrap_or_else(|| format!("kelpie-{owner}"));
-    let state = draw_state().map_err(|e| format!("cannot draw a random state: {e}"))?;
+    let state = random::hex128().map_err(|e| format!("cannot draw a random state: {e}"))?;
     let listener =
         TcpListener::bind("127.0.0.1:0").map_err(|e| format!("cannot listen on 127.0.0.1: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
@@ -396,13 +397,6 @@ fn read_args(args: &[String]) -> Result<Asked, BadArgs> {
         }
     }
     Ok(Asked::Setup { org, name, replace })
-}
-
-// 128 random bits in hex.
-fn draw_state() -> io::Result<String> {
-    let mut bytes = [0u8; 16];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
-    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 // Opens `url` in the maintainer's browser; the URL is printed either way.

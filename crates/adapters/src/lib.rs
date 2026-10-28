@@ -12,7 +12,7 @@ pub mod github;
 // The modules of `shep-kelpie-core` the adapters use, each kept under the name it had here
 use shep_kelpie_core::{
     board, bridge, browse, confine, dep_sources, fence, forwarder, guard, home, hooks, ipc, lease,
-    metrics, ports, profile, review_bot, settings, skills, ticket, transcripts, webhook,
+    metrics, ports, profile, random, review_bot, settings, skills, ticket, transcripts, webhook,
 };
 
 // What only the adapters' tests use of core
