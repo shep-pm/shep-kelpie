@@ -228,3 +228,47 @@ fn a_pick_of_an_agent_that_is_no_implementer_file_is_dropped() {
         ]
     );
 }
+
+#[test]
+fn a_picks_agent_that_allow_drops_before_dispatch_opens_on_its_label_and_keeps_tier_and_slack() {
+    let (rig, runner) = with_pm("koji");
+    rig.forge.list_ready(9, false);
+    rig.forge.list_ready(12, false);
+    rig.forge.label(12, "agent:sonnet-high");
+    rig.claude.script([Scripted::Say(
+        "```json\n{\"pick\": {\"issue\": 12, \"agent\": \"opus-high\", \"tier\": \"light\", \
+         \"slack\": 45}, \"why\": \"w\"}\n```",
+    )]);
+    let (_, acted, _) = answered(step(&runner).unwrap());
+    assert_eq!(acted, ["picked #12"]);
+    rig.edit_settings(|s| {
+        let listed = "\nimplementers = [\"sonnet-high\"]\n";
+        assert!(s.contains(listed), "the example's implementers moved");
+        let allow = "\nallow = [\"sonnet-high\", \"pm\", \"qwen\", \"claude\"]";
+        s.replace(listed, &format!("{allow}{listed}"))
+    });
+    let (settings, kelpie) = (rig.settings(), rig.kelpie_settings());
+    runner.lock().unwrap().reread(settings, kelpie).unwrap();
+    runner.lock().unwrap().take_notes();
+
+    let report = step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+
+    assert!(
+        matches!(&report, StepReport::Dispatched { issue, agent, .. }
+            if *issue == ticket(12) && agent.as_str() == "sonnet-high"),
+        "{report:?}"
+    );
+    let mut held = runner.lock().unwrap();
+    let item = held.state.item(ticket(12)).unwrap();
+    assert_eq!(
+        (item.pinned, item.tier, item.slack),
+        (false, Some(Tier::Light), Some(45))
+    );
+    let notes = held.take_notes();
+    assert!(
+        notes.iter().any(|n| n
+            == "#12: the project manager picked it for opus-high, which is no longer an \
+                implementer `agents.allow` holds, so its labels choose"),
+        "{notes:?}"
+    );
+}
