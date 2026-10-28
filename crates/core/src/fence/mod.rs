@@ -117,6 +117,11 @@ fn root_names() -> impl Iterator<Item = &'static str> {
         .copied()
 }
 
+// Every folder a harness loads from a folder of another name in the worktree's root.
+fn nested_names() -> impl Iterator<Item = [&'static str; 2]> {
+    HARNESSES.iter().flat_map(|own| own.nested).copied()
+}
+
 /// The sandbox's `denyWrite` paths that fence these files in `worktree`
 ///
 /// srt skips every glob in `denyWrite` on Linux, so there the harness folders
@@ -330,7 +335,8 @@ enum Disk {
 fn on_disk(worktree: &Path) -> Result<BTreeMap<String, Disk>, WorktreeError> {
     let mut found = BTreeMap::new();
     let mut pending: Vec<PathBuf> = Vec::new();
-    for name in root_names() {
+    let nested = nested_names().map(|[parent, folder]| Path::new(parent).join(folder));
+    for name in root_names().map(PathBuf::from).chain(nested) {
         let path = worktree.join(name);
         match fs::symlink_metadata(&path) {
             Ok(_) => pending.push(path),
@@ -764,6 +770,36 @@ mod tests {
         let w = World::new();
         w.push_branch(".Codex/config.toml", "[mcp_servers]\n");
         assert_eq!(w.changed(None).len(), 1);
+    }
+
+    // The Windows fence lists only what exists when the call starts, so a
+    // harness file or folder made during the call is caught here alone.
+    #[test]
+    fn a_harness_file_or_folder_made_during_a_call_differs() {
+        for made in [
+            ".agents/skills/x/SKILL.md",
+            ".codex/config.toml",
+            ".goose/config.yaml",
+            ".pi/extensions/run.ts",
+            ".config/goose/config.yaml",
+            ".mcp.json",
+        ] {
+            let w = World::new();
+            assert!(deny_write_on(&w.wt(), false).contains(&w.wt().join(".codex")));
+            w.write(made, "made during the call\n");
+            assert_eq!(w.differ(None), [made]);
+        }
+    }
+
+    #[test]
+    fn goose_files_in_the_config_folder_are_compared_with_an_accepted_commit() {
+        let w = World::new();
+        let accepted = w.commit(&w.wt(), ".config/goose/config.yaml", "extensions: {}\n");
+        let file = ".config/goose/config.yaml";
+        assert_eq!(w.differ(None), [file]);
+        assert_eq!(w.differ(Some(&accepted)), Vec::<String>::new());
+        w.write(file, "changed\n");
+        assert_eq!(w.differ(Some(&accepted)), [file]);
     }
 
     #[test]

@@ -218,6 +218,21 @@ pub fn srt_settings(policy: &Policy) -> Value {
 // is the install's loopback mode, not the policy's `listen`, since srt-win
 // refuses a session that asks for the other mode the install fixed.
 fn settings_on(policy: &Policy, platform: Platform, loopback_open: bool) -> Value {
+    settings_in(
+        policy,
+        platform,
+        loopback_open,
+        crate::home::user_home().as_deref(),
+    )
+}
+
+// The same, with `home` as what a `~/` path in a deny list is under
+fn settings_in(
+    policy: &Policy,
+    platform: Platform,
+    loopback_open: bool,
+    home: Option<&Path>,
+) -> Value {
     // Without `strictAllowlist`, a host off the list is asked about rather than refused.
     let mut network = json!({
         "allowedDomains": policy.hosts,
@@ -273,16 +288,45 @@ fn settings_on(policy: &Policy, platform: Platform, loopback_open: bool) -> Valu
             write.extend([json!(glob), json!(format!("{glob}/*"))]);
         }
     }
+    // srt-win makes an empty placeholder for a deny target that is missing, and
+    // never deletes it. A path the worker cannot make needs no deny, and one it
+    // makes in the worktree is caught by `fence::differ` after the call.
+    let (no_read, no_write) = match platform {
+        Platform::Windows => (
+            json!(existing(&policy.no_read, home)),
+            json!(existing(&policy.no_write, home)),
+        ),
+        _ => (json!(policy.no_read), json!(policy.no_write)),
+    };
     json!({
         "network": network,
         "filesystem": {
-            "denyRead": policy.no_read,
+            "denyRead": no_read,
             "allowRead": read,
             "allowWrite": write,
-            "denyWrite": policy.no_write,
+            "denyWrite": no_write,
         },
         "enableWeakerNetworkIsolation": policy.verify_tls,
     })
+}
+
+// What `paths` holds that is there, or may be: a glob is kept, since srt
+// expands it to what exists. A leading `~/` is under `home`.
+fn existing<'a, T: AsRef<Path>>(paths: &'a [T], home: Option<&Path>) -> Vec<&'a T> {
+    paths
+        .iter()
+        .filter(|path| {
+            let path = path.as_ref();
+            let text = path.to_string_lossy();
+            if text.contains(['*', '?', '[']) {
+                return true;
+            }
+            match (text.strip_prefix("~/"), home) {
+                (Some(rest), Some(home)) => home.join(rest).exists(),
+                _ => path.exists(),
+            }
+        })
+        .collect()
 }
 
 // Whether `folder` is a Windows path with a drive letter and something below
@@ -526,6 +570,65 @@ mod tests {
         for platform in [Platform::Macos, Platform::Linux] {
             let files = &settings_on(&policy, platform, false)["filesystem"];
             assert_eq!(files["allowRead"], json!(read), "{platform:?}");
+        }
+    }
+
+    // A path srt-win denies that is not there gets an empty placeholder it never
+    // deletes, so the fence names only what exists when the call starts.
+    fn denying(home: &Path) -> Policy {
+        let wt = home.join("wt");
+        std::fs::create_dir_all(wt.join(".codex")).unwrap();
+        std::fs::create_dir_all(home.join(".ssh")).unwrap();
+        std::fs::write(wt.join(".mcp.json"), "{}").unwrap();
+        std::fs::write(home.join(".netrc"), "machine").unwrap();
+        Policy {
+            no_write: vec![
+                wt.join(".codex"),
+                wt.join("**").join(".codex"),
+                wt.join(".mcp.json"),
+                wt.join(".pi"),
+                wt.join(".agents"),
+            ],
+            no_read: vec![
+                "~/.netrc".into(),
+                "~/.git-credentials".into(),
+                "~/.ssh/**".into(),
+                "~/.kelpie/settings.toml".into(),
+                home.join(".cargo")
+                    .join("credentials")
+                    .display()
+                    .to_string(),
+            ],
+            ..Policy::default()
+        }
+    }
+
+    #[test]
+    fn on_windows_a_missing_deny_target_is_left_out_of_both_lists_and_an_existing_one_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let policy = denying(home);
+        let wt = home.join("wt");
+        let files = &settings_in(&policy, Platform::Windows, false, Some(home))["filesystem"];
+        assert_eq!(
+            files["denyWrite"],
+            json!([
+                wt.join(".codex"),
+                wt.join("**").join(".codex"),
+                wt.join(".mcp.json")
+            ])
+        );
+        assert_eq!(files["denyRead"], json!(["~/.netrc", "~/.ssh/**"]));
+    }
+
+    #[test]
+    fn macos_and_linux_keep_every_deny_target_whether_it_exists_or_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let policy = denying(dir.path());
+        for platform in [Platform::Macos, Platform::Linux] {
+            let files = &settings_in(&policy, platform, false, Some(dir.path()))["filesystem"];
+            assert_eq!(files["denyWrite"], json!(policy.no_write), "{platform:?}");
+            assert_eq!(files["denyRead"], json!(policy.no_read), "{platform:?}");
         }
     }
 
