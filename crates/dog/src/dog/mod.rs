@@ -389,10 +389,16 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
         let (shown, board) = (Arc::clone(&shown), Arc::clone(&board));
         shepherd.on_action(action, move |params, name| {
             let shown = availability::lock(&shown).clone();
-            let view = board::lock(&board).view();
-            let now = lock_desk(&desk).desk.book.now();
-            // The board's medians are worked out before the desk is held for the answer.
-            let board = view.status(&shown, now);
+            // The board's medians are worked out before the desk is held for the answer,
+            // and only for `status`, the one action that shows them.
+            let board = match name {
+                "status" => {
+                    let view = board::lock(&board).view();
+                    let now = lock_desk(&desk).desk.book.now();
+                    view.status(&shown, now)
+                }
+                _ => serde_json::Value::Null,
+            };
             let (body, grants) =
                 lock_desk(&desk).change(|d| d.answer_with(name, params, &shown, &board));
             let _ = answered.send(grants);
