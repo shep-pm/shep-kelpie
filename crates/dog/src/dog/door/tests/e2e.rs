@@ -20,6 +20,8 @@ fn e2e_door(stand: &StandIn) -> (tempfile::TempDir, PathBuf, Arc<Mutex<Kept>>) {
         Duration::ZERO,
         stand.kelpie_home(),
         stand.remote.clone(),
+        Arc::default(),
+        no_board(),
     ));
     (dir, socket, desk)
 }

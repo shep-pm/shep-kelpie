@@ -1,0 +1,8 @@
+{"take":"cargo-test","pid":42,"what":"cargo test"}
+{"take":"cargo-test","pid":42,"what":"cargo test","running":true}
+{"take":"e2e","pid":42,"what":"cargo test","worktree":"/k/koji/worktrees/7"}
+{"take":"forge","pid":42,"what":"forge","forge":{"pass":{"project":"koji"}}}
+{"take":"forge","pid":42,"what":"forge","forge":"held"}
+{"take":"forge","pid":42,"what":"forge","forge":{"hold":7}}
+{"take":"pick","pid":42,"what":"pick","pick":{"kind":"fix","tier":"standard","pin":"sonnet-high","slack":30,"agents":["sonnet-high","iq3-xxs"],"leave_out":["iq3-xxs"]}}
+{"take":"pick","pid":42,"what":"pick","pick":{"agents":["sonnet-high"]}}

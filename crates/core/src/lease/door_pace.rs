@@ -7,7 +7,7 @@
 //! takes one line and answers one, so each question is a short connection.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::ipc::blocking::Stream;
@@ -34,24 +34,28 @@ impl DoorPace {
         }
     }
 
-    // The dog's answer, or none when it cannot be asked or its answer read.
     fn ask(&self, forge: ForgeAsk) -> Option<Answer> {
         let ask = Ask {
             forge: Some(forge),
             ..Ask::new(FORGE, std::process::id(), "forge")
         };
-        let mut stream = Stream::connect(&self.socket).ok()?;
-        stream.set_read_timeout(Some(ANSWER_WITHIN)).ok()?;
-        stream.set_write_timeout(Some(ANSWER_WITHIN)).ok()?;
-        let mut line = serde_json::to_vec(&ask).ok()?;
-        line.push(b'\n');
-        stream.write_all(&line).ok()?;
-        let mut answer = String::new();
-        BufReader::new(stream.take(LONGEST_LINE))
-            .read_line(&mut answer)
-            .ok()?;
-        serde_json::from_str(&answer).ok()
+        answered(&self.socket, &ask)
     }
+}
+
+// The dog's one-line answer to `ask` at `socket`, or none when it cannot be asked or its answer read.
+pub(super) fn answered(socket: &Path, ask: &Ask) -> Option<Answer> {
+    let mut stream = Stream::connect(socket).ok()?;
+    stream.set_read_timeout(Some(ANSWER_WITHIN)).ok()?;
+    stream.set_write_timeout(Some(ANSWER_WITHIN)).ok()?;
+    let mut line = serde_json::to_vec(ask).ok()?;
+    line.push(b'\n');
+    stream.write_all(&line).ok()?;
+    let mut answer = String::new();
+    BufReader::new(stream.take(LONGEST_LINE))
+        .read_line(&mut answer)
+        .ok()?;
+    serde_json::from_str(&answer).ok()
 }
 
 impl Pace for DoorPace {

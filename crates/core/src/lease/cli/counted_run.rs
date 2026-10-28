@@ -325,13 +325,14 @@ async fn one_turn(socket: &Path, ask: &Ask, signals: &mut Interrupts) -> Turn {
             Ok(Some(Answer::Error(why))) => {
                 return Turn::Refused(format!("the dog refused: {why}"));
             }
-            // Answers to an e2e ask or a forge ask; a dog never sends them to this one.
+            // Answers to an e2e, forge or pick ask; a dog never sends them to this one.
             Ok(Some(
                 other @ (Answer::Output(_)
                 | Answer::Done(_)
                 | Answer::Go
                 | Answer::Wait(_)
-                | Answer::Held(_)),
+                | Answer::Held(_)
+                | Answer::Picks(_)),
             )) => {
                 return Turn::Refused(format!("the dog answered {other:?} to {CARGO_TEST}"));
             }

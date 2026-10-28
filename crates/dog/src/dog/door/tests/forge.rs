@@ -5,11 +5,6 @@ use crate::ports::{Pace, Pass, Timestamp};
 // The dog's clock is the book's, fixed at `EPOCH` in these tests.
 const NOW: Timestamp = Timestamp(EPOCH);
 
-// A client is blocking, so it runs off the runtime the dog's door is served on.
-async fn off_the_runtime<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
-    tokio::task::spawn_blocking(work).await.unwrap()
-}
-
 #[tokio::test]
 async fn a_hold_one_runner_reports_stops_the_other_runner_on_the_same_door() {
     let (_dir, socket, _desk) = door(3);

@@ -4,6 +4,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use super::*;
+use crate::dog::board::Board;
 use crate::dog::open as open_book;
 use crate::lease::cli::counted_run;
 use crate::lease::door::{NO_E2E_HOST, Visit};
@@ -30,8 +31,22 @@ fn kept(dir: &Path, capacity: u32) -> Arc<Mutex<Kept>> {
     Arc::new(Mutex::new(kept))
 }
 
+// The board of kelpie's own agents, with no ledger read.
+fn no_board() -> Arc<Mutex<Board>> {
+    Arc::new(Mutex::new(Board::new(&crate::agents::Agents::embedded())))
+}
+
 // A dog's door in its own folder, with `capacity` places.
 fn door(capacity: u32) -> (tempfile::TempDir, PathBuf, Arc<Mutex<Kept>>) {
+    door_seeing(capacity, Availability::default(), no_board())
+}
+
+// A dog's door that answers a pick from `shown` and `board`.
+fn door_seeing(
+    capacity: u32,
+    shown: Availability,
+    board: Arc<Mutex<Board>>,
+) -> (tempfile::TempDir, PathBuf, Arc<Mutex<Kept>>) {
     let dir = tempfile::tempdir().unwrap();
     let desk = kept(dir.path(), capacity);
     let socket = dir.path().join("lease.sock");
@@ -43,8 +58,15 @@ fn door(capacity: u32) -> (tempfile::TempDir, PathBuf, Arc<Mutex<Kept>>) {
         Duration::ZERO,
         home,
         Remote::default(),
+        Arc::new(Mutex::new(shown)),
+        board,
     ));
     (dir, socket, desk)
+}
+
+// A client is blocking, so it runs off the runtime the dog's door is served on.
+async fn off_the_runtime<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    tokio::task::spawn_blocking(work).await.unwrap()
 }
 
 fn ask(what: &str) -> Ask {
@@ -156,6 +178,8 @@ async fn door_child() {
                 Duration::ZERO,
                 home,
                 Remote::default(),
+                Arc::default(),
+                no_board(),
             )
             .await;
         }
@@ -381,6 +405,8 @@ async fn a_run_whose_dog_restarts_is_seated_by_the_next_even_when_full() {
         Duration::ZERO,
         dir.path().join("kelpie"),
         Remote::default(),
+        Arc::default(),
+        no_board(),
     ));
     let mut holder = Visit::knock(&socket, &ask("holder")).await.unwrap();
     assert_eq!(answer(&mut holder).await, Some(Answer::Granted));
@@ -416,6 +442,8 @@ async fn a_queued_run_whose_dog_restarts_waits_for_the_next() {
         Duration::ZERO,
         dir.path().join("kelpie"),
         Remote::default(),
+        Arc::default(),
+        no_board(),
     ));
     assert_eq!(exited(&mut run).await, Some(0));
     assert!(marker.exists());
@@ -482,6 +510,8 @@ async fn a_new_door_seats_running_commands_before_any_new_ask() {
         grace,
         home,
         Remote::default(),
+        Arc::default(),
+        no_board(),
     ));
     let mut fresh = Visit::knock(&socket, &ask("fresh")).await.unwrap();
     let early = tokio::time::timeout(Duration::from_millis(500), fresh.answer()).await;
@@ -612,6 +642,7 @@ async fn a_dead_door_is_taken_over_and_closed_to_others() {
 
 mod e2e;
 mod forge;
+mod pick;
 
 #[test]
 fn a_lease_is_logged_as_granted_only_when_the_ask_had_to_wait() {
