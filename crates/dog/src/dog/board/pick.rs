@@ -1,10 +1,12 @@
 //! The board's answer to a `pick` ask, and its part of `status`
 
+use std::collections::BTreeMap;
+
 use serde_json::{Value, json};
 
 use super::View;
 use crate::agent_board::{self, Candidate, History, Item};
-use crate::agents::Agent;
+use crate::agents::{Agent, Tier};
 use crate::dog::availability::{self, Availability};
 use crate::dog::door::{Place, say};
 use crate::dog::lock_desk;
@@ -12,7 +14,7 @@ use crate::ipc::ServerWriteHalf;
 use crate::lease::door::{Answer, Ask, Pick, PickAsk};
 use crate::pacer::{self, Assessment};
 use crate::ports::Timestamp;
-use crate::settings::{AgentName, Limit};
+use crate::settings::Limit;
 
 impl View {
     /// Each implementer's typical time and cost for an item of no kind, and its wait
@@ -35,10 +37,10 @@ impl View {
     }
 
     fn history(&self) -> History<'_> {
-        let tier_of = |name: &str| {
-            let name = AgentName::try_from(name.to_owned()).ok()?;
-            Some(self.implementers.get(&name)?.fit.tier())
-        };
+        let tiers: BTreeMap<&str, Tier> = (self.implementers.iter())
+            .map(|(name, agent)| (name.as_str(), agent.fit.tier()))
+            .collect();
+        let tier_of = |name: &str| tiers.get(name).copied();
         History::new(self.ledgers.iter().flat_map(|l| l.iter()), tier_of)
     }
 }

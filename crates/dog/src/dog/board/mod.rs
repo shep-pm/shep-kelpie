@@ -11,6 +11,7 @@ mod pick;
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
@@ -77,17 +78,20 @@ impl Board {
 /// Rereads each project's ledger under `kelpie_home` that changed, and says how many it read
 ///
 /// A project is a folder whose name is a project's and that holds a ledger.
-/// The reads run outside the lock. A ledger that cannot be read keeps its
-/// last lines, and the next refresh tries it again.
+/// The reads run outside the lock. A ledger that cannot be looked at or read
+/// keeps its last lines, and only one that is gone leaves the board.
 pub(super) fn refresh(board: &Mutex<Board>, kelpie_home: &Path) -> usize {
-    let found = ledgers(kelpie_home);
+    let Some(found) = ledgers(kelpie_home) else {
+        return 0;
+    };
     let changed: Vec<_> = {
         let board = lock(board);
         (found.iter())
-            .filter(|(project, _, stamp)| {
-                (board.ledgers.get(project)).is_none_or(|ledger| ledger.stamp != *stamp)
+            .filter_map(|(project, seen)| Some((project, seen.as_ref()?)))
+            .filter(|(project, (_, stamp))| {
+                (board.ledgers.get(*project)).is_none_or(|ledger| ledger.stamp != *stamp)
             })
-            .cloned()
+            .map(|(project, (path, stamp))| (project.clone(), path.clone(), *stamp))
             .collect()
     };
     let read: Vec<_> = (changed.into_iter())
@@ -103,27 +107,35 @@ pub(super) fn refresh(board: &Mutex<Board>, kelpie_home: &Path) -> usize {
         .collect();
     let count = read.len();
     let mut board = lock(board);
-    (board.ledgers).retain(|project, _| found.iter().any(|(there, ..)| there == project));
+    (board.ledgers).retain(|project, _| found.contains_key(project));
     board.ledgers.extend(read);
     count
 }
 
-// Each project's ledger under `kelpie_home`, with its stamp. Only a plain
-// file is read, so a FIFO left in its place cannot stall the dog.
-fn ledgers(kelpie_home: &Path) -> Vec<(ProjectName, PathBuf, Stamp)> {
-    let Ok(entries) = fs::read_dir(kelpie_home) else {
-        return Vec::new();
-    };
-    (entries.flatten())
-        .filter_map(|entry| {
-            let project = ProjectName::try_from(entry.file_name().to_str()?).ok()?;
-            let path = entry.path().join(usage::FILE);
-            let meta = fs::symlink_metadata(&path)
-                .ok()
-                .filter(fs::Metadata::is_file)?;
-            Some((project, path, (meta.len(), meta.modified().ok())))
-        })
-        .collect()
+// Each project with a ledger under `kelpie_home`: its path and stamp, or
+// None when it cannot be looked at. None when the home cannot be listed.
+// Only a plain file is read, so a FIFO left in its place cannot stall the dog.
+fn ledgers(kelpie_home: &Path) -> Option<BTreeMap<ProjectName, Option<(PathBuf, Stamp)>>> {
+    let mut found = BTreeMap::new();
+    for entry in fs::read_dir(kelpie_home).ok()? {
+        let entry = entry.ok()?;
+        let Some(project) =
+            (entry.file_name().to_str()).and_then(|n| ProjectName::try_from(n).ok())
+        else {
+            continue;
+        };
+        let path = entry.path().join(usage::FILE);
+        match fs::symlink_metadata(&path) {
+            Ok(meta) if meta.is_file() => {
+                let stamp = (meta.len(), meta.modified().ok());
+                found.insert(project, Some((path, stamp)));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => _ = found.insert(project, None),
+        }
+    }
+    Some(found)
 }
 
 /// The board of `agents`' implementers, refreshed from the ledgers under `kelpie_home` from now on
