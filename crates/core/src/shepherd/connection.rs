@@ -16,7 +16,7 @@ use shep_client::shep_core::protocol::{DogSectionToml, HelloAck, Request};
 use shep_client::{Client, ConnectError, ReconnectingClient, RequestError};
 
 use super::ConnectRefused;
-use crate::home::SHEP_SOCKET;
+use crate::home::shepherd_address;
 
 /// What a [`Connection`] answers a request with
 pub type Answer<'a> = Pin<Box<dyn Future<Output = Result<Response, RequestError>> + Send + 'a>>;
@@ -140,7 +140,7 @@ pub struct Socket;
 impl Dial for Socket {
     fn open<'a>(&'a self, shep_home: &'a Path) -> Opened<'a> {
         Box::pin(async move {
-            let client = Client::connect(&shep_home.join(SHEP_SOCKET))
+            let client = Client::connect(&shepherd_address(shep_home))
                 .await
                 .map_err(|e| match e {
                     ConnectError::ProtocolMismatch { daemon_version, .. } => {
@@ -154,10 +154,13 @@ impl Dial for Socket {
 }
 
 // These bind a real socket, to prove the one thing the in-memory shepherd
-// cannot: that `Socket` reaches shep's control socket under a shep home. A
+// cannot: that `Socket` reaches the address shep-core gives a shep home. A
 // worker's sandbox refuses the bind, so they run in CI.
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    use shep_client::shep_core::paths::ShepPaths;
     use shep_client::shep_core::protocol::request::Response;
     use shep_client::shep_core::protocol::{RpcError, RpcErrorCode};
     use shep_client::testing::{fake_daemon, fake_daemon_answering_with_ack, sample_ack};
@@ -168,20 +171,23 @@ mod tests {
     // A shep home holding the folder the control socket lives in.
     fn shep_home() -> tempfile::TempDir {
         let home = short_tempdir();
-        let socket = home.path().join(SHEP_SOCKET);
-        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(home.path().join("run")).unwrap();
         home
+    }
+
+    // Where shep-core says the shepherd of `home` listens.
+    fn shepherd_at(home: &tempfile::TempDir) -> PathBuf {
+        ShepPaths::at(home.path().to_path_buf()).socket
     }
 
     #[tokio::test]
     async fn the_socket_dial_reaches_the_shepherd_under_the_shep_home() {
         let home = shep_home();
         let ack = sample_ack();
-        let _heard =
-            fake_daemon_answering_with_ack(&home.path().join(SHEP_SOCKET), ack.clone(), |_| {
-                Response::Flock(Vec::new())
-            })
-            .await;
+        let _heard = fake_daemon_answering_with_ack(&shepherd_at(&home), ack.clone(), |_| {
+            Response::Flock(Vec::new())
+        })
+        .await;
 
         let connection = Socket.open(home.path()).await.unwrap();
 
@@ -196,10 +202,8 @@ mod tests {
     #[tokio::test]
     async fn a_secret_in_a_dog_s_section_reaches_the_socket_connection_resolved() {
         let home = shep_home();
-        let _heard = fake_daemon_answering_with_ack(
-            &home.path().join(SHEP_SOCKET),
-            sample_ack(),
-            |request| match request {
+        let _heard = fake_daemon_answering_with_ack(&shepherd_at(&home), sample_ack(), |request| {
+            match request {
                 Request::DogConfigResolved { .. } => Response::DogSection {
                     toml: "token = \"tk_resolved\"\n".to_owned().into(),
                 },
@@ -207,8 +211,8 @@ mod tests {
                     toml: "token = \"{{secret:ntfy}}\"\n".to_owned().into(),
                 },
                 other => panic!("kelpie asked {other:?}"),
-            },
-        )
+            }
+        })
         .await;
 
         let connection = Socket.open(home.path()).await.unwrap();
@@ -233,7 +237,7 @@ mod tests {
     async fn the_socket_dial_reports_the_version_of_a_shepherd_on_another_protocol() {
         let home = shep_home();
         let _hello = fake_daemon(
-            &home.path().join(SHEP_SOCKET),
+            &shepherd_at(&home),
             Err(RpcError {
                 code: RpcErrorCode::ProtocolMismatch,
                 message: "protocol 99".into(),

@@ -89,9 +89,11 @@ impl Scene {
         koji.dogs.insert("kelpie".into(), DogTable::from(table));
         let flock = [dog, koji];
         let says = Arc::clone(&self.koji_says);
-        fake_daemon_answering_with_ack(&self.shep_home().join("run/shep.sock"), ack, move |r| {
-            answer(&flock, &says, r)
-        })
+        fake_daemon_answering_with_ack(
+            &shep_kelpie::home::shepherd_address(&self.shep_home()),
+            ack,
+            move |r| answer(&flock, &says, r),
+        )
         .await
     }
 

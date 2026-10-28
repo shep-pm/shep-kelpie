@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::home::SHEP_SOCKET;
+use crate::home::shepherd_address;
 use crate::ports::{Cost, Usage};
 use crate::profile;
 use crate::runner::step;
@@ -181,7 +181,15 @@ fn a_worker_reads_its_worktree_inside_the_shepherds_home_and_not_shep_s_socket()
     let (rig, runner) = with_issue_7("koji");
     let home = rig.home.path();
     let shep = home.join("shep");
-    write_in(&shep, SHEP_SOCKET, "");
+    // A named pipe is no file, so only a Unix shepherd leaves one to read.
+    if cfg!(unix) {
+        let socket = shepherd_address(&shep);
+        write_in(
+            &shep,
+            socket.strip_prefix(&shep).unwrap().to_str().unwrap(),
+            "",
+        );
+    }
     write_in(&shep, "dogs.toml", "");
     write_in(&shep, "kelpie/rotom/state.json", "{}");
     // Another repo of the same home, private and holding its own secret.

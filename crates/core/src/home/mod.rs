@@ -9,6 +9,8 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use shep_client::shep_core::paths::ShepPaths;
+
 mod build;
 mod paths;
 mod stamp;
@@ -19,8 +21,13 @@ pub use stamp::{running, stamp_of};
 /// The variable that names kelpie's home in place of the shepherd's
 pub const KELPIE_VAR: &str = "KELPIE_HOME";
 
-/// The shepherd's control socket, under its home
-pub const SHEP_SOCKET: &str = "run/shep.sock";
+/// Where the shepherd listens, for the shep home `shep_home`
+///
+/// The socket file under the home on Unix, and a named pipe on Windows, as
+/// shep-core lays out its paths.
+pub fn shepherd_address(shep_home: &Path) -> PathBuf {
+    ShepPaths::at(shep_home.to_path_buf()).socket
+}
 
 /// The file in a project's folder that holds one JSON object per step
 pub const STEPS_FILE: &str = "steps.jsonl";
@@ -429,18 +436,47 @@ mod tests {
         }
     }
 
+    // The old folder holds kelpie's own files and one file of a shepherd's home.
+    fn assert_a_shepherds_home(marker: impl Fn(&Path) -> PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let (old, home) = (root.path().join(".kelpie"), root.path().join("new"));
+        write(&old.join("settings.toml"));
+        write(&old.join("tools/srt"));
+        write(&old.join("dog/book.json"));
+        let marker = marker(&old);
+        write(&marker);
+        let shown = marker.display();
+        assert_eq!(runner_may_start(&old, &home, &koji()), Ok(()), "{shown}");
+        assert_eq!(dog_may_start(&old, &home.join("dog")), Ok(()), "{shown}");
+    }
+
     #[test]
     fn a_shepherds_home_on_the_old_folder_is_not_an_unmoved_kelpie_home() {
-        for marker in ["flock.json", "shep.toml", SHEP_SOCKET] {
-            let root = tempfile::tempdir().unwrap();
-            let (old, home) = (root.path().join(".kelpie"), root.path().join("new"));
-            write(&old.join("settings.toml"));
-            write(&old.join("tools/srt"));
-            write(&old.join("dog/book.json"));
-            write(&old.join(marker));
-            assert_eq!(runner_may_start(&old, &home, &koji()), Ok(()), "{marker}");
-            assert_eq!(dog_may_start(&old, &home.join("dog")), Ok(()), "{marker}");
+        for marker in ["flock.json", "shep.toml"] {
+            assert_a_shepherds_home(|old| old.join(marker));
         }
+    }
+
+    // A named pipe is no file, so only a Unix home can hold the socket.
+    #[cfg(unix)]
+    #[test]
+    fn a_shepherds_socket_on_the_old_folder_is_not_an_unmoved_kelpie_home() {
+        assert_a_shepherds_home(shepherd_address);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_shepherd_listens_on_the_socket_file_under_its_home() {
+        let address = shepherd_address(Path::new("/h/.shep"));
+        assert_eq!(address, Path::new("/h/.shep/run/shep.sock"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_shepherd_listens_on_a_named_pipe() {
+        let address = shepherd_address(Path::new(r"C:\Users\R\.shep"));
+        let name = address.to_string_lossy();
+        assert!(name.starts_with(r"\\.\pipe\shep-"), "{name}");
     }
 
     #[test]
