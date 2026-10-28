@@ -21,6 +21,8 @@ use shep_kelpie::guard::{self, Checkout};
 use shep_kelpie::hooks::Hooks;
 use shep_kelpie::tools::Tools;
 
+mod handover_boot;
+
 /// A PreToolUse hook's exit code that refuses the tool call
 const REFUSE: u8 = 2;
 
@@ -33,7 +35,7 @@ fn main() -> ExitCode {
     // Then, before anything opens a descriptor or starts a thread: a build a
     // handover execs is asked here whether it reads the state, and takes it.
     shep_handover::record_launch_path();
-    let arrival = match shep_handover::boot::<shep_kelpie::sheep::Carry>() {
+    let arrival = match handover_boot::arrival(shep_handover::boot::<shep_kelpie::sheep::Carry>()) {
         Ok(arrival) => arrival,
         Err(e) => {
             eprintln!("kelpie cannot take over from the runner that handed over: {e}");
