@@ -36,7 +36,7 @@ pub(super) fn built(
 ///
 /// [`SettingsError::Invalid`] as [`check`] gives it.
 pub(super) fn check_here(settings: &Settings) -> Result<(), SettingsError> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let home = crate::home::user_home();
     check(
         settings,
         home.as_deref(),

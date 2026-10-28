@@ -218,8 +218,8 @@ fn migrate_agents_in(folder: &std::path::Path) -> Vec<String> {
 // The issue skill in each installed harness's own skills folder, written again
 // as each start does so an upgrade's restart brings the new one.
 fn link_issue_skill() {
-    let Some(user_home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        return println!("HOME is not set: not linking kelpie's issue skill");
+    let Some(user_home) = home::user_home() else {
+        return println!("{}: not linking kelpie's issue skill", home::HOME_UNSET);
     };
     match home::kelpie_home() {
         Ok(home) => {

@@ -6,7 +6,7 @@
 //! that build's steps, since this process predates the build it installed and
 //! does not know its migrations. A rollback runs none.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 
 use super::{Action, Scene};
@@ -77,9 +77,7 @@ async fn steps(
              `shep kelpie agents migrate` does"
         )),
     }
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or("HOME is not set")?;
+    let home = crate::home::user_home().ok_or(crate::home::HOME_UNSET)?;
     let homes = Homes {
         home: &home,
         kelpie_home,

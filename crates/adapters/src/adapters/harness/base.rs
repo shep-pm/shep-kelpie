@@ -26,9 +26,7 @@ pub struct Base {
 // The default home is the maintainer's: `$HOME`.
 impl Default for Base {
     fn default() -> Self {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_default();
+        let home = crate::home::user_home().unwrap_or_default();
         Self {
             processes: Processes::default(),
             lambs: None,

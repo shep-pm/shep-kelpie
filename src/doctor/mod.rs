@@ -17,7 +17,7 @@ mod unbound;
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 
 use serde::Deserialize;
@@ -362,9 +362,7 @@ pub fn main(args: &[String]) -> ExitCode {
     };
     let ran = (|| -> Result<Report, String> {
         let shep_home = shep_home::required(shep_home::FLOCK_FIX)?;
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .ok_or("HOME is not set")?;
+        let home = crate::home::user_home().ok_or(crate::home::HOME_UNSET)?;
         let kelpie_home = crate::home::kelpie_home_of(&shep_home);
         let old_home = crate::home::old_home();
         let here = Here {
