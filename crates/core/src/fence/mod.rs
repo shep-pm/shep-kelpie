@@ -662,7 +662,7 @@ mod tests {
             assert!(!fenced(Path::new(path)), "{path}");
         }
         let wt = Path::new("/k/wt/7");
-        let deny = deny_write(wt);
+        let deny = deny_write_on(wt, "macos");
         for path in ["/k/wt/7/.config/goose", "/k/wt/7/**/.config/goose"] {
             assert!(deny.contains(&PathBuf::from(path)), "{path}");
         }
@@ -671,7 +671,7 @@ mod tests {
     #[test]
     fn the_sandbox_denies_every_harnesss_files_in_the_worktree() {
         let wt = Path::new("/k/wt/7");
-        let deny: Vec<String> = deny_write(wt)
+        let deny: Vec<String> = deny_write_on(wt, "macos")
             .iter()
             .map(|p| p.display().to_string())
             .collect();
