@@ -1,2 +1,3 @@
 #!/bin/sh
+echo "pre-push: bun run lint"
 exec bun run lint

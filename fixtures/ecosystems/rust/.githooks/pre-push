@@ -1,2 +1,3 @@
 #!/bin/sh
+echo "pre-push: make lint"
 exec make lint

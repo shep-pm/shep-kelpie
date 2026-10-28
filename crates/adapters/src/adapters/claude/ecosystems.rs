@@ -95,13 +95,12 @@ impl Ecosystem {
         }
     }
 
-    // Text the lint prints, which the push shows only if its pre-push hook ran it.
-    fn lint_prints(self) -> &'static str {
+    // Text the fixture's pre-push hook prints, which the push shows only if the hook ran.
+    fn hook_prints(self) -> &'static str {
         match self {
-            Self::Rust => "clippy",
-            Self::Go => "golangci-lint",
-            Self::Bun => "scripts/lint.ts",
-            Self::Npm => "scripts/lint.js",
+            Self::Rust | Self::Go => "pre-push: make lint",
+            Self::Bun => "pre-push: bun run lint",
+            Self::Npm => "pre-push: npm run lint",
         }
     }
 
@@ -305,9 +304,13 @@ impl World {
         env: &[(String, String)],
     ) -> Output {
         let policy = (through.policy)(call, &self.path("home"));
+        // The sandbox runtime sets `TMPDIR` to `/tmp/claude` for the command, which a
+        // runner does not have, so the script puts it back first.
+        let tmp = self.path("build/tmp");
+        let script = format!("export TMPDIR={}; {script}", tmp.display());
         let mut inner = Command::new("/bin/sh");
         inner
-            .args(["-c", script])
+            .args(["-c", &script])
             .current_dir(&call.cwd)
             .envs(env.iter().map(|(k, v)| (k, v)));
         SandboxRuntime::under_test()
@@ -427,8 +430,8 @@ pub(crate) fn project(through: &Through, eco: Ecosystem) {
     }
     let stderr = String::from_utf8_lossy(&pushed.unwrap().stderr).into_owned();
     assert!(
-        stderr.contains(eco.lint_prints()),
-        "the pre-push hook did not run the lint: {stderr}"
+        stderr.contains(eco.hook_prints()),
+        "the pre-push hook did not run: {stderr}"
     );
     assert_eq!(
         git(&remote, &["rev-parse", "wt"]),
