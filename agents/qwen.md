@@ -6,4 +6,6 @@
 role: reviewer
 harness: command
 command: ~/.claude/scripts/qwen-review.sh
+description: Reads a diff for defects with the maintainer's local qwen-review script, as a first pass.
+tier: light
 ---

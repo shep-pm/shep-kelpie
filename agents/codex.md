@@ -14,4 +14,6 @@ bot: codex
 reviews: 10
 hours: 168
 reviews_on_ready: false
+description: Reviews the pull request on GitHub as the ChatGPT Codex app.
+tier: standard
 ---

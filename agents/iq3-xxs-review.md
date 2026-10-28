@@ -7,4 +7,6 @@ harness: endpoint
 gateway: paddock
 model: iq3_xxs
 context: 262144
+description: Reads a diff for defects on the local paddock model, as a first pass before a stronger reviewer.
+tier: light
 ---
