@@ -2,7 +2,8 @@
 //!
 //! [`connect`] opens `run/<project>.sock`, makes the hello and refuses a runner
 //! on an older protocol. [`Connection::ask`] sends one [`Request`] and reads its
-//! [`Reply`] within a deadline.
+//! [`Reply`] within a deadline. [`watch`] turns a connection into a stream of
+//! the runner's [`Status`], each time it changes.
 //!
 //! [`Unreachable`] (missing, refused, silent at the hello or on an older
 //! protocol) lets the caller fall back to `shep trigger`. [`Failure::TimedOut`]
@@ -23,7 +24,7 @@ use tokio::time::timeout;
 
 use shep_kelpie_core::ipc::{self, ClientStream};
 use shep_kelpie_protocol::frame::{self, Hello, LONGEST_FRAME, PROTOCOL, UnknownRequest};
-use shep_kelpie_protocol::{Reply, Request};
+use shep_kelpie_protocol::{Event, Reply, Request, Status};
 
 /// The longest reply line the client reads
 ///
@@ -173,6 +174,133 @@ impl Connection {
         }
         Reply::decode(request, &line)
             .map_err(|e| Failure::Broken(format!("answered {line:?} ({e})")))
+    }
+}
+
+/// Why a watch did not start
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WatchError {
+    /// The runner cannot be asked at all
+    Unreachable(Unreachable),
+    /// The runner was asked and did not start the stream. A runner that
+    /// predates `watch` gives [`Failure::Unknown`]
+    Failed(Failure),
+}
+
+impl fmt::Display for WatchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unreachable(unreachable) => unreachable.fmt(f),
+            Self::Failed(failure) => failure.fmt(f),
+        }
+    }
+}
+
+impl core::error::Error for WatchError {}
+
+/// The runner's status as it changes, from [`watch`]
+#[derive(Debug)]
+pub struct Watching {
+    stream: BufReader<ClientStream>,
+    // The first status, read by `watch` so that a runner too old for it fails there.
+    first: Option<Status>,
+    // A line part read: a `next` dropped before it ends loses nothing.
+    partial: Vec<u8>,
+}
+
+/// Connects to the runner's socket and asks it to watch, within `deadline`
+///
+/// `deadline` bounds the connect, the hello and the first status together.
+///
+/// # Errors
+///
+/// [`WatchError::Unreachable`] as for [`connect`]. [`WatchError::Failed`] with
+/// [`Failure::Unknown`] when the runner predates `watch`, [`Failure::TimedOut`]
+/// when the first status does not come in time, and [`Failure::Broken`] when
+/// the connection ends or the first line is no status.
+pub async fn watch(socket: &Path, deadline: Duration) -> Result<Watching, WatchError> {
+    let started = tokio::time::Instant::now();
+    let mut connection = connect(socket, deadline)
+        .await
+        .map_err(WatchError::Unreachable)?;
+    let left = deadline.saturating_sub(started.elapsed());
+    let started = match timeout(left, connection.start_watch()).await {
+        Ok(Ok(first)) => first,
+        Ok(Err(failure)) => return Err(WatchError::Failed(failure)),
+        Err(_) => return Err(WatchError::Failed(Failure::TimedOut)),
+    };
+    Ok(Watching {
+        stream: connection.stream,
+        first: Some(started),
+        partial: Vec::new(),
+    })
+}
+
+impl Connection {
+    // Asks the runner to watch and reads the status it answers with.
+    async fn start_watch(&mut self) -> Result<Status, Failure> {
+        let broken = |e: io::Error| Failure::Broken(e.to_string());
+        let line = frame::encode(&Request::Watch).map_err(|e| Failure::Broken(e.to_string()))?;
+        self.stream
+            .write_all(line.as_bytes())
+            .await
+            .map_err(broken)?;
+        let line = read_line(&mut self.stream, LONGEST_REPLY)
+            .await
+            .map_err(broken)?;
+        event(&line)
+    }
+}
+
+impl Watching {
+    /// The next status: the current one first, then one after each change
+    ///
+    /// Waits as long as the runner has nothing to say. `None` when the runner
+    /// ended the stream, such as at its shutdown. A client slower than the
+    /// runner changes misses the statuses in between.
+    ///
+    /// # Errors
+    ///
+    /// [`Failure::Broken`] when the connection breaks or a line is no status.
+    pub async fn next(&mut self) -> Result<Option<Status>, Failure> {
+        if let Some(first) = self.first.take() {
+            return Ok(Some(first));
+        }
+        loop {
+            let room = (LONGEST_REPLY + 1).saturating_sub(self.partial.len()) as u64;
+            let read = (&mut self.stream)
+                .take(room)
+                .read_until(b'\n', &mut self.partial)
+                .await
+                .map_err(|e| Failure::Broken(e.to_string()))?;
+            if self.partial.last() == Some(&b'\n') {
+                let mut line = std::mem::take(&mut self.partial);
+                line.pop();
+                let line = String::from_utf8(line).map_err(|e| Failure::Broken(e.to_string()))?;
+                return event(&line).map(Some);
+            }
+            if read == 0 {
+                return if self.partial.is_empty() {
+                    Ok(None)
+                } else {
+                    Err(Failure::Broken(
+                        "the stream ended before the line did, or the line was too long".into(),
+                    ))
+                };
+            }
+        }
+    }
+}
+
+// The status one line of the stream carries.
+fn event(line: &str) -> Result<Status, Failure> {
+    let broken = |why: String| Failure::Broken(format!("answered {line:?} ({why})"));
+    let shown: Value = serde_json::from_str(line).map_err(|e| broken(e.to_string()))?;
+    if let Some(unknown) = unknown_request(&shown) {
+        return Err(Failure::Unknown(unknown));
+    }
+    match serde_json::from_value(shown).map_err(|e| broken(e.to_string()))? {
+        Event::Status(status) => Ok(*status),
     }
 }
 
