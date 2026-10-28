@@ -12,6 +12,7 @@ pub const ACTIONS: [&str; 3] = ["status", "take", "return"];
 
 impl Desk {
     /// Shorthand for <code>[Desk::answer_with]</code> with nothing read of availability
+    #[cfg(test)]
     pub fn answer(&mut self, action: &str, params: Option<&str>) -> (String, Vec<Delivery>) {
         self.answer_with(action, params, &Availability::default())
     }
