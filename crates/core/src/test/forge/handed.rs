@@ -18,6 +18,8 @@ pub struct FakePullRequest {
     // Where the fork is cloned from, and whether its owner lets the
     // maintainers edit it
     pub fork: Option<(String, bool)>,
+    // Whether an organization owns the fork
+    pub fork_owned_by_organization: bool,
     pub author: String,
     pub author_is_bot: bool,
 }

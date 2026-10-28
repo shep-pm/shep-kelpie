@@ -79,6 +79,13 @@ impl FakeForge {
         pr.fork = Some((url.to_owned(), maintainer_can_edit));
     }
 
+    /// Makes an organization own the fork pull request `number` comes from
+    pub fn set_fork_owned_by_organization(&self, number: u64) {
+        let mut prs = self.pull_requests.lock().unwrap();
+        let pr = prs.get_mut(&number).expect("an opened pull request");
+        pr.fork_owned_by_organization = true;
+    }
+
     /// Counts one more review read of `number`
     pub fn count_review(&self, number: u64) {
         let mut counts = self.review_counts.lock().unwrap();
