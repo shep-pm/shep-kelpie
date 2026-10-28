@@ -16,7 +16,8 @@ use super::TRIAGE_LABELS;
 use super::comment::NEEDS_TRIAGE;
 use super::ready::READY_LABEL;
 use crate::board::{READY, ReadyIssue, Skip, TRIAGE, check};
-use crate::ports::{ForgeError, OpenIssue, OpenPull};
+use crate::guard::conventional_type;
+use crate::ports::{ForgeError, NewLabel, OpenIssue, OpenPull};
 use crate::settings::TriagePick;
 use crate::state::{CheckTriage, IssueCheck, TriageStep};
 
@@ -90,14 +91,25 @@ impl Runner {
             if busy.contains(&issue.number) || self.triage_busy(issue.number) {
                 continue;
             }
-            let key = check::key(&issue.title, &issue.body, &issue.labels);
+            let mut labels = issue.labels.clone();
+            let mut key = check::key(&issue.title, &issue.body, &labels);
             let at = kept.iter().position(|c| c.issue == issue.number);
             let ran = at.is_some_and(|at| kept[at].triage == CheckTriage::Ran);
-            let same = at.is_some_and(|at| kept[at].key == key);
-            if same && !ran {
+            if at.is_some_and(|at| kept[at].key == key) && !ran {
                 continue;
             }
-            let failures: Vec<String> = (check::check(&issue.title, &issue.body, &issue.labels))
+            // The label goes on before the check reads, and into the key, so
+            // the next listing, which carries it, is the same edit.
+            match self.title_kind_label(issue, &mut poll) {
+                Err(()) => continue,
+                Ok(None) => {}
+                Ok(Some(label)) => {
+                    labels.push(label);
+                    key = check::key(&issue.title, &issue.body, &labels);
+                }
+            }
+            let same = at.is_some_and(|at| kept[at].key == key);
+            let failures: Vec<String> = (check::check(&issue.title, &issue.body, &labels))
                 .iter()
                 .map(ToString::to_string)
                 .collect();
@@ -147,6 +159,52 @@ impl Runner {
             self.notes
                 .push(format!("cannot save the issue check's results: {e}"));
             self.state.checks = kept;
+        }
+    }
+
+    // Puts `kind:<type>` on `issue` when its title starts with a kind and no
+    // label is a kind label, even a wrong one. The label put on, if any. A
+    // write that fails is noted and the issue is checked as it stands. `Err`
+    // when the poll has no writes left or the forge is busy: the issue waits.
+    fn title_kind_label(
+        &mut self,
+        issue: &OpenIssue,
+        poll: &mut Poll,
+    ) -> Result<Option<String>, ()> {
+        let kind = conventional_type(&issue.title).filter(|t| check::kinds().any(|k| k == *t));
+        let Some(kind) = kind else {
+            return Ok(None);
+        };
+        if issue.labels.iter().any(|l| check::kind_of(l).is_some()) {
+            return Ok(None);
+        }
+        if poll.writes == 0 {
+            return Err(());
+        }
+        let number = issue.number;
+        let label = format!("{}{kind}", check::KIND);
+        let wanted = NewLabel {
+            name: &label,
+            color: "c5def5",
+            description: "The kind of work, from the issue's title",
+        };
+        if let Err(why) = self.make_missing_labels([wanted]) {
+            self.notes
+                .push(format!("check #{number}: cannot make `{label}`: {why}"));
+            return Ok(None);
+        }
+        poll.writes -= 1;
+        match self.label_issue(number, &label, true) {
+            Ok(()) => Ok(Some(label)),
+            Err(e) => {
+                self.notes
+                    .push(format!("check #{number}: cannot label it `{label}`: {e}"));
+                poll.busy = forge_is_busy(&e);
+                match poll.busy {
+                    true => Err(()),
+                    false => Ok(None),
+                }
+            }
         }
     }
 
