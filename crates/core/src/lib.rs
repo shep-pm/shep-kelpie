@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 #![doc(test(attr(deny(warnings))))]
 
+pub mod agent_board;
 pub mod agents;
 pub mod board;
 pub mod bridge;

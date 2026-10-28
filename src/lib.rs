@@ -18,10 +18,10 @@ pub mod upgrade;
 
 // The modules of `shep-kelpie-core`, each kept under the name it had here
 pub use shep_kelpie_core::{
-    agents, board, bridge, browse, coderabbit, codex, confine, cubic, fence, forge_ledger,
-    forwarder, guard, home, hooks, ipc, lease, local_paths, local_tickets, metrics, pacer,
-    package_managers, pm_answer, ports, profile, review_bot, settings, shep_home, shepherd, skills,
-    state, ticket, totp, usage, watch, webhook, work_item, work_kind,
+    agent_board, agents, board, bridge, browse, coderabbit, codex, confine, cubic, fence,
+    forge_ledger, forwarder, guard, home, hooks, ipc, lease, local_paths, local_tickets, metrics,
+    pacer, package_managers, pm_answer, ports, profile, review_bot, settings, shep_home, shepherd,
+    skills, state, ticket, totp, usage, watch, webhook, work_item, work_kind,
 };
 
 // The real ports and the forge, each kept under the name it had here
