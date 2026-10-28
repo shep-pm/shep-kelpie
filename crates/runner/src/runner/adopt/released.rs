@@ -146,7 +146,7 @@ fn a_released_fork_without_edits_cannot_be_adopted() {
 
     assert_eq!(
         rig.ask(&runner, "adopt", Some("80")),
-        json!({ "error": "pull request #80 comes from a fork kelpie cannot push to: it does not let maintainers edit it, or it has been deleted" })
+        json!({ "error": "pull request #80 comes from a fork kelpie cannot push to: it does not let maintainers edit it, it has been deleted, or an organization owns it" })
     );
     assert_eq!(work_item(&rig, &runner), Value::Null);
 }

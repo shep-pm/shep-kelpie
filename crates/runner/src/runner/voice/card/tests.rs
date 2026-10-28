@@ -467,12 +467,30 @@ fn a_contribution_ruling_names_each_line_and_offers_a_yes_that_trusts_and_a_no_t
 }
 
 #[test]
-fn a_no_edits_ruling_card_offers_leave_it_open_or_close_and_names_both_causes() {
+fn a_no_edits_ruling_card_offers_leave_it_open_or_close_and_names_each_cause() {
     let kind = RulingKind::Contribution(crate::state::Held::NoEdits);
     let card = rendered(&ruling(ticket(72), kind));
 
     assert!(card.contains("Leave it open"), "{card}");
     assert!(card.contains("Close with thanks"), "{card}");
-    assert!(card.contains("or has been deleted"), "{card}");
+    assert!(card.contains("has been deleted"), "{card}");
+    assert!(card.contains("belongs to an organization"), "{card}");
     assert!(!card.contains("  "), "no run of spaces: {card}");
+}
+
+#[test]
+fn a_contribution_merge_card_offers_no_rework_when_the_fork_cannot_be_pushed_to() {
+    let merge = |rework_off| {
+        let kind = RulingKind::Contribution(crate::state::Held::Merge {
+            head: "2a8f1e6".into(),
+            rework_off,
+        });
+        rendered(&ruling(ticket(72), kind))
+    };
+
+    assert!(merge(false).contains("Rework"), "{}", merge(false));
+    let card = merge(true);
+    assert!(!card.contains("Rework"), "{card}");
+    assert!(card.contains("Merge"), "{card}");
+    assert!(card.contains("| No |"), "{card}");
 }

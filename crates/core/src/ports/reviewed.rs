@@ -25,6 +25,9 @@ pub struct Reviewed {
     /// Where the branch's repository is cloned from, `None` once a fork was
     /// deleted
     pub head_clone_url: Option<String>,
+    /// Whether an organization owns the branch's repository. GitHub refuses a
+    /// maintainer's push to such a fork whatever `maintainer_can_edit` says.
+    pub head_owner_is_organization: bool,
     /// Its author's login, empty for a deleted account
     pub author: String,
     /// Whether it is still a draft
@@ -38,9 +41,13 @@ pub struct Reviewed {
 
 impl Reviewed {
     /// Whether kelpie can push to the branch: it is on the repo itself, or on
-    /// a fork that still exists and lets the maintainers edit
+    /// a fork that still exists, lets the maintainers edit and no
+    /// organization owns
     pub fn pushable(&self) -> bool {
-        !self.from_fork || (self.maintainer_can_edit && self.head_clone_url.is_some())
+        !self.from_fork
+            || (self.maintainer_can_edit
+                && self.head_clone_url.is_some()
+                && !self.head_owner_is_organization)
     }
 }
 

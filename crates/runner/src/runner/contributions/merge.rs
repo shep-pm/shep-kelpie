@@ -78,7 +78,7 @@ impl Runner {
             return false;
         };
         let Some(ruling) = (self.state.rulings.iter()).find(|r| {
-            r.id == id && matches!(&r.kind, RulingKind::Contribution(Held::Merge { head }) if *head == held.head)
+            r.id == id && matches!(&r.kind, RulingKind::Contribution(Held::Merge { head, .. }) if *head == held.head)
         }) else {
             return false;
         };
@@ -156,9 +156,13 @@ impl Runner {
             return Ok(());
         }
         let facts = self.merge_facts(held);
+        // A pull request the forge cannot be read for keeps its rework, as
+        // before.
+        let rework_off =
+            (self.ports.forge.reviewed(&self.remote, number)).is_ok_and(|pr| !pr.pushable());
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
-        raise_merge(&mut next, number, &held.head, &facts, now);
+        raise_merge(&mut next, number, &held.head, rework_off, &facts, now);
         self.save(next)
     }
 

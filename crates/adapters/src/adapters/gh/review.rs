@@ -14,7 +14,7 @@ use crate::settings::ForgeSlug;
 // longer pull request the oldest fall out, never the latest review's.
 const QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
     repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
-    state title body isDraft baseRefName headRefName isCrossRepository maintainerCanModify headRepository { url } \
+    state title body isDraft baseRefName headRefName isCrossRepository maintainerCanModify headRepository { url owner { __typename } } \
     author { login } \
     closingIssuesReferences(first: 50) { nodes { number repository { name owner { login } } } } \
     labels(first: 100) { nodes { name } } \
@@ -82,6 +82,14 @@ struct Pr {
 #[derive(Deserialize)]
 struct Head {
     url: String,
+    #[serde(default)]
+    owner: Option<Owner>,
+}
+
+#[derive(Deserialize)]
+struct Owner {
+    #[serde(rename = "__typename")]
+    kind: String,
 }
 
 #[derive(Deserialize)]
@@ -190,7 +198,14 @@ pub(crate) fn parse_reviewed(stdout: &[u8], repo: &ForgeSlug) -> Result<Reviewed
         maintainer_can_edit: pr.maintainer_can_modify,
         // GitHub names a repository by its page, which is also its clone URL
         // with `.git` after it.
-        head_clone_url: pr.head_repository.map(|r| format!("{}.git", r.url)),
+        head_clone_url: pr
+            .head_repository
+            .as_ref()
+            .map(|r| format!("{}.git", r.url)),
+        head_owner_is_organization: pr
+            .head_repository
+            .and_then(|r| r.owner)
+            .is_some_and(|o| o.kind == "Organization"),
         author: pr.author.map(|a| a.login).unwrap_or_default(),
         draft: pr.is_draft,
         labels: pr.labels.nodes.into_iter().map(|l| l.name).collect(),
@@ -208,6 +223,10 @@ mod tests {
     // resolved. `maintainerCanModify` and `headRepository` are added by hand
     // in the schema's shape; the ignored test below reads them from GitHub.
     const PR_617: &str = include_str!("../../../../../fixtures/gh-pr-reviewed-617.json");
+
+    // The shape of #1241's reply, whose fork an organization owns, written by
+    // hand from the schema; the ignored test below reads the real one.
+    const ORG_FORK: &str = include_str!("../../../../../fixtures/gh-pr-reviewed-org-fork.json");
 
     fn shep() -> ForgeSlug {
         ForgeSlug::try_from("shep-pm/shep".to_owned()).unwrap()
@@ -272,7 +291,7 @@ mod tests {
     #[test]
     fn the_gh_adapter_reads_maintainer_can_modify_and_the_head_repository_from_the_recording() {
         assert!(QUERY.contains("maintainerCanModify"));
-        assert!(QUERY.contains("headRepository { url }"));
+        assert!(QUERY.contains("headRepository { url owner { __typename } }"));
         let pr = parse_reviewed(PR_617.as_bytes(), &shep()).unwrap();
         assert!(!pr.from_fork);
         assert!(!pr.maintainer_can_edit);
@@ -294,6 +313,7 @@ mod tests {
         };
         let open = fork(true, r#"{"url":"https://github.com/newcomer/shep"}"#);
         assert!(open.from_fork && open.maintainer_can_edit);
+        assert!(!open.head_owner_is_organization);
         assert_eq!(
             open.head_clone_url.as_deref(),
             Some("https://github.com/newcomer/shep.git")
@@ -304,6 +324,21 @@ mod tests {
         let deleted = fork(true, "null");
         assert_eq!(deleted.head_clone_url, None);
         assert!(!deleted.pushable(), "a deleted fork is not pushable");
+    }
+
+    #[test]
+    fn an_organization_s_fork_is_read_as_not_pushable() {
+        let pr = parse_reviewed(ORG_FORK.as_bytes(), &shep()).unwrap();
+        assert!(pr.from_fork && pr.maintainer_can_edit);
+        assert!(pr.head_owner_is_organization);
+        assert_eq!(
+            pr.head_clone_url.as_deref(),
+            Some("https://github.com/Nitjsefnie-OSC/shep-kelpie.git")
+        );
+        assert!(
+            !pr.pushable(),
+            "GitHub refuses a push to an organization's fork"
+        );
     }
 
     #[test]
