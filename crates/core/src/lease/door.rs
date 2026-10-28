@@ -12,8 +12,10 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
+use crate::agents::Tier;
 use crate::home;
 use crate::ipc::{self, ClientStream};
+use crate::settings::AgentName;
 
 /// The variable naming the door, which a runner sets for its workers
 pub const SOCKET_VAR: &str = "KELPIE_LEASE_SOCKET";
@@ -108,6 +110,10 @@ pub const E2E: &str = "e2e";
 /// connection holds: the dog answers one line and closes
 pub const FORGE: &str = "forge";
 
+/// What an ask names to have the agent board rank the agents for a work
+/// item: the dog answers one line and closes
+pub const PICK: &str = "pick";
+
 /// What the dog says, first, when the project that asked for [`E2E`] has no
 /// host to run it on
 pub const NO_E2E_HOST: &str = "this project has no e2e host";
@@ -141,12 +147,15 @@ pub struct Ask {
     /// What a `forge` ask wants of the login's forge hold and pace
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forge: Option<ForgeAsk>,
+    /// The work item a `pick` ask wants agents for
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pick: Option<PickAsk>,
 }
 
 impl Ask {
     /// An ask for the counted lease `take` from process `pid`, running
-    /// `what`, with no folder and no forge ask, from a command not yet under
-    /// a grant
+    /// `what`, with no folder, forge ask or pick, from a command not yet
+    /// under a grant
     pub fn new(take: impl Into<String>, pid: u32, what: impl Into<String>) -> Self {
         Self {
             take: take.into(),
@@ -155,6 +164,7 @@ impl Ask {
             running: false,
             worktree: None,
             forge: None,
+            pick: None,
         }
     }
 }
@@ -177,9 +187,48 @@ pub enum ForgeAsk {
     Hold(u64),
 }
 
-/// What the dog answers, one line each
+/// What a runner asks the agent board of a work item, in a [`PICK`] ask
 // wire format: changing this is a breaking change to the door
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PickAsk {
+    /// Its kind, as `fix`, or None when its issue names none
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// The least tier it needs, or None for any
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<Tier>,
+    /// The agent it is pinned to, the only one tried
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<AgentName>,
+    /// Minutes past the soonest finish it allows, or None for the board's default
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slack: Option<u32>,
+    /// The agents its project allows: the board ranks only these
+    pub agents: Vec<AgentName>,
+    /// Agents not to pick
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub leave_out: Vec<AgentName>,
+}
+
+/// An agent the board would pick, in a [`Answer::Picks`]
+// wire format: changing this is a breaking change to the door
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Pick {
+    /// Its name
+    pub agent: AgentName,
+    /// Seconds from now to its finish: its wait and its typical time
+    pub finish: u64,
+    /// Seconds before it can start
+    pub wait: u64,
+    /// What it typically costs in US dollars, or None when unknown
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+}
+
+/// What the dog answers, one line each
+// wire format: changing this is a breaking change to the door
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Answer {
     /// Waiting, with this many ahead
@@ -197,6 +246,8 @@ pub enum Answer {
     /// An e2e run is over, with the exit code of its command, and the dog
     /// closes the connection
     Done(i32),
+    /// The agents a pick ask may start, in the order to try them; none fits when empty
+    Picks(Vec<Pick>),
     /// Refused, saying why, and the dog closes the connection
     Error(String),
 }
@@ -449,5 +500,49 @@ mod tests {
                 Answer::Held(1_790_000_600),
             ]
         );
+        let pick = Ask {
+            take: PICK.into(),
+            pick: Some(PickAsk {
+                kind: Some("fix".into()),
+                tier: Some(Tier::Light),
+                pin: None,
+                slack: Some(0),
+                agents: vec![AgentName::kelpies("sonnet-high")],
+                leave_out: Vec::new(),
+            }),
+            ..ask.clone()
+        };
+        assert_eq!(
+            serde_json::to_value(&pick).unwrap()["pick"],
+            json!({ "kind": "fix", "tier": "light", "slack": 0, "agents": ["sonnet-high"] })
+        );
+        let picks = Answer::Picks(vec![Pick {
+            agent: AgentName::kelpies("sonnet-high"),
+            finish: 600,
+            wait: 0,
+            cost_usd: None,
+        }]);
+        assert_eq!(
+            serde_json::to_value(&picks).unwrap(),
+            json!({ "picks": [{ "agent": "sonnet-high", "finish": 600, "wait": 0 }] })
+        );
+    }
+
+    // Each line was written by a build of its time, so a change that stops one reading breaks a runner.
+    #[test]
+    fn every_recorded_ask_and_answer_still_reads_as_written() {
+        let asks = include_str!("../../../../fixtures/door-asks.jsonl");
+        for line in asks.lines() {
+            let ask: Ask = serde_json::from_str(line).unwrap();
+            assert_eq!(ask.pick.is_some(), ask.take == PICK, "{line}");
+            let written: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert_eq!(serde_json::to_value(&ask).unwrap(), written, "{line}");
+        }
+        let answers = include_str!("../../../../fixtures/door-answers.jsonl");
+        for line in answers.lines() {
+            let answer: Answer = serde_json::from_str(line).unwrap();
+            let written: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert_eq!(serde_json::to_value(&answer).unwrap(), written, "{line}");
+        }
     }
 }

@@ -4,7 +4,8 @@
 //! behind a paddock gateway. In the same pass it reads the plan meter of
 //! each account an agent's `limit` names, at most every [`RECHECK_SECS`].
 //! A failed load read is unknown, never free. A failed meter read keeps the
-//! last reading, with the time it was read. Only `status` shows it so far.
+//! last reading, with the time it was read. `status` shows it, and the
+//! agent board's pick waits on it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -106,6 +107,18 @@ impl Availability {
             merged(line, shown)
         });
         json!({ "models": models.collect::<Vec<_>>(), "accounts": accounts.collect::<Vec<_>>() })
+    }
+
+    /// The last load of `model` behind `gateway`, None inside while unknown,
+    /// and None when the dog reads no load for it
+    pub(super) fn load(&self, gateway: &GatewayName, model: &str) -> Option<Option<ModelLoad>> {
+        let seen = self.models.get(&(gateway.clone(), model.to_owned()))?;
+        Some(seen.last.map(|(load, _)| load))
+    }
+
+    /// The last meter reading of `account`, None until one is read
+    pub(super) fn usage(&self, account: Account) -> Option<Utilization> {
+        self.accounts.get(&account)?.last.map(|(usage, _)| usage)
     }
 
     fn loaded(&mut self, key: ModelKey, load: Option<ModelLoad>, now: Timestamp) {

@@ -185,7 +185,17 @@ pub fn assess(
         ),
         until: Timestamp(week_start + (u64::from(day) + 1) * DAY_SECS),
     });
-    let window = (usage.session.used_pct >= PARK_AT_PCT).then(|| Hold {
+    Assessment {
+        day_start: Some(day_start),
+        reading: Some(reading),
+        allowance,
+        window: window(account, usage),
+    }
+}
+
+/// The hold on every turn while `account`'s 5-hour window is past [`PARK_AT_PCT`], until it resets
+pub fn window(account: Account, usage: &Utilization) -> Option<Hold> {
+    (usage.session.used_pct >= PARK_AT_PCT).then(|| Hold {
         kind: HoldKind::Window,
         reason: format!(
             "{} 5-hour window is at {}%, past the {PARK_AT_PCT}% mark, \
@@ -194,13 +204,7 @@ pub fn assess(
             usage.session.used_pct
         ),
         until: usage.session.resets_at,
-    });
-    Assessment {
-        day_start: Some(day_start),
-        reading: Some(reading),
-        allowance,
-        window,
-    }
+    })
 }
 
 /// `claude` for the Claude account, which reasons have always meant, else `other`

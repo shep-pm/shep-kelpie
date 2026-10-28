@@ -15,11 +15,13 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::oneshot;
 
+use super::availability::Availability;
+use super::board::Board;
 use super::e2e::Remote;
 use super::{Kept, lock_desk};
 use crate::ipc::{Listener, ServerReadHalf, ServerStream, ServerWriteHalf, split};
 use crate::lease::counted::{CARGO_TEST, Taken, Taker, Ticket};
-use crate::lease::door::{Answer, Ask, E2E, FORGE, LONGEST_LINE};
+use crate::lease::door::{Answer, Ask, E2E, FORGE, LONGEST_LINE, PICK};
 
 /// How long a connection has to send its ask before the dog hangs up
 const ASK_WITHIN: Duration = Duration::from_secs(10);
@@ -55,13 +57,15 @@ pub fn open(socket: &Path) -> Result<Listener, String> {
 /// granting nothing new for `grace` from now
 ///
 /// An `e2e` ask is placed by the worktree it names under `kelpie_home`, and
-/// run through `remote`.
+/// run through `remote`. A `pick` ask reads `board` and what is `shown`.
 pub(super) async fn serve(
     mut listener: Listener,
     desk: Arc<Mutex<Kept>>,
     grace: Duration,
     kelpie_home: PathBuf,
     remote: Remote,
+    shown: Arc<Mutex<Availability>>,
+    board: Arc<Mutex<Board>>,
 ) {
     let kelpie_home = Arc::new(kelpie_home);
     let remote = Arc::new(remote);
@@ -84,6 +88,8 @@ pub(super) async fn serve(
             waiters: Arc::clone(&waiters),
             kelpie_home: Arc::clone(&kelpie_home),
             remote: Arc::clone(&remote),
+            shown: Arc::clone(&shown),
+            board: Arc::clone(&board),
             e2e_host: None,
         };
         tokio::spawn(visit(stream, place, fresh_from));
@@ -97,6 +103,8 @@ pub(super) struct Place {
     waiters: Waiters,
     pub(super) kelpie_home: Arc<PathBuf>,
     pub(super) remote: Arc<Remote>,
+    pub(super) shown: Arc<Mutex<Availability>>,
+    pub(super) board: Arc<Mutex<Board>>,
     // The host whose e2e lease this connection holds or waits for, if it is
     // an e2e ask; otherwise it is for cargo-test.
     pub(super) e2e_host: Option<String>,
@@ -146,6 +154,9 @@ async fn visit(stream: ServerStream, mut place: Place, fresh_from: tokio::time::
         }
         Ok(ask) if ask.take == FORGE => {
             return super::forge::visit(&place, ask, &mut write).await;
+        }
+        Ok(ask) if ask.take == PICK => {
+            return super::board::visit(&place, ask, &mut write).await;
         }
         Ok(ask) => {
             let why = format!(

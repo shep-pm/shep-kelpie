@@ -1,0 +1,10 @@
+{"queued":2}
+"granted"
+"go"
+{"wait":4}
+{"held":1790000600}
+{"output":"ok 1"}
+{"done":3}
+{"error":"no"}
+{"picks":[{"agent":"sonnet-high","finish":2400,"wait":0,"cost_usd":1.2},{"agent":"iq3-xxs","finish":6000,"wait":2400}]}
+{"picks":[]}

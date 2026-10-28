@@ -106,7 +106,9 @@ async fn follow(mut visit: Visit, out: &mut impl Write) -> Ended {
             Ok(Some(Answer::Error(why))) => {
                 return Ended::Refused(told(&format!("the dog refused: {why}")));
             }
-            Ok(Some(other @ (Answer::Go | Answer::Wait(_) | Answer::Held(_)))) => {
+            Ok(Some(
+                other @ (Answer::Go | Answer::Wait(_) | Answer::Held(_) | Answer::Picks(_)),
+            )) => {
                 return Ended::Refused(told(&format!("the dog answered {other:?} to the e2e ask")));
             }
         }

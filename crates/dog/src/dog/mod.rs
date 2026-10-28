@@ -6,10 +6,11 @@
 //! shepherd's bus for runners' lease notes and their process events,
 //! keeps the book on its [`desk`], and grants with a `grant` trigger on the
 //! runner. The book is saved to `<kelpie home>/dog/book.json` after every
-//! change and loaded on start, with a review window for each review bot as
-//! its agent file in kelpie's home defines it. It keeps each agent's [`availability`].
+//! change and loaded on start, with a review window for each bot as its file
+//! in kelpie's home defines it. It keeps each agent's [`availability`] and the agent board.
 
 pub mod availability;
+mod board;
 mod bus;
 pub mod desk;
 mod door;
@@ -351,6 +352,9 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
     kept.desk.set_test_capacity(capacity);
     let desk = Arc::new(Mutex::new(kept));
     let shown = availability::begin(&agents, &settings, ports);
+    // Never `KELPIE_HOME`: shep starts the adopted dog without it.
+    let kelpie_home = home::under(&shep_home);
+    let board = board::begin(&agents, kelpie_home.clone());
     // The other leases do not need the door, so the dog runs on without it.
     // It is bound before any handler can start a process that inherits it.
     // The runner hands its workers the same door, or the default with this message.
@@ -363,15 +367,15 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
         Ok((socket, listener)) => {
             println!("the door is {}, {capacity} at a time", socket.display());
             let grace = door::REJOIN_GRACE;
-            // Never `KELPIE_HOME`: shep starts the adopted dog without it.
-            let home = home::under(&shep_home);
             let remote = e2e::Remote::default();
             tokio::spawn(door::serve(
                 listener,
                 Arc::clone(&desk),
                 grace,
-                home,
+                kelpie_home,
                 remote,
+                Arc::clone(&shown),
+                Arc::clone(&board),
             ));
         }
         Err(e) => {
@@ -381,10 +385,22 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
     }
     let (answered, mut to_deliver) = mpsc::unbounded_channel::<Vec<Delivery>>();
     for action in ACTIONS {
-        let (desk, answered, shown) = (Arc::clone(&desk), answered.clone(), Arc::clone(&shown));
+        let (desk, answered) = (Arc::clone(&desk), answered.clone());
+        let (shown, board) = (Arc::clone(&shown), Arc::clone(&board));
         shepherd.on_action(action, move |params, name| {
             let shown = availability::lock(&shown).clone();
-            let (body, grants) = lock_desk(&desk).change(|d| d.answer_with(name, params, &shown));
+            // The board's medians are worked out before the desk is held for the answer,
+            // and only for `status`, the one action that shows them.
+            let board = match name {
+                "status" => {
+                    let view = board::lock(&board).view();
+                    let now = lock_desk(&desk).desk.book.now();
+                    view.status(&shown, now)
+                }
+                _ => serde_json::Value::Null,
+            };
+            let (body, grants) =
+                lock_desk(&desk).change(|d| d.answer_with(name, params, &shown, &board));
             let _ = answered.send(grants);
             body
         });
