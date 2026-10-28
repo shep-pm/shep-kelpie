@@ -14,7 +14,7 @@ use crate::test::{Rig, Scripted, ticket};
 use crate::work_item::{Seconds, TimingPhase};
 
 mod board;
-mod fixtures;
+pub(in crate::runner) mod fixtures;
 mod ticket;
 
 // A running project with issue 7 in flight

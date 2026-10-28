@@ -27,15 +27,15 @@ fn parse(shown: &str) -> Value {
     serde_json::from_str(shown).expect("a recorded fixture is JSON")
 }
 
-pub(super) fn status() -> Value {
+pub(in crate::runner) fn status() -> Value {
     parse(STATUS)
 }
 
-pub(super) fn timings() -> Value {
+pub(in crate::runner) fn timings() -> Value {
     parse(TIMINGS)
 }
 
-pub(super) fn board() -> Value {
+pub(in crate::runner) fn board() -> Value {
     parse(BOARD)
 }
 
@@ -47,7 +47,7 @@ pub(super) fn pm_attach() -> Value {
     parse(PM_ATTACH)
 }
 
-pub(super) fn refusal() -> Value {
+pub(in crate::runner) fn refusal() -> Value {
     parse(REFUSAL)
 }
 
@@ -61,7 +61,7 @@ pub(super) fn asked(runner: &Mutex<Runner>, postings: &Posted, action: &str, hea
 
 /// Marks out what a run of the rig makes different from the run that recorded
 /// the fixture, and drops what this run alone decides
-pub(super) fn settled(value: &mut Value, head: &str) {
+pub(in crate::runner) fn settled(value: &mut Value, head: &str) {
     match value {
         Value::Object(fields) => {
             // How long this run's passes held the lock, which no fixture can name.
@@ -126,7 +126,7 @@ fn earlier(count: u64) -> Vec<Finished> {
 }
 
 // A project with `count` work items finished before its clock began
-pub(super) fn seed(rig: &Rig, count: u64) {
+pub(in crate::runner) fn seed(rig: &Rig, count: u64) {
     let mut state = ProjectState::new();
     state.history = earlier(count);
     let file = rig.paths().state;
@@ -144,7 +144,7 @@ fn name_pm(rig: &Rig) {
 }
 
 /// A project manager, a red workflow on `main`, and three finished work items
-pub(super) fn rich(rig: &Rig) {
+pub(in crate::runner) fn rich(rig: &Rig) {
     name_pm(rig);
     seed(rig, 3);
     rig.forge.set_branch_runs(
@@ -161,7 +161,7 @@ pub(super) fn rich(rig: &Rig) {
 }
 
 /// Two ready issues blocked by #32, which is open
-pub(super) fn ready(rig: &Rig) {
+pub(in crate::runner) fn ready(rig: &Rig) {
     rig.forge.open_issue(32, "Blocker", "Body of #32.\n");
     for issue in [282, 284] {
         rig.forge.list_ready_unchecked(issue, false);

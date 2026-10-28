@@ -75,6 +75,14 @@ pub fn work_branch(ticket: TicketId) -> String {
     format!("kelpie/{ticket}")
 }
 
+/// Where the runner of `project` answers: `<kelpie home>/run/<project>.sock`
+///
+/// Under `run/` and not the project's folder, whose path is longer than a
+/// Unix socket's may be.
+pub fn socket_of(kelpie_home: &Path, project: &str) -> PathBuf {
+    kelpie_home.join("run").join(format!("{project}.sock"))
+}
+
 /// Where a project's files live under kelpie's home
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectPaths {
@@ -118,6 +126,9 @@ pub struct ProjectPaths {
     /// The dog's door, the one socket a worker may connect to. Under
     /// kelpie's home unless the runner sets it from its own environment.
     pub door: PathBuf,
+    /// The runner's own socket, `<kelpie home>/run/<project>.sock`, where it
+    /// answers the typed protocol (ADR 0017)
+    pub socket: PathBuf,
     worktrees: PathBuf,
     builds: PathBuf,
     graphs: PathBuf,
@@ -150,6 +161,7 @@ impl ProjectPaths {
             kelpie_home: kelpie_home.to_owned(),
             shep_home: shep_home.to_owned(),
             door: kelpie_home.join("dog/lease.sock"),
+            socket: socket_of(kelpie_home, project.as_str()),
             worktrees: folder.join("worktrees"),
             builds: folder.join("builds"),
             graphs: folder.join("code-graphs"),
@@ -163,6 +175,18 @@ impl ProjectPaths {
     pub fn name(&self) -> String {
         let name = self.folder.file_name();
         name.map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+    }
+
+    /// Whether the runner's socket is short enough to bind
+    ///
+    /// Not part of [`sockets_fit`](Self::sockets_fit), which refuses a
+    /// runner's start: a runner on a path too long goes on without its socket.
+    ///
+    /// # Errors
+    ///
+    /// A message naming the path that is too long.
+    pub fn socket_fits(&self) -> Result<(), String> {
+        crate::home::socket_fits(&self.socket)
     }
 
     /// Whether the door, and the longest socket a call opens (a 128-bit
@@ -336,6 +360,26 @@ mod tests {
                 "{id}"
             );
         }
+    }
+
+    #[test]
+    fn the_runner_socket_sits_under_run_in_kelpie_s_home() {
+        let koji = ProjectName::try_from("koji").unwrap();
+        let paths = ProjectPaths::under(Path::new("/s/kelpie"), Path::new("/s"), &koji);
+        assert_eq!(paths.socket, Path::new("/s/kelpie/run/koji.sock"));
+        assert_eq!(socket_of(Path::new("/s/kelpie"), "koji"), paths.socket);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_runner_socket_too_long_to_bind_is_reported_by_socket_fits() {
+        let koji = ProjectName::try_from("koji").unwrap();
+        let fits = ProjectPaths::under(Path::new("/s/kelpie"), Path::new("/s"), &koji);
+        assert_eq!(fits.socket_fits(), Ok(()));
+        let long = format!("/{}", "s".repeat(95));
+        let paths = ProjectPaths::under(&Path::new(&long).join("kelpie"), Path::new("/s"), &koji);
+        let error = paths.socket_fits().unwrap_err();
+        assert!(error.contains("koji.sock"), "{error}");
     }
 
     #[cfg(unix)]

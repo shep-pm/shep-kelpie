@@ -13,7 +13,7 @@ mod build;
 mod paths;
 mod stamp;
 pub use build::{Build, BuildError, COMMIT, probe_version, version_with_commit};
-pub use paths::{ProjectName, ProjectNameError, ProjectPaths, work_branch};
+pub use paths::{ProjectName, ProjectNameError, ProjectPaths, socket_of, work_branch};
 pub use stamp::{running, stamp_of};
 
 /// The variable that names kelpie's home in place of the shepherd's

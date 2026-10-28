@@ -133,6 +133,7 @@ mod slots;
 #[cfg(test)]
 mod slots_tests;
 mod snapshot;
+mod socket;
 mod started;
 mod step_log;
 mod talk;
@@ -179,10 +180,11 @@ pub(crate) use reread::check_gateways;
 use reviewers_check::{check_bots, check_coderabbit, check_local};
 pub use rework::ReworkError;
 pub use ruling::{Action, Answer, RuleError};
+pub use socket::{Handles, Limits, Serving, serve, start as serve_socket};
 pub use timings::{Totals, settle};
-pub use trigger::answer;
 pub use trigger::{ACTIONS, BudgetStatus, Status, WorkItemStatus, wakes};
 pub use trigger::{GateError, WhichItem};
+pub use trigger::{answer, answer_request, request_of};
 pub use words::{Wants, read_answer};
 
 #[cfg(any(test, feature = "test-support"))]
