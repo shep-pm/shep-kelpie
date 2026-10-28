@@ -401,18 +401,46 @@ fn implementers(subject: String, settings: &Settings, paths: &ProjectPaths) -> (
     };
     let skipped: Vec<String> = book.skipped().collect();
     let line = match settings.role_agents(&book) {
-        Ok(_) if !skipped.is_empty() => Line::unsure(
-            subject,
-            skipped.join("; "),
-            "correct or rename the file it names, or move it out of kelpie's `agents` folder",
-        ),
-        Ok(roles) => Line::ok(
-            subject,
-            format!(
-                "an issue with no `agent:` label runs on {}",
-                roles.default_implementer.name
-            ),
-        ),
+        Ok(roles) => {
+            let described =
+                |name: &AgentName| book.get(name).is_some_and(|a| a.fit.description.is_some());
+            let bare: Vec<&AgentName> = (roles.implementers.iter())
+                .map(|i| &i.name)
+                .filter(|name| !described(name))
+                .collect();
+            let mut fixes = Vec::new();
+            if !skipped.is_empty() {
+                fixes.push(
+                    "correct or rename the file it names, or move it out of kelpie's `agents` folder"
+                        .to_owned(),
+                );
+            }
+            let mut found = skipped;
+            if !bare.is_empty() {
+                found.extend(bare.iter().map(|name| format!("{name} has no description")));
+                let files: Vec<String> = (bare.iter())
+                    .map(|name| {
+                        paths
+                            .agents
+                            .join(format!("{name}.md"))
+                            .display()
+                            .to_string()
+                    })
+                    .collect();
+                fixes.push(format!("add a `description` key to {}", files.join(", ")));
+            }
+            if found.is_empty() {
+                Line::ok(
+                    subject,
+                    format!(
+                        "an issue with no `agent:` label runs on {}",
+                        roles.default_implementer.name
+                    ),
+                )
+            } else {
+                Line::unsure(subject, found.join("; "), fixes.join("; "))
+            }
+        }
         Err(e) => Line::missing(
             subject,
             e.to_string(),

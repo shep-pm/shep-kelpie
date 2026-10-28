@@ -465,6 +465,9 @@ fn the_board_lists_the_projects_agents_from_their_files() {
         ],
         "{text}"
     );
-    assert!(!text.contains("claude-opus-5-5"), "no model reaches the board");
+    assert!(
+        !text.contains("claude-opus-5-5"),
+        "no model reaches the board"
+    );
     drop(runner);
 }

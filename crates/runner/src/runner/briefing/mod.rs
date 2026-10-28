@@ -13,11 +13,11 @@ use std::sync::Mutex;
 use super::Runner;
 use super::trigger::lock;
 use super::turn::held_up::HeldUp;
-use crate::board::briefing::{
-    self, AgentLine, Briefing, Files, IDLE_AFTER, Item, Merge, Ready, ReadyLine, RedLine, RulingLine, Session,
-    age, elapsed, quiet_for,
-};
 use crate::agents::{Fit, Role, Tier};
+use crate::board::briefing::{
+    self, AgentLine, Briefing, Files, IDLE_AFTER, Item, Merge, Ready, ReadyLine, RedLine,
+    RulingLine, Session, age, elapsed, quiet_for,
+};
 use crate::board::{ReadyIssue, Skip, priority, rule_order};
 use crate::local_paths::Surface;
 use crate::ports::{AgentCall, PaddockHolder, Timestamp, Wait};
