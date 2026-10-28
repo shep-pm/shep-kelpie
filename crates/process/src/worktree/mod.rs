@@ -680,7 +680,7 @@ pub fn trust_git_of(
 }
 
 // The config every trusted git runs with.
-const TRUSTED_CONFIG: [(&str, &str); 3] = [
+const TRUSTED_CONFIG: [(&str, &str); 4] = [
     // None of the hooks is kelpie's to run.
     ("core.hooksPath", "/dev/null"),
     // `status`, `diff`, `reset`, `merge` and `rebase` start this program.
@@ -688,6 +688,9 @@ const TRUSTED_CONFIG: [(&str, &str); 3] = [
     // Git for Windows' system config sets `true`, and a file checked out with
     // CRs differs from its blob in the fence's byte comparison.
     ("core.autocrlf", "false"),
+    // `text=auto` in `.gitattributes` converts on checkout to `core.eol`,
+    // which is CRLF on Windows by default.
+    ("core.eol", "lf"),
 ];
 
 // The worktree's own git dir and the repo's common one, once the own dir's
@@ -793,7 +796,7 @@ where
     S: AsRef<OsStr>,
 {
     let mut git = in_repo(cwd);
-    git.args(["-c", "core.autocrlf=false"]);
+    git.args(["-c", "core.autocrlf=false", "-c", "core.eol=lf"]);
     output(git, args)
 }
 
