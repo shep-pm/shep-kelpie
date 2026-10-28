@@ -549,13 +549,21 @@ impl Rig {
         project: &str,
         setup: impl FnOnce(&Self),
     ) -> (Self, Mutex<Runner>, String) {
+        Self::with_pull_request_worked(project, setup, Scripted::Push("work.txt", "work\n"))
+    }
+
+    /// [`Rig::with_pull_request_set`], the worker's first turn being `work`
+    pub fn with_pull_request_worked(
+        project: &str,
+        setup: impl FnOnce(&Self),
+        work: Scripted,
+    ) -> (Self, Mutex<Runner>, String) {
         let rig = Self::new(project);
         setup(&rig);
         let runner = rig.open().unwrap();
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-        rig.claude
-            .script([Scripted::Push("work.txt", "work\n"), Scripted::Text(CLEAN)]);
+        rig.claude.script([work, Scripted::Text(CLEAN)]);
         step(&runner).unwrap(); // the worker's first turn: opens the pull request
         step(&runner).unwrap(); // review round 1, qwen: clean by default
         step(&runner).unwrap(); // review round 2, claude: scripted clean above

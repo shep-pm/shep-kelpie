@@ -33,6 +33,10 @@ pub enum Scripted {
     /// Commits this file with this text on the worktree's branch, pushes
     /// it the way a worker does, and answers
     Push(&'static str, &'static str),
+    /// Merges `origin`'s branch of this name into the worktree's branch, then
+    /// commits this file with this text, pushes it the way a worker does, and
+    /// answers
+    PushMerging(&'static str, &'static str, &'static str),
     /// Pushes like [`Self::Push`], and answers with its session's context
     /// this many tokens
     PushAt(&'static str, &'static str, u64),
@@ -548,6 +552,13 @@ impl Agents for FakeClaude {
                 Ok(said("committed"))
             }
             Some(Scripted::Push(file, text)) => {
+                push(&call.cwd, &[(file, text)], file);
+                Ok(said("pushed"))
+            }
+            Some(Scripted::PushMerging(branch, file, text)) => {
+                git(&call.cwd, &["fetch", "--quiet", "origin", branch]);
+                let tip = format!("origin/{branch}");
+                git(&call.cwd, &["merge", "--quiet", "--no-edit", &tip]);
                 push(&call.cwd, &[(file, text)], file);
                 Ok(said("pushed"))
             }

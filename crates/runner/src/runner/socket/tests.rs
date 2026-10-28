@@ -415,10 +415,12 @@ fn an_oversized_line_and_a_silent_connection_are_closed() {
     let rig = Rig::new("koji");
     let served = served_with(rig.open().unwrap(), QUICK);
 
-    // A line past the bound closes the connection
+    // A line past the bound closes the connection. The runner closes once it has read the
+    // bound, so the rest of the line, or its newline, may meet a closed socket
     let mut peer = Peer::hello(&served.socket);
     let too_long = "x".repeat(LONGEST_FRAME + 10);
-    peer.send(&too_long);
+    let _ = peer.write.write_all(too_long.as_bytes());
+    let _ = peer.write.write_all(b"\n");
     assert_eq!(peer.line(), None);
 
     // A connection that never says hello is closed

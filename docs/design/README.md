@@ -52,7 +52,8 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | review.md | review, bots, rulings | `runner/{review,ruling}/`, `core/webhook.rs` |
 | review-outcomes.md | fix turn outcomes | `runner/review/outcomes/` |
 | local-review.md | local reviewers, kept rounds | `runner/review/keep.rs`, `core/settings/{local_rounds,local}.rs`, `adapters/local/` |
-| merge.md | CI, catching up, merge, after it | `runner/{gate,merge}/`, `runner/{close_merged,main_ci}.rs` |
+| merge.md | CI, catch-up, merge | `runner/{gate,merge}/`, `runner/close_merged.rs` |
+| main-ci.md | red on `main` | `runner/main_ci/` |
 | stuck-checks.md | stuck checks | `runner/gate/queued/` |
 | local-tickets.md | local ticket store, `ticket` verbs | `core/local_tickets/`, `src/flock/ticket.rs`, `runner/close_merged.rs` |
 | github-app.md | App tokens, posting, answers | `runner/voice/`, `core/guard/gh.rs`, `worker_folder/` |
@@ -83,6 +84,6 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | metrics-transcripts.md | a call's transcript: MCP, tools, `usage` | `crates/facts/`, `runner/transcript_count/`, `core/usage/` |
 | budget.md | pacing, dog + leases, time, usage, settings | `runner/pace.rs`, `dog/`, `core/usage/`, `core/settings/`, `src/sheep/mod.rs` |
 
-Each file stays under 8 KB; over it, split in two, add a row. A changed decision updates its bullet.
+Each file is under 8 KB; over it, split, add a row. A changed decision updates its bullet.
 
-Elsewhere: `docs/design-log.md` (history, old file formats), `docs/facts/`, `docs/adr/`, `GLOSSARY.md`.
+Elsewhere: `docs/design-log.md` (history, old formats), `docs/facts/`, `docs/adr/`, `GLOSSARY.md`.

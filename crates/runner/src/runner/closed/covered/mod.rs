@@ -76,15 +76,22 @@ impl Runner {
         }
     }
 
-    /// The other open pull requests that cover the current work item, which its merge ruling
-    /// names. The reason when they cannot be listed or the logins cannot be read.
-    pub(in crate::runner) fn rivals(&mut self) -> Result<Vec<u64>, String> {
+    /// The open pull requests, listed once for a gate. The reason when they cannot be listed.
+    pub(in crate::runner) fn open_now(&self) -> Result<Vec<OpenPullRequest>, String> {
+        (self.ports.forge.open_pull_requests(&self.remote))
+            .map_err(|e| format!("cannot list open pull requests: {e}"))
+    }
+
+    /// The pull requests in `open` that cover the current work item besides its own, which its
+    /// merge ruling names. The reason when the logins cannot be read.
+    pub(in crate::runner) fn rivals(
+        &mut self,
+        open: &[OpenPullRequest],
+    ) -> Result<Vec<u64>, String> {
         let Some(item) = self.current() else {
             return Ok(Vec::new());
         };
         let (ticket, branch, own_number) = (item.issue, item.branch.clone(), item.pull_request);
-        let open = (self.ports.forge.open_pull_requests(&self.remote))
-            .map_err(|e| format!("cannot list open pull requests: {e}"))?;
         // The logins are asked only when a pull request might cover the item.
         if !open
             .iter()
@@ -93,7 +100,7 @@ impl Runner {
             return Ok(Vec::new());
         }
         let logins = (self.own_logins()).map_err(|e| format!("cannot read the logins: {e}"))?;
-        let rivals = covering(&open, ticket, &branch, &logins);
+        let rivals = covering(open, ticket, &branch, &logins);
         Ok(rivals.filter(|n| Some(*n) != own_number).collect())
     }
 

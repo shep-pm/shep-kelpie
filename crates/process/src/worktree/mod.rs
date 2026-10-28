@@ -18,6 +18,9 @@ use std::time::SystemTime;
 
 mod active;
 mod adopt;
+mod borrowed;
+#[cfg(test)]
+mod borrowed_tests;
 mod cache;
 mod catch_up;
 mod changed;
@@ -32,6 +35,7 @@ mod writable;
 
 pub use active::touched_since;
 pub use adopt::adopt;
+pub use borrowed::borrowed;
 pub use cache::{Pruned, TurnMark, prune};
 pub use catch_up::{Rebase, rebase};
 pub use changed::changed_files;
