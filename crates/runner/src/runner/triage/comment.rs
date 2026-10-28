@@ -415,22 +415,27 @@ impl Runner {
             && stood.is_none()
             && !found.open.is_empty()
             && self.askable(author);
-        // An issue with no priority gets one, unless this pass asks its author and
-        // the answers pass is still to rank it. The research naming none, or `P0`,
-        // which kelpie never sets, leaves the fallback.
-        let fallback = !ranked && !ask && found.priority.is_none();
-        let found = &match fallback {
+        // An issue with no priority gets one. The research naming none, or `P0`,
+        // which kelpie never sets, leaves the fallback. A pass that asks its author
+        // owes the label with the rest, put on when the wait ends: the answers
+        // pass may rank the issue, and silence ends with the fallback.
+        let fallback = !ranked && found.priority.is_none();
+        let wanted = found.priority.or(fallback.then_some(FALLBACK_PRIORITY));
+        let named = (wanted.filter(|_| !ranked)).and_then(|priority| {
+            let named = board::repo_priority(&have, priority).map(str::to_owned);
+            named.or_else(|| self.made_priority(issue, priority))
+        });
+        // The comment says kelpie set the fallback only where the label is owed
+        // and the pass does not wait on the author.
+        let set = fallback && !ask && named.is_some();
+        labels.splice(priority_at..priority_at, named);
+        let found = &match set {
             true => Found {
                 priority: Some(FALLBACK_PRIORITY),
                 ..found.clone()
             },
             false => found.clone(),
         };
-        if let Some(priority) = found.priority.filter(|_| !ranked) {
-            let named = board::repo_priority(&have, priority).map(str::to_owned);
-            let named = named.or_else(|| self.made_priority(issue, priority));
-            labels.splice(priority_at..priority_at, named);
-        }
         let ready = ready::readiness(self, issue, author, found, &labels);
         // A rewrite the check still refuses is written as settled answers are,
         // and the issue ends `needs-triage`.
@@ -525,7 +530,7 @@ impl Runner {
             settled: answers_body.is_some() && !rewritten,
             rewrite: rewritten,
             stood: stood.is_some(),
-            fallback,
+            fallback: set,
         };
         let mut facts = facts(found, &labels, wording, reader);
         if plain {

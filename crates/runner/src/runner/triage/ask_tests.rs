@@ -9,7 +9,7 @@ use super::ask::REPLY_HINT;
 use super::marker::MARKER;
 use super::pick_tests::{MAINTAINER, issue, list, rig_with};
 use super::research_tests::{
-    APP, calls, crashed_with, handed, moves, reply, restart, triage, under,
+    APP, calls, crashed_with, facts, handed, moves, reply, restart, triage, under,
 };
 use crate::github::ApiError;
 use crate::ports::{Clock, Role};
@@ -342,6 +342,40 @@ fn silence_for_wait_days_hands_the_issue_to_the_maintainer_and_asks_nothing_more
     assert_eq!(held["step"], "done");
     assert!(held.get("questions").is_none(), "{held}");
     assert!(held.get("local").is_none(), "{held}");
+}
+
+// The ask pass owes the fallback with its other labels, so an author who never
+// answers still leaves the issue ranked
+#[test]
+fn silence_after_a_pass_that_named_no_priority_ends_with_p3_on_the_issue() {
+    let found = json!({
+        "type": "bug",
+        "open": [{ "question": "Which OS crashes?", "recommended": "Linux" }],
+    });
+    let (rig, runner) = filed("pick = \"maintainer\"\nwait_days = 1", MAINTAINER, found);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(
+        moves(&rig),
+        ["comment"],
+        "no label while the author is asked"
+    );
+    let said = facts(&rig);
+    assert!(!said.contains("kelpie set priority"), "{said}");
+
+    rig.clock.advance(Rig::DAY);
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(
+        moves(&rig),
+        [
+            "comment",
+            "label bug",
+            "label priority: P3",
+            "label needs-triage"
+        ]
+    );
+    assert_eq!(record(&rig, &runner)["step"], "done");
 }
 
 #[test]

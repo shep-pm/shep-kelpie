@@ -268,6 +268,28 @@ fn a_reply_with_no_priority_gets_p3_and_the_issue_passes_the_check() {
     assert!(said.contains("the maintainer can change it"), "{said}");
 }
 
+// The comment says kelpie set the fallback only when the label went on
+#[test]
+fn a_fallback_the_forge_would_not_make_is_not_said_to_be_set() {
+    let (rig, runner) = filed_at("maintainer", MAINTAINER, &BOARD_LABELS, |_| {});
+    rig.forge
+        .set_repo_labels(&["bug", "kind:fix", "needs-triage"]);
+    rig.github.fail_next(ApiError::Refused(403));
+    let found = json!({ "type": "bug", "kind": "fix", "body": BODY });
+    rig.claude.script_for(Role::Triager, [reply(found)]);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let on = moves(&rig);
+    assert!(
+        on.iter().all(|m| !m.starts_with("label priority")),
+        "{on:?}"
+    );
+    let said = facts(&rig);
+    assert!(!said.contains("kelpie set priority"), "{said}");
+    assert!(said.contains("the priority"), "{said}");
+}
+
 // `P0` is the author's to rate: kelpie asks, and puts no priority on yet
 #[test]
 fn a_reply_of_p0_asks_the_author_and_sets_no_p0() {
