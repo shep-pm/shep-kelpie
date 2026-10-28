@@ -11,7 +11,7 @@
 
 use super::super::Runner;
 use super::super::gate::short;
-use super::super::thread_replies::Settler;
+use super::super::thread_replies::{Outcome, Settler};
 use super::super::voice::thumbs;
 use super::post::forge_is_busy;
 use super::ruling::{flagged_lines, raise_merge};
@@ -47,7 +47,7 @@ impl Runner {
             return Ok(());
         };
         let Some(ruled) = held.ruled.as_ref() else {
-            if self.answer_by_reaction(&held) {
+            if self.answer_by_reaction(&held)? {
                 return self.merge_one(number);
             }
             return self.raise_for(&held);
@@ -65,32 +65,38 @@ impl Runner {
     }
 
     // Answers the waiting merge ruling with the maintainer's reaction on the
-    // note of the head's clean pass, if they gave one, and returns whether it
-    // was answered. A thumbs down wins over a thumbs up. A read or an answer
-    // that fails is told once and tried at the next poll.
-    fn answer_by_reaction(&mut self, held: &Contribution) -> bool {
+    // note of the head's clean pass, and returns whether it was. A thumbs down
+    // wins. A read or an answer that fails is told once and tried again. Where
+    // a question ruling alone holds the pull request, the reaction settles it.
+    fn answer_by_reaction(&mut self, held: &Contribution) -> Result<bool, StateError> {
         let number = held.pull_request;
         let id = TicketId::from_pull_request(number);
         let Some(note) = (held.pass.as_ref())
             .filter(|p| p.head == held.head)
             .and_then(|p| p.note)
         else {
-            return false;
+            return Ok(false);
         };
-        let Some(ruling) = (self.state.rulings.iter()).find(|r| {
-            r.id == id && matches!(&r.kind, RulingKind::Contribution(Held::Merge { head, .. }) if *head == held.head)
-        }) else {
-            return false;
+        let Some(ruling) = (self.state.rulings.iter()).find(|r| r.id == id) else {
+            return Ok(false);
         };
-        let kind = ruling.kind.clone();
+        let question = match &ruling.kind {
+            RulingKind::Contribution(Held::Merge { head, .. }) if *head == held.head => false,
+            RulingKind::Contribution(Held::Question { .. })
+                if held.released.is_none() && held.awaits_merge_ruling() =>
+            {
+                true
+            }
+            _ => return Ok(false),
+        };
         if !self.app_covers() {
-            return false;
+            return Ok(false);
         }
         // A reaction answers once: it stays on the comment, so a ruling raised
         // again for the same head must not be answered by it.
         let answered = format!("reacted:{number}:{note}");
         if self.post_tries.borrow().contains_key(&answered) {
-            return false;
+            return Ok(false);
         }
         let key = format!("react:{number}:{note}");
         let marks = self.maintainer().and_then(|maintainer| {
@@ -104,7 +110,7 @@ impl Runner {
             }
             Err(e) => {
                 self.answer_failed(&key, number, "read the reaction on the note to", &e, false);
-                return false;
+                return Ok(false);
             }
         };
         let theirs: Vec<bool> = (marks.thumbs.iter())
@@ -114,16 +120,26 @@ impl Runner {
         let up = match (theirs.contains(&false), theirs.contains(&true)) {
             (true, _) => false,
             (false, true) => true,
-            (false, false) => return false,
+            (false, false) => return Ok(false),
+        };
+        if question {
+            self.withdraw_question(held)?;
+            self.raise_for(held)?;
+        }
+        let Some(kind) = (self.state.rulings.iter())
+            .find(|r| r.id == id && is_merge_ruling(&r.kind))
+            .map(|r| r.kind.clone())
+        else {
+            return Ok(false);
         };
         let Some(answer) = thumbs(&kind, up) else {
-            return false;
+            return Ok(false);
         };
         match self.rule_by(id, answer, Settler::Thread) {
             Ok(()) => {
                 self.answer_ends(&format!("refused:{number}:{note}"));
                 (self.post_tries.borrow_mut()).entry(answered).or_default();
-                true
+                Ok(true)
             }
             Err(e) => {
                 let key = format!("refused:{number}:{note}");
@@ -137,9 +153,29 @@ impl Runner {
                     attempt.told = true;
                     self.notes.push(why);
                 }
-                false
+                Ok(false)
             }
         }
+    }
+
+    // Takes the question ruling out, for the maintainer's thumbs on the note
+    // made it moot, and says so on its comment where one was posted. The
+    // contributor's question was marked answered when it was raised.
+    fn withdraw_question(&mut self, held: &Contribution) -> Result<(), StateError> {
+        let number = held.pull_request;
+        let id = TicketId::from_pull_request(number);
+        let mut next = self.state.clone();
+        (next.rulings).retain(|r| r.id != id);
+        if let Some(held) = (next.contributions.iter_mut()).find(|c| c.pull_request == number) {
+            held.deciding = None;
+        }
+        self.save(next)?;
+        let why = "the maintainer settled the merge with a thumbs on the clean-pass note";
+        self.notes.push(format!(
+            "contribution #{number}: its question is withdrawn, since {why}"
+        ));
+        self.say_settled(id, Outcome::withdrawn(why));
+        Ok(())
     }
 
     // Raises the ruling when the head is due one and nothing else is asked of
