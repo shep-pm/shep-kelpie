@@ -11,7 +11,6 @@ What the person starting the shepherd needs on a Windows machine (#1271). Measur
   - `gh`'s keyring token reads as invalid from an SSH session, so `gh` there cannot open a pull request even where a worker could run.
 - Turn on Developer Mode (Settings, then System, then For developers), or start the shepherd from an elevated shell.
   - `adapters::files::link` makes the Codex login and both skill folders with `symlink_file` and `symlink_dir`, and Windows allows a symlink only with Developer Mode on or an elevated token. Without either, linking fails.
-  - The tests that make a symlink need the same.
 - On ARM64 Windows, put `C:\Program Files\LLVM\bin` on `PATH` before `cargo install` of shep or kelpie.
   - `ring` builds with clang there. CI sets the same `PATH` entry.
 - Run the one-time `crabpot windows-install` (below), and have Git for Windows installed.
@@ -24,7 +23,7 @@ What the person starting the shepherd needs on a Windows machine (#1271). Measur
 - `upgrade` compiles on Windows and does not install there yet (#1392). `--binary` takes a regular file as it is, and the staged copy gets no mode. `--release` refuses before `tar`: there is no Windows asset. `--ref` adds `EXE_SUFFIX`. The staged copy's name ends in the pid, never `.exe`, so `Build::of` cannot run it, and a running `.exe` cannot be replaced.
 - Workers run through crabpot here as on every platform (#1217): the wrap is kelpie's own binary with `--crabpot`, and the machine needs a one-time `crabpot windows-install`, which fixes the loopback mode of every session after it. `crabpot::windows_status` reads what the install says, `Host::windows_status` carries it to `doctor`, and `docs/design/fence.md` holds the loopback rule.
 - A test's stand-in command is `write_fake` and `Fake` from `test_support`: an `sh` script on Unix, a `.cmd` file on Windows. `write_script` is for a script that needs real shell, which Windows runs through `spawn::sh()`. A FIFO test is `#[cfg_attr(windows, ignore = "a FIFO is a Unix file")]`.
-- `docs/agents/sandbox-red-tests.md` lists what Windows cannot run, read from the source, since the Windows job only runs `cargo check`.
+- `docs/agents/sandbox-red-tests.md` lists what Windows cannot run, read from the source, since the Windows job runs only `cargo check` and the `save` step.
 - `core` and the crates below it (#1262), `dog` (#1274), `adapters` (#1298), `runner` (#1299) and the root package (#1392) compile for Windows, tests included, each in the gating `cargo check`. The root package's tests do not run there yet (#241).
 - A file's mode is a Unix answer, and `core` gives Windows one of its own where it can (#1262):
   - the home stamp reads `Metadata::modified`.
@@ -48,6 +47,6 @@ What the person starting the shepherd needs on a Windows machine (#1271). Measur
   - On Windows: a new folder or file takes a protected DACL of one ACE, full control for the current user, and the owner is set to that user, so one made from an elevated shell is not Administrators'. A folder's ACE is inherited by what it holds. `restrict_dir` does the same for a folder that is already there.
   - `is_owner_only` on Windows is false for a null DACL, an owner that is not the current user, or any allow ACE for another SID, Administrators and SYSTEM included. Deny ACEs are ignored.
   - `private_dir` narrows only the folders it makes, as `DirBuilder::mode` does.
-  - `Secret::write` draws its bytes from `getrandom` on every platform. It skips the folder sync on Windows, which cannot open a folder to sync it and whose NTFS journals the rename and link.
+  - `Secret::write` draws its bytes from `getrandom` on every platform. It and `write_atomically` skip the folder sync on Windows, which cannot open a folder to sync it and whose NTFS journals the rename and link.
   - A refusal's advice on Windows is `icacls <path> /inheritance:r /grant:r %USERNAME%:F`, or `:(OI)(CI)F` for a folder.
   - The ACL tests run in the `windows` job's non-gating step, `id: totp`.

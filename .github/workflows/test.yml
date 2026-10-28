@@ -311,3 +311,6 @@ jobs:
       - if: steps.totp.outcome == 'failure'
         run: |
           echo "::warning title=windows::the owner-only ACL's tests do not pass on Windows yet. The step's log names each failing test."
+      # What the atomic save settles: the lease book and the state file. Gates.
+      - id: save
+        run: 'cargo test --locked -p shep-kelpie-core --lib -- lease::saved:: state::tests::release:: state::tests::a_second_atomic_write_over_a_file_replaces_it'
