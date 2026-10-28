@@ -244,8 +244,8 @@ async fn a_bare_upgrade_deletes_the_keys_the_agent_board_replaced_and_names_them
 
     ran.unwrap();
     assert!(
-        said.iter()
-            .any(|l| l.starts_with("project koji: ") && l.contains("removed agents.implementers")),
+        said.iter().any(|l| l.starts_with("project koji: ")
+            && l.contains("removed agents.implementers = [\"sonnet-high\"]")),
         "{said:?}"
     );
     let (koji, _) = rig.shepherd.sheep("koji").unwrap();
