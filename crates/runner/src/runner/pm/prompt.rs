@@ -25,8 +25,10 @@ macro_rules! questions {
          asked. For a decision only the maintainer can make, give `escalate` with the \
          choice you recommend, which is added to the question as `PM recommends: \
          <choice>`; kelpie checks that the item is parked on a question, and drops the \
-         answer if not, when the question goes to the maintainer as it stands. A worker \
-         writes the problem on a `Problem:` line and what each option leads to after \
+         answer if not, when the question goes to the maintainer as it stands. Where the \
+         question lists choices, name the one you recommend by its letter (`A`, `B`, \
+         ...) as the card shows them, or give a new choice. A letter past the list \
+         drops the answer. A worker writes the problem on a `Problem:` line and what each option leads to after \
          its ` => `, and the card shows both. When you pass a question on, give \
          `problem` to replace the worker's with one or two plain sentences a maintainer \
          who has not followed the item can act on, and `board` with what the board \
@@ -603,6 +605,23 @@ mod tests {
         assert!(text.contains("`escalate`"), "{text}");
         assert!(
             text.contains("Never offer a choice the worker cannot carry out"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_pm_prompt_says_to_name_a_listed_choice_by_its_letter() {
+        let ask = Wake::Question {
+            ticket: ticket(7),
+            id: ticket(1),
+            asked: "Which flag?".into(),
+        };
+        let text = wake("koji", &[ask], &[], &[], true, &Notes::default(), BOARD);
+        assert!(
+            text.contains(
+                "Where the question lists choices, name the one you recommend by its letter \
+                 (`A`, `B`, ...) as the card shows them, or give a new choice."
+            ),
             "{text}"
         );
     }

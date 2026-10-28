@@ -279,6 +279,86 @@ fn a_recommendation_outside_the_list_is_added_as_its_first_line() {
 }
 
 #[test]
+fn a_recommendation_naming_a_choice_by_its_letter_moves_it_up_with_no_new_row() {
+    let (rig, runner) = asking("oddish", CHOICES);
+    let text = passed_on(
+        &rig,
+        &runner,
+        "{\"answer\": {\"item\": 7, \"escalate\": \"B\", \"why\": \"shep uses it\"}}",
+    );
+    assert_eq!(
+        text,
+        "The worker on issue #7 asks:\n\nWhich flag?\nPM recommends: `--check`\n\
+         PM says: shep uses it\n- `--check`\n- `--dry-run`\n\n\
+         `shep kelpie rule 7 <text>` sends the worker your answer."
+    );
+}
+
+#[test]
+fn a_recommendation_naming_a_letter_past_the_list_is_dropped_and_the_question_stands() {
+    let (rig, runner) = asking("gloom", CHOICES);
+    rig.claude.script([Scripted::Say(
+        "{\"answer\": {\"item\": 7, \"escalate\": \"C\", \"why\": \"guess\"}}",
+    )]);
+    let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    let (_, acted, dropped) = answered(Some(report));
+    assert_eq!(acted, Vec::<String>::new());
+    assert_eq!(
+        dropped,
+        ["answer #7: choice C is past the 2 options the question lists"]
+    );
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Alerted { id: ticket(7) })
+    );
+    let [(_, alert)] = rig.alerts.posts().try_into().unwrap();
+    assert_eq!(
+        alert.text,
+        "The worker on issue #7 asks:\n\nWhich flag?\n- `--dry-run`\n- `--check`\n\n\
+         `shep kelpie rule 7 <text>` sends the worker your answer."
+    );
+}
+
+const LANGUAGES: &str = "<kelpie-question>\nWhich language?\n- Go\n- C\n- Rust\n\
+                         </kelpie-question>\n";
+
+const TWO_LANGUAGES: &str = "<kelpie-question>\nWhich language?\n- Rust\n- C\n\
+                             </kelpie-question>\n";
+
+#[test]
+fn a_recommendation_naming_an_option_that_is_a_letter_moves_that_option_up() {
+    for (project, asked, expected) in [
+        ("sandshrew", LANGUAGES, "- C\n- Go\n- Rust"),
+        ("sandslash", TWO_LANGUAGES, "- C\n- Rust"),
+    ] {
+        let (rig, runner) = asking(project, asked);
+        let text = passed_on(
+            &rig,
+            &runner,
+            "{\"answer\": {\"item\": 7, \"escalate\": \"C\", \"why\": \"\"}}",
+        );
+        assert!(text.contains("PM recommends: C\n"), "{text}");
+        assert!(text.contains(expected), "{text}");
+    }
+}
+
+#[test]
+fn a_recommendation_in_other_words_is_still_added_as_a_new_choice() {
+    let (rig, runner) = asking("vileplume", CHOICES);
+    let text = passed_on(
+        &rig,
+        &runner,
+        "{\"answer\": {\"item\": 7, \"escalate\": \"Neither flag, run `--plan`\", \"why\": \"\"}}",
+    );
+    assert_eq!(
+        text,
+        "The worker on issue #7 asks:\n\nWhich flag?\nPM recommends: Neither flag, run `--plan`\n\
+         - Neither flag, run `--plan`\n- `--dry-run`\n- `--check`\n\n\
+         `shep kelpie rule 7 <text>` sends the worker your answer."
+    );
+}
+
+#[test]
 fn a_question_with_no_list_gets_the_recommendation_line_alone() {
     let (rig, runner) = asking("venusaur", ASKS);
     let text = passed_on(
