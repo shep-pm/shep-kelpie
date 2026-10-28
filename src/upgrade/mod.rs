@@ -17,6 +17,7 @@ mod migrate;
 pub mod restart;
 pub mod seen;
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -375,7 +376,7 @@ fn fetch_source(scene: &Scene<'_>, source: &Source) -> Result<PathBuf, String> {
                 .ok()
                 .filter(std::fs::Metadata::is_file)
                 .ok_or_else(|| format!("{} is not a file", path.display()))?;
-            if meta.permissions().mode() & 0o111 == 0 {
+            if !has_executable_bits(&meta) {
                 return Err(format!(
                     "{} is not executable: `chmod +x {}` makes it so",
                     path.display(),
@@ -387,8 +388,24 @@ fn fetch_source(scene: &Scene<'_>, source: &Source) -> Result<PathBuf, String> {
         Source::Ref(reference) => {
             fetch::build_ref(&work, scene.repo, reference, fetch::Limits::default())
         }
+        #[cfg(windows)]
+        Source::Release(_) => {
+            Err("kelpie publishes no Windows release asset: use `--ref` or `--binary`".to_owned())
+        }
+        #[cfg(not(windows))]
         Source::Release(version) => fetch::download_release(&work, version),
     }
+}
+
+// Windows keeps no executable bit, so a regular file is taken as it is.
+#[cfg(unix)]
+fn has_executable_bits(meta: &std::fs::Metadata) -> bool {
+    meta.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn has_executable_bits(_: &std::fs::Metadata) -> bool {
+    true
 }
 
 // Whether `build` and the shepherd `daemon` take each other, else what to do

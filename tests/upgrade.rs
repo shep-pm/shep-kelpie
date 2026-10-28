@@ -5,6 +5,7 @@
 //! Kelpie's home, the shepherd and the installed kelpie are all folders under
 //! one scratch root, so nothing here touches a real install.
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
@@ -367,6 +368,7 @@ async fn a_minor_mismatch_fails_with_the_steps_before_anything_restarts() {
     assert_eq!(scene.installed_says().await, "0.1.0 for shep 0.17.0");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn a_binary_without_its_executable_bits_is_refused_naming_chmod() {
     let scene = Scene::new();

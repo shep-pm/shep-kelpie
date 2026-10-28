@@ -104,6 +104,7 @@ fn stand_in_runner() {
 // message and exits on it at once, leaving its lambs running. One leads a
 // process group, as each agent call does, and one leads a session of its
 // own. Both ignore SIGTERM. Their pids go to the file `LAMBS` names.
+#[cfg(unix)]
 #[test]
 #[ignore = "a sheep of a_stop_of_a_runner_leaves_none_of_its_lambs_running"]
 #[expect(
