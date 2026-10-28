@@ -271,6 +271,12 @@ pub struct WorkerProfile<'a> {
     /// maintainer's login is then out of its reach. Without one the worker
     /// runs as the maintainer's login.
     pub token: Option<&'a InstallationToken>,
+    /// The maintainer's own gh login as a token, for a worker with no App
+    /// token on Windows. Its sandbox user cannot read the maintainer's gh
+    /// config or Credential Manager, so the login reaches it as `GH_TOKEN`
+    /// in place of the folder a Unix worker reads. None elsewhere, and
+    /// ignored where `token` is set.
+    pub login_token: Option<&'a InstallationToken>,
 }
 
 impl WorkerProfile<'_> {
@@ -391,11 +397,12 @@ impl WorkerProfile<'_> {
     }
 
     // What the worker's own commands read of the home folder for their config:
-    // git's, and `gh`'s when the worker runs as the maintainer's login. A worker
-    // holding the App's token gets a `gh` config folder of its own in its build
-    // folder, and the maintainer's stays denied.
+    // git's, and `gh`'s when the worker runs as the maintainer's login in a
+    // folder. A worker holding the App's token has a `gh` folder of its own in
+    // its build folder, and one handed the login as `GH_TOKEN` needs none.
     fn login_carve_outs(&self) -> impl Iterator<Item = PathBuf> {
-        let gh = self.token.is_none().then(|| self.home.join(".config/gh"));
+        let from_folder = self.token.is_none() && self.login_token.is_none();
+        let gh = from_folder.then(|| self.home.join(".config/gh"));
         git_config(self.home)
             .into_iter()
             .chain(gh.filter(|path| path.exists()))
@@ -417,6 +424,8 @@ impl WorkerProfile<'_> {
             )
         });
         let github = self.token.into_iter().flat_map(|_| login::env(self.build));
+        let maintainer = (self.login_token.filter(|_| self.token.is_none()))
+            .map(|token| ("GH_TOKEN".to_owned(), token.expose().to_owned()));
         // One variable, so a covered worker's value carries both lists.
         let git_config = [housekeeping::PARAMETERS]
             .into_iter()
@@ -432,6 +441,7 @@ impl WorkerProfile<'_> {
         .chain(caches)
         .chain(project)
         .chain(github)
+        .chain(maintainer)
         .collect()
     }
 }

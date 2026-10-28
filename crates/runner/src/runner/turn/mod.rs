@@ -54,6 +54,7 @@ mod ended;
 mod handover;
 pub(super) mod held_up;
 mod issue_comments;
+mod maintainer_login;
 pub(super) mod paused;
 pub(super) mod reads;
 mod unfinished;
@@ -703,6 +704,7 @@ impl Runner {
             profile::write_login(&item.build, token)
                 .map_err(|e| format!("cannot write the worker's GitHub login: {e}"))?;
         }
+        let login_token = self.maintainers_login(token)?;
         let registries = self.registries(&item.worktree);
         let profile = WorkerProfile {
             worktree: &item.worktree,
@@ -726,6 +728,7 @@ impl Runner {
             shep_home: &self.paths.shep_home,
             door: &self.paths.door,
             token,
+            login_token: login_token.as_ref(),
         };
         // The guard in the fence runs the project's `commit`, `push` and
         // `publish` hooks, so every harness reaches them with its own checks.

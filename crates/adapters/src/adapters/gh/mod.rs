@@ -30,9 +30,9 @@ use serde::Deserialize;
 
 use crate::board::OpenPullRequest;
 use crate::ports::{
-    BranchRun, Checks, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, Issue, NewLabel,
-    OpenPull, PullRequest, PullRequestState, QueueStanding, Queued, RateLimits, Rerun, Reviewed,
-    Talk, ThreadComment, Timestamp, Visibility, Workflow,
+    BranchRun, Checks, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, InstallationToken,
+    Issue, NewLabel, OpenPull, PullRequest, PullRequestState, QueueStanding, Queued, RateLimits,
+    Rerun, Reviewed, Talk, ThreadComment, Timestamp, Visibility, Workflow,
 };
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
@@ -150,6 +150,10 @@ impl Forge for Gh {
 
     fn viewer(&self) -> Result<String, ForgeError> {
         review::viewer()
+    }
+
+    fn login_token(&self) -> Result<InstallationToken, ForgeError> {
+        review::login_token()
     }
 
     fn account_created(&self, login: &str) -> Result<Timestamp, ForgeError> {

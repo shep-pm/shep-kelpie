@@ -879,6 +879,7 @@ impl World {
             shep_home: &self.path("shep"),
             door: Path::new("/k/dog/lease.sock"),
             token: None,
+            login_token: None,
         };
         AgentCall {
             role: Role::Worker,

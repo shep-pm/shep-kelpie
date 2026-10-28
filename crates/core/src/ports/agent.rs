@@ -171,7 +171,10 @@ pub struct Browser {
 /// Where a session may write and connect, and what it may not run
 ///
 /// The harness enforces it and fails closed when it cannot.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Debug` does not leak `env`: a worker's `GH_TOKEN` is the maintainer's own
+/// token. It shows the names and elides the values.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Fence {
     /// Folders it may write, and everything under them
     pub write: Vec<PathBuf>,
@@ -195,6 +198,24 @@ pub struct Fence {
     pub guard: Guard,
     /// The project's own hooks, which run after kelpie's
     pub hooks: Vec<GuardHook>,
+}
+
+impl fmt::Debug for Fence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let env: BTreeMap<&String, &str> = self.env.keys().map(|name| (name, "..")).collect();
+        f.debug_struct("Fence")
+            .field("write", &self.write)
+            .field("no_write", &self.no_write)
+            .field("no_read", &self.no_read)
+            .field("read", &self.read)
+            .field("hosts", &self.hosts)
+            .field("no_commands", &self.no_commands)
+            .field("env", &env)
+            .field("sockets", &self.sockets)
+            .field("guard", &self.guard)
+            .field("hooks", &self.hooks)
+            .finish()
+    }
 }
 
 /// What kelpie's own checks are run with

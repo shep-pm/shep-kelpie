@@ -190,6 +190,7 @@ mod tests {
             shep_home: &root.join("shep"),
             door: Path::new("/k/dog/lease.sock"),
             token: None,
+            login_token: None,
         };
         let mut fence = *profile.reach().fence.unwrap();
         let list: Vec<ProjectHook> = (commands.iter())

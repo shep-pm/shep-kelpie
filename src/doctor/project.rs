@@ -176,7 +176,12 @@ pub(super) fn checks(
         lines.extend(forge_lines(&at, repo, &settings, &bots, probes));
         let (line, covered) = super::github::app(at("github app"), repo, probes.github);
         lines.push(line);
-        lines.push(super::github::workers(at("workers"), repo, probes.github));
+        lines.push(super::github::workers(
+            at("workers"),
+            repo,
+            probes.github,
+            probes.host,
+        ));
         lines.push(super::github::reads(at("reads"), repo, probes.github));
         lines.extend(super::github::maintainer(
             at("maintainer"),

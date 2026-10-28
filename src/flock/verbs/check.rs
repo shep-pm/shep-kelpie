@@ -162,6 +162,7 @@ mod tests {
             shep_home: &shep_home,
             door: &door,
             token: None,
+            login_token: None,
         };
         profile.reach().fence.expect("a worker is fenced").env
     }

@@ -12,9 +12,9 @@ use std::time::Instant;
 
 use super::Revalidated;
 use super::{
-    BranchRun, Clock, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, LocalPace,
-    NewLabel, OpenPull, Pace, PullRequest, QueueStanding, RateLimits, Rerun, Reviewed, Talk,
-    ThreadComment, Tickets, Timestamp, Visibility, Workflow, pace,
+    BranchRun, Clock, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, InstallationToken,
+    LocalPace, NewLabel, OpenPull, Pace, PullRequest, QueueStanding, RateLimits, Rerun, Reviewed,
+    Talk, ThreadComment, Tickets, Timestamp, Visibility, Workflow, pace,
 };
 use crate::board::OpenPullRequest;
 use crate::forge_ledger::{Ended, Identity, Kind, Ledger};
@@ -389,6 +389,11 @@ impl Forge for RateHeld {
 
     fn viewer(&self) -> Result<String, ForgeError> {
         self.call(Kind::Viewer, |f| f.viewer())
+    }
+
+    // `gh auth token` makes no API call, so no hold or budget applies.
+    fn login_token(&self) -> Result<InstallationToken, ForgeError> {
+        self.forge.login_token()
     }
 
     fn account_created(&self, login: &str) -> Result<Timestamp, ForgeError> {

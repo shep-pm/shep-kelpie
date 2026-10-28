@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 mod home;
+mod maintainer_login;
 
 trait Rendered {
     fn settings(&self) -> Value;
@@ -67,6 +68,7 @@ fn profile<'a>(hooks: &'a [GuardHook], domains: &'a [NonBlank]) -> WorkerProfile
         shep_home: Path::new("/srv/shep"),
         door: Path::new("/k/dog/lease.sock"),
         token: None,
+        login_token: None,
     }
 }
 
@@ -272,6 +274,7 @@ fn build_env_points_into_the_build_folder_beside_cargo() {
         shep_home: Path::new("/srv/shep"),
         door: Path::new("/k/dog/lease.sock"),
         token: None,
+        login_token: None,
     }
     .settings();
     assert_eq!(

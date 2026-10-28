@@ -243,6 +243,7 @@ mod tests {
                 shep_home: Path::new("/k/shep"),
                 door: Path::new("/k/dog/lease.sock"),
                 token: None,
+                login_token: None,
             };
             AgentCall {
                 tools: Tools::Work,

@@ -285,6 +285,7 @@ impl World {
             shep_home: &self.path("shep"),
             door: &self.path("dog/lease.sock"),
             token: None,
+            login_token: None,
         };
         (through.call)(profile.reach(), self.path("worker/settings.json"), wt)
     }

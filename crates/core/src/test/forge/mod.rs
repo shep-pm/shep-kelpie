@@ -9,9 +9,10 @@ use std::sync::{Arc, Mutex};
 use super::coderabbit::FakeCodeRabbit;
 use crate::board::{OpenPullRequest, ReadyIssue, ReviewMarks};
 use crate::ports::{
-    BranchRun, Checks, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, IssueCloseReason,
-    MaintainerReview, NewLabel, OpenIssue, OpenPull, PullRequest, PullRequestState, QueueStanding,
-    RateLimits, Rerun, Reviewed, Talk, ThreadComment, Timestamp, Visibility, Workflow,
+    BranchRun, Checks, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, InstallationToken,
+    IssueCloseReason, MaintainerReview, NewLabel, OpenIssue, OpenPull, PullRequest,
+    PullRequestState, QueueStanding, RateLimits, Rerun, Reviewed, Talk, ThreadComment, Timestamp,
+    Visibility, Workflow,
 };
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
@@ -119,6 +120,7 @@ pub struct FakeForge {
     bot_reviewed: Arc<Mutex<Option<Timestamp>>>,
     bot_review_reads: Arc<AtomicUsize>,
     viewer_down: Arc<Mutex<Option<ForgeError>>>,
+    login_token_down: Arc<Mutex<Option<ForgeError>>>,
     // Every call made, and the board's reads and open-issue listings among them
     asked: Arc<AtomicUsize>,
     board_reads: Arc<AtomicUsize>,
@@ -147,6 +149,9 @@ pub struct FakeForge {
 
 /// The account the fake forge says kelpie acts as, and opens pull requests as
 pub const VIEWER: &str = "the-maintainer";
+
+/// The token the fake forge says `gh auth token` prints
+pub const LOGIN_TOKEN: &str = "gho_the_maintainers_login";
 
 impl FakeForge {
     /// A public repo whose pull requests' branches live on `origin`, a bare repo
@@ -221,6 +226,7 @@ impl FakeForge {
             bot_reviewed: Arc::new(Mutex::new(Some(Timestamp(LAST_REVIEWED)))),
             bot_review_reads: Arc::default(),
             viewer_down: Arc::default(),
+            login_token_down: Arc::default(),
             asked: Arc::default(),
             board_reads: Arc::default(),
             issue_listings: Arc::default(),
@@ -548,6 +554,14 @@ impl Forge for FakeForge {
         match &*self.viewer_down.lock().unwrap() {
             Some(error) => Err(error.clone()),
             None => Ok(VIEWER.to_owned()),
+        }
+    }
+
+    fn login_token(&self) -> Result<InstallationToken, ForgeError> {
+        self.ask()?;
+        match &*self.login_token_down.lock().unwrap() {
+            Some(error) => Err(error.clone()),
+            None => Ok(InstallationToken::new(LOGIN_TOKEN.to_owned())),
         }
     }
 

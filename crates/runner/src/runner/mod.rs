@@ -298,6 +298,9 @@ pub struct Runner {
     book: Agents,
     // The maintainer's home folder, for `~/` in kelpie's own settings
     home: PathBuf,
+    // Whether a worker with no App token gets the maintainer's gh login as
+    // `GH_TOKEN`, which it does on Windows, instead of reading `gh`'s folder
+    login_as_variable: bool,
     // The GPU's last reading, from the page kelpie's settings name
     gpu: gpu::GpuWatch,
     // The gateways the adapters were built with, which a change waits to replace
@@ -629,6 +632,7 @@ impl Runner {
             agents,
             book,
             home: home.to_owned(),
+            login_as_variable: cfg!(windows),
             gpu,
             gateways,
             webhook,

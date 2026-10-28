@@ -42,7 +42,7 @@ pub use dev_server::FakeDevServers;
 pub use disk::{FakeDisk, GB};
 pub use e2e_runner::FakeE2e;
 pub use endpoint::{Answer, StandInEndpoint, Take, unreachable_url};
-pub use forge::{AppComments, FakeForge, HeldCall, VIEWER};
+pub use forge::{AppComments, FakeForge, HeldCall, LOGIN_TOKEN, VIEWER};
 pub use git::{FakeGit, Synced};
 pub use hold::Hold;
 pub use home::Home;

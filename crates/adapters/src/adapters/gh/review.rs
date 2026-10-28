@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use super::board::{Closes, closed_here};
 use super::{Label, gh, gh_as, pull_request_state, unreadable};
-use crate::ports::{ForgeError, MaintainerReview, ReviewComment, Reviewed};
+use crate::ports::{ForgeError, InstallationToken, MaintainerReview, ReviewComment, Reviewed};
 use crate::settings::ForgeSlug;
 
 // Reads the latest 100 reviews, threads, and comments a thread, so on a
@@ -50,6 +50,21 @@ pub(super) fn reviewed(
 
 pub(super) fn viewer() -> Result<String, ForgeError> {
     parse_viewer(&gh(&["api", "user", "--jq", ".login"])?)
+}
+
+pub(super) fn login_token() -> Result<InstallationToken, ForgeError> {
+    parse_login_token(&gh(&["auth", "token"])?)
+}
+
+// The token is one line. What failed to parse is not echoed: it may be a token.
+fn parse_login_token(stdout: &[u8]) -> Result<InstallationToken, ForgeError> {
+    let token = String::from_utf8_lossy(stdout).trim().to_owned();
+    match token.is_empty() || token.contains(char::is_whitespace) {
+        true => Err(ForgeError::Failed(
+            "`gh auth token` printed no single token".to_owned(),
+        )),
+        false => Ok(InstallationToken::new(token)),
+    }
 }
 
 fn parse_viewer(stdout: &[u8]) -> Result<String, ForgeError> {
@@ -234,6 +249,16 @@ mod tests {
 
     fn reply(pr: &str) -> String {
         format!(r#"{{"data":{{"repository":{{"pullRequest":{pr}}}}}}}"#)
+    }
+
+    #[test]
+    fn the_login_token_is_the_one_line_gh_prints_and_nothing_else_is_echoed() {
+        let token = parse_login_token(b"gho_abc123\r\n").unwrap();
+        assert_eq!(token.expose(), "gho_abc123");
+        for bad in [&b""[..], b"\n", b"gho_abc def\n"] {
+            let error = parse_login_token(bad).unwrap_err().to_string();
+            assert!(!error.contains("gho_abc"), "{error}");
+        }
     }
 
     #[test]
