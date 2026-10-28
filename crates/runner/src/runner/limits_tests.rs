@@ -129,6 +129,44 @@ fn a_ready_issue_on_an_unlisted_labelled_implementer_is_held_by_its_account() {
 }
 
 #[test]
+fn a_pick_pinning_an_unlisted_implementer_is_held_by_its_account() {
+    let (rig, runner) = named("shep", "implementers = [\"sonnet-high\"]\npm = \"pm\"\n");
+    let runner = reopened(&rig, runner, || rig.codex_day_began(0));
+    rig.forge.list_ready(7, false);
+    rig.forge.list_ready(9, false);
+    rig.codex_meter.set(Rig::utilization(15, 0));
+    rig.claude.script([Scripted::Say(
+        "{\"pick\": {\"issue\": 7, \"agent\": \"codex\"}, \"why\": \"w\"}",
+    )]);
+    let answered = step(&runner).unwrap();
+    assert!(
+        matches!(&answered, Some(StepReport::PmAnswered { acted, .. }) if acted == &["picked #7"]),
+        "{answered:?}"
+    );
+
+    let opened = step(&runner).unwrap();
+
+    assert!(
+        !matches!(opened, Some(StepReport::Dispatched { issue, .. }) if issue == ticket(7)),
+        "{opened:?}"
+    );
+    assert_eq!(
+        rig.codex_meter.reads(),
+        1,
+        "the pinned agent's account is read"
+    );
+    let status = rig.ask(&runner, "status", None);
+    let skipped = status["skipped"].as_array().unwrap();
+    let paced = skipped.iter().find(|s| s["issue"] == "7").unwrap();
+    assert_eq!(paced["reason"], "paced");
+    let hold = paced["hold"].as_str().unwrap();
+    assert!(
+        hold.starts_with("today's Codex allowance of 14.3% of the week is spent (15%"),
+        "{hold}"
+    );
+}
+
+#[test]
 fn a_ready_issue_on_an_unlisted_labelled_implementer_dispatches_when_its_account_is_clear() {
     let (rig, runner) = codex_day_began(0);
     rig.codex_meter.set(Rig::utilization(5, 0));

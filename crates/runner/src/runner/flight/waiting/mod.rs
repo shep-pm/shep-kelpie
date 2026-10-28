@@ -192,8 +192,8 @@ impl Runner {
         }
     }
 
-    // Whether `item`'s first turn may move to another implementer: its label
-    // pins it to no agent, and the project lists the one it runs on.
+    // Whether `item`'s first turn may move to another implementer: neither its
+    // label nor the project manager's pick pins it, and the project lists its agent.
     fn can_fall_back(&self, item: &WorkItem) -> bool {
         !item.pinned && self.agents.implementer(&item.agent).is_some()
     }

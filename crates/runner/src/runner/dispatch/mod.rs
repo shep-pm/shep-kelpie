@@ -246,7 +246,7 @@ impl Runner {
             };
             // The agent its pick or label names may be one the project does not list, whose
             // account `pace_dispatch` has not read. A label that fails is `add`'s to refuse.
-            let pinned = chosen.as_ref().and_then(|c| c.agent.clone());
+            let pinned = chosen.as_ref().and_then(|c| self.pinned_agent(c));
             let labelled = pinned.or_else(|| {
                 let found = ready.iter().find(|i| i.ticket == ticket)?;
                 Some(self.labelled_agent(ticket, &found.labels).ok()?.0)

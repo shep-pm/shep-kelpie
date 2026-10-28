@@ -119,5 +119,15 @@ mod tests {
             "`pick`: a ticket id, or an object with an `issue` and any of a `tier`, an \
              implementer as `agent` and `slack` in minutes, not {\"issue\":12,\"model\":\"opus\"}"
         );
+        let one = read("{\"pick\": {\"issue\": 12, \"tier\": \"huge\"}}").unwrap();
+        assert_eq!(
+            (one.picks, one.unread),
+            (
+                vec![],
+                vec![format!(
+                    "`pick`: {PICK}, not {{\"issue\":12,\"tier\":\"huge\"}}"
+                )]
+            )
+        );
     }
 }

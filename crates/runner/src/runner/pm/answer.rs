@@ -208,6 +208,7 @@ pub(super) fn read(text: &str) -> Option<Answer> {
                 }
                 value => match picked(value) {
                     Some(p) => answer.picks.push(p),
+                    None if value.is_object() => answer.unread.push(unread(PICK)),
                     None => answer
                         .unread
                         .push(unread("a ticket id, a list of them or null")),

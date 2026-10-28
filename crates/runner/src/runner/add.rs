@@ -121,7 +121,7 @@ impl Runner {
         if !found.open {
             return Err(AddError::Closed(ticket));
         }
-        let pin = self.pin(ticket, picked);
+        let (pin, pin_note) = self.pin(ticket, picked);
         let by_pm = pin.is_some();
         let (labelled, note) = match pin {
             Some(agent) => (agent, None),
@@ -149,24 +149,41 @@ impl Runner {
             }
             return Err(AddError::State(e));
         }
+        self.notes.extend(pin_note);
         self.notes.extend(note);
         self.mark_held(ticket, true);
         Ok(agent)
     }
 
-    // The agent `picked` pins `ticket`'s work item to, while it is still an
-    // implementer `agents.allow` holds. One that went since is noted.
-    fn pin(&mut self, ticket: TicketId, picked: Option<&Picked>) -> Option<AgentName> {
-        let agent = picked?.agent.clone()?;
-        if self.implementer_files().contains(&agent) {
-            return Some(agent);
-        }
-        self.notes.push(format!(
-            "{}: the project manager picked it for {agent}, which is no longer an implementer \
-             `agents.allow` holds, so its labels choose",
-            ticket.shown()
-        ));
-        None
+    // The agent `picked` pins its work item to, while it is an implementer
+    // `agents.allow` holds.
+    pub(super) fn pinned_agent(&self, picked: &Picked) -> Option<AgentName> {
+        let agent = picked.agent.as_ref()?;
+        self.implementer_files()
+            .contains(agent)
+            .then(|| agent.clone())
+    }
+
+    // `pinned_agent` of `picked`, and the note for an agent it names that is
+    // no implementer now.
+    fn pin(
+        &self,
+        ticket: TicketId,
+        picked: Option<&Picked>,
+    ) -> (Option<AgentName>, Option<String>) {
+        let Some(picked) = picked else {
+            return (None, None);
+        };
+        let pin = self.pinned_agent(picked);
+        let lapsed = picked.agent.as_ref().filter(|_| pin.is_none());
+        let note = lapsed.map(|agent| {
+            format!(
+                "{}: the project manager picked it for {agent}, which is no longer an \
+                 implementer `agents.allow` holds, so its labels choose",
+                ticket.shown()
+            )
+        });
+        (pin, note)
     }
 
     // The implementer a work item for `ticket` opens on, given the one its
