@@ -506,7 +506,7 @@ fn its_words_reach_a_ruling_on_one_line_and_cut_short() {
     let (rig, runner) = with_pm("chelone");
     rig.ask(&runner, "add", Some("7"));
     let failed = AgentError::Failed(Harness::ClaudeCode, "it crashed".into());
-    let long = format!("line one\\n\\u001b[31m{}", "x".repeat(400));
+    let long = format!("line one\\n\\u001b[31m{}", "word ".repeat(80));
     let answer =
         format!("{{\"unstick\": {{\"item\": 7, \"action\": \"ask\", \"why\": \"{long}\"}}}}");
     let answer: &'static str = Box::leak(answer.into_boxed_str());
@@ -520,9 +520,10 @@ fn its_words_reach_a_ruling_on_one_line_and_cut_short() {
     let (_, said) = question
         .split_once("\n\nThe project manager asks you to decide. PM says: ")
         .unwrap();
-    assert!(said.starts_with("line one [31mxxx"), "{said}");
+    assert!(said.starts_with("line one [31mword word"), "{said}");
     assert!(!said.contains('\n'), "{said}");
-    assert_eq!(said.chars().count(), 300 + " …".chars().count(), "{said}");
+    assert!(said.ends_with("word …"), "{said}");
+    assert!(said.chars().count() <= 300 + " …".chars().count(), "{said}");
 }
 
 #[test]

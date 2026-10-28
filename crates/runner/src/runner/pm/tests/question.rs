@@ -263,6 +263,36 @@ fn passing_a_question_on_rewrites_its_problem_and_adds_the_boards_note_over_the_
 }
 
 #[test]
+fn a_problem_of_500_characters_reaches_the_ruling_whole() {
+    let (rig, runner) = asking("togepi", EFFECTS);
+    let problem = ["word"; 100].join(" ");
+    assert_eq!(problem.chars().count(), 499);
+    let answer = format!(
+        "{{\"answer\": {{\"item\": 7, \"escalate\": \"--check\", \"why\": \"shep uses it\", \
+         \"problem\": \"{problem}\"}}}}"
+    );
+    let text = passed_on(&rig, &runner, Box::leak(answer.into_boxed_str()));
+    assert!(text.contains(&format!("Problem: {problem}\n")), "{text}");
+}
+
+#[test]
+fn a_why_past_300_characters_is_cut_at_a_word_with_an_ellipsis() {
+    let (rig, runner) = asking("eevee", ASKS);
+    let why = ["reasons"; 60].join(" ");
+    let answer = format!(
+        "{{\"answer\": {{\"item\": 7, \"escalate\": true, \"candidates\": [\"Use --check\", \
+         \"Ask the maintainer\"], \"why\": \"{why}\"}}}}"
+    );
+    let text = passed_on(&rig, &runner, Box::leak(answer.into_boxed_str()));
+    let said = text
+        .lines()
+        .find_map(|l| l.strip_prefix("PM says: "))
+        .unwrap();
+    let kept = ["reasons"; 37].join(" ");
+    assert_eq!(said, format!("{kept} …"));
+}
+
+#[test]
 fn a_recommendation_outside_the_list_is_added_as_its_first_line() {
     let (rig, runner) = asking("ivysaur", CHOICES);
     let text = passed_on(
