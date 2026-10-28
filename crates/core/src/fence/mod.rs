@@ -10,6 +10,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs;
+use std::io::ErrorKind;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
@@ -340,7 +341,7 @@ fn on_disk(worktree: &Path) -> Result<BTreeMap<String, Disk>, WorktreeError> {
         let path = worktree.join(name);
         match fs::symlink_metadata(&path) {
             Ok(_) => pending.push(path),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {}
             Err(e) => return Err(folder(&path, &e)),
         }
     }
@@ -800,6 +801,14 @@ mod tests {
         assert_eq!(w.differ(Some(&accepted)), Vec::<String>::new());
         w.write(file, "changed\n");
         assert_eq!(w.differ(Some(&accepted)), [file]);
+    }
+
+    #[test]
+    fn a_file_named_config_in_the_worktree_root_is_no_harness_file() {
+        let w = World::new();
+        w.write(".config", "not a folder\n");
+        assert_eq!(w.differ(None), Vec::<String>::new());
+        assert!(matches_main(&w.repo(), &w.wt(), "main"));
     }
 
     #[test]
