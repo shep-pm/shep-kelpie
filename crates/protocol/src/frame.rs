@@ -162,20 +162,20 @@ mod tests {
 
     #[test]
     fn a_request_this_crate_has_no_variant_for_is_named_not_dropped() {
-        let line = r#"{"action":"watch","since":12}"#;
+        let line = r#"{"action":"subscribe","since":12}"#;
         assert_eq!(
             decode(line),
             Err(FrameError::Unknown {
-                request: "watch".to_owned()
+                request: "subscribe".to_owned()
             })
         );
         assert_eq!(
             UnknownRequest {
-                request: "watch".to_owned(),
+                request: "subscribe".to_owned(),
                 version: "1.2.3".to_owned(),
             }
             .to_string(),
-            "this runner (1.2.3) has no `watch` request: upgrade kelpie"
+            "this runner (1.2.3) has no `subscribe` request: upgrade kelpie"
         );
     }
 

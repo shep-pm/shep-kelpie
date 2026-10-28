@@ -256,10 +256,10 @@ fn an_unknown_request_gets_a_typed_error_and_the_connection_goes_on() {
     let served = served(&rig);
     let mut peer = Peer::hello(&served.socket);
 
-    let unknown = peer.ask(r#"{"action":"watch","since":12}"#).unwrap();
+    let unknown = peer.ask(r#"{"action":"subscribe","since":12}"#).unwrap();
     assert_eq!(
         unknown,
-        json!({ "request": "watch", "version": Build::this().kelpie })
+        json!({ "request": "subscribe", "version": Build::this().kelpie })
     );
     // A request it has, with params that do not read, is a refusal and not "unknown"
     let refused = peer.ask(r#"{"action":"add","params":"x"}"#).unwrap();
