@@ -129,7 +129,7 @@ fn a_later_turn_past_the_slack_hands_off_on_a_fresh_session_with_a_note() {
 }
 
 #[test]
-fn the_settings_slack_decides_whether_a_later_turn_stays() {
+fn a_later_turn_past_a_short_settings_slack_hands_off() {
     let (rig, runner) = later_turn_slacking(10);
     let own = SOON + 30 * 60;
     rig.agent_board
@@ -138,7 +138,10 @@ fn the_settings_slack_decides_whether_a_later_turn_stays() {
     assert_eq!(item(&rig, &runner)["agent"], "coder");
     let ask = rig.agent_board.asks().pop().expect("an ask");
     assert_eq!(ask.slack, Some(10));
+}
 
+#[test]
+fn a_later_turn_within_a_long_settings_slack_stays() {
     let (rig, runner) = later_turn_slacking(120);
     let own = SOON + SLACK + 1;
     rig.agent_board

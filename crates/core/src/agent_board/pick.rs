@@ -15,7 +15,8 @@ pub struct Item<'a> {
     pub tier: Option<Tier>,
     /// The agent it is pinned to, the only one tried
     pub pin: Option<&'a AgentName>,
-    /// Minutes past the soonest finish it allows, [`DEFAULT_SLACK_MINUTES`] when None, which only an ask from an older runner leaves
+    /// Minutes past the soonest finish it allows, [`DEFAULT_SLACK_MINUTES`]
+    /// when None, which only an older runner's ask leaves
     pub slack: Option<u32>,
     /// Agents not to pick
     pub leave_out: &'a [AgentName],

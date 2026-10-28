@@ -95,3 +95,20 @@ async fn a_file_the_migration_leaves_is_named_with_why() {
     );
     assert_eq!(fix, "delete `mine.md`");
 }
+
+#[tokio::test]
+async fn files_named_with_an_underscore_are_ignored_and_named_in_one_line() {
+    let scene = Scene::new().await;
+    scene.runs("golbat", |_| {});
+    let agents = scene.kelpie_home.join("agents");
+    crate::test::write_in(&agents, "_old.md", "---\nrole: implementer\n---\n");
+    crate::test::write_in(&agents, "_haiku.md", "no frontmatter\n");
+
+    let report = scene.report().await;
+
+    assert_eq!(
+        ok(&report, "agent files"),
+        "ignored, since their names start with `_`: _haiku.md, _old.md"
+    );
+    ok(&report, "golbat: implementers");
+}
