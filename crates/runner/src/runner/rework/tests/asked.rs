@@ -123,6 +123,46 @@ fn a_rework_held_by_its_labelled_account_leaves_the_ones_after_it_to_start() {
 }
 
 #[test]
+fn an_unreachable_board_starts_no_rework_asks_once_and_the_next_poll_that_reaches_it_starts() {
+    let rig = Rig::new("webapp");
+    rig.push_by_hand("kelpie/6", "work.txt");
+    rig.forge.open_pull_request(70, "kelpie/6", &[6]);
+    rig.forge.review(70, review());
+    rig.forge.label_pull_request(70, READY);
+    reviewed_71(&rig);
+    rig.forge.label_pull_request(71, READY);
+    rig.agent_board.unreachable();
+    let runner = running(&rig);
+
+    let why = "the agent board, which the dog keeps, cannot be reached";
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::BoardFailed {
+            reason: format!("cannot rework #70: {why}")
+        })
+    );
+
+    assert_eq!(rig.agent_board.asks().len(), 1, "the dog is asked once");
+    assert_eq!(
+        rig.ask(&runner, "status", None)["skipped"],
+        json!([{ "reason": "rework", "issue": "6", "pull_request": 70, "error": why }])
+    );
+    assert!(runner.lock().unwrap().state.work_items.is_empty());
+    assert_eq!(rig.forge.pull_request_labels(70), [READY]);
+    assert_eq!(rig.forge.pull_request_labels(71), [READY]);
+
+    rig.agent_board.ranks_first(&["sonnet-high"]);
+    rig.next_look();
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Reworked {
+            pull_request: 70,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn a_review_requesting_changes_starts_a_rework_once() {
     let rig = Rig::new("reactmap");
     reviewed_71(&rig);

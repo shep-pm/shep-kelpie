@@ -12,7 +12,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::Runner;
-use super::add::{AddError, Opening, Ranked};
+use super::add::{AddError, Opening, Ranked, Unpicked};
 use super::pace::{Passed, Started};
 use super::report::{Begin, ReworkBy, StepReport};
 use super::trigger::{self, issue_list};
@@ -254,6 +254,11 @@ impl Runner {
                     by,
                 }),
                 Err(ReworkError::State(e)) => return Err(e),
+                // A dog out of reach answers no pull request, so this poll asks for none after it.
+                Err(e @ ReworkError::Agent(AddError::Unpicked(Unpicked::Unreachable))) => {
+                    skipped.push(skip(ticket, number, e));
+                    break;
+                }
                 Err(e) if e.settled() => match self.refuse_rework(number, labelled, review, &e)? {
                     Ok(begin) => begin,
                     Err(e) => {

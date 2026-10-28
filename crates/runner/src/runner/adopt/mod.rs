@@ -12,7 +12,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::Runner;
-use super::add::AddError;
+use super::add::{AddError, Unpicked};
 use super::pace::{Passed, Started};
 use super::report::{Begin, StepReport};
 use super::rework::review_text;
@@ -281,6 +281,11 @@ impl Runner {
                 }
                 // It waits for the work item on its issue to end.
                 Err(AdoptError::InFlight(_)) => continue,
+                // A dog out of reach answers no pull request, so this poll asks for none after it.
+                Err(e @ AdoptError::Agent(AddError::Unpicked(Unpicked::Unreachable))) => {
+                    skipped.push(self.adopt_failed(number, &e)?);
+                    break;
+                }
                 Err(e) if e.settled() => match self.refuse_adoption(number, &e)? {
                     Ok(begin) => begin,
                     Err(e) => {
