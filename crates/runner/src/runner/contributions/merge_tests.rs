@@ -287,6 +287,71 @@ fn a_maintainers_thumbs_down_answers_no_and_posts_nothing() {
     assert_eq!(contribution(&rig, &runner)["head"], head);
 }
 
+const DECISION: &str =
+    r#"{"kind": "decision", "question": "Will you merge this once it is rebased?"}"#;
+
+// `reviewed`, where the contributor then asks for a decision: the question
+// ruling holds the pull request's id, and the clean pass's note is up
+fn asked_after_the_pass() -> (Rig, Mutex<Runner>, String) {
+    let (rig, runner, head) = reviewed();
+    rig.claude
+        .script_for(Role::Representative, [Scripted::Say(DECISION)]);
+    rig.writes_on(30, "newcomer", "Will you merge this?");
+    for _ in 0..3 {
+        poll(&rig, &runner);
+    }
+    let waiting = rulings(&rig, &runner);
+    assert_eq!(waiting.len(), 1, "{waiting:?}");
+    assert_eq!(waiting[0]["kind"]["reason"], "question");
+    assert!(!contribution(&rig, &runner)["deciding"].is_null());
+    (rig, runner, head)
+}
+
+#[test]
+fn a_maintainers_thumbs_up_on_the_note_merges_the_head_while_a_question_waits() {
+    let (rig, runner, head) = asked_after_the_pass();
+    let note = note_of(&rig, &runner);
+
+    rig.forge.threads.thumbs(note, MAINTAINER, true);
+    poll(&rig, &runner);
+    poll(&rig, &runner);
+
+    assert_eq!(rig.forge.merges(), [(30, head)]);
+    assert_eq!(rulings(&rig, &runner), Vec::<Value>::new());
+    assert!(contribution(&rig, &runner)["deciding"].is_null());
+}
+
+#[test]
+fn a_maintainers_thumbs_down_on_the_note_answers_no_while_a_question_waits() {
+    let (rig, runner, _) = asked_after_the_pass();
+    let note = note_of(&rig, &runner);
+    let posted = comments(&rig).len();
+
+    rig.forge.threads.thumbs(note, MAINTAINER, false);
+    poll(&rig, &runner);
+    poll(&rig, &runner);
+
+    assert_eq!(rig.forge.merges(), []);
+    assert_eq!(rulings(&rig, &runner), Vec::<Value>::new());
+    assert!(contribution(&rig, &runner)["deciding"].is_null());
+    assert_eq!(comments(&rig).len(), posted, "nothing is posted for a no");
+}
+
+#[test]
+fn a_thumbs_up_from_the_contributor_while_a_question_waits_answers_nothing() {
+    let (rig, runner, _) = asked_after_the_pass();
+    let note = note_of(&rig, &runner);
+
+    rig.forge.threads.thumbs(note, "newcomer", true);
+    poll(&rig, &runner);
+    poll(&rig, &runner);
+
+    assert_eq!(rig.forge.merges(), []);
+    let waiting = rulings(&rig, &runner);
+    assert_eq!(waiting.len(), 1, "{waiting:?}");
+    assert_eq!(waiting[0]["kind"]["reason"], "question");
+}
+
 #[test]
 fn a_thumbs_down_wins_over_a_thumbs_up() {
     let (rig, runner, _) = ruled_on();
