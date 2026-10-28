@@ -35,7 +35,7 @@ use crate::lease::Epoch;
 use crate::lease::saved::BookFile;
 use crate::lease::wire::GRANT;
 use crate::ports::{Forge, Leases, Ports, Revalidated, Routed, SystemClock, Tickets};
-use crate::runner::{ACTIONS, Pass, Posted, Runner, advance, answer, wakes};
+use crate::runner::{ACTIONS, Handles, Pass, Posted, Runner, advance, answer, serve_socket, wakes};
 use crate::settings::{Harness, Settings};
 use crate::shep_home;
 use crate::shepherd::{self, Dial, Socket};
@@ -338,12 +338,25 @@ fn serve(project: &str, arrival: Option<Arrival<Carry>>) -> Result<(), Exit> {
     shepherd.on_shutdown(move || {
         let _ = stop.send(Stop::Shutdown);
     });
+    // The verbs ask here first and fall back to `shep trigger`, so a runner
+    // that cannot open its socket says so and goes on.
+    let socket = serve_socket(
+        &paths.socket,
+        Handles {
+            runner: Arc::clone(&runner),
+            postings: Arc::clone(&postings),
+            wake: wake.clone(),
+        },
+    );
     shepherd.ready().map_err(|e| e.to_string())?;
 
     // Only a shutdown message or a dead loop thread ends the wait. Each call
     // gets SIGTERM, shep's stop ends what is left once the runner exits, and
     // each work item's turn resumes from its session on restart.
     let why = stopped.recv();
+    if let Some(socket) = socket {
+        socket.end();
+    }
     let let_go = worker.stop(JOIN_BOUND, || stop_calls(&base, &reviewer));
     // Their ends will not be heard now, and a pass that did not let go
     // still holds the runner's lock, which this needs none of.

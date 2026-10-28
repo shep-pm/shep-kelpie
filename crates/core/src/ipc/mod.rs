@@ -96,6 +96,69 @@ fn pipe_name(socket: &Path) -> String {
     format!(r"\\.\pipe\kelpie-{stem}-{digest}")
 }
 
+/// Binds `socket` for the maintainer's user alone, through `bind`
+///
+/// On Unix a dead process's socket is replaced and a live one's is not. `bind`
+/// is given a private name beside `socket`, cut to 0600 and then renamed into
+/// place, so no client reaches a half-made socket. On Windows it is given
+/// `socket` itself, a pipe only its creator and administrators may write.
+/// `rival` names what else may answer there (`dog`, `runner`), for the message.
+///
+/// # Errors
+///
+/// A message when the path is too long, taken by a live process or something
+/// else, or cannot be bound.
+pub fn open_owner_only<L>(
+    socket: &Path,
+    rival: &str,
+    bind: impl FnOnce(&Path) -> io::Result<L>,
+) -> Result<L, String> {
+    #[cfg(unix)]
+    {
+        open_socket(socket, rival, bind)
+    }
+    #[cfg(windows)]
+    {
+        bind(socket).map_err(|e| match e.kind() {
+            io::ErrorKind::PermissionDenied => {
+                format!("another {rival} answers at {}", socket.display())
+            }
+            _ => format!("cannot open {}: {e}", socket.display()),
+        })
+    }
+}
+
+#[cfg(unix)]
+fn open_socket<L>(
+    socket: &Path,
+    rival: &str,
+    bind: impl FnOnce(&Path) -> io::Result<L>,
+) -> Result<L, String> {
+    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+
+    let private = socket.with_extension(format!("{}.new", std::process::id()));
+    crate::home::socket_fits(&private)?;
+    match std::fs::symlink_metadata(socket) {
+        Ok(meta) if meta.file_type().is_socket() => {
+            if blocking::Stream::connect(socket).is_ok() {
+                return Err(format!("another {rival} answers at {}", socket.display()));
+            }
+        }
+        Ok(_) => return Err(format!("{} is not a socket", socket.display())),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("cannot read {}: {e}", socket.display())),
+    }
+    let _ = std::fs::remove_file(&private);
+    let listener = bind(&private).map_err(|e| format!("cannot open {}: {e}", private.display()))?;
+    let placed = std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o600))
+        .and_then(|()| std::fs::rename(&private, socket));
+    if let Err(e) = placed {
+        let _ = std::fs::remove_file(&private);
+        return Err(format!("cannot open {}: {e}", socket.display()));
+    }
+    Ok(listener)
+}
+
 /// Connects to the endpoint `socket` names
 ///
 /// # Errors

@@ -48,50 +48,7 @@ type Waiters = Arc<Mutex<HashMap<Ticket, oneshot::Sender<()>>>>;
 /// A message when the path is too long, taken by a live dog or something
 /// else, or cannot be bound.
 pub fn open(socket: &Path) -> Result<Listener, String> {
-    #[cfg(unix)]
-    {
-        open_socket(socket)
-    }
-    #[cfg(windows)]
-    {
-        Listener::bind(socket).map_err(|e| match e.kind() {
-            std::io::ErrorKind::PermissionDenied => {
-                format!("another dog answers at {}", socket.display())
-            }
-            _ => format!("cannot open {}: {e}", socket.display()),
-        })
-    }
-}
-
-#[cfg(unix)]
-fn open_socket(socket: &Path) -> Result<Listener, String> {
-    use std::io;
-    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
-
-    use crate::ipc::blocking;
-
-    let private = socket.with_extension(format!("{}.new", std::process::id()));
-    crate::home::socket_fits(&private)?;
-    match std::fs::symlink_metadata(socket) {
-        Ok(meta) if meta.file_type().is_socket() => {
-            if blocking::Stream::connect(socket).is_ok() {
-                return Err(format!("another dog answers at {}", socket.display()));
-            }
-        }
-        Ok(_) => return Err(format!("{} is not a socket", socket.display())),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("cannot read {}: {e}", socket.display())),
-    }
-    let _ = std::fs::remove_file(&private);
-    let listener =
-        Listener::bind(&private).map_err(|e| format!("cannot open {}: {e}", private.display()))?;
-    let placed = std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o600))
-        .and_then(|()| std::fs::rename(&private, socket));
-    if let Err(e) = placed {
-        let _ = std::fs::remove_file(&private);
-        return Err(format!("cannot open {}: {e}", socket.display()));
-    }
-    Ok(listener)
+    crate::ipc::open_owner_only(socket, "dog", Listener::bind)
 }
 
 /// Answers every command that knocks at `listener`, for as long as it runs,

@@ -39,3 +39,5 @@ The decision:
 - Scripts that scan `src/` scan every member's `src/` too, and a test that names a type above its crate moves to the crate that holds both.
 
 ADR 0017 adds `protocol` to the map, between `core` and `runner`: it holds the runner's typed requests, answers and owned status, and names only `core`, serde and serde_json.
+
+ADR 0017 also adds `client`, beside `runner`: it speaks the runner's socket and names only `protocol` and `core`. The root uses it.

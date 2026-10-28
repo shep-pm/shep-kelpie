@@ -284,7 +284,9 @@ async fn status_names_the_build_of_the_kelpie_the_dog_runs() {
     shepherd.says("koji", &[r#"{"work_items":[],"commit":"1f2e3a4"}"#]);
 
     let client = client(&shepherd).await;
-    let lines = in_time(status(&client, Format::Plain)).await.unwrap();
+    let lines = in_time(status(&reach(), &client, Format::Plain))
+        .await
+        .unwrap();
 
     assert!(
         lines.contains(&"  build: 1f2e3a4, not the installed 9c8b7a6".to_owned()),
@@ -415,7 +417,9 @@ async fn a_plain_status_keeps_a_project_that_is_not_running_to_a_line() {
     shepherd.holds_dog("kelpie", true);
     let client = client(&shepherd).await;
     assert_eq!(
-        in_time(status(&client, Format::Plain)).await.unwrap(),
+        in_time(status(&reach(), &client, Format::Plain))
+            .await
+            .unwrap(),
         ["koji: not running"]
     );
 }

@@ -185,3 +185,21 @@ fn a_blocking_peer_that_hangs_up_is_read_as_the_end() {
     drop(far);
     assert_eq!((&near).read(&mut [0u8; 1]).unwrap(), 0);
 }
+
+#[test]
+fn a_runner_socket_is_pinned_to_one_pipe_name() {
+    let socket = crate::home::socket_of(Path::new(r"C:\Users\me\.kelpie\shep\kelpie"), "koji");
+    let pipe = pipe_name(&socket);
+    assert!(pipe.starts_with(r"\\.\pipe\kelpie-koji-"), "{pipe}");
+    assert_eq!(
+        pipe,
+        pipe_name(Path::new(r"c:/users/me/.kelpie/shep/kelpie/RUN/koji.sock"))
+    );
+    assert_ne!(
+        pipe,
+        pipe_name(&crate::home::socket_of(
+            Path::new(r"C:\Users\me\.kelpie\shep\kelpie"),
+            "other"
+        ))
+    );
+}

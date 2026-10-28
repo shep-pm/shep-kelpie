@@ -358,20 +358,40 @@ pub fn answer(
     action: &str,
     params: Option<&str>,
 ) -> String {
-    let request = match read(action, params.map(str::trim).filter(|p| !p.is_empty())) {
-        Ok(request) => request,
-        Err(e) => return body(&Reply::Refused(e)),
-    };
+    match request_of(action, params) {
+        Ok(request) => body(&answer_request(runner, posted, &request)),
+        Err(e) => body(&Reply::Refused(e)),
+    }
+}
+
+/// The request `shep trigger <action> [params]` reads as
+///
+/// Blank params count as none. The socket's verbs read their text through
+/// this too, so a request typed and one sent as text cannot disagree.
+///
+/// # Errors
+///
+/// The text the runner refuses with: an unknown action, or params the action
+/// does not take.
+pub fn request_of(action: &str, params: Option<&str>) -> Result<Request, String> {
+    read(action, params.map(str::trim).filter(|p| !p.is_empty()))
+}
+
+/// Answers `request` of `runner`, taking its lock unless a pass holds it and the
+/// posted copy has the answer
+///
+/// What both `shep trigger` and the runner's socket call, so the two cannot drift.
+pub fn answer_request(runner: &Mutex<Runner>, posted: &Posted, request: &Request) -> Reply {
     let held = try_lock(runner);
     if held.is_none()
-        && let Some(reply) = from_posted(posted, &request)
+        && let Some(reply) = from_posted(posted, request)
     {
-        return body(&reply);
+        return reply;
     }
     // Memory changes only after a save succeeds, so a panicked holder
     // cannot have left the runner half changed.
     let mut runner = held.unwrap_or_else(|| lock(runner));
-    body(&handle(&mut runner, posted, &request))
+    handle(&mut runner, posted, request)
 }
 
 /// The body a reply answers with
@@ -381,9 +401,9 @@ fn body(reply: &Reply) -> String {
 
 /// Answers `request` of `runner`, whose lock the caller holds
 ///
-/// `shep trigger` gets this through [`answer`]; the runner's own socket gets it
-/// directly, so both paths answer the same way.
-pub(super) fn handle(runner: &mut Runner, posted: &Posted, request: &Request) -> Reply {
+/// [`answer_request`] takes the lock and calls this, for `shep trigger` and the
+/// runner's socket alike.
+fn handle(runner: &mut Runner, posted: &Posted, request: &Request) -> Reply {
     let totals_of = match request {
         Request::Timings(last) => Some(*last),
         _ => None,
@@ -892,4 +912,4 @@ fn try_lock(runner: &Mutex<Runner>) -> Option<Held<'_>> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(in crate::runner) mod tests;

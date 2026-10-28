@@ -13,6 +13,7 @@ mod finish;
 mod late;
 mod pause;
 mod plain;
+mod socket;
 
 use pause::{IN_TOOL_7, paused};
 
@@ -39,6 +40,11 @@ fn runner(shepherd: &FakeShepherd, name: &str, root: &Path, online: bool) {
     let mut table = crate::test::project_table(EXAMPLE);
     table["git"]["checkout"] = Value::String(root.display().to_string());
     shepherd.holds(launch(shepherd).runner(&project(name), table), online);
+}
+
+// A reach to no socket, so a verb uses `shep trigger` and says nothing about it
+fn reach() -> Reach {
+    Reach::saying(Path::new("/no/kelpie"), |_| {})
 }
 
 async fn client(shepherd: &FakeShepherd) -> Box<dyn Connection> {
@@ -412,6 +418,7 @@ async fn a_trigger_goes_to_its_project_with_its_params() {
     runner(&shepherd, "reactmap", Path::new("/src/reactmap"), false);
     let client = client(&shepherd).await;
     let sent = in_time(send(
+        &reach(),
         &client,
         &project("koji"),
         "rule",
@@ -433,9 +440,9 @@ async fn a_trigger_goes_to_its_project_with_its_params() {
             params: Some("14 no fix it".into()),
         }]
     );
-    let err = in_time(send(&client, &project("reactmap"), "gate", None)).await;
+    let err = in_time(send(&reach(), &client, &project("reactmap"), "gate", None)).await;
     assert_eq!(err, Err("reactmap's runner is not running".into()));
-    let err = in_time(send(&client, &project("nope"), "drop", None)).await;
+    let err = in_time(send(&reach(), &client, &project("nope"), "drop", None)).await;
     assert_eq!(
         err,
         Err("no kelpie runner named nope in this flock: `shep kelpie add` sets one up".into())
@@ -459,7 +466,9 @@ async fn status_reports_every_project() {
     runner(&shepherd, "reactmap", Path::new("/src/reactmap"), false);
     shepherd.holds_dog("kelpie", true);
     let client = client(&shepherd).await;
-    let lines = in_time(status(&client, Format::Json)).await.unwrap();
+    let lines = in_time(status(&reach(), &client, Format::Json))
+        .await
+        .unwrap();
     assert_eq!(
         lines,
         [
@@ -477,7 +486,9 @@ async fn status_marks_a_draining_runner() {
     shepherd.says("koji", &[draining]);
     let client = client(&shepherd).await;
     assert_eq!(
-        in_time(status(&client, Format::Json)).await.unwrap(),
+        in_time(status(&reach(), &client, Format::Json))
+            .await
+            .unwrap(),
         [format!("koji (draining): {draining}")]
     );
 }
@@ -488,7 +499,14 @@ async fn a_tell_the_runner_never_answered_is_delivered_and_not_to_be_repeated() 
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
     shepherd.replies("koji", &[None]);
     let client = client(&shepherd).await;
-    let told = in_time(tell(&client, &project("koji"), "hold #4", Format::Plain)).await;
+    let told = in_time(tell(
+        &reach(),
+        &client,
+        &project("koji"),
+        "hold #4",
+        Format::Plain,
+    ))
+    .await;
     let lines = told.expect("a note that arrived is no error to retry");
     let [line] = lines.as_slice() else {
         panic!("{lines:?}")
@@ -506,7 +524,14 @@ async fn a_tell_the_runner_never_answered_prints_an_object_with_json() {
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
     shepherd.replies("koji", &[None]);
     let client = client(&shepherd).await;
-    let told = in_time(tell(&client, &project("koji"), "hold #4", Format::Json)).await;
+    let told = in_time(tell(
+        &reach(),
+        &client,
+        &project("koji"),
+        "hold #4",
+        Format::Json,
+    ))
+    .await;
     let [line] = told.unwrap().try_into().unwrap();
     let object: Value = serde_json::from_str(&line).unwrap();
     assert_eq!(object["sheep"], "koji");
@@ -519,7 +544,14 @@ async fn a_tell_the_runner_answered_says_it_was_told() {
     let shepherd = FakeShepherd::new();
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
     let client = client(&shepherd).await;
-    let told = in_time(tell(&client, &project("koji"), "hold #4", Format::Plain)).await;
+    let told = in_time(tell(
+        &reach(),
+        &client,
+        &project("koji"),
+        "hold #4",
+        Format::Plain,
+    ))
+    .await;
     assert_eq!(
         told,
         Ok(vec![
@@ -534,7 +566,14 @@ async fn a_runner_that_refuses_a_tell_is_its_error() {
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
     shepherd.says("koji", &[r#"{"error":"koji has no project manager"}"#]);
     let client = client(&shepherd).await;
-    let told = in_time(tell(&client, &project("koji"), "hold #4", Format::Plain)).await;
+    let told = in_time(tell(
+        &reach(),
+        &client,
+        &project("koji"),
+        "hold #4",
+        Format::Plain,
+    ))
+    .await;
     assert_eq!(told, Err("koji has no project manager".into()));
 }
 
@@ -545,12 +584,14 @@ async fn a_runner_still_taking_its_actions_is_starting() {
     let client = client(&shepherd).await;
     shepherd.just_started("koji");
     assert_eq!(
-        in_time(status(&client, Format::Json)).await.unwrap(),
+        in_time(status(&reach(), &client, Format::Json))
+            .await
+            .unwrap(),
         ["koji: starting"]
     );
     // Each answer from a runner still starting uses the flag up.
     shepherd.just_started("koji");
-    let err = in_time(send(&client, &project("koji"), "drop", None))
+    let err = in_time(send(&reach(), &client, &project("koji"), "drop", None))
         .await
         .unwrap_err();
     assert_eq!(err, "koji's runner is starting: ask again in a moment");

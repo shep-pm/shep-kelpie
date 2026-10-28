@@ -5,6 +5,7 @@ members = ["crates/*"]
 default-members = [
     ".",
     "crates/adapters",
+    "crates/client",
     "crates/core",
     "crates/disk",
     "crates/dog",
@@ -39,6 +40,7 @@ self_named_module_files = "deny"
 # The members below the root. A member's own manifest names none of them,
 # except `test_support`, which every other member names as a dev-dependency.
 shep-kelpie-adapters = { path = "crates/adapters" }
+shep-kelpie-client = { path = "crates/client" }
 shep-kelpie-core = { path = "crates/core" }
 shep-kelpie-disk = { path = "crates/disk" }
 shep-kelpie-dog = { path = "crates/dog" }
@@ -109,11 +111,13 @@ workspace = true
 
 [dependencies]
 shep-kelpie-adapters.workspace = true
+shep-kelpie-client.workspace = true
 shep-kelpie-core.workspace = true
 shep-kelpie-disk.workspace = true
 shep-kelpie-dog.workspace = true
 shep-kelpie-facts.workspace = true
 shep-kelpie-process.workspace = true
+shep-kelpie-protocol.workspace = true
 shep-kelpie-runner.workspace = true
 shep-kelpie-tree.workspace = true
 shep-kelpie-trim.workspace = true

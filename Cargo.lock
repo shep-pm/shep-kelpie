@@ -1339,11 +1339,13 @@ dependencies = [
  "shep-client",
  "shep-handover",
  "shep-kelpie-adapters",
+ "shep-kelpie-client",
  "shep-kelpie-core",
  "shep-kelpie-disk",
  "shep-kelpie-dog",
  "shep-kelpie-facts",
  "shep-kelpie-process",
+ "shep-kelpie-protocol",
  "shep-kelpie-runner",
  "shep-kelpie-test-support",
  "shep-kelpie-tree",
@@ -1377,6 +1379,18 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
+name = "shep-kelpie-client"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "shep-kelpie-core",
+ "shep-kelpie-protocol",
+ "shep-kelpie-test-support",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

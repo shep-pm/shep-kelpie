@@ -7,7 +7,7 @@ use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use super::control::Format;
+use super::control::{Format, Reach};
 use super::glob::Named;
 use super::{Checkout, Launch, add, attach, control, help, pm, rule, set, ticket, usage, watch};
 use crate::adapters::Gh;
@@ -245,15 +245,16 @@ async fn run(
             _ => Err(USAGE.to_owned()),
         };
     }
+    let reach = Reach::new(&kelpie_home);
     let send = async |action: &str, params: Option<&str>| {
-        control::send(&client, &project().await?, action, params).await
+        control::send(&reach, &client, &project().await?, action, params).await
     };
     // The runner's JSON with `--json`, else its answer to `action` as plain lines.
     let print = async |action: &str, params: Option<&str>| {
         // The project is found before the action is sent, so a lookup that fails
         // cannot follow an action the runner already took.
         let name = project().await?;
-        let answer = control::send(&client, &name, action, params).await?;
+        let answer = control::send(&reach, &client, &name, action, params).await?;
         Ok(match (json, answer.as_slice()) {
             (false, [body]) => control::plain_reply(name.as_str(), action, params, body),
             _ => answer,
@@ -263,7 +264,7 @@ async fn run(
     // An action that changes the runner: one it takes late is no failure.
     let change = async |action: &str, params: Option<&str>| {
         let name = project().await?;
-        control::change(&client, &name, action, params, format).await
+        control::change(&reach, &client, &name, action, params, format).await
     };
     // `start`, `pause`, `finish` and `add` take their project in place of `-p` too.
     let positional = |name: Option<&&str>| match (name, &named) {
@@ -342,7 +343,7 @@ async fn run(
                 }
             }
         }
-        ("status", []) if named.is_none() => control::status(&client, format).await,
+        ("status", []) if named.is_none() => control::status(&reach, &client, format).await,
         ("status", []) => {
             let answer = send("status", None).await?;
             Ok(match (json, answer.as_slice()) {
@@ -370,13 +371,13 @@ async fn run(
         ("attach", [text]) => {
             let ticket = text.parse::<TicketId>();
             let ticket = ticket.map_err(|_| format!("{text:?} is not a ticket id"))?;
-            attach::attach(&client, &project().await?, ticket).await
+            attach::attach(&reach, &client, &project().await?, ticket).await
         }
         ("tell", [_, ..]) => {
             let project = project().await?;
-            control::tell(&client, &project, &args.join(" "), format).await
+            control::tell(&reach, &client, &project, &args.join(" "), format).await
         }
-        ("pm", []) => pm::pm(&client, &project().await?).await,
+        ("pm", []) => pm::pm(&reach, &client, &project().await?).await,
         ("get", [] | [_]) => set::get(&client, &project().await?, args.first().copied()).await,
         ("set", [key, value]) => {
             let name = project().await?;
@@ -468,7 +469,14 @@ async fn answer(
         .await
         .map_err(|e| e.describe(shep_home))?;
     let answers = ProjectPaths::under(kelpie_home, shep_home, &project).answers;
-    control::rule(&client, &project, &params, &answers).await
+    control::rule(
+        &Reach::new(kelpie_home),
+        &client,
+        &project,
+        &params,
+        &answers,
+    )
+    .await
 }
 
 /// `-p <project>`, `--project <project>` or `--project=<project>` in `args`, and the rest
