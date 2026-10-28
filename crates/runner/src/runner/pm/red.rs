@@ -108,16 +108,6 @@ impl Runner {
         Ok(Ok((said, settled)))
     }
 
-    /// Why the project manager may not start nothing now: a workflow is red on
-    /// `main` after its rerun, and neither a fix nor a question settles it
-    pub(super) fn unsettled_red(&self) -> Option<String> {
-        let red = (self.state.red.iter()).find(|r| r.again && r.handled.is_none())?;
-        Some(format!(
-            "{} is red on main after a rerun and has no fix work item or question yet",
-            red.workflow
-        ))
-    }
-
     // The wake for each head that stayed red after its rerun and has no call yet
     pub(super) fn unsettled_reds(&self) -> Vec<Wake> {
         (self.state.red.iter())

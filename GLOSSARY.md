@@ -55,7 +55,8 @@ down, the board's rule picks and stuck items wait on their rulings.
 _Avoid_: lead, control room, control center
 
 **Pick**:
-The PM's choice of which ready issue the next free slot takes, or none.
+The PM's choice of which ready issue the next free slot takes. With none named,
+the board's rule picks.
 
 **Hold**:
 The ready issues the PM keeps waiting, each until the open work item it names

@@ -128,7 +128,7 @@ What the digest counts:
 
 - A work item's section holds only its own run. Its entries start when the item started and end at its finish, so an issue that ran twice in the batch shows as two numbered runs, each with its own wakes, rounds and rulings.
 - A wake counts for a work item when it woke for it, picked it or acted on it. One that only names the item in its list of what it holds back counts for none of it.
-- A wake whose answer was `starts nothing now` counts as one that changed nothing, in the item's section and in the batch's totals.
+- A wake whose answer did nothing but hold issues back, or named no action at all (a pick of null names none), counts as one that changed nothing, in the item's section and in the batch's totals.
 - Review rounds are counted as rounds that read the pull request. A round that read it and found nothing is listed with 0 findings, and a reviewer the pass went without is listed too, numbered, with its reason.
 - A project's first retro has no earlier retro to start from, so its totals cover the batch's own span, from its first work item's start.
 - A call whose harness reported no cost shows as `local, unpriced`, and a turn ended at its ceiling as `timed out, usage not read`. Neither shows as `$0.00`.

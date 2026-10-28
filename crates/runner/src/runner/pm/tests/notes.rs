@@ -2,7 +2,7 @@
 //! wake, the standing notes it writes, and what a wake says of both
 
 use super::{PICK_12, answered, pm_seen, step_until, with_pm};
-use crate::ports::{AgentError, Session};
+use crate::ports::{AgentError, Role, Session};
 use crate::runner::flight::advance;
 use crate::runner::pm::notes::{NOTES_MAX, PM_ARCHIVE, PM_STANDING, STANDING_MAX};
 use crate::runner::{Pass, StepReport, step};
@@ -113,7 +113,8 @@ fn the_first_roll_forces_a_full_prompt_that_sends_it_to_the_archive() {
     let (rig, runner) = with_pm("koji");
     rig.forge.list_ready(9, false);
     rig.forge.list_ready(12, false);
-    rig.claude.script([Scripted::Say("{\"pick\": null}")]);
+    rig.claude
+        .script_for(Role::Pm, [Scripted::Say("{\"pick\": null}")]);
     answered(step(&runner).unwrap());
     assert!(
         !rig.paths().pm.join(PM_STANDING).exists(),
@@ -123,11 +124,8 @@ fn the_first_roll_forces_a_full_prompt_that_sends_it_to_the_archive() {
     std::fs::write(rig.paths().pm.join(crate::ports::PM_NOTES), log_of(40)).unwrap();
     rig.ask(&runner, "tell", Some("Release is out"));
     let down = AgentError::Failed(Harness::ClaudeCode, "overloaded".into());
-    rig.claude.script([Scripted::Fail(down)]);
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::PmFailed { .. })
-    ));
+    rig.claude.script_for(Role::Pm, [Scripted::Fail(down)]);
+    step_until(&runner, |r| matches!(r, StepReport::PmFailed { .. }));
 
     let [first, second] = pm_seen(&rig).try_into().unwrap();
     assert!(matches!(second.call.session, Session::Resume(_)));
@@ -160,13 +158,16 @@ fn a_standing_answer_replaces_the_file_and_null_leaves_it() {
     let (rig, runner) = with_pm("koji");
     rig.forge.list_ready(9, false);
     rig.forge.list_ready(12, false);
-    rig.claude.script([
-        Scripted::Say(
-            "{\"pick\": null, \"standing\": \"Hold #12 until the release.\\nNever merge a \
-             head with CI red.\"}",
-        ),
-        Scripted::Say("{\"pick\": null, \"standing\": null}"),
-    ]);
+    rig.claude.script_for(
+        Role::Pm,
+        [
+            Scripted::Say(
+                "{\"pick\": null, \"standing\": \"Hold #12 until the release.\\nNever merge a \
+                 head with CI red.\"}",
+            ),
+            Scripted::Say("{\"pick\": null, \"standing\": null}"),
+        ],
+    );
     let (_, acted, dropped) = answered(step(&runner).unwrap());
     assert_eq!(dropped, Vec::<String>::new());
     assert!(
@@ -179,7 +180,8 @@ fn a_standing_answer_replaces_the_file_and_null_leaves_it() {
     assert_eq!(read(&rig, PM_STANDING), held, "the file ends a line");
 
     rig.ask(&runner, "tell", Some("Release is out"));
-    let (_, acted, _) = answered(step(&runner).unwrap());
+    let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    let (_, acted, _) = answered(Some(report));
     assert!(!acted.iter().any(|a| a.contains("standing")), "{acted:?}");
     let standing = read(&rig, PM_STANDING);
     assert!(

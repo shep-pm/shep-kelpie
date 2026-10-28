@@ -241,8 +241,7 @@ pub enum Skip {
         /// Why, in words
         why: String,
     },
-    /// The project manager is deciding, or said to start nothing, so this
-    /// pick waits
+    /// The project manager is deciding, so this pick waits
     PmWaits {
         /// The ticket
         issue: TicketId,

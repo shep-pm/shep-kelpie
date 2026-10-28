@@ -25,8 +25,9 @@ pub(super) const WORDS: usize = 300;
 
 impl Runner {
     /// Acts on `answer` as far as the board allows, and returns what it
-    /// did and what it dropped, each in words. `picking` is how many slots
-    /// were free when the wake was for them, and so how many picks it takes.
+    /// did and what it dropped, each in words. `picking` is how many issues
+    /// and then how many slots the wake offered, when it was for a pick, and
+    /// so how many picks it takes.
     ///
     /// # Errors
     ///
@@ -34,13 +35,9 @@ impl Runner {
     pub(super) fn act(
         &mut self,
         answer: &mut Answer,
-        picking: Option<usize>,
+        picking: Option<(usize, usize)>,
     ) -> Result<(Vec<String>, Vec<String>), StateError> {
         let ready = self.board_ready();
-        // Starting nothing lasts until its next wake, which says again.
-        if matches!(self.pm.pick, Some(Pick::Nothing(_))) {
-            self.pm.pick = None;
-        }
         // An answer with no `hold` leaves the holds standing; one with a list replaces them.
         let mut held: Vec<Held> = match &answer.hold {
             Some(_) => Vec::new(),
@@ -67,29 +64,24 @@ impl Runner {
         }
         let mut acted = Vec::new();
         // A workflow red on `main` is settled first: a fix work item it opens
-        // is first on the board, so a wake that picks nothing starts it.
-        let mut fixed = false;
+        // is first on the board, so the rule starts it when no pick is named.
         for red in &answer.red {
             match self.settle_red(red)? {
                 Ok((done, settled)) => {
                     acted.push(done);
-                    match settled {
-                        Settled::Fixed(_) => fixed = true,
-                        Settled::Asked(message) => {
-                            let reply = answer.reply.take();
-                            answer.reply = Some(match reply {
-                                Some(reply) => format!("{reply}\n\n{message}"),
-                                None => message,
-                            });
-                        }
+                    if let Settled::Asked(message) = settled {
+                        let reply = answer.reply.take();
+                        answer.reply = Some(match reply {
+                            Some(reply) => format!("{reply}\n\n{message}"),
+                            None => message,
+                        });
                     }
                 }
                 Err(why) => dropped.push(why),
             }
         }
-        let now = self.ports.clock.now();
         // A wake for free slots takes a pick for each; any other takes one.
-        let slots = picking.unwrap_or(1);
+        let (offered, slots) = picking.unwrap_or((1, 1));
         let implementers = self.implementer_files();
         let mut picks: Vec<Picked> = Vec::new();
         for picked in &answer.picks {
@@ -116,20 +108,10 @@ impl Runner {
             let named: Vec<String> = picks.iter().map(|p| ticket_ref(p.issue)).collect();
             acted.push(format!("picked {}", named.join(", ")));
             self.pm.pick = Some(Pick::Issues(picks));
-        } else if picking.is_some() && (!answer.picks.is_empty() || fixed) {
-            self.pm.pick = Some(Pick::Rule);
         } else if picking.is_some() {
-            match self.unsettled_red() {
-                // Nothing started would leave a red main to the maintainer.
-                Some(why) => {
-                    self.pm.pick = Some(Pick::Rule);
-                    dropped.push(format!("starts nothing: {why}"));
-                }
-                None => {
-                    self.pm.pick = Some(Pick::Nothing(now));
-                    acted.push("starts nothing now".to_owned());
-                }
-            }
+            // A pick of null, or none the board could take, leaves the issues
+            // the wake offered to the rule.
+            self.pm.pick = Some(Pick::Rule(slots.min(offered)));
         }
         if picking.is_some() {
             self.pm.asked_pick = false;

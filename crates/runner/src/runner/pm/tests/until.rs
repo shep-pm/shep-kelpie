@@ -40,7 +40,7 @@ const UNTIL_7: &str = "{\"pick\": null, \"hold\": [{\"issue\": 9, \"until\": 7}]
 #[test]
 fn a_hold_until_one_item_survives_another_closing_and_ends_when_it_closes() {
     let (rig, runner, acted) = held_by(UNTIL_7);
-    assert_eq!(acted, ["starts nothing now", "holds #9 until #7"]);
+    assert_eq!(acted, ["holds #9 until #7"]);
     assert_eq!(held(&rig, &runner), json!([{ "issue": "9", "until": "7" }]));
 
     rig.ask(&runner, "drop", Some("8"));
@@ -90,7 +90,7 @@ fn a_later_answer_with_no_hold_leaves_the_hold_and_an_empty_list_clears_it() {
 #[test]
 fn a_hold_with_no_until_ends_at_any_close() {
     let (rig, runner, acted) = held_by("{\"pick\": null, \"hold\": [9]}");
-    assert_eq!(acted, ["starts nothing now", "holds #9"]);
+    assert_eq!(acted, ["holds #9"]);
     assert_eq!(held(&rig, &runner), json!([{ "issue": "9" }]));
 
     rig.ask(&runner, "drop", Some("8"));
@@ -114,7 +114,7 @@ fn a_hold_until_what_is_no_open_work_item_is_refused_with_a_note() {
     let (_, acted, dropped) = answered(Some(report));
 
     assert_eq!(dropped, ["hold #9: #12 is no open work item"]);
-    assert_eq!(acted, ["starts nothing now", "holds #12 until #7"]);
+    assert_eq!(acted, ["holds #12 until #7"]);
     assert_eq!(
         held(&rig, &runner),
         json!([{ "issue": "12", "until": "7" }])

@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use crate::board::briefing::{age, elapsed, ticket_ref};
 
-use super::{Pick, StuckState, Wake};
+use super::{StuckState, Wake};
 use crate::ports::Timestamp;
 use crate::runner::Runner;
 use crate::runner::voice::brief;
@@ -250,9 +250,6 @@ impl Runner {
         if !closed.is_empty() {
             // A hold waits on the work item it names, or on any when it names none.
             (self.pm.held).retain(|held| held.until.is_some_and(|until| !closed.contains(&until)));
-            if matches!(self.pm.pick, Some(Pick::Nothing(_))) {
-                self.pm.pick = None;
-            }
             let open = now.open_tickets();
             self.pm.after_end.retain(|ticket, _| open.contains(ticket));
             (self.pm.left_alone).retain(|ticket, _| open.contains(ticket));

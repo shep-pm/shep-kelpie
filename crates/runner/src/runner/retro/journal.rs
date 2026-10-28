@@ -275,7 +275,7 @@ fn acted_on(acted: &[String]) -> Vec<&String> {
 /// The `acted` line that names what the wake holds back
 const HOLDS: &str = "holds ";
 
-/// The `acted` line the project manager's answer has when it starts nothing
+/// The `acted` line that journals from before a pick of null meant no preference carry
 const STARTS_NOTHING: &str = "starts nothing now";
 
 /// Whether the wake whose answer `acted` is changed nothing it was asked about
