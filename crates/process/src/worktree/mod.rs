@@ -26,6 +26,8 @@ mod catch_up;
 mod changed;
 mod common;
 mod contribution;
+#[cfg(test)]
+mod line_endings_tests;
 mod push;
 mod ref_folders;
 mod remote;
@@ -218,7 +220,7 @@ pub fn prepare(
             if git(repo, ["rev-parse", "--verify", "--quiet", &start_ref])? != local {
                 return Err(WorktreeError::BranchTaken(branch.to_owned()));
             }
-            git(
+            checkout_git(
                 repo,
                 [
                     "worktree".as_ref(),
@@ -229,7 +231,7 @@ pub fn prepare(
                 ],
             )?;
         } else {
-            git(
+            checkout_git(
                 repo,
                 [
                     "worktree".as_ref(),
@@ -364,7 +366,7 @@ pub fn view(repo: &Path, view: &Path, base: &str) -> Result<(), WorktreeError> {
         view.as_os_str(),
         tip.as_ref(),
     ];
-    git(repo, args).map(drop)
+    checkout_git(repo, args).map(drop)
 }
 
 /// Removes the detached worktree [`view`] made, if it is there
@@ -678,11 +680,17 @@ pub fn trust_git_of(
 }
 
 // The config every trusted git runs with.
-const TRUSTED_CONFIG: [(&str, &str); 2] = [
+const TRUSTED_CONFIG: [(&str, &str); 4] = [
     // None of the hooks is kelpie's to run.
     ("core.hooksPath", "/dev/null"),
     // `status`, `diff`, `reset`, `merge` and `rebase` start this program.
     ("core.fsmonitor", "false"),
+    // Git for Windows' system config sets `true`, and a file checked out with
+    // CRs differs from its blob in the fence's byte comparison.
+    ("core.autocrlf", "false"),
+    // `text=auto` in `.gitattributes` converts on checkout to `core.eol`,
+    // which is CRLF on Windows by default.
+    ("core.eol", "lf"),
 ];
 
 // The worktree's own git dir and the repo's common one, once the own dir's
@@ -778,6 +786,18 @@ pub fn in_repo(cwd: &Path) -> Command {
         .arg("-C")
         .arg(cwd);
     git
+}
+
+// Runs `git args` in `cwd` as `git` does, with files checked out as committed:
+// the worktree has no git dirs of its own yet to carry the setting.
+fn checkout_git<I, S>(cwd: &Path, args: I) -> Result<String, WorktreeError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut git = in_repo(cwd);
+    git.args(["-c", "core.autocrlf=false", "-c", "core.eol=lf"]);
+    output(git, args)
 }
 
 /// Runs `git args` in `cwd`, with the git dir found there, and returns its trimmed stdout
