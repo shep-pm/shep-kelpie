@@ -277,18 +277,53 @@ fn tool_denies(tools: Tools, reach: &Reach) -> impl Iterator<Item = &'static str
 }
 
 // `//` roots a rule at `/`: a single `/` is taken from the settings file.
-// Claude Code's deny rules take no exceptions, so a folder holding one the
-// session may read is denied entry by entry around it. The sandbox still
-// denies the whole folder, entries made later included.
+// Deny rules take no exceptions, so a folder holding a readable one is denied
+// entry by entry around it, as given and with its links resolved, since Claude
+// Code matches the path its tool names. The sandbox still denies the folder whole.
 fn read_denials(no_read: &[String], read: &[PathBuf]) -> Vec<String> {
-    let holds_one = |dir: &Path| read.iter().any(|r| r.starts_with(dir));
+    let mut spelled: Vec<PathBuf> = Vec::new();
+    for path in read {
+        spelled.push(path.clone());
+        spelled.extend(path.canonicalize().ok().filter(|c| c != path));
+    }
+    let holds_one = |dir: &Path| spelled.iter().any(|r| r.starts_with(dir));
     no_read
         .iter()
         .flat_map(|rule| match rule.strip_suffix("/**").map(Path::new) {
-            Some(dir) if holds_one(dir) => around(dir, read),
+            Some(dir) if holds_one(dir) => around_in_both(dir, &spelled),
             _ => vec![rule.clone()],
         })
         .collect()
+}
+
+// `around` for `dir` as given and where its links lead, each entry given
+// first and then resolved where that differs.
+fn around_in_both(dir: &Path, read: &[PathBuf]) -> Vec<String> {
+    let given = around(dir, read);
+    let Some(resolved) = dir.canonicalize().ok().filter(|c| c != dir) else {
+        return given;
+    };
+    let mut rules: Vec<String> = Vec::new();
+    let mut add = |rule: Option<String>| {
+        if let Some(rule) = rule.filter(|r| !rules.contains(r)) {
+            rules.push(rule);
+        }
+    };
+    for rule in &given {
+        add(Some(rule.clone()));
+        add(respelled(rule, dir, &resolved));
+    }
+    for rule in around(&resolved, read) {
+        add(respelled(&rule, &resolved, dir));
+        add(Some(rule));
+    }
+    rules
+}
+
+// `rule` with the folder `from` it starts with named `to`.
+fn respelled(rule: &str, from: &Path, to: &Path) -> Option<String> {
+    let rest = rule.strip_prefix(from.to_str()?)?;
+    Some(format!("{}{rest}", to.display()))
 }
 
 // A rule for each entry of `dir` that is not, and holds none of, `read`.
@@ -504,15 +539,58 @@ mod tests {
 
         let rules = read_denials(&no_read, &[own]);
 
-        let at = |p: &str| shep.join(p).display().to_string();
-        let expected = [
-            at("dogs.toml"),
-            format!("{}/**", at("kelpie/koji/worktrees/8")),
-            format!("{}/**", at("kelpie/rotom")),
-            format!("{}/**", at("run")),
-            "~/.ssh/**".to_owned(),
-        ];
+        let at = |p: &str| spellings(&shep.join(p));
+        let folder = |p: &str| at(p).into_iter().map(|s| format!("{s}/**"));
+        let expected: Vec<String> = at("dogs.toml")
+            .into_iter()
+            .chain(folder("kelpie/koji/worktrees/8"))
+            .chain(folder("kelpie/rotom"))
+            .chain(folder("run"))
+            .chain(["~/.ssh/**".to_owned()])
+            .collect();
         assert_eq!(rules, expected);
+    }
+
+    // `path` as given, then with its links resolved where that differs.
+    fn spellings(path: &Path) -> Vec<String> {
+        let resolved = path.canonicalize().ok().filter(|c| c != path);
+        std::iter::once(path.to_owned())
+            .chain(resolved)
+            .map(|p| p.display().to_string())
+            .collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_denied_home_reached_through_a_link_is_denied_in_both_spellings() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        for folder in ["toolchain/bin", "other"] {
+            std::fs::create_dir_all(real.join(folder)).unwrap();
+        }
+        std::fs::write(real.join("credentials"), "").unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let no_read = [format!("{}/**", link.display())];
+
+        let rules = read_denials(&no_read, &[link.join("toolchain")]);
+
+        let folder = |p: &str| {
+            spellings(&link.join(p))
+                .into_iter()
+                .map(|s| format!("{s}/**"))
+        };
+        let expected: Vec<String> = spellings(&link.join("credentials"))
+            .into_iter()
+            .chain(folder("other"))
+            .collect();
+        assert_eq!(rules, expected);
+        assert_ne!(
+            link.canonicalize().unwrap(),
+            link,
+            "the denied home is reached through a link"
+        );
+        assert!(rules.iter().all(|r| !r.contains("toolchain")));
     }
 
     #[test]
