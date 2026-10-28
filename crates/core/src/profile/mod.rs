@@ -25,6 +25,10 @@ mod login;
 
 pub use login::{config_dir as login_dir, write as write_login};
 
+/// The variable that hands a worker the maintainer's gh login, which a
+/// harness passes to the process and writes to no file
+pub const GH_TOKEN_VAR: &str = "GH_TOKEN";
+
 /// Kelpie's instructions to every worker, appended to its system prompt
 pub const INSTRUCTIONS: &str = include_str!("../worker-instructions.md");
 
@@ -425,7 +429,7 @@ impl WorkerProfile<'_> {
         });
         let github = self.token.into_iter().flat_map(|_| login::env(self.build));
         let maintainer = (self.login_token.filter(|_| self.token.is_none()))
-            .map(|token| ("GH_TOKEN".to_owned(), token.expose().to_owned()));
+            .map(|token| (GH_TOKEN_VAR.to_owned(), token.expose().to_owned()));
         // One variable, so a covered worker's value carries both lists.
         let git_config = [housekeeping::PARAMETERS]
             .into_iter()

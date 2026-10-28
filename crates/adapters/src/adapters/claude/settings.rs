@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use crate::guard::{AFTER_FLAG, FOLDER_FLAG, PAUSE_FLAG};
 use crate::hooks::GUARD_BUDGET;
 use crate::ports::{AgentCall, Fence, Guard, PM_NOTES, Reach, Tools};
+use crate::profile::GH_TOKEN_VAR;
 use crate::settings::{HookEvent, HookPoint};
 use crate::spawn::shell_quote;
 use crate::trim::trimmed;
@@ -368,10 +369,11 @@ fn rule(tool: &str, path: &str) -> String {
     }
 }
 
-// The project's own variables come last, so one it names wins.
+// The project's own variables come last, so one it names wins. The maintainer's
+// login is not here: this file stays on disk, and the command carries it.
 fn env(fence: &Fence) -> Value {
     let mut env = json!({});
-    for (name, value) in &fence.env {
+    for (name, value) in fence.env.iter().filter(|(name, _)| *name != GH_TOKEN_VAR) {
         env[name.as_str()] = json!(value);
     }
     env
