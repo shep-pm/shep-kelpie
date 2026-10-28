@@ -335,7 +335,10 @@ mod tests {
             pr.head_clone_url.as_deref(),
             Some("https://github.com/Nitjsefnie-OSC/shep-kelpie.git")
         );
-        assert!(!pr.pushable(), "GitHub refuses a push to an organization's fork");
+        assert!(
+            !pr.pushable(),
+            "GitHub refuses a push to an organization's fork"
+        );
     }
 
     #[test]

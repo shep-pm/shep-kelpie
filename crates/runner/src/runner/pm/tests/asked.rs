@@ -461,7 +461,10 @@ fn pm_decide_is_refused_on_every_kind_the_project_manager_never_decides() {
     }
     let (_rig, runner) = super::with_pm("asked-decide-refused");
     let runner = runner.lock().unwrap();
-    let merge = RulingKind::Contribution(Held::Merge { head: "abc".into() });
+    let merge = RulingKind::Contribution(Held::Merge {
+        head: "abc".into(),
+        rework_off: false,
+    });
     let refused = runner.pm_may_decide(&Ruling::new(ticket(9), "q", merge));
     assert!(refused.unwrap_err().contains("`contribution-merge`"));
     let rebase = RulingKind::from(Stuck::Rebase {

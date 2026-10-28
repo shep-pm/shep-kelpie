@@ -50,7 +50,8 @@ pub enum AdoptError {
     /// The pull request's branch is on a fork, not the repo itself
     Fork(u64),
     /// The pull request's branch is on a fork that kelpie cannot push to: its
-    /// owner does not allow edits by maintainers, or deleted it
+    /// owner does not allow edits by maintainers, deleted it, or is an
+    /// organization, whose forks GitHub does not let maintainers push to
     NoEdits(u64),
     /// The pull request merges into the first branch, not the project's base
     /// branch, the second
@@ -97,7 +98,7 @@ impl fmt::Display for AdoptError {
             Self::NoEdits(number) => write!(
                 f,
                 "pull request #{number} comes from a fork kelpie cannot push to: it does not let \
-                 maintainers edit it, or it has been deleted"
+                 maintainers edit it, it has been deleted, or an organization owns it"
             ),
             Self::Base(number, merges_into, base) => write!(
                 f,

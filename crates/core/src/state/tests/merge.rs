@@ -45,6 +45,7 @@ fn an_older_state_file_loads() {
 fn the_merge_ruling_is_saved_by_its_reason() {
     let kind = RulingKind::Contribution(Held::Merge {
         head: "2a8f1e6".into(),
+        rework_off: false,
     });
     let value = serde_json::to_value(&kind).unwrap();
     assert_eq!(
@@ -52,6 +53,33 @@ fn the_merge_ruling_is_saved_by_its_reason() {
         serde_json::json!({ "kind": "contribution", "reason": "merge", "head": "2a8f1e6" })
     );
     assert_eq!(serde_json::from_value::<RulingKind>(value).unwrap(), kind);
+}
+
+#[test]
+fn a_merge_ruling_saved_without_rework_loads_and_one_saved_before_it_loads_with_rework() {
+    let off = RulingKind::Contribution(Held::Merge {
+        head: "2a8f1e6".into(),
+        rework_off: true,
+    });
+    let value = serde_json::to_value(&off).unwrap();
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "kind": "contribution", "reason": "merge", "head": "2a8f1e6", "rework_off": true
+        })
+    );
+    assert_eq!(serde_json::from_value::<RulingKind>(value).unwrap(), off);
+
+    let before =
+        serde_json::json!({ "kind": "contribution", "reason": "merge", "head": "2a8f1e6" });
+    assert_eq!(
+        serde_json::from_value::<RulingKind>(before).unwrap(),
+        RulingKind::Contribution(Held::Merge {
+            head: "2a8f1e6".into(),
+            rework_off: false,
+        })
+    );
+    assert_eq!(VERSION, 90);
 }
 
 // A push is a new head: the answer to the ruling on the old one is gone

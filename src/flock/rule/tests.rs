@@ -6,7 +6,7 @@ use crate::test::ticket;
 
 const FORMS: &str = "It takes `shep kelpie rule 14 yes` or `shep kelpie rule 14 no <note>`";
 const FORMS_427: &str = "It takes `shep kelpie rule 427 yes` or `shep kelpie rule 427 no <note>`";
-use crate::state::{ProjectState, Resume, RulingKind, STATE_FILE, StateStore, Stuck};
+use crate::state::{Held, ProjectState, Resume, RulingKind, STATE_FILE, StateStore, Stuck};
 
 // A ruling on issue `id`, which is its number.
 fn yes_or_no(id: TicketId) -> Ruling {
@@ -73,9 +73,36 @@ fn a_merge_ruling_takes_a_rework_and_another_ruling_refuses_one() {
         },
         ..yes_or_no(ticket(16))
     };
-    waiting(home.path(), "koji", vec![yes_or_no(ticket(14)), merge]);
+    let contribution = |id, rework_off| Ruling {
+        kind: RulingKind::Contribution(Held::Merge {
+            head: "2a8f1e6".into(),
+            rework_off,
+        }),
+        ..yes_or_no(ticket(id))
+    };
+    waiting(
+        home.path(),
+        "koji",
+        vec![
+            yes_or_no(ticket(14)),
+            merge,
+            contribution(30, false),
+            contribution(31, true),
+        ],
+    );
     let projects = Projects::under(home.path());
     let answer = |args: &[&str]| prepare(&projects, None, args, None);
+    assert_eq!(
+        answer(&["30", "rework", "split", "it"]),
+        Ok((project("koji"), "30 rework split it".into()))
+    );
+    assert_eq!(
+        answer(&["31", "rework", "split", "it"]),
+        Err(String::from(
+            "ruling 31 was not answered: it takes `yes`, or `no <note>`. \
+             It takes `shep kelpie rule 31 yes` or `shep kelpie rule 31 no <note>`"
+        ))
+    );
     assert_eq!(
         answer(&["16", "rework", "split", "the", "parser"]),
         Ok((project("koji"), "16 rework split the parser".into()))

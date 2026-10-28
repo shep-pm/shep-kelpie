@@ -771,6 +771,18 @@ fn decide(
                 force: Some(Phase::Review(Review::first())),
             });
         }
+        (
+            Answer::Rework(_),
+            RulingKind::Contribution(Held::Merge {
+                rework_off: true, ..
+            }),
+        ) => {
+            return Err(RuleError::Choice(
+                id,
+                "the pull request's fork cannot be pushed to, so it takes `yes` or `no <note>`"
+                    .to_owned(),
+            ));
+        }
         // A contribution's rework is carried out by the merge stage, which
         // releases the record and queues it for adoption. No work item is
         // parked on it, so here the answer only clears the ruling.
