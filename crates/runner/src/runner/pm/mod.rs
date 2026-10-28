@@ -44,6 +44,7 @@ mod requests;
 mod rulings;
 #[cfg(test)]
 mod tests;
+mod unstartable;
 mod wakes;
 
 pub(super) use asked::{PmReply, pm_reply};
@@ -271,6 +272,9 @@ pub(super) struct Desk {
     lost: Vec<String>,
     // Each ready issue it holds back, with what it waits on
     held: Vec<Held>,
+    // Each ready issue the last try could not start an agent for, which wakes no pick,
+    // with when the pacer's hold that kept it lapses
+    unstartable: BTreeMap<TicketId, Option<Timestamp>>,
     // Each pair of open branches in conflict, with the files
     conflicts: BTreeMap<(TicketId, TicketId), Vec<String>>,
     // A stuck item or conflict was given up while it was unavailable
@@ -383,6 +387,7 @@ impl Runner {
             issue.is_some_and(|r| r.fingerprint() != held.text)
         };
         self.pm.held.retain(|held| !edited(held));
+        self.pm_forget_unstartable(takeable);
         let held = |n: &TicketId| self.pm.held.iter().any(|h| h.issue == *n);
         let all = !takeable.is_empty() && takeable.iter().all(held);
         if all && self.state.work_items.is_empty() {
@@ -439,11 +444,11 @@ impl Runner {
                 self.pm.pick = Some(Pick::Nothing(at));
                 Choice::Wait
             }
-            None if takeable.len() < 2 || !self.pm_available() => Choice::Rule,
+            None if self.pm_choices(takeable) < 2 || !self.pm_available() => Choice::Rule,
             None if self.pm.asked_pick => Choice::Wait,
             None => {
                 self.pm.asked_pick = true;
-                self.pm_due(Wake::Pick(takeable.len(), self.free_slots()));
+                self.pm_due(Wake::Pick(self.pm_choices(takeable), self.free_slots()));
                 Choice::Wait
             }
         }
@@ -452,6 +457,7 @@ impl Runner {
     /// Takes `ticket` off the project manager's picks, since its work item
     /// opened
     pub(super) fn pm_started(&mut self, ticket: TicketId) {
+        self.pm.unstartable.remove(&ticket);
         if let Some(Pick::Issues(named)) = &mut self.pm.pick {
             named.retain(|p| p.issue != ticket);
             if named.is_empty() {

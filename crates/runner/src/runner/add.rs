@@ -6,7 +6,8 @@ use super::Runner;
 use super::pm::Picked;
 use super::trigger::issue_list;
 use crate::board::check::label_kind;
-use crate::board::{AGENT_LABEL, LabelError, agent_label, old_worker_label, pinned};
+use crate::board::{LabelError, agent_label, old_worker_label, pinned};
+use crate::lease::door::PickAsk;
 use crate::ports::{ForgeError, Issue};
 use crate::settings::AgentName;
 use crate::state::StateError;
@@ -26,6 +27,8 @@ pub enum AddError {
     Closed(TicketId),
     /// The issue's `agent:` label cannot be used
     Label(LabelError),
+    /// The agent board named no agent to open it on
+    Unpicked(Unpicked),
     /// `finish` holds the board back, so no new work item opens
     Finishing,
     /// No random session id could be drawn, with the OS's reason
@@ -34,13 +37,68 @@ pub enum AddError {
     State(StateError),
 }
 
-// A label swap `add` made as it opened a work item
-struct Moved {
-    // The board event naming both implementers
-    event: String,
-    // The `agent:` label the issue had, and the one it has now
-    old: String,
-    new: String,
+/// Why the agent board named no agent for a new work item
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unpicked {
+    /// The dog that keeps it could not be asked, or its answer read
+    Unreachable,
+    /// It ranked no allowed implementer: what the item asked for, in words
+    Nobody(String),
+}
+
+impl fmt::Display for Unpicked {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unreachable => {
+                f.write_str("the agent board, which the dog keeps, cannot be reached")
+            }
+            Self::Nobody(wanted) => write!(
+                f,
+                "the agent board ranks no allowed implementer for {wanted}"
+            ),
+        }
+    }
+}
+
+impl core::error::Error for Unpicked {}
+
+/// The implementers the agent board ranks for a new work item, best first
+pub(super) struct Ranked {
+    first: AgentName,
+    rest: Vec<AgentName>,
+    // A pin, the project manager's or a pinned label's, was the only agent asked for
+    pinned: bool,
+    // The note for a project manager's pin that lapsed, told once the item opens
+    note: Option<String>,
+}
+
+/// The implementer a new work item opens on, out of a [`Ranked`]
+pub(super) struct Opening {
+    agent: AgentName,
+    pinned: bool,
+    note: Option<String>,
+}
+
+impl Ranked {
+    /// The ranked agents, best first
+    pub(super) fn agents(&self) -> impl Iterator<Item = &AgentName> {
+        std::iter::once(&self.first).chain(&self.rest)
+    }
+
+    /// The item opens on the first ranked agent
+    pub(super) fn first(self) -> Opening {
+        let agent = self.first.clone();
+        self.opening(agent)
+    }
+
+    /// The item opens on `agent`, one of those ranked
+    pub(super) fn opening(self, agent: AgentName) -> Opening {
+        Opening {
+            agent,
+            pinned: self.pinned,
+            note: self.note,
+        }
+    }
 }
 
 impl fmt::Display for AddError {
@@ -55,6 +113,7 @@ impl fmt::Display for AddError {
             Self::Forge(e) => write!(f, "cannot read the issue: {e}"),
             Self::Closed(ticket) => write!(f, "{} is closed", ticket.shown()),
             Self::Label(e) => e.fmt(f),
+            Self::Unpicked(e) => e.fmt(f),
             Self::Finishing => f.write_str(
                 "the runner is finishing, so it opens no new work item: `shep kelpie start` \
                  lets it pick again",
@@ -76,22 +135,24 @@ impl Runner {
     /// [`AddError`] when the runner is finishing, the project has
     /// `concurrency.active_items` working or one for this issue open
     /// already, the issue cannot be read or is closed, or its `agent:` label names no
-    /// implementer kelpie has an agent file for, or the change cannot be saved.
-    /// Nothing changes then.
+    /// implementer kelpie has an agent file for, the agent board names no
+    /// implementer, or the change cannot be saved. Nothing changes then.
     pub fn add(&mut self, ticket: TicketId) -> Result<AgentName, AddError> {
-        self.add_picked(ticket, None)
+        self.add_picked(ticket, None, None)
     }
 
-    // `add`, on what `picked`, the project manager's pick of `ticket`, says.
+    // `add`, on what `picked`, the project manager's pick of `ticket`, says,
+    // on `opening` where dispatch chose it already.
     pub(super) fn add_picked(
         &mut self,
         ticket: TicketId,
         picked: Option<&Picked>,
+        opening: Option<Opening>,
     ) -> Result<AgentName, AddError> {
         self.looks.poll_reset();
         self.add_allowed(ticket)?;
         let found = (self.ports.tickets.issue(&self.remote, ticket)).map_err(AddError::Forge)?;
-        self.add_found(ticket, found, picked)
+        self.add_found(ticket, found, picked, opening)
     }
 
     // Whether a work item for `ticket` may open now, before the issue is read.
@@ -109,50 +170,79 @@ impl Runner {
     }
 
     // Opens the work item for `ticket` from the issue as read, on what
-    // `picked` says. The agent it names pins the work item over any label.
+    // `picked` says, on `opening`, or else on the agent board's first pick.
     // The guards are checked again, since the runner may have moved since.
     pub(super) fn add_found(
         &mut self,
         ticket: TicketId,
         found: Issue,
         picked: Option<&Picked>,
+        opening: Option<Opening>,
     ) -> Result<AgentName, AddError> {
         self.add_allowed(ticket)?;
         if !found.open {
             return Err(AddError::Closed(ticket));
         }
-        let (pin, pin_note) = self.pin(ticket, picked);
-        let by_pm = pin.is_some();
-        let (labelled, note) = match pin {
-            Some(agent) => (agent, None),
-            None => (self.labelled_agent(ticket, &found.labels)).map_err(AddError::Label)?,
+        let opening = match opening {
+            Some(opening) => opening,
+            None => self.ranked(ticket, &found.labels, picked)?.first(),
         };
         let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
         let mut next = self.state.clone();
-        let (agent, moved) = match by_pm {
-            true => (labelled, None),
-            false => self.opening_agent(ticket, &found.labels, labelled),
-        };
+        let agent = opening.agent;
         let mut item = self.fresh(ticket, found.title, agent.clone(), session);
-        item.pinned = by_pm || pinned(&found.labels);
+        item.pinned = opening.pinned;
         item.kind = label_kind(&found.labels).map(str::to_owned);
         item.tier = picked.and_then(|p| p.tier);
         item.slack = picked.and_then(|p| p.slack);
         next.work_items.push(item);
-        if let Some(moved) = &moved {
-            next.record_event(self.ports.clock.now(), moved.event.clone());
-        }
-        if let Err(e) = self.save(next) {
-            // No work item opened, so the issue keeps the label it had.
-            if let Some(moved) = moved {
-                let _ = self.swap_labels(ticket, &moved.new, &moved.old);
-            }
-            return Err(AddError::State(e));
-        }
-        self.notes.extend(pin_note);
-        self.notes.extend(note);
+        self.save(next).map_err(AddError::State)?;
+        self.notes.extend(opening.note);
         self.mark_held(ticket, true);
         Ok(agent)
+    }
+
+    // The implementers the agent board ranks for a work item for `ticket`,
+    // whose issue has `labels`, on what `picked` says. A pin, the project
+    // manager's or else a pinned `agent:` label's, is the only one asked for.
+    pub(super) fn ranked(
+        &self,
+        ticket: TicketId,
+        labels: &[String],
+        picked: Option<&Picked>,
+    ) -> Result<Ranked, AddError> {
+        let (pin, note) = self.pin(ticket, picked);
+        let pin = match pin {
+            Some(pin) => Some(pin),
+            // A label naming no implementer is refused, pinned or not.
+            None => (agent_label(labels, &self.implementer_files()))
+                .map_err(AddError::Label)?
+                .filter(|_| pinned(labels)),
+        };
+        let ask = PickAsk {
+            kind: label_kind(labels).map(str::to_owned),
+            tier: picked.and_then(|p| p.tier),
+            pin: pin.clone(),
+            slack: picked.and_then(|p| p.slack),
+            agents: self.board_agents(),
+            leave_out: Vec::new(),
+        };
+        let picks =
+            (self.ports.agent_board.pick(&ask)).ok_or(AddError::Unpicked(Unpicked::Unreachable))?;
+        // The project's allow list holds whatever the dog answers.
+        let mut agents = (picks.into_iter())
+            .map(|pick| pick.agent)
+            .filter(|agent| ask.agents.contains(agent))
+            .filter(|agent| pin.as_ref().is_none_or(|pin| pin == agent));
+        let Some(first) = agents.next() else {
+            return Err(AddError::Unpicked(Unpicked::Nobody(wanted(&ask))));
+        };
+        Ok(Ranked {
+            first,
+            rest: agents.collect(),
+            pinned: pin.is_some(),
+            note,
+        })
     }
 
     // The agent `picked` pins its work item to, while it is an implementer
@@ -179,67 +269,11 @@ impl Runner {
         let note = lapsed.map(|agent| {
             format!(
                 "{}: the project manager picked it for {agent}, which is no longer an \
-                 implementer `agents.allow` holds, so its labels choose",
+                 implementer `agents.allow` holds, so the agent board picks",
                 ticket.shown()
             )
         });
         (pin, note)
-    }
-
-    // The implementer a work item for `ticket` opens on, given the one its
-    // `agent:` label names, and the move made, if any. A pinned label, or
-    // one with no free implementer to move to, keeps `labelled`. A label swap
-    // the forge refuses keeps it too, with a note, so label and item match.
-    fn opening_agent(
-        &mut self,
-        ticket: TicketId,
-        labels: &[String],
-        labelled: AgentName,
-    ) -> (AgentName, Option<Moved>) {
-        let label = labels.iter().find(|l| is_agent_label(l));
-        let to = label.filter(|_| !pinned(labels));
-        let to = to.and_then(|label| Some((label, self.opens_elsewhere(ticket, &labelled)?)));
-        let Some((label, to)) = to else {
-            return (labelled, None);
-        };
-        let new = format!("{AGENT_LABEL}{to}");
-        match self.swap_labels(ticket, label, &new) {
-            Ok(()) => {
-                let event = format!(
-                    "{}: its `{AGENT_LABEL}{labelled}` label moved to `{new}`, since \
-                     {labelled}'s model already has a wait",
-                    ticket.shown()
-                );
-                let old = label.clone();
-                (to, Some(Moved { event, old, new }))
-            }
-            Err(e) => {
-                self.notes.push(format!(
-                    "{}: stays on {labelled}, whose model already has a wait, since the \
-                     forge would not move its label to `{new}`: {e}",
-                    ticket.shown()
-                ));
-                (labelled, None)
-            }
-        }
-    }
-
-    // Puts the label `new` on `ticket` in place of `old`, the label it has.
-    // Leaves it as it was when either change fails.
-    fn swap_labels(&self, ticket: TicketId, old: &str, new: &str) -> Result<(), ForgeError> {
-        self.set_agent_label(ticket, new, true)?;
-        self.set_agent_label(ticket, old, false).inspect_err(|_| {
-            let _ = self.set_agent_label(ticket, new, false);
-        })
-    }
-
-    // Puts a label on, or takes it off, as the App where one covers the repo.
-    // A local ticket keeps its labels in the store.
-    fn set_agent_label(&self, ticket: TicketId, label: &str, on: bool) -> Result<(), ForgeError> {
-        match ticket.github() {
-            Some(number) => self.label_issue(number, label, on),
-            None => (self.ports.tickets).set_issue_label(&self.remote, ticket, label, on),
-        }
     }
 
     // The implementer a ticket with `labels` runs on: the one its `agent:`
@@ -265,6 +299,15 @@ impl Runner {
         Ok((agent, note))
     }
 
+    // The implementers the agent board may rank: `implementer_files`, those
+    // the project lists first, in its order.
+    fn board_agents(&self) -> Vec<AgentName> {
+        let listed = self.agents.implementer_names();
+        let mut files = self.implementer_files();
+        files.sort_by_key(|n| listed.iter().position(|l| l == n).unwrap_or(listed.len()));
+        files
+    }
+
     // Every agent an `agent:` label may name for this project: each agent
     // file whose role is `implementer`, listed in `agents.implementers` or
     // not, that `agents.allow` holds. A listed one always has such a file and
@@ -279,7 +322,19 @@ impl Runner {
     }
 }
 
-// Whether `label` is an `agent:` label, its prefix in any case.
-fn is_agent_label(label: &str) -> bool {
-    (label.get(..AGENT_LABEL.len())).is_some_and(|p| p.eq_ignore_ascii_case(AGENT_LABEL))
+// What `ask` wanted, in words: its kind, its least tier and its pin.
+fn wanted(ask: &PickAsk) -> String {
+    let kind = match &ask.kind {
+        Some(kind) => format!("a `{kind}` item"),
+        None => "an item of no kind".to_owned(),
+    };
+    let tier = match ask.tier {
+        Some(tier) => format!("tier {} or above", tier.as_str()),
+        None => "any tier".to_owned(),
+    };
+    let pin = match &ask.pin {
+        Some(pin) => format!(", pinned to {pin}"),
+        None => String::new(),
+    };
+    format!("{kind} at {tier}{pin}")
 }

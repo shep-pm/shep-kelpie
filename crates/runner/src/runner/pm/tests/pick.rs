@@ -173,11 +173,11 @@ fn a_list_longer_than_the_free_slots_drops_the_rest() {
 }
 
 #[test]
-fn a_picks_agent_pins_its_work_item_over_the_issues_label_and_its_tier_and_slack_are_kept() {
+fn a_picks_agent_pins_its_work_item_over_the_issues_pinned_label_and_its_tier_and_slack_are_kept() {
     let (rig, runner) = with_pm("koji");
     rig.forge.list_ready(9, false);
     rig.forge.list_ready(12, false);
-    rig.forge.label(12, "agent:sonnet-high");
+    rig.forge.label(12, "agent:sonnet-high!");
     rig.forge.label(12, "kind:docs");
     rig.claude.script([Scripted::Say(
         "```json\n{\"pick\": {\"issue\": 12, \"agent\": \"opus-high\", \"tier\": \"heavy\", \
@@ -202,8 +202,88 @@ fn a_picks_agent_pins_its_work_item_over_the_issues_label_and_its_tier_and_slack
     assert!(
         rig.forge
             .labels_of(12)
-            .contains(&"agent:sonnet-high".to_owned()),
+            .contains(&"agent:sonnet-high!".to_owned()),
         "the issue's label is left as it was"
+    );
+    let asks = rig.agent_board.asks();
+    let ask = asks.last().unwrap();
+    assert_eq!(
+        (ask.pin.as_ref().map(|p| p.as_str()), ask.tier, ask.slack),
+        (Some("opus-high"), Some(Tier::Heavy), Some(0))
+    );
+}
+
+#[test]
+fn issues_no_agent_can_start_never_wake_the_project_manager_again() {
+    let (rig, runner) = picked_12();
+    rig.agent_board.ranks(&[]);
+
+    assert_eq!(step(&runner).unwrap(), None);
+    let dropped = pick_dropped_steps(&runner);
+    assert_eq!(dropped.len(), 1, "{dropped:?}");
+    assert_eq!(dropped[0]["issue"], "12");
+    let calls = rig.claude.calls().len();
+    for _ in 0..3 {
+        rig.next_look();
+        assert_eq!(step(&runner).unwrap(), None);
+    }
+
+    assert_eq!(rig.claude.calls().len(), calls, "no wake for the same two");
+    rig.agent_board.ranks_listed();
+    rig.next_look();
+    let report = step(&runner).unwrap();
+    assert!(
+        matches!(report, Some(StepReport::Dispatched { .. })),
+        "{report:?}"
+    );
+}
+
+// A project manager's project with #12 ready and pinned to `codex`, whose 5-hour window
+// holds it, after the pass that found no agent could start #12
+fn codex_holds_12() -> (Rig, Mutex<Runner>) {
+    let rig = Rig::new("koji");
+    rig.write_codex_implementer();
+    let (rig, runner) = pm_on(rig);
+    rig.codex_meter.set(Rig::utilization(0, 55));
+    rig.forge.list_ready(12, false);
+    rig.forge.label(12, "agent:codex!");
+    step(&runner).unwrap();
+    assert!(pm_seen(&rig).is_empty(), "one issue wakes no pick");
+    (rig, runner)
+}
+
+const PICK_9: &str = "```json\n{\"pick\": 9, \"why\": \"w\"}\n```";
+
+#[test]
+fn a_pick_wake_counts_only_the_issues_an_agent_could_start() {
+    let (rig, runner) = codex_holds_12();
+    rig.forge.list_ready(9, false);
+    rig.forge.list_ready(14, false);
+    rig.claude.script([Scripted::Say(PICK_9)]);
+    rig.next_look();
+
+    let (woke_for, _, _) = answered(step(&runner).unwrap());
+
+    assert_eq!(
+        woke_for,
+        ["a slot is free and 2 ready issues could fill it: pick one, or none to start nothing now"]
+    );
+}
+
+#[test]
+fn an_issue_whose_pacer_hold_lapsed_counts_toward_a_pick_wake_again() {
+    let (rig, runner) = codex_holds_12();
+    rig.clock.advance(5 * 3600);
+    rig.codex_meter.set(Rig::utilization(0, 0));
+    rig.forge.list_ready(9, false);
+    rig.claude.script([Scripted::Say(PICK_9)]);
+    rig.next_look();
+
+    let (woke_for, _, _) = answered(step(&runner).unwrap());
+
+    assert_eq!(
+        woke_for,
+        ["a slot is free and 2 ready issues could fill it: pick one, or none to start nothing now"]
     );
 }
 
@@ -230,7 +310,8 @@ fn a_pick_of_an_agent_that_is_no_implementer_file_is_dropped() {
 }
 
 #[test]
-fn a_picks_agent_that_allow_drops_before_dispatch_opens_on_its_label_and_keeps_tier_and_slack() {
+fn a_picks_agent_that_allow_drops_before_dispatch_opens_on_the_boards_pick_keeping_tier_and_slack()
+{
     let (rig, runner) = with_pm("koji");
     rig.forge.list_ready(9, false);
     rig.forge.list_ready(12, false);
@@ -268,7 +349,7 @@ fn a_picks_agent_that_allow_drops_before_dispatch_opens_on_its_label_and_keeps_t
     assert!(
         notes.iter().any(|n| n
             == "#12: the project manager picked it for opus-high, which is no longer an \
-                implementer `agents.allow` holds, so its labels choose"),
+                implementer `agents.allow` holds, so the agent board picks"),
         "{notes:?}"
     );
 }

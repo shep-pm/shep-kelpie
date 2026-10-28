@@ -29,8 +29,9 @@ fn behind(rig: &Rig, url: &str) -> Mutex<Runner> {
     );
     rig.set_kelpie_settings(&format!("{settings}{gateway}"));
     let runner = rig.open().unwrap();
-    rig.forge.label(7, "agent:mine");
+    rig.agent_board.ranks(&["mine"]);
     rig.ask(&runner, "add", Some("7"));
+    rig.agent_board.ranks_listed();
     runner
 }
 

@@ -281,7 +281,7 @@ fn a_dispatch_on_an_unlisted_implementer_logs_the_model_and_effort_it_runs_on() 
     );
     let runner = rig.open().unwrap();
     rig.forge.list_ready(7, false);
-    rig.forge.label(7, "agent:gpt");
+    rig.forge.label(7, "agent:gpt!");
     let report = step(&runner).unwrap().unwrap();
     let line = runner.lock().unwrap().log_step(&report);
     assert_eq!(line, "#7 dispatched to gpt-5-codex (medium)");

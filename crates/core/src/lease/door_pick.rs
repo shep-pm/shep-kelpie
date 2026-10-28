@@ -4,10 +4,30 @@
 //! may start an item, in the order to try them. A runner that cannot reach
 //! the dog, or cannot read its answer, gets none and starts nothing.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::door::{Answer, Ask, PICK, Pick, PickAsk};
 use super::door_pace::answered;
+use crate::ports::AgentBoard;
+
+/// The agent board as the dog at a door keeps it
+#[derive(Debug)]
+pub struct DoorBoard {
+    socket: PathBuf,
+}
+
+impl DoorBoard {
+    /// The board the dog answers for at `socket`
+    pub fn new(socket: PathBuf) -> Self {
+        Self { socket }
+    }
+}
+
+impl AgentBoard for DoorBoard {
+    fn pick(&self, item: &PickAsk) -> Option<Vec<Pick>> {
+        pick(&self.socket, item)
+    }
+}
 
 /// The agents the dog at `door` would start `item` on, in order, or None when it cannot say
 ///

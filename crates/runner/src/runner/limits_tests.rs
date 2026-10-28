@@ -78,7 +78,7 @@ fn a_claude_worker_waits_on_claudes_window_and_never_reads_codexs() {
 fn an_item_on_an_unlisted_implementer_paces_on_its_account_too() {
     let (rig, runner) = named("shep", "");
     rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 2"));
-    rig.forge.label(7, "agent:codex");
+    rig.forge.label(7, "agent:codex!");
     rig.ask(&runner, "add", Some("7"));
     rig.codex_meter.set(Rig::utilization(0, 55));
     rig.forge.list_ready(8, false);
@@ -99,13 +99,77 @@ fn an_item_on_an_unlisted_implementer_paces_on_its_account_too() {
 }
 
 // The `named("shep", "")` rig, reopened on a Codex day that began with `used` percent of
-// its week spent, with a ready issue 7 labelled for `codex`, which the project does not list.
+// its week spent, with a ready issue 7 pinned to `codex`, which the project does not list.
 fn codex_day_began(used: u32) -> (Rig, Mutex<Runner>) {
     let (rig, runner) = named("shep", "");
     let runner = reopened(&rig, runner, || rig.codex_day_began(used));
     rig.forge.list_ready(7, false);
-    rig.forge.label(7, "agent:codex");
+    rig.forge.label(7, "agent:codex!");
     (rig, runner)
+}
+
+#[test]
+fn a_first_pick_the_pacer_holds_gives_the_boards_second() {
+    let (rig, runner) = named("shep", "");
+    let runner = reopened(&rig, runner, || rig.codex_day_began(0));
+    rig.forge.list_ready(7, false);
+    rig.agent_board.ranks(&["codex", "sonnet-high"]);
+    rig.codex_meter.set(Rig::utilization(15, 0));
+
+    let report = step(&runner).unwrap();
+
+    assert!(
+        matches!(&report, Some(StepReport::Dispatched { issue, agent, .. })
+            if *issue == ticket(7) && agent.as_str() == "sonnet-high"),
+        "{report:?}"
+    );
+    assert_eq!(
+        rig.codex_meter.reads(),
+        1,
+        "the first pick's account is read"
+    );
+}
+
+// A local implementer listed alone, so no account is read before the board's ranking is.
+const ONLY_QWEN: &str = "implementers = [\"coder\"]\nreviewers = [\"qwen\"]\n";
+
+#[test]
+fn a_later_pick_whose_account_is_unread_is_read_before_the_walk_gives_up() {
+    let (rig, runner) = named("shep", ONLY_QWEN);
+    let runner = reopened(&rig, runner, || rig.codex_day_began(0));
+    rig.forge.list_ready(7, false);
+    rig.agent_board.ranks(&["codex", "sonnet-high"]);
+    rig.codex_meter.set(Rig::utilization(15, 0));
+    rig.meter.set(Rig::utilization(0, 0));
+
+    let report = step(&runner).unwrap();
+
+    assert!(
+        matches!(&report, Some(StepReport::Dispatched { issue, agent, .. })
+            if *issue == ticket(7) && agent.as_str() == "sonnet-high"),
+        "{report:?}"
+    );
+    assert_eq!((rig.codex_meter.reads(), rig.meter.reads()), (1, 1));
+}
+
+#[test]
+fn a_paced_pin_waits_and_opens_on_no_other_agent() {
+    let (rig, runner) = codex_day_began(0);
+    rig.agent_board.ranks(&["codex", "sonnet-high"]);
+    rig.codex_meter.set(Rig::utilization(15, 0));
+
+    let (kind, _) = held(step(&runner).unwrap());
+
+    assert_eq!(kind, HoldKind::Allowance);
+    let names: Vec<_> = rig
+        .agent_board
+        .asks()
+        .iter()
+        .map(|a| a.pin.clone())
+        .collect();
+    assert_eq!(names, [Some(crate::settings::AgentName::kelpies("codex"))]);
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_items"], json!([]));
 }
 
 #[test]
@@ -263,7 +327,7 @@ fn a_new_work_item_waits_on_any_account_its_roles_spend() {
     // A local implementer, with the Claude reviewer every project has by default.
     let (rig, runner) = named("shep", BESIDE_QWEN);
     rig.forge.list_ready(7, false);
-    rig.forge.label(7, "agent:coder");
+    rig.forge.label(7, "agent:coder!");
     assert!(dispatched(&step(&runner).unwrap()));
     assert_eq!(rig.meter.reads(), 1);
 
@@ -271,7 +335,7 @@ fn a_new_work_item_waits_on_any_account_its_roles_spend() {
     rig.meter.set(Rig::utilization(20, 0));
     rig.ask(&runner, "drop", Some("7"));
     rig.forge.list_ready(8, false);
-    rig.forge.label(8, "agent:coder");
+    rig.forge.label(8, "agent:coder!");
     let (kind, reason) = held(step(&runner).unwrap());
     assert_eq!(kind, HoldKind::Allowance);
     assert!(
@@ -346,7 +410,7 @@ fn a_local_worker_is_never_paced_and_shows_no_lease() {
     rig.meter.set(Rig::utilization(0, 1));
     rig.codex_meter.set(Rig::utilization(90, 90));
     rig.forge.list_ready(7, false);
-    rig.forge.label(7, "agent:coder");
+    rig.forge.label(7, "agent:coder!");
     assert!(dispatched(&step(&runner).unwrap()));
     // Both accounts past half their windows: neither is the local model's limit.
     rig.clock.advance(RECHECK_SECS);
@@ -421,7 +485,7 @@ fn reopened(rig: &Rig, runner: Mutex<Runner>, change: impl FnOnce()) -> Mutex<Ru
 #[test]
 fn a_work_item_keeps_its_agent_and_runs_its_file_as_it_now_stands() {
     let (rig, runner) = named("rotom", BESIDE_QWEN);
-    rig.forge.label(7, "agent:coder");
+    rig.forge.label(7, "agent:coder!");
     rig.ask(&runner, "add", Some("7"));
     let runner = reopened(&rig, runner, || {
         rig.write_agent(
@@ -446,7 +510,7 @@ fn a_work_item_keeps_its_agent_and_runs_its_file_as_it_now_stands() {
 #[test]
 fn a_work_item_whose_agent_file_is_gone_fails_its_turn_saying_so() {
     let (rig, runner) = named("rotom", BESIDE_QWEN);
-    rig.forge.label(7, "agent:coder");
+    rig.forge.label(7, "agent:coder!");
     rig.ask(&runner, "add", Some("7"));
     let runner = reopened(&rig, runner, || {
         std::fs::remove_file(rig.paths().agents.join("coder.md")).unwrap();
@@ -492,7 +556,7 @@ fn a_review_round_on_a_local_agent_runs_on_that_agent() {
 fn beside_a_local_implementer_listed_first_an_issue_labelled_for_sonnet_is_paced_on_claude() {
     let (rig, runner) = named("rotom", "implementers = [\"coder\", \"sonnet-high\"]\n");
     rig.forge.list_ready(7, false);
-    rig.forge.label(7, "agent:sonnet-high");
+    rig.forge.label(7, "agent:sonnet-high!");
     rig.meter.set(Rig::utilization(0, 1));
     assert!(dispatched(&step(&runner).unwrap()));
 
@@ -520,7 +584,7 @@ fn a_project_with_no_local_agent_shows_no_leases() {
 #[test]
 fn spend_without_dollars_shows_tokens_and_says_it_has_none() {
     let (rig, runner) = named("reactmap", BESIDE_QWEN);
-    rig.forge.label(7, "agent:coder");
+    rig.forge.label(7, "agent:coder!");
     rig.ask(&runner, "add", Some("7"));
     let used = Usage {
         input: 120,

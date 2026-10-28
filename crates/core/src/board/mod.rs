@@ -234,6 +234,13 @@ pub enum Skip {
         /// The pacer's reading of the hold
         hold: String,
     },
+    /// The agent board named no agent to start it on, and the next poll asks again
+    Unpicked {
+        /// The ticket
+        issue: TicketId,
+        /// Why, in words
+        why: String,
+    },
     /// The project manager is deciding, or said to start nothing, so this
     /// pick waits
     PmWaits {
@@ -271,6 +278,7 @@ impl Skip {
             | Self::PathsUnread { issue, .. }
             | Self::Check { issue, .. }
             | Self::Paced { issue, .. }
+            | Self::Unpicked { issue, .. }
             | Self::PmWaits { issue } => Some(*issue),
             Self::Adopt { .. } => None,
         }

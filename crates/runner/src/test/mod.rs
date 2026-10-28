@@ -47,10 +47,11 @@ pub use shep_kelpie_adapters::test::{
     SeenRound, SentReview, Told,
 };
 pub use shep_kelpie_core::test::{
-    Answer, EPOCH, FakeAlerts, FakeBridges, FakeClassifier, FakeClock, FakeDevServers, FakeDisk,
-    FakeE2e, FakeForge, FakeGit, FakeMeter, FakePages, FakeShepherd, FakeTests, GB, HeldCall, Hold,
-    Home, LOGIN_TOKEN, LeaseReads, Memory, OpenSandbox, RecordedSink, SeenAsk, StandInEndpoint,
-    Synced, Take, VIEWER, a_work_item, clean_visit, project_table, ticket, unreachable_url,
+    Answer, EPOCH, FakeAgentBoard, FakeAlerts, FakeBridges, FakeClassifier, FakeClock,
+    FakeDevServers, FakeDisk, FakeE2e, FakeForge, FakeGit, FakeMeter, FakePages, FakeShepherd,
+    FakeTests, GB, HeldCall, Hold, Home, LOGIN_TOKEN, LeaseReads, Memory, OpenSandbox,
+    RecordedSink, SeenAsk, StandInEndpoint, Synced, Take, VIEWER, a_work_item, clean_visit,
+    project_table, ticket, unreachable_url,
 };
 pub use shep_kelpie_test_support::{
     CALL_PATIENCE, Elsewhere, Fake, cut_from_main, git, linked_worktree, main_commits, make_fifo,
@@ -161,6 +162,8 @@ pub struct Rig {
     /// The login's forge hold and pace, which no test's calls reach the cap of
     /// until it swaps in a pacer with one
     pub pace: Arc<dyn Pace>,
+    /// The agent board, which ranks the project's implementers in order until a test sets it
+    pub agent_board: FakeAgentBoard,
     /// GitHub as kelpie's App sees it: the rig has registered no App until
     /// [`Rig::with_app`]
     pub github: FakeGithub,
@@ -463,6 +466,7 @@ impl Rig {
             classifier: Arc::new(self.classifier.clone()),
             clock: Arc::new(self.clock.clone()),
             pace: Arc::clone(&self.pace),
+            agent_board: Arc::new(self.agent_board.clone()),
             flock: Vec::new(),
         };
         Runner::open(

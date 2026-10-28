@@ -20,9 +20,9 @@ use std::time::Duration;
 use shep_handover::Arrival;
 
 use crate::adapters::{
-    Base, ClaudeCli, CodexCli, Curl, CurlGithub, DogE2e, DoorPace, Etags, GatewayClassifier, Gh,
-    GhApps, GooseCli, GpuCurl, LocalReviewer, LoginToken, McpRules, Openssl, PiCli,
-    PlaywrightBridges, PlaywrightPages, SandboxRuntime, ShepLeases, ShepherdSink, StatDisk,
+    Base, ClaudeCli, CodexCli, Curl, CurlGithub, DogE2e, DoorBoard, DoorPace, Etags,
+    GatewayClassifier, Gh, GhApps, GooseCli, GpuCurl, LocalReviewer, LoginToken, McpRules, Openssl,
+    PiCli, PlaywrightBridges, PlaywrightPages, SandboxRuntime, ShepLeases, ShepherdSink, StatDisk,
     SystemGit, stop_calls,
 };
 use crate::coderabbit::CodeRabbit;
@@ -258,6 +258,7 @@ fn serve(project: &str, arrival: Option<Arrival<Carry>>) -> Result<(), Exit> {
         classifier: Arc::new(GatewayClassifier),
         clock: Arc::new(SystemClock),
         pace: Arc::new(DoorPace::new(paths.door.clone())),
+        agent_board: Arc::new(DoorBoard::new(paths.door.clone())),
         flock,
     };
     let finished: OnFinished = {
