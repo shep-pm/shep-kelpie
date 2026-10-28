@@ -2,12 +2,12 @@
 //!
 //! A worker can plant a link anywhere in its folders, and a path opened the
 //! ordinary way follows it to any file the maintainer can use. So kelpie
-//! reads and writes there only through here, which follows no link. On
-//! Windows every call returns [`Error::Unsupported`].
+//! reads and writes there only through here, which follows no link.
 //!
 //! - A read opens with `O_NOFOLLOW` and takes a regular file of at most [`MAX`] bytes.
 //! - A write makes a new file with `O_EXCL` beside the file, then renames it over.
 //! - Each folder of a path is opened with `O_NOFOLLOW` and `O_DIRECTORY`.
+//! - On Windows folders are held open (`Held`); a link count and the owner are not checked.
 
 use std::fmt;
 use std::io;
@@ -18,21 +18,12 @@ mod unix;
 #[cfg(unix)]
 use unix as sys;
 
-// Windows has no `openat`, no `O_NOFOLLOW` and no descriptor-relative rename in
-// std, so a plain `std::fs` walk would follow the links this module refuses.
-// Every call is refused until one is built. Placeholder: the port is #241.
-#[cfg(not(unix))]
-mod sys {
-    use super::{Error, Path};
-
-    pub(super) fn read(_: &Path, _: &Path) -> Result<Option<String>, Error> {
-        Err(Error::Unsupported)
-    }
-
-    pub(super) fn write(_: &Path, _: &Path, _: &str, _: bool) -> Result<(), Error> {
-        Err(Error::Unsupported)
-    }
-}
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as sys;
+#[cfg(windows)]
+pub use windows::Held;
 
 /// The most a file read from a worker's folder may hold, in bytes
 pub const MAX: u64 = 1 << 20;
@@ -48,8 +39,6 @@ pub enum Error {
     NotFolder,
     /// It holds more than [`MAX`] bytes
     TooBig,
-    /// This system has no way yet to touch a worker's folder without following a link
-    Unsupported,
     /// The system refused for this reason
     Io(io::ErrorKind),
 }
@@ -59,9 +48,6 @@ impl fmt::Display for Error {
         match self {
             Self::NotRegular => f.write_str("it is not a regular file, so kelpie leaves it"),
             Self::NotFolder => f.write_str("a folder on its path is not a plain folder"),
-            Self::Unsupported => f.write_str(
-                "kelpie cannot yet read or write a worker's folder safely on this system",
-            ),
             Self::TooBig => write!(f, "it is over {MAX} bytes"),
             Self::Io(kind) => write!(f, "{kind}"),
         }
@@ -307,15 +293,5 @@ mod tests {
     }
 }
 
-#[cfg(all(test, not(unix)))]
-mod tests_without_unix {
-    use super::*;
-
-    #[test]
-    fn every_call_is_refused_until_the_walk_is_built() {
-        let (root, rel) = (Path::new("build"), Path::new("a.md"));
-        assert_eq!(read(root, rel), Err(Error::Unsupported));
-        assert_eq!(write(root, rel, "x"), Err(Error::Unsupported));
-        assert_eq!(write_private(root, rel, "x"), Err(Error::Unsupported));
-    }
-}
+#[cfg(all(test, windows))]
+mod windows_tests;

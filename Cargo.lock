@@ -1442,6 +1442,7 @@ dependencies = [
  "shep-client",
  "shep-kelpie-core",
  "shep-kelpie-test-support",
+ "shep-kelpie-worker-folder",
  "tempfile",
  "tokio",
  "toml 1.1.8+spec-1.1.0",
