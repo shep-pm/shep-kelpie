@@ -8,6 +8,7 @@ mod ci;
 mod e2e;
 mod gateways;
 mod github;
+mod ignored;
 mod machine;
 mod mcp;
 mod project;
@@ -327,6 +328,7 @@ async fn projects(
         let listed = project::listed_reviewers(&tables, here, (&agents, &gateways));
         lines.extend(gateways::checks(&gateways, &agents, &listed));
         lines.extend(unbound::checks(&agents, &folder));
+        lines.extend(ignored::check(&agents));
     }
     if ask.test_alert {
         lines.push(rulings::test_alert(kelpie.as_ref(), probes.alerts));

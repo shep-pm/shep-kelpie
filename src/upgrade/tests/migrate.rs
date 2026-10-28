@@ -208,6 +208,27 @@ async fn a_bare_upgrade_writes_the_missing_kinds_into_a_table_that_loads() {
 }
 
 #[tokio::test]
+async fn a_bare_upgrade_writes_no_agents_allow_or_slack() {
+    let shepherd = FakeShepherd::on(crate::shepherd::SHEP_VERSION);
+    let table = loading(&shepherd);
+    let rig = Rig::holding_on(shepherd, false, table).await;
+    crate::agents::write_bound_stubs(
+        &rig.home.join("agents"),
+        "harness: claude-code\nmodel: claude-opus-5-5\neffort: high\n",
+    );
+    rig.cargo_installs("0.3.0", "0.17.0");
+
+    let (ran, _) = rig.upgrade(Action::Installed).await;
+
+    ran.unwrap();
+    let (koji, _) = rig.shepherd.sheep("koji").unwrap();
+    let written = koji.dogs.get(crate::shepherd::DOG).unwrap().as_map();
+    let agents = written["agents"].as_object().unwrap();
+    assert_eq!(agents.get("allow"), None);
+    assert_eq!(agents.get("slack"), None);
+}
+
+#[tokio::test]
 async fn a_bare_upgrade_whose_settings_are_refused_stops_before_the_restarts() {
     // A table missing its kinds that does not load, so the check refuses the migrated one.
     let mut table = Map::new();

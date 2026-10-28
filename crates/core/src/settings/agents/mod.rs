@@ -24,6 +24,9 @@ use super::{HookPoint, RoleModel, Settings, SettingsError};
 use crate::agents::{Agent, Agents, FOLDER, Role, Runs};
 use crate::forwarder::Upstream;
 
+/// The minutes past the soonest finish an item allows when nothing names a slack
+pub const DEFAULT_SLACK_MINUTES: u32 = 60;
+
 /// An agent's name: lowercase letters, digits and `-`
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
@@ -268,32 +271,21 @@ impl TryFrom<String> for ImplementerChoice {
     }
 }
 
-/// The agents a project may use: one or more, none twice over
+/// The agents a project may use, or every agent when it lists none
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
-#[serde(try_from = "Vec<AgentName>")]
-// schemars describes a `try_from` type by its source, so the bound goes here.
-#[schemars(extend("minItems" = 1))]
+#[serde(from = "Vec<AgentName>")]
 pub struct Allow(Vec<AgentName>);
 
 impl Allow {
     /// Whether the project may use `name`
     pub fn holds(&self, name: &AgentName) -> bool {
-        self.0.contains(name)
+        self.0.is_empty() || self.0.contains(name)
     }
 }
 
-impl TryFrom<Vec<AgentName>> for Allow {
-    type Error = String;
-
-    fn try_from(names: Vec<AgentName>) -> Result<Self, Self::Error> {
-        match names.is_empty() {
-            true => Err(
-                "`agents.allow` names no agent, so it would allow none: leave it out \
-                 to allow every agent"
-                    .to_owned(),
-            ),
-            false => Ok(Self(names)),
-        }
+impl From<Vec<AgentName>> for Allow {
+    fn from(names: Vec<AgentName>) -> Self {
+        Self(names)
     }
 }
 
@@ -304,7 +296,8 @@ pub struct RoleAgentNames {
     /// The only agents the project may use, by the names of kelpie's agent
     /// files: any other is refused wherever the project names it, and no
     /// `agent:` label may pick it. Not checked against the agents folder,
-    /// since the files are reread each wake. Every agent with a file when absent.
+    /// since the files are reread each wake. Every agent with a file when
+    /// absent or empty.
     #[serde(default)]
     pub allow: Option<Allow>,
     /// The agents that build its work items, from kelpie's agent files. An
@@ -319,6 +312,12 @@ pub struct RoleAgentNames {
     /// Read by nothing: the agent board's handoff moves a work item now
     #[serde(default)]
     pub fallback_after: Option<NonZeroU32>,
+    /// Minutes past the soonest finish the agent board lets a work item's agent
+    /// take: a new item opens on the cheapest agent finishing within it, and a
+    /// later turn moves on when its own agent finishes past it. The project
+    /// manager's pick may name its own. Whole minutes, `0` allowed. 60 when absent.
+    #[serde(default = "default_slack")]
+    pub slack: u32,
     /// The agents that review each pull request, from kelpie's agent files,
     /// each once a pass, in this order. When absent, `qwen` where the
     /// maintainer's qwen-review script is installed, then `defect-hunter`.
@@ -345,11 +344,16 @@ impl Default for RoleAgentNames {
             implementers: default_implementers(),
             implementer_choice: ImplementerChoice::default(),
             fallback_after: None,
+            slack: DEFAULT_SLACK_MINUTES,
             reviewers: None,
             pm: None,
             representative: default_representative(),
         }
     }
+}
+
+fn default_slack() -> u32 {
+    DEFAULT_SLACK_MINUTES
 }
 
 fn default_implementers() -> Vec<AgentName> {

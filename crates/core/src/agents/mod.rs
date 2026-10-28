@@ -40,6 +40,9 @@ pub use needs::Need;
 /// The folder in kelpie's home that holds the agent files
 pub const FOLDER: &str = "agents";
 
+/// What starts the name of an agent file that kelpie ignores, as if it were absent
+const IGNORED: char = '_';
+
 /// The folder of `agents` that holds each baseline whole, for reading and diffing
 pub const BASELINES: &str = ".defaults";
 
@@ -266,6 +269,7 @@ pub struct Agent {
 pub struct Agents {
     agents: BTreeMap<AgentName, Agent>,
     skipped: Vec<PathBuf>,
+    ignored: Vec<PathBuf>,
     broken: BTreeMap<AgentName, AgentsError>,
     unbound: Vec<Unbound>,
     bare: Vec<Baseline>,
@@ -309,6 +313,7 @@ impl fmt::Debug for Agents {
                     .collect::<BTreeMap<_, _>>(),
             )
             .field("skipped", &self.skipped)
+            .field("ignored", &self.ignored)
             .field("broken", &self.broken)
             .field("unbound", &self.unbound)
             .field(
@@ -353,6 +358,7 @@ impl Agents {
         Self {
             agents,
             skipped: Vec::new(),
+            ignored: Vec::new(),
             broken: BTreeMap::new(),
             unbound: Vec::new(),
             bare,
@@ -361,8 +367,9 @@ impl Agents {
 
     /// Kelpie's own agents, then each `<name>.md` in `folder` over them
     ///
-    /// A folder that is not there holds no files, and a `.md` file whose
-    /// name is no agent's is skipped. A file that binds nothing is left out
+    /// A folder that is not there holds no files, a `.md` file whose name
+    /// starts with `_` is ignored, as if absent, and one whose name is no
+    /// agent's is skipped. A file that binds nothing is left out
     /// of the book and listed by [`Agents::unbound`], and one that cannot be
     /// used is left out with its error in [`Agents::broken`].
     ///
@@ -397,10 +404,14 @@ impl Agents {
         for entry in entries {
             let path = entry.map_err(|e| failed(folder, e))?.path();
             if path.extension().is_some_and(|e| e == "md") && path.is_file() {
-                files.push(path);
+                match is_ignored(&path) {
+                    true => agents.ignored.push(path),
+                    false => files.push(path),
+                }
             }
         }
         files.sort();
+        agents.ignored.sort();
         // Every file is read first, since one may extend another that sorts after it.
         let mut texts = BTreeMap::new();
         for path in files {
@@ -530,6 +541,11 @@ impl Agents {
             Some(shipped.name),
             shipped.name,
         ))
+    }
+
+    /// The `.md` files ignored because their names start with `_`, sorted
+    pub fn ignored(&self) -> &[PathBuf] {
+        &self.ignored
     }
 
     /// A line for each `.md` file skipped because its name is no agent's, and
@@ -785,11 +801,17 @@ fn failed(path: &Path, e: io::Error) -> AgentsError {
     }
 }
 
+// Whether the file at `path` is one kelpie ignores, whose name starts with `_`.
+fn is_ignored(path: &Path) -> bool {
+    let name = path.file_name().and_then(|name| name.to_str());
+    name.is_some_and(|name| name.starts_with(IGNORED))
+}
+
 /// What `folder`'s `.md` files hold, by file name, so a change to any of
 /// them can be seen without loading them
 ///
-/// A folder or file that cannot be read shows as its error, so it reads as
-/// a change once it can be.
+/// A file ignored for a name that starts with `_` is left out. A folder or file
+/// that cannot be read shows as its error, so it reads as a change once it can be.
 pub fn snapshot(folder: &Path) -> Vec<(String, String)> {
     let entries = match fs::read_dir(folder) {
         Ok(entries) => entries,
@@ -799,7 +821,7 @@ pub fn snapshot(folder: &Path) -> Vec<(String, String)> {
     let mut files: Vec<(String, String)> = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|e| e == "md"))
+        .filter(|path| path.extension().is_some_and(|e| e == "md") && !is_ignored(path))
         .map(|path| {
             let text = fs::read_to_string(&path).unwrap_or_else(|e| e.kind().to_string());
             (path.display().to_string(), text)

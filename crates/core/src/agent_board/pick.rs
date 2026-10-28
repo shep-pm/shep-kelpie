@@ -4,10 +4,7 @@ use std::cmp::Ordering;
 
 use super::Typical;
 use crate::agents::{Fit, Tier};
-use crate::settings::AgentName;
-
-/// The minutes past the soonest finish an item allows when its pick names no slack
-pub const DEFAULT_SLACK_MINUTES: u32 = 60;
+use crate::settings::{AgentName, DEFAULT_SLACK_MINUTES};
 
 /// What a work item asks of the agent the board picks
 #[derive(Debug, Clone, Copy, Default)]
@@ -18,7 +15,8 @@ pub struct Item<'a> {
     pub tier: Option<Tier>,
     /// The agent it is pinned to, the only one tried
     pub pin: Option<&'a AgentName>,
-    /// Minutes past the soonest finish it allows, [`DEFAULT_SLACK_MINUTES`] when None
+    /// Minutes past the soonest finish it allows, [`DEFAULT_SLACK_MINUTES`]
+    /// when None, which only an older runner's ask leaves
     pub slack: Option<u32>,
     /// Agents not to pick
     pub leave_out: &'a [AgentName],

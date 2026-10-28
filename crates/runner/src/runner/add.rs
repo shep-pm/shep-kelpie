@@ -223,7 +223,7 @@ impl Runner {
             kind: label_kind(labels).map(str::to_owned),
             tier: picked.and_then(|p| p.tier),
             pin: pin.clone(),
-            slack: picked.and_then(|p| p.slack),
+            slack: Some(self.slack(picked.and_then(|p| p.slack))),
             agents: self.board_agents(),
             leave_out: Vec::new(),
         };
@@ -238,6 +238,12 @@ impl Runner {
             pinned: pin.is_some(),
             note,
         })
+    }
+
+    // The minutes of slack a work item allows: its own, from the project
+    // manager's pick, else the project's `agents.slack`.
+    pub(super) fn slack(&self, own: Option<u32>) -> u32 {
+        own.unwrap_or(self.settings.agents.slack)
     }
 
     // What the agent board ranks for `ask`, best first, of the agents `ask`

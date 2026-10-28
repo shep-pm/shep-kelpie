@@ -216,6 +216,47 @@ fn a_file_whose_name_is_no_agents_name_is_skipped_and_named() {
 }
 
 #[test]
+fn a_file_whose_name_starts_with_an_underscore_is_ignored_as_if_absent_and_listed() {
+    let dir = folder(&[
+        ("_qwen.md", QWEN),
+        ("_broken.md", "no frontmatter at all\n"),
+        ("qwen.md", QWEN),
+    ]);
+    let agents = Agents::load(dir.path()).unwrap();
+    assert!(agents.get(&name("qwen")).is_some());
+    assert_eq!(
+        agents.ignored(),
+        [dir.path().join("_broken.md"), dir.path().join("_qwen.md")]
+    );
+    assert_eq!(
+        agents.skipped().count(),
+        0,
+        "ignored on purpose, not skipped"
+    );
+    assert_eq!(agents.unbound().len(), 0);
+    assert_eq!(Agents::embedded().ignored(), [] as [PathBuf; 0]);
+}
+
+#[test]
+fn an_ignored_file_is_not_an_agent_an_extends_can_reach() {
+    let dir = folder(&[
+        ("_base.md", QWEN),
+        ("mine.md", "---\nextends: _base\n---\n"),
+    ]);
+    let agents = Agents::load(dir.path()).unwrap();
+    assert!(agents.get(&name("mine")).is_none());
+    assert!(agents.broken(&name("mine")).is_some());
+}
+
+#[test]
+fn a_change_to_an_ignored_file_leaves_the_snapshot_alone() {
+    let dir = folder(&[("qwen.md", QWEN)]);
+    let before = snapshot(dir.path());
+    fs::write(dir.path().join("_old.md"), QWEN).unwrap();
+    assert_eq!(before, snapshot(dir.path()));
+}
+
+#[test]
 fn a_change_to_any_md_file_changes_the_snapshot() {
     let dir = folder(&[("qwen.md", QWEN)]);
     let before = snapshot(dir.path());
