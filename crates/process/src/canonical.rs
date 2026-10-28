@@ -10,9 +10,37 @@ use std::path::{Path, PathBuf};
 const MAX_PLAIN: usize = 259;
 
 /// Device names Windows reads as the device in any plain path
-const DEVICES: [&str; 22] = [
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+const DEVICES: [&str; 30] = [
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "CONIN$",
+    "CONOUT$",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "COM\u{b9}",
+    "COM\u{b2}",
+    "COM\u{b3}",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
+    "LPT\u{b9}",
+    "LPT\u{b2}",
+    "LPT\u{b3}",
 ];
 
 /// `path` made absolute with its links resolved, as a path other programs
@@ -63,7 +91,12 @@ fn plain(raw: &str) -> Option<String> {
 }
 
 fn plain_part(part: &str) -> bool {
-    let stem = part.split('.').next().unwrap_or_default();
+    // Windows drops the spaces before the extension's dot: `nul .txt` is `NUL`.
+    let stem = part
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches(' ');
     !part.is_empty()
         && part != "."
         && part != ".."
@@ -103,6 +136,11 @@ mod tests {
             r"\\?\C:\work\trailing \x",
             r"\\?\C:\work\nul\x",
             r"\\?\C:\work\com1.txt",
+            r"\\?\C:\work\nul .txt",
+            "\\\\?\\C:\\work\\COM\u{b9}\\x",
+            "\\\\?\\C:\\work\\lpt\u{b3}.log",
+            r"\\?\C:\work\CONIN$",
+            r"\\?\C:\work\conout$.txt",
             r"\\?\C:\work\..\x",
             r"\\?\C:\work\a:b",
             r"\\?\UNC\server",
