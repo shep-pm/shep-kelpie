@@ -1,18 +1,18 @@
 # Design
 
-Kelpie: the maintainer's dog; one runner per project builds ready issues. Maintainer asked only via rulings.
+Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks only via rulings.
 
 ## Always
 
-- Gates, locks, rate windows live in code; Claude only for work and judgement. ADR 0001
+- Gates, locks, rate windows live in code; Claude only for work, judgement. ADR 0001
 - Kelpie controls each agent's context growth. `runner/turn/`
 - Naming: dog = adopted `kelpie` (lease dog); project = sheep; agent calls = lambs. One kelpie for all projects. ADR 0001 to 0004
-- Binary is the dog with no args + `SHEP_DOG_NAME` and `SHEP_NAME` set; needs the `shep adopt` channel; names itself in the handshake, so never `silent`. `src/sheep/mod.rs`
+- Binary is the dog with no args + `SHEP_DOG_NAME` and `SHEP_NAME` set; needs the `shep adopt` channel; names itself in the handshake, never `silent`. `src/sheep/mod.rs`
 - Needs shep 0.17.0+ (ADR 0016); `upgrade` refuses builds it would. shep-pm/shep#688, #319, #656, #914
 - Home: `$SHEP_HOME/kelpie` (`KELPIE_HOME`), shep plugin, folder per project; the dog's files stay under `$SHEP_HOME`. #253
 - The shepherd is reached through the `Dial` port (`core/shepherd/connection.rs`): `Socket` is the real one; tests dial `FakeShepherd`. #587
-- Socket path over 103 bytes: runner won't start. #1147
-- Home never moved from `~/.kelpie`: won't start, naming each old file, exit 78 (`stop_exit_codes`). #311, #345
+- Socket path over 103 bytes: no start. #1147
+- Home never moved from `~/.kelpie`: no start, names each old file, exit 78 (`stop_exit_codes`). #311, #345
 - State file version 89 (`VERSION` in `core/state/mod.rs`); each change one way: rollback = finish or drop open items. `core/state/removed/mod.rs`
 - Business code is Rust; Tauri GUI after MVP. #5
 - Crates under `crates/` use nothing above them; the root holds the binary, verbs (`src/{flock,upgrade,sheep,doctor,issues}/`, `src/schema.rs`). ADR 0015
@@ -20,7 +20,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Mainta
 
 ## Files
 
-| file | covers | touch (`core/` is `crates/core/src/`, `dog/` is `crates/dog/src/dog/`, `adapters/` is `crates/adapters/src/`, `runner/` is `crates/runner/src/runner/`) |
+| file | covers | touch (`core/`: `crates/core/src/`, `dog/`: `crates/dog/src/dog/`, `adapters/`: `crates/adapters/src/`, `runner/`: `crates/runner/src/runner/`) |
 |---|---|---|
 | work.md | projects, slots, issues | `src/issues/check.rs`, `runner/slots.rs`, `src/flock/verbs.rs`, `core/board/check.rs` |
 | board.md | board, items, adoption | `core/board/`, `runner/{dispatch,adopt}/` |
@@ -40,6 +40,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Mainta
 | plugins.md | repo plugins: sources, copies, harness loading, MCP | `core/skills/repo/`, `adapters/{skills,claude/mcp,pi/skills,codex/skills,goose/skills}.rs` |
 | agent-files.md | agent file, `extends`, baselines | `core/agents/`, `src/flock/add/` |
 | agent-migration.md | `agents migrate` | `core/agents/legacy.rs` |
+| agent-allow.md | allow list | `core/settings/agents/`, `runner/add.rs` |
 | agents.md | harnesses, gateways | `adapters/`, `core/settings/agents/`, `process/spawn.rs` |
 | cli-adapter.md | a new CLI | `adapters/cli/` |
 | handover.md | in-flight turns handed to a new build, `upgrade` | `src/sheep/handover/`, `runner/flight/carry/`, `adapters/process/adopt/`, `src/upgrade/handover.rs` |
@@ -55,11 +56,11 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Mainta
 | who-answers.md | who answers | `runner/pm/rulings.rs` |
 | contributions.md | others' pull requests: settings, detection | `core/settings/{contributions.rs,reviewers/}`, `runner/contributions/`, `core/state/contributions.rs` |
 | contribution-security.md | a contribution's security review | `runner/contributions/`, `runner/flight/security.rs`, `process/worktree/` |
-| contribution-pass.md | reviewers' pass over a green head | `runner/contributions/pass.rs`, `process/worktree/` |
-| contribution-talk.md | what contributors say, answers, quiet clock | `runner/contributions/{heard,clock}.rs`, `runner/thread_replies/` |
-| contribution-push.md | a fork worker's push; the red-CI comment | `runner/contributions/{push,after}.rs` |
+| contribution-pass.md | reviewers' pass, green head | `runner/contributions/pass.rs`, `process/worktree/` |
+| contribution-talk.md | contributors' words, answers, quiet clock | `runner/contributions/{heard,clock}.rs`, `runner/thread_replies/` |
+| contribution-push.md | a fork worker's push; red-CI comment | `runner/contributions/{push,after}.rs` |
 | contribution-release.md | asking for a release: yes, thumbs up, silence, ruling | `runner/contributions/{release,ruling}.rs` |
-| contribution-merge.md | a contribution's merge ruling: yes, thanks, no | `runner/contributions/{merge,ruling}.rs`, `core/settings/rulings.rs` |
+| contribution-merge.md | merge ruling: yes, thanks, no | `runner/contributions/{merge,ruling}.rs`, `core/settings/rulings.rs` |
 | representative.md | agent file, `agents.representative`, post wording | `runner/representative/`, `core/agents/front/`, `core/settings/agents/`, `agents/representative.md` |
 | dependencies.md | bot bumps: rebase, proof, merge, red | `core/settings/dependencies.rs`, `runner/{dependencies,dev_server/bump}/`, `runner/flight/proving.rs`, `core/state/bumps.rs`, `adapters/{e2e_runner,pages}.rs`, `adapters/bridge/client/` |
 | triage.md | settings, triager, pick rule, `since`, the verb, `status` | `core/settings/triage.rs`, `runner/triage/`, `runner/open_checks.rs`, `core/ports/issue.rs` |
@@ -79,6 +80,6 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Mainta
 | metrics-transcripts.md | a call's transcript: MCP, tools, `usage` | `crates/facts/`, `runner/transcript_count/`, `core/usage/` |
 | budget.md | pacing, dog + leases, time, usage, settings | `runner/pace.rs`, `dog/`, `core/usage/`, `core/settings/`, `src/sheep/mod.rs` |
 
-Each file stays under 8 KB; over it, split in two and add a row here. A changed decision updates its bullet.
+Each file stays under 8 KB; over it, split in two, add a row. A changed decision updates its bullet.
 
 Elsewhere: `docs/design-log.md` (history, old file formats), `docs/facts/`, `docs/adr/`, `GLOSSARY.md`.
