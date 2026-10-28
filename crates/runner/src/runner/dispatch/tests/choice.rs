@@ -73,6 +73,37 @@ fn the_ask_carries_every_allowed_implementer_the_listed_ones_first() {
     );
 }
 
+// The ask a new item for issue 6 sends the board, in a project whose settings
+// hold `slack` minutes, or the example's when None
+fn slack_asked(slack: Option<u32>) -> (Option<u32>, Option<u32>) {
+    let rig = Rig::new("acme");
+    if let Some(minutes) = slack {
+        rig.edit_settings(|s| {
+            s.replace(
+                "\nimplementers = ",
+                &format!("\nslack = {minutes}\nimplementers = "),
+            )
+        });
+    }
+    let runner = rig.open().unwrap();
+    rig.forge.list_ready(6, false);
+    assert!(dispatched_on(step(&runner).unwrap(), 6, "sonnet-high"));
+    let held = runner.lock().unwrap();
+    let kept = held.state.item(ticket(6)).unwrap().slack;
+    (rig.agent_board.asks()[0].slack, kept)
+}
+
+#[test]
+fn the_ask_carries_an_hour_of_slack_when_the_settings_name_none() {
+    assert_eq!(slack_asked(None), (Some(60), None));
+}
+
+#[test]
+fn the_ask_carries_the_settings_slack_and_the_item_keeps_none_of_its_own() {
+    assert_eq!(slack_asked(Some(25)), (Some(25), None));
+    assert_eq!(slack_asked(Some(0)), (Some(0), None));
+}
+
 #[test]
 fn an_unpinned_agent_label_does_not_choose() {
     let (rig, runner) = in_order("acme", &["coder", "coder2"]);

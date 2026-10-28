@@ -122,8 +122,8 @@ implementers = ["sonnet-high"]
 # `triage.agent`) is refused when it names one left out, so is the default
 # `reviewers`, and an `agent:<name>` label naming one is skipped. Names are
 # not checked against the agents folder: a missing file is refused where the
-# name is used. At least one name; leave it out to allow every agent, as
-# when absent.
+# name is used. Leave it out, or leave it empty (`allow = []`), to allow
+# every agent.
 # allow = ["sonnet-high", "iq3-xxs-review", "defect-hunter-lite", "pm", "representative", "security-reviewer", "triager"]
 # How an issue with no `agent:` label gets its implementer: `order`, where
 # it runs on the first implementer listed and no call runs, the only choice
@@ -170,6 +170,12 @@ implementers = ["sonnet-high"]
 # Read by nothing: the agent board's handoff moves a work item now, and a
 # later release removes this.
 # fallback_after = 15
+# Minutes past the soonest finish that the agent board lets a work item's
+# agent take: a new item opens on the cheapest ranked agent finishing within
+# it, and a later turn moves to the next pick when its own agent would finish
+# past it. 0 keeps only the soonest. A pick of the project manager's own
+# `slack` wins for its item. 60 when absent.
+# slack = 60
 
 # Turn `enabled` off for a stretch when usage limits do not matter: neither
 # the daily allowance nor the 5-hour window then holds anything, and `status`

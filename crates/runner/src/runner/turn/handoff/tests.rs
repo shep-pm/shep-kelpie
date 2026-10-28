@@ -23,7 +23,19 @@ const SLACK: u64 = 60 * 60;
 // turn committed `work.txt` and stopped with no pull request: the next step
 // sends it back, a later turn
 fn later_turn_due(labels: &[&str]) -> (Rig, Mutex<Runner>) {
+    later_turn_in(Rig::new("acme"), labels)
+}
+
+// ... in a project whose settings hold `minutes` of slack
+fn later_turn_slacking(minutes: u32) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new("acme");
+    let slack = format!("\nslack = {minutes}\nimplementers = ");
+    rig.edit_settings(|s| s.replace("\nimplementers = ", &slack));
+    later_turn_in(rig, &[])
+}
+
+// ... on `rig`
+fn later_turn_in(rig: Rig, labels: &[&str]) -> (Rig, Mutex<Runner>) {
     rig.write_agent("coder", CODER);
     rig.write_codex_implementer();
     rig.implementers(&["sonnet-high", "coder"]);
@@ -114,6 +126,45 @@ fn a_later_turn_past_the_slack_hands_off_on_a_fresh_session_with_a_note() {
     let events = saved["events"].as_array().unwrap();
     let event = "#7: handed off from sonnet-high to coder";
     assert!(events.iter().any(|e| e["what"] == event), "{events:?}");
+}
+
+#[test]
+fn the_settings_slack_decides_whether_a_later_turn_stays() {
+    let (rig, runner) = later_turn_slacking(10);
+    let own = SOON + 30 * 60;
+    rig.agent_board
+        .ranks_finishing(&[("coder", SOON), ("sonnet-high", own)]);
+    step(&runner).unwrap();
+    assert_eq!(item(&rig, &runner)["agent"], "coder");
+    let ask = rig.agent_board.asks().pop().expect("an ask");
+    assert_eq!(ask.slack, Some(10));
+
+    let (rig, runner) = later_turn_slacking(120);
+    let own = SOON + SLACK + 1;
+    rig.agent_board
+        .ranks_finishing(&[("coder", SOON), ("sonnet-high", own)]);
+    next_turn(&rig, &runner);
+    assert_eq!(item(&rig, &runner)["agent"], "sonnet-high");
+    let ask = rig.agent_board.asks().pop().expect("an ask");
+    assert_eq!(ask.slack, Some(120));
+}
+
+#[test]
+fn an_items_own_slack_wins_over_the_settings() {
+    let (rig, runner) = later_turn_slacking(120);
+    runner
+        .lock()
+        .unwrap()
+        .state
+        .item_mut(ticket(7))
+        .expect("the item")
+        .slack = Some(0);
+    rig.agent_board
+        .ranks_finishing(&[("coder", SOON), ("sonnet-high", SOON + 1)]);
+    step(&runner).unwrap();
+    assert_eq!(item(&rig, &runner)["agent"], "coder");
+    let ask = rig.agent_board.asks().pop().expect("an ask");
+    assert_eq!(ask.slack, Some(0));
 }
 
 #[test]

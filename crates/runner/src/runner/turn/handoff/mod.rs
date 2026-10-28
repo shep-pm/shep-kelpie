@@ -28,11 +28,12 @@ impl Runner {
         let Some(item) = self.current().filter(|item| !item.pinned) else {
             return Ok(None);
         };
+        let slack = self.slack(item.slack);
         let ask = PickAsk {
             kind: item.kind.clone(),
             tier: item.tier,
             pin: None,
-            slack: item.slack,
+            slack: Some(slack),
             agents: self.board_agents(),
             leave_out: item.left.clone(),
         };
@@ -49,7 +50,7 @@ impl Runner {
         };
         let (issue, from) = (item.issue, item.agent.clone());
         let from_finish = (picks.iter().find(|pick| pick.agent == from)).map(|pick| pick.finish);
-        if from_finish.is_some_and(|own| within_slack(own, soonest, item.slack)) {
+        if from_finish.is_some_and(|own| within_slack(own, soonest, Some(slack))) {
             return Ok(None);
         }
         let to = match self.first_unpaced(picks.iter().map(|pick| &pick.agent), Scope::Turn)? {

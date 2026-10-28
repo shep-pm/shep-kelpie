@@ -353,3 +353,23 @@ fn a_picks_agent_that_allow_drops_before_dispatch_opens_on_the_boards_pick_keepi
         "{notes:?}"
     );
 }
+
+#[test]
+fn a_picks_own_slack_wins_over_the_settings() {
+    let rig = Rig::new("koji");
+    rig.edit_settings(|s| s.replace("\nimplementers = ", "\nslack = 25\nimplementers = "));
+    let (rig, runner) = pm_on(rig);
+    rig.forge.list_ready(9, false);
+    rig.forge.list_ready(12, false);
+    rig.claude.script([Scripted::Say(
+        "```json\n{\"pick\": {\"issue\": 12, \"slack\": 0}, \"why\": \"w\"}\n```",
+    )]);
+    answered(step(&runner).unwrap());
+
+    step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+
+    let held = runner.lock().unwrap();
+    assert_eq!(held.state.item(ticket(12)).unwrap().slack, Some(0));
+    let asks = rig.agent_board.asks();
+    assert_eq!(asks.last().unwrap().slack, Some(0));
+}

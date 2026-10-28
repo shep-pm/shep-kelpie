@@ -156,3 +156,23 @@ async fn a_model_behind_a_gateway_with_no_load_to_read_waits_nothing() {
         "paddock's load is unread"
     );
 }
+
+#[test]
+fn an_agent_file_named_with_an_underscore_is_no_implementer_the_board_ranks() {
+    let dir = tempfile::tempdir().unwrap();
+    let lite = "---\nrole: implementer\nharness: stand-in\nmodel: lite\neffort: low\n\
+                usage: none\n---\n";
+    write_in(dir.path(), "_lite.md", lite);
+    let loaded = crate::dog::agents_in(dir.path());
+
+    let ranked = |agents: &Agents| {
+        Board::new(agents)
+            .view()
+            .implementers
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(ranked(&loaded), ranked(&Agents::embedded()));
+}
