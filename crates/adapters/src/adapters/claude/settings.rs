@@ -299,21 +299,27 @@ fn read_denials(no_read: &[String], read: &[PathBuf]) -> Vec<String> {
 // `around` for `dir` as given and where its links lead, each entry given
 // first and then resolved where that differs.
 fn around_in_both(dir: &Path, read: &[PathBuf]) -> Vec<String> {
-    let given = around(dir, read);
     let Some(resolved) = dir.canonicalize().ok().filter(|c| c != dir) else {
-        return given;
+        return around(dir, read);
     };
+    // A read path spelled one way under the folder is also named the other.
+    let mut read = read.to_vec();
+    for path in read.clone() {
+        for (from, to) in [(dir, resolved.as_path()), (resolved.as_path(), dir)] {
+            read.extend(path.strip_prefix(from).ok().map(|rest| to.join(rest)));
+        }
+    }
     let mut rules: Vec<String> = Vec::new();
     let mut add = |rule: Option<String>| {
         if let Some(rule) = rule.filter(|r| !rules.contains(r)) {
             rules.push(rule);
         }
     };
-    for rule in &given {
+    for rule in around(dir, &read) {
         add(Some(rule.clone()));
-        add(respelled(rule, dir, &resolved));
+        add(respelled(&rule, dir, &resolved));
     }
-    for rule in around(&resolved, read) {
+    for rule in around(&resolved, &read) {
         add(respelled(&rule, &resolved, dir));
         add(Some(rule));
     }
@@ -591,6 +597,27 @@ mod tests {
             "the denied home is reached through a link"
         );
         assert!(rules.iter().all(|r| !r.contains("toolchain")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_readable_folder_spelled_through_the_link_or_not_is_denied_in_neither() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        for folder in ["a", "b", "c"] {
+            std::fs::create_dir_all(real.join(folder)).unwrap();
+        }
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let no_read = [format!("{}/**", link.display())];
+
+        let rules = read_denials(&no_read, &[link.join("a"), real.join("b")]);
+
+        let expected: Vec<String> = spellings(&link.join("c"))
+            .into_iter()
+            .map(|s| format!("{s}/**"))
+            .collect();
+        assert_eq!(rules, expected);
     }
 
     #[test]
