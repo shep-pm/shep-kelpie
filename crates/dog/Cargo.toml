@@ -21,6 +21,9 @@ shep-client.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt", "signal", "sync", "time"] }
 toml.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+shep-kelpie-worker-folder.workspace = true
+
 [dev-dependencies]
 shep-kelpie-core = { workspace = true, features = ["test-support"] }
 shep-kelpie-test-support.workspace = true
