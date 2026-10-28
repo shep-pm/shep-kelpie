@@ -4,13 +4,10 @@
 //! on an older protocol. [`Connection::ask`] sends one [`Request`] and reads its
 //! [`Reply`] within a deadline.
 //!
-//! The outcomes a caller acts on are separate. [`Unreachable`] covers a socket
-//! that is missing, refused, silent at the hello or on an older protocol, so
-//! the caller can fall back to `shep trigger`. [`Failure::TimedOut`] is its own
-//! outcome: the runner may still take the request, so asking again would do it
-//! twice, and a connection that timed out asks nothing more.
-//!
-//! Uses only `shep-kelpie-protocol` and `shep-kelpie-core` (for `ipc`).
+//! [`Unreachable`] (missing, refused, silent at the hello or on an older
+//! protocol) lets the caller fall back to `shep trigger`. [`Failure::TimedOut`]
+//! never does: the runner may still take the request, and a connection that
+//! timed out asks nothing more. Uses only `protocol` and `core`.
 
 #![forbid(unsafe_code)]
 #![doc(test(attr(deny(warnings))))]

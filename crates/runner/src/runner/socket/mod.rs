@@ -2,14 +2,10 @@
 //!
 //! `run/<project>.sock` under kelpie's home answers the requests of
 //! `shep-kelpie-protocol` (ADR 0017). A connection sends a hello and is
-//! answered with the runner's, then asks one request a line and gets one reply
-//! a line, each the body `shep trigger` returns for it. The runner has no
-//! tokio, so each connection is a thread of its own on `ipc::blocking`.
-//!
-//! Everything is bounded. A line past [`LONGEST_FRAME`], a connection silent
-//! for [`Limits::idle_within`], and a connection past [`Limits::most_connections`]
-//! close it. A request the runner has no variant for gets a typed error and the
-//! connection stays open.
+//! answered with the runner's, then asks a request a line and gets the body
+//! `shep trigger` returns for it. The runner has no tokio, so each connection
+//! is a thread of its own on `ipc::blocking`. Everything is bounded: a line
+//! past [`LONGEST_FRAME`], silence, and too many connections close it.
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};

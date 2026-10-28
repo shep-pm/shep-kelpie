@@ -98,13 +98,11 @@ fn pipe_name(socket: &Path) -> String {
 
 /// Binds `socket` for the maintainer's user alone, through `bind`
 ///
-/// On Unix a socket left by a process that is gone is replaced, and one a live
-/// process answers on is left alone. `bind` is given a private name beside
-/// `socket`, whose mode is cut to 0600 before it is renamed into place, so no
-/// client reaches a socket that is half made. On Windows `bind` is given
-/// `socket` itself: the pipe is writable only by its creator and
-/// administrators, and a second process cannot create it. `rival` names what
-/// else may answer there (`dog`, `runner`), for the message.
+/// On Unix a dead process's socket is replaced and a live one's is not. `bind`
+/// is given a private name beside `socket`, cut to 0600 and then renamed into
+/// place, so no client reaches a half-made socket. On Windows it is given
+/// `socket` itself, a pipe only its creator and administrators may write.
+/// `rival` names what else may answer there (`dog`, `runner`), for the message.
 ///
 /// # Errors
 ///
