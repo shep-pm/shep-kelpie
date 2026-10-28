@@ -465,6 +465,34 @@ fn no_json_and_a_failed_exit_reports_stderr() {
     assert_eq!(err, AgentError::Failed(CLAUDE, "not logged in".into()));
 }
 
+// The wrapper prints crabpot's own refusal when a Windows session's grant meets
+// the profile read grant's exclusions, which a list that drifted from the
+// install's would cause. The turn's error must carry every conflict.
+#[test]
+fn a_start_refused_for_profile_conflicts_names_each_conflict() {
+    let conflicts = vec![
+        crabpot::ProfileConflict {
+            path: r"C:\Users\R\.cargo".into(),
+            exclusion: r"\\?\C:\Users\R\.cargo\credentials".into(),
+            write: false,
+        },
+        crabpot::ProfileConflict {
+            path: r"C:\Users\R\.rustup".into(),
+            exclusion: r"\\?\C:\Users\R\.rustup\NTUSER.DAT*".into(),
+            write: false,
+        },
+    ];
+    let stderr = format!(
+        "crabpot: {}\n",
+        crabpot::StartError::ProfileConflicts(conflicts.clone())
+    );
+    let err = parse_result(&output(1, "", &stderr), &fresh()).unwrap_err();
+    let said = err.to_string();
+    for conflict in &conflicts {
+        assert!(said.contains(&conflict.to_string()), "{conflict}: {said}");
+    }
+}
+
 #[test]
 fn no_json_and_a_clean_exit_is_unreadable() {
     let err = parse_result(&output(0, "hello", ""), &fresh()).unwrap_err();

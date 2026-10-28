@@ -348,6 +348,7 @@ mod tests {
                 loopback_open: false,
                 seclogon_runs: true,
                 desktop_session: true,
+                profile_exclusions: Default::default(),
             });
         let cli = w.cli(Arc::new(none));
         for call in [w.worker(), w.call(Role::Reviewer)] {
