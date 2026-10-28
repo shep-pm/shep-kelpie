@@ -30,6 +30,8 @@ pub(in crate::runner) struct Kept {
     head: Option<Result<String, WorktreeError>>,
     // By the head the base was read for, which a step that finds another reads again
     bases: BTreeMap<String, Result<Base, WorktreeError>>,
+    // By the head the tips were read for, which a step that finds another reads again
+    borrowed: BTreeMap<String, Result<Vec<String>, WorktreeError>>,
     changes: Option<Result<Changes, WorktreeError>>,
     prepared: Option<Result<Worktree, WorktreeError>>,
     installed: Option<Installed>,
@@ -46,6 +48,7 @@ impl Kept {
     pub(in crate::runner) fn is_empty(&self) -> bool {
         self.head.is_none()
             && self.bases.is_empty()
+            && self.borrowed.is_empty()
             && self.changes.is_none()
             && self.prepared.is_none()
             && self.installed.is_none()
@@ -68,6 +71,9 @@ impl Kept {
             Found::Base { head, base } => {
                 self.bases.insert(head, base);
             }
+            Found::Borrowed { head, borrowed } => {
+                self.borrowed.insert(head, borrowed);
+            }
             Found::Changes(changes) => self.changes = Some(changes),
             Found::Prepared(prepared) => self.prepared = Some(prepared),
             Found::Installed(installed) => self.installed = Some(installed),
@@ -79,6 +85,7 @@ impl Kept {
 pub(in crate::runner) enum Git {
     Head(Head),
     Base(Standing),
+    Borrowed(Borrowed),
     Changes(Changed),
     Prepare(Preparing),
     Install(Installing),
@@ -90,6 +97,10 @@ pub(in crate::runner) enum Found {
     Base {
         head: String,
         base: Result<Base, WorktreeError>,
+    },
+    Borrowed {
+        head: String,
+        borrowed: Result<Vec<String>, WorktreeError>,
     },
     Changes(Result<Changes, WorktreeError>),
     Prepared(Result<Worktree, WorktreeError>),
@@ -110,6 +121,13 @@ impl Git {
                 let head = ask.head.clone();
                 Found::Base {
                     base: ask.run(),
+                    head,
+                }
+            }
+            Self::Borrowed(ask) => {
+                let head = ask.head.clone();
+                Found::Borrowed {
+                    borrowed: ask.run(),
                     head,
                 }
             }
@@ -175,6 +193,26 @@ impl Ask for Standing {
 
     fn job(self) -> Git {
         Git::Base(self)
+    }
+}
+
+/// The commits among `tips` that `head` carries and the base lacks, just fetched
+pub(in crate::runner) struct Borrowed {
+    checkout: PathBuf,
+    head: String,
+    base: String,
+    tips: Vec<String>,
+}
+
+impl Ask for Borrowed {
+    type Answer = Result<Vec<String>, WorktreeError>;
+
+    fn run(self) -> Self::Answer {
+        worktree::borrowed(&self.checkout, &self.head, &self.base, &self.tips)
+    }
+
+    fn job(self) -> Git {
+        Git::Borrowed(self)
     }
 }
 
@@ -327,6 +365,29 @@ impl Runner {
         });
         let read = self.read_git(self.reads.git.bases.get(head).cloned(), ask)?;
         read.map_err(|e| Box::new(self.gate_failed(format!("cannot fetch main: {e}"))))
+    }
+
+    /// The commits among `tips` that `head`, the forge's head of the work item's branch, carries
+    /// and its base lacks, or the step's end: `Begin::Reads`, or the gate failing as git could
+    /// not say
+    ///
+    /// Tips read for another head are not this one's: they are read again.
+    pub(in crate::runner) fn tips_carried(
+        &self,
+        head: &str,
+        tips: Vec<String>,
+    ) -> Result<Vec<String>, Box<Begin>> {
+        let ask = self.current().map(|item| Borrowed {
+            checkout: self.settings.git.checkout.clone(),
+            head: head.to_owned(),
+            base: self.item_base(item).to_owned(),
+            tips,
+        });
+        let read = self.read_git(self.reads.git.borrowed.get(head).cloned(), ask)?;
+        read.map_err(|e| {
+            let why = format!("cannot tell which pull requests this head carries: {e}");
+            Box::new(self.gate_failed(why))
+        })
     }
 
     /// The branch's head on its remote and the agents' own files it changes, or the step's
