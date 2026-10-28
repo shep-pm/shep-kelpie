@@ -1,0 +1,25 @@
+[package]
+name = "shep-kelpie-client"
+description = "The client of a runner's socket: connect, hello, and one request at a time. Uses only protocol and core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+shep-kelpie-core.workspace = true
+shep-kelpie-protocol.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["io-util", "time"] }
+
+[dev-dependencies]
+shep-kelpie-test-support.workspace = true
+# Only for the fake runners the tests serve
+tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time"] }
+# Only for throwaway socket folders in tests
+tempfile.workspace = true
