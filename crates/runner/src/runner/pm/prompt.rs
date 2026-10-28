@@ -12,7 +12,7 @@ use crate::ports::Wait;
 /// shows again to a session that has seen the answer without it
 macro_rules! answer_key {
     () => {
-        "\"answer\": null or {\"item\": <the work item whose worker asked, or whose follow-up you pass on>, \"text\": \"<the worker's next turn>\" or \"escalate\": \"<the choice you recommend>\", \"candidates\"?: [\"<an answer>\", ...], \"problem\": \"<optional>\", \"board\": \"<optional>\", \"why\": \"<one sentence>\"}"
+        "\"answer\": null or {\"item\": <the work item whose worker asked, or whose follow-up you pass on>, \"text\": \"<the worker's next turn>\" or \"escalate\": \"<the choice you recommend>\", \"candidates\"?: [\"<an answer>\", ...], \"problem\": \"<optional, at most 600 characters>\", \"board\": \"<optional, at most 300 characters>\", \"why\": \"<one sentence, at most 300 characters>\"}"
     };
 }
 
@@ -33,7 +33,9 @@ macro_rules! questions {
          `problem` to replace the worker's with one or two plain sentences a maintainer \
          who has not followed the item can act on, and `board` with what the board \
          shows of picking an option: the items held behind this one, and whether a slot \
-         is freed or kept. Both are optional, and each goes on one line.\n\n\
+         is freed or kept. Both are optional, and each goes on one line. Kelpie cuts \
+         `problem` at 600 characters, and `board`, `why`, each `candidates` entry and the \
+         `escalate` choice at 300, at the last word that fits, so keep to them.\n\n\
          Unless you answer a question with `text`, give `candidates` beside \
          `escalate` (or alone): two or three short answers the worker could act on as \
          they stand, one line each, the likeliest first. Where the question is a \
@@ -57,7 +59,7 @@ macro_rules! questions {
 /// ruling shows again to a session that has seen the answer without it
 macro_rules! follow_up_key {
     () => {
-        "\"follow_up\": null or {\"item\": <the work item whose follow-up ruling you decide>, \"decision\": \"yes\" | \"no\", \"label\"?: \"ready-for-agent\" | \"needs-triage\" (only with yes, may be left out), \"why\": \"<one sentence>\"}"
+        "\"follow_up\": null or {\"item\": <the work item whose follow-up ruling you decide>, \"decision\": \"yes\" | \"no\", \"label\"?: \"ready-for-agent\" | \"needs-triage\" (only with yes, may be left out), \"why\": \"<one sentence, at most 300 characters>\"}"
     };
 }
 
@@ -87,7 +89,7 @@ macro_rules! follow_ups {
 /// `main` shows again to a session that has seen the answer without it
 macro_rules! red_key {
     () => {
-        "\"red\": null or {\"workflow\": <a workflow under Red on main>, \"call\": \"fix\", \"title\": \"<the fix issue's title>\", \"body\": \"<the failing check, the log lines you read and the suspect merge>\", \"why\": \"<one sentence>\"} or {\"workflow\": <a workflow under Red on main>, \"call\": \"ask\", \"log\": \"<the log lines you read>\", \"why\": \"<one sentence>\"} or a list of them"
+        "\"red\": null or {\"workflow\": <a workflow under Red on main>, \"call\": \"fix\", \"title\": \"<the fix issue's title>\", \"body\": \"<the failing check, the log lines you read and the suspect merge>\", \"why\": \"<one sentence, at most 300 characters>\"} or {\"workflow\": <a workflow under Red on main>, \"call\": \"ask\", \"log\": \"<the log lines you read>\", \"why\": \"<one sentence, at most 300 characters>\"} or a list of them"
     };
 }
 
@@ -159,7 +161,7 @@ const ANSWER: &str = concat!(
 ```
 {\"pick\": <the ready issue to start next, or null to leave the pick to the board rule; when the wake says several slots are free, a list of ready issues in the order to start them>,
  \"hold\": [{\"issue\": <a ready issue that should wait>, \"until\": <the open work item whose closing ends the hold>}, ...] (one entry for every ready issue that should wait; [] holds none),
- \"unstick\": null or {\"item\": <a stuck work item's issue>, \"action\": \"retry\" | \"re-scope\" | \"ask\" | \"none\", \"why\": \"<one sentence>\"} or [{\"item\": <a stuck work item's issue>, \"action\": \"retry\" | \"re-scope\" | \"ask\" | \"none\", \"why\": \"<one sentence>\"}, ...],
+ \"unstick\": null or {\"item\": <a stuck work item's issue>, \"action\": \"retry\" | \"re-scope\" | \"ask\" | \"none\", \"why\": \"<one sentence, at most 300 characters>\"} or [{\"item\": <a stuck work item's issue>, \"action\": \"retry\" | \"re-scope\" | \"ask\" | \"none\", \"why\": \"<one sentence, at most 300 characters>\"}, ...],
  ",
     answer_key!(),
     ",\n ",
@@ -173,7 +175,7 @@ const ANSWER: &str = concat!(
     standing_key!(),
     ",
  \"reply\": null or \"<a message to the maintainer, if one is due>\",
- \"why\": \"<two sentences at most>\"}
+ \"why\": \"<two sentences at most, 300 characters>\"}
 ```
 
 A `pick` entry may be `{\"issue\": <a ready issue>, \"tier\": \"light\" | \"standard\" | \"heavy\", \
@@ -620,6 +622,37 @@ mod tests {
             ),
             "{text}"
         );
+    }
+
+    #[test]
+    fn the_pm_prompt_states_the_cap_of_each_field_kelpie_cuts() {
+        let ask = Wake::Question {
+            ticket: ticket(7),
+            id: ticket(1),
+            asked: "Which flag?".into(),
+        };
+        for fresh in [true, false] {
+            let text = wake(
+                "koji",
+                std::slice::from_ref(&ask),
+                &[],
+                &[],
+                fresh,
+                &Notes::default(),
+                BOARD,
+            );
+            for key in [
+                "\"problem\": \"<optional, at most 600 characters>\"",
+                "\"board\": \"<optional, at most 300 characters>\"",
+                "\"why\": \"<one sentence, at most 300 characters>\"",
+            ] {
+                assert!(text.contains(key), "{key}: {text}");
+            }
+            assert!(
+                text.contains("each `candidates` entry and the `escalate` choice at 300"),
+                "{text}"
+            );
+        }
     }
 
     #[test]

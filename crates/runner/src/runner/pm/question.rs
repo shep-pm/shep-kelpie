@@ -8,7 +8,7 @@
 //! `answer`: its text is dropped, and so is an escalation whose choice is
 //! neither `yes` nor `no`. Its own `follow_up` key decides the ruling.
 
-use super::act::{WORDS, plain};
+use super::act::{PROBLEM_WORDS, WORDS, plain};
 use super::answer::{Call, Decide, How, Settle};
 use super::maintainer::Settled;
 use crate::board::briefing::ticket_ref;
@@ -106,8 +106,8 @@ impl Runner {
                     )));
                 }
                 let choice = (choice.as_deref()).map(|c| plain(&self.shown(c.to_owned()), WORDS));
-                let words = |text: &Option<String>| {
-                    (text.as_ref()).map(|t| plain(&self.shown(t.clone()), WORDS))
+                let words = |text: &Option<String>, most| {
+                    (text.as_ref()).map(|t| plain(&self.shown(t.clone()), most))
                 };
                 let candidates = (settle.candidates.iter())
                     .map(|c| plain(&self.shown(c.clone()), WORDS))
@@ -115,8 +115,8 @@ impl Runner {
                 let passed = Passed {
                     choice: choice.as_deref(),
                     why: &why,
-                    problem: words(&settle.problem),
-                    board: words(&settle.board),
+                    problem: words(&settle.problem, PROBLEM_WORDS),
+                    board: words(&settle.board, WORDS),
                     candidates,
                 };
                 self.recommend(id, &passed)?;
