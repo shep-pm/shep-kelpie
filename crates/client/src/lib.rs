@@ -2,8 +2,7 @@
 //!
 //! [`connect`] opens `run/<project>.sock`, makes the hello and refuses a runner
 //! on an older protocol. [`Connection::ask`] sends one [`Request`] and reads its
-//! [`Reply`] within a deadline. [`watch`] turns a connection into a stream of
-//! the runner's [`Status`], each time it changes.
+//! [`Reply`] within a deadline. [`watch`] streams the [`Status`] as it changes.
 //!
 //! [`Unreachable`] (missing, refused, silent at the hello or on an older
 //! protocol) lets the caller fall back to `shep trigger`. [`Failure::TimedOut`]

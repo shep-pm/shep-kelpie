@@ -8,9 +8,6 @@
 //! changed what `status` shows and asked the forge nothing, and those two
 //! triggers read the copy whenever the lock is held. A `drain` or `undrain`
 //! that lands while a pass holds the lock is answered from the copy too.
-//!
-//! A `watch` on the runner's socket reads the status from here as well: while
-//! a client watches, each post also keeps the owned [`Status`] it was built as.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -366,9 +363,8 @@ impl Watcher {
     /// one given, waiting for it if need be; `None` once `quit` says so
     ///
     /// Snapshots posted while the caller was away are skipped. Lines are
-    /// compared whole, so what a client could not tell apart is one event, and a
-    /// field that moves with the clock makes a line of its own. `quit` is read
-    /// with the posts locked, so whatever makes it true calls
+    /// compared whole, so what a client could not tell apart is one event.
+    /// `quit` is read with the posts locked, so whatever makes it true calls
     /// [`Posted::wake_watchers`] after.
     pub(crate) fn next(&mut self, quit: impl Fn() -> bool) -> Option<String> {
         let mut watching = self.posted.watching();
