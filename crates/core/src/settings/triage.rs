@@ -309,11 +309,18 @@ impl Settings {
     /// # Errors
     ///
     /// [`SettingsError::Invalid`] naming `triage.agent` when it has no agent
-    /// file, or its file's role is not `triager`.
+    /// file, its file's role is not `triager`, or `agents.allow` leaves it out.
     pub fn triager(&self, agents: &Agents) -> Result<ExpertAgent, SettingsError> {
         let at = "triage.agent";
         let name = &self.triage.agent;
-        let agent = find(agents, name, at, at, Role::Triager)?;
+        let agent = find(
+            agents,
+            name,
+            at,
+            at,
+            Role::Triager,
+            self.agents.allow.as_ref(),
+        )?;
         let Runs::Session { model, limit } = &agent.runs else {
             unreachable!("a triager's file only parses to a session")
         };

@@ -268,10 +268,45 @@ impl TryFrom<String> for ImplementerChoice {
     }
 }
 
+/// The agents a project may use: one or more, none twice over
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(try_from = "Vec<AgentName>")]
+// schemars describes a `try_from` type by its source, so the bound goes here.
+#[schemars(extend("minItems" = 1))]
+pub struct Allow(Vec<AgentName>);
+
+impl Allow {
+    /// Whether the project may use `name`
+    pub fn holds(&self, name: &AgentName) -> bool {
+        self.0.contains(name)
+    }
+}
+
+impl TryFrom<Vec<AgentName>> for Allow {
+    type Error = String;
+
+    fn try_from(names: Vec<AgentName>) -> Result<Self, Self::Error> {
+        match names.is_empty() {
+            true => Err(
+                "`agents.allow` names no agent, so it would allow none: leave it out \
+                 to allow every agent"
+                    .to_owned(),
+            ),
+            false => Ok(Self(names)),
+        }
+    }
+}
+
 /// The agents a project names: its implementers and its reviewers
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoleAgentNames {
+    /// The only agents the project may use, by the names of kelpie's agent
+    /// files: any other is refused wherever the project names it, and no
+    /// `agent:` label may pick it. Not checked against the agents folder,
+    /// since the files are reread each wake. Every agent with a file when absent.
+    #[serde(default)]
+    pub allow: Option<Allow>,
     /// The agents that build its work items, from kelpie's agent files. An
     /// issue labelled `agent:<name>` runs on that one, and any other on the
     /// first listed. `["sonnet-high"]` when absent.
@@ -308,6 +343,7 @@ pub struct RoleAgentNames {
 impl Default for RoleAgentNames {
     fn default() -> Self {
         Self {
+            allow: None,
             implementers: default_implementers(),
             implementer_choice: ImplementerChoice::default(),
             fallback_after: None,
@@ -405,15 +441,23 @@ impl Settings {
     /// # Errors
     ///
     /// [`SettingsError::Invalid`] naming an agent `agents` lacks or whose
-    /// file is another role's, an implementer the worker's fence cannot hold,
-    /// or an empty list.
+    /// file is another role's, one `agents.allow` leaves out, an implementer
+    /// the worker's fence cannot hold, or an empty list.
     pub fn role_agents(&self, agents: &Agents) -> Result<RoleAgents, SettingsError> {
+        let allow = self.agents.allow.as_ref();
         let mut implementers: Vec<Implementer> = Vec::new();
         for name in &self.agents.implementers {
             if implementers.iter().any(|i| &i.name == name) {
                 continue;
             }
-            let agent = find(agents, name, IMPLEMENTERS, "agents", Role::Implementer)?;
+            let agent = find(
+                agents,
+                name,
+                IMPLEMENTERS,
+                "agents",
+                Role::Implementer,
+                allow,
+            )?;
             let Runs::Session { model, limit } = &agent.runs else {
                 unreachable!("an implementer's file only parses to a session")
             };
@@ -433,7 +477,7 @@ impl Settings {
         };
         let pm = match &self.agents.pm {
             Some(name) => {
-                let agent = find(agents, name, "agents.pm", "agents", Role::Pm)?;
+                let agent = find(agents, name, "agents.pm", "agents", Role::Pm, allow)?;
                 let Runs::Session { model, limit } = &agent.runs else {
                     unreachable!("a project manager's file only parses to a session")
                 };
@@ -458,11 +502,19 @@ impl Settings {
     /// # Errors
     ///
     /// [`SettingsError::Invalid`] naming `agents.representative` when it has
-    /// no agent file, or its file's role is not `representative`.
+    /// no agent file, its file's role is not `representative`, or
+    /// `agents.allow` leaves it out.
     pub fn representative(&self, agents: &Agents) -> Result<ExpertAgent, SettingsError> {
         let at = "agents.representative";
         let name = &self.agents.representative;
-        let agent = find(agents, name, at, at, Role::Representative)?;
+        let agent = find(
+            agents,
+            name,
+            at,
+            at,
+            Role::Representative,
+            self.agents.allow.as_ref(),
+        )?;
         let Runs::Session { model, limit } = &agent.runs else {
             unreachable!("a representative's file only parses to a session")
         };
@@ -542,16 +594,20 @@ impl Settings {
 ///
 /// # Errors
 ///
-/// [`SettingsError::Invalid`] on `setting` when `agents` lacks it, its file
-/// is left out, or its file is another role's.
+/// [`SettingsError::Invalid`] on `setting` when `allow` leaves it out,
+/// `agents` lacks it, its file is left out, or its file is another role's.
 pub(super) fn find<'a>(
     agents: &'a Agents,
     name: &AgentName,
     at: &str,
     setting: &'static str,
     role: Role,
+    allow: Option<&Allow>,
 ) -> Result<&'a Agent, SettingsError> {
     let invalid = |reason: String| SettingsError::Invalid { setting, reason };
+    if let Some(left_out) = left_out(allow, name, at, "name another") {
+        return Err(invalid(left_out));
+    }
     let Some(agent) = agents.get(name) else {
         if let Some(error) = agents.broken(name) {
             return Err(invalid(format!("`{at}` names {name}, whose {error}")));
@@ -575,6 +631,23 @@ pub(super) fn find<'a>(
         )));
     }
     Ok(agent)
+}
+
+/// The refusal of `name` when `allow` leaves it out, with `instead` as the
+/// other fix beside adding it to `agents.allow`
+pub(super) fn left_out(
+    allow: Option<&Allow>,
+    name: &AgentName,
+    at: &str,
+    instead: &str,
+) -> Option<String> {
+    let left_out = allow.is_some_and(|allow| !allow.holds(name));
+    left_out.then(|| {
+        format!(
+            "`{at}` names {name}, which `agents.allow` leaves out: add it to `agents.allow`, \
+             or {instead}"
+        )
+    })
 }
 
 #[cfg(test)]

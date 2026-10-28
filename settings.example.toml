@@ -114,6 +114,17 @@ per_item_usd = 10
 # back (below). `sonnet-high` alone when absent.
 [app.dogs.kelpie.agents]
 implementers = ["sonnet-high"]
+# The only agents this project may use, by the names of kelpie's agent
+# files, for a private project that keeps its code to the models its owner
+# names. With it set, no other agent is named or chosen: every setting that
+# names an agent (`implementers`, `reviewers`, `pm`, `representative`,
+# `contributions.reviewers`, `contributions.security_reviewer` and
+# `triage.agent`) is refused when it names one left out, so is the default
+# `reviewers`, and an `agent:<name>` label naming one is skipped. Names are
+# not checked against the agents folder: a missing file is refused where the
+# name is used. At least one name; leave it out to allow every agent, as
+# when absent.
+# allow = ["sonnet-high", "iq3-xxs-review", "defect-hunter-lite", "pm", "representative", "security-reviewer", "triager"]
 # How an issue with no `agent:` label gets its implementer: `order`, where
 # it runs on the first implementer listed and no call runs, the only choice
 # and the default. `fallback_after` below still moves a first turn that

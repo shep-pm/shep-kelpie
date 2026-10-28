@@ -293,3 +293,49 @@ fn an_agent_on_a_gateway_kelpie_cannot_route_to_stops_the_runner() {
         "{err}"
     );
 }
+
+// An implementer on a local model, which no setting lists
+const CODER: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-coder\n\
+                      effort: low\nusage: none\n---\n";
+
+// A project whose `agents.allow` holds sonnet-high, coder and the rig's reviewers, with
+// opus-high's file and coder's both there.
+fn allowing_coder() -> Rig {
+    let rig = Rig::new("shep");
+    rig.write_agent("coder", CODER);
+    name_agents(
+        &rig,
+        "allow = [\"sonnet-high\", \"coder\", \"qwen\", \"claude\"]\n\
+         implementers = [\"sonnet-high\"]\n",
+    );
+    rig
+}
+
+#[test]
+fn an_agent_label_naming_an_implementer_allow_leaves_out_is_skipped_listing_the_allowed() {
+    let rig = allowing_coder();
+    let runner = rig.open().unwrap();
+    rig.forge.label(9, "agent:opus-high");
+    assert_eq!(
+        rig.ask(&runner, "add", Some("9")),
+        serde_json::json!({
+            "error": "label `agent:opus-high` names no implementer: kelpie's agent files with \
+                      `role: implementer` are coder, sonnet-high"
+        })
+    );
+
+    rig.forge.label(8, "agent:coder");
+    rig.ask(&runner, "add", Some("8"));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["agent"], serde_json::json!("coder"));
+}
+
+#[test]
+fn agent_labels_are_made_only_for_allowed_implementers() {
+    let rig = allowing_coder();
+    rig.open().unwrap();
+    assert_eq!(
+        rig.forge.repo_labels_now(),
+        ["agent:coder", "agent:sonnet-high"]
+    );
+}
