@@ -189,3 +189,51 @@ async fn a_meter_read_never_sees_a_gateway_key() {
     assert!(shown.contains("PATH="), "{shown}");
     assert!(!shown.contains(SET), "a meter's command saw it");
 }
+
+// A lease reader whose load read panics, as a bug in a parse would.
+struct Panics;
+
+impl crate::ports::LocalLeases for Panics {
+    fn paddock_holder(
+        &self,
+        _: &crate::forwarder::Upstream,
+        _: &str,
+    ) -> Option<crate::ports::PaddockHolder> {
+        None
+    }
+
+    fn paddock_load(&self, _: &crate::forwarder::Upstream, _: &str) -> Option<ModelLoad> {
+        panic!("a load read that panics")
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_load_read_that_panics_leaves_each_model_unknown() {
+    let (_dir, agents) = agents(&[("coder.md", on_gateway("paddock", "coder"))]);
+    let sources = Sources::of(&agents, &gateways());
+    let shown = Mutex::new(Availability::new(&sources));
+    let leases = Arc::new(LeaseReads::default());
+    leases.loaded(Some(ModelLoad {
+        slots: 1,
+        held: 1,
+        waiting: 0,
+    }));
+    let clock = Arc::new(FakeClock::at(EPOCH));
+    let readers = |leases| Readers {
+        leases,
+        meters: BTreeMap::new(),
+        clock: clock.clone(),
+    };
+    read(&shown, &sources, &readers(leases)).await;
+    assert_eq!(shown.lock().unwrap().status()["models"][0]["held"], 1);
+
+    read(&shown, &sources, &readers(Arc::new(Panics))).await;
+    let status = shown.lock().unwrap().status();
+    assert!(
+        status["models"]
+            .as_array()
+            .unwrap()
+            .contains(&model("coder", unknown())),
+        "{status}"
+    );
+}

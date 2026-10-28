@@ -232,7 +232,14 @@ pub(super) async fn read(shown: &Mutex<Availability>, sources: &Sources, readers
         };
         models.into_iter().map(load).collect::<Vec<_>>()
     });
-    let loads = loads.await.unwrap_or_default();
+    let unread = || {
+        sources
+            .models
+            .keys()
+            .map(|key| (key.clone(), None))
+            .collect()
+    };
+    let loads = loads.await.unwrap_or_else(unread);
     let now = readers.clock.now();
     for (key, load) in loads {
         lock(shown).loaded(key, load, now);
