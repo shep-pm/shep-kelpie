@@ -187,13 +187,21 @@ impl Held {
         };
         let written = file.write_all(text.as_bytes());
         drop(file);
-        written
+        let staged = written
             .map_err(|e| io_error(&e))
-            .and_then(|()| self.check())
-            .and_then(|()| std::fs::rename(&beside, &to).map_err(|e| io_error(&e)))
-            .inspect_err(|_| {
-                let _ = std::fs::remove_file(&beside);
-            })
+            .and_then(|()| self.check());
+        let done = staged.and_then(|()| match std::fs::rename(&beside, &to) {
+            Ok(()) => Ok(()),
+            // A rename by path may open the held folder for writing, which its
+            // share mode refuses. The old file is then removed and the new one
+            // made in its place, as `create` does.
+            Err(_) => self
+                .create(name)
+                .and_then(|mut file| file.write_all(text.as_bytes()).map_err(|e| io_error(&e))),
+        });
+        // Whatever is left of the staged file goes, a renamed one being gone already.
+        let _ = std::fs::remove_file(&beside);
+        done
     }
 }
 
