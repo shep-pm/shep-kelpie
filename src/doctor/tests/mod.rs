@@ -320,6 +320,33 @@ async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
 }
 
 #[tokio::test]
+async fn a_listed_implementer_with_no_description_makes_its_line_unsure_naming_it() {
+    let scene = Scene::new().await;
+    scene.runs("golbat", |t| {
+        t.insert(
+            "agents".into(),
+            json!({ "implementers": ["sonnet-high", "mine"] }),
+        );
+    });
+    let agents = scene.kelpie_home.join("agents");
+    let mine = "---\nrole: implementer\nharness: claude-code\nmodel: claude-opus-5-5\n\
+                effort: high\n---\n";
+    crate::test::write_in(&agents, "mine.md", mine);
+
+    let report = scene.report().await;
+
+    let Verdict::Unsure { what, next } = verdict(&report, "golbat: implementers") else {
+        panic!("{:#?}", report.render());
+    };
+    assert_eq!(what, "mine has no description");
+    let file = agents.join("mine.md");
+    assert_eq!(
+        next,
+        &format!("add a `description` key to {}", file.display())
+    );
+}
+
+#[tokio::test]
 async fn an_md_file_named_for_no_agent_is_named_and_unsure() {
     let scene = Scene::new().await;
     scene.runs("golbat", |_| {});

@@ -15,7 +15,7 @@ use std::process::ExitCode;
 use crate::agents::baseline::{self, Baseline};
 use crate::agents::init::quoted;
 use crate::agents::legacy;
-use crate::agents::{Agents, Role, Runs};
+use crate::agents::{Agents, Fit, Role, Runs};
 use crate::settings::AgentName;
 use crate::shep_home;
 
@@ -355,13 +355,28 @@ fn list(folder: &Path) -> Result<Vec<String>, String> {
     Ok(lines(&book))
 }
 
+// The tier, the kinds when the file sets them and the description when it has
+// one, each after a comma, on one line.
+fn fit_keys(fit: &Fit) -> String {
+    let mut keys = format!(", tier {}", fit.tier().as_str());
+    if let Some(kinds) = &fit.kinds {
+        let kinds: Vec<&str> = kinds.iter().collect();
+        keys.push_str(&format!(", kinds [{}]", kinds.join(", ")));
+    }
+    if let Some(description) = &fit.description {
+        let words: Vec<&str> = description.as_str().split_whitespace().collect();
+        keys.push_str(&format!(", description: {}", words.join(" ")));
+    }
+    keys
+}
+
 // A line for each agent, each unbound file, then each baseline that binds
 // nothing and has no file.
 fn lines(book: &Agents) -> Vec<String> {
     let mut lines = Vec::new();
     for (name, agent) in book.iter() {
         let role = agent.role.as_str();
-        lines.push(match &agent.runs {
+        let mut line = match &agent.runs {
             Runs::Session { model, .. } => format!(
                 "{name}: {role}, {}, {}, {}",
                 model.harness.harness().as_str(),
@@ -371,7 +386,11 @@ fn lines(book: &Agents) -> Vec<String> {
             Runs::Command(_) => format!("{name}: {role}, command"),
             Runs::Endpoint(_) => format!("{name}: {role}, endpoint"),
             Runs::Bot(_) => format!("{name}: {role}, review bot"),
-        });
+        };
+        if matches!(agent.role, Role::Implementer | Role::Reviewer) {
+            line.push_str(&fit_keys(&agent.fit));
+        }
+        lines.push(line);
     }
     for unbound in book.unbound() {
         lines.push(format!(

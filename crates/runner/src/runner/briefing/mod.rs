@@ -13,14 +13,15 @@ use std::sync::Mutex;
 use super::Runner;
 use super::trigger::lock;
 use super::turn::held_up::HeldUp;
+use crate::agents::{Fit, Role, Tier};
 use crate::board::briefing::{
-    self, Briefing, Files, IDLE_AFTER, Item, Merge, Ready, ReadyLine, RedLine, RulingLine, Session,
-    age, elapsed, quiet_for,
+    self, AgentLine, Briefing, Files, IDLE_AFTER, Item, Merge, Ready, ReadyLine, RedLine,
+    RulingLine, Session, age, elapsed, quiet_for,
 };
 use crate::board::{ReadyIssue, Skip, priority, rule_order};
 use crate::local_paths::Surface;
 use crate::ports::{AgentCall, PaddockHolder, Timestamp, Wait};
-use crate::settings::{GatewayName, ModelHost};
+use crate::settings::{AgentName, GatewayName, ModelHost};
 use crate::state::{ProjectState, StateError, write_atomically};
 use crate::ticket::TicketId;
 use crate::work_item::{Phase, ReviewStage, Seat, Turn, WorkItem};
@@ -443,6 +444,7 @@ impl Runner {
                 })
                 .collect(),
             ready: self.ready_lines(),
+            agents: self.agent_lines(),
             events,
             woken_before: self.state.pm_seen.is_some(),
             dropped,
@@ -540,6 +542,31 @@ impl Runner {
         ready
     }
 
+    // The implementers the project lists, the default first, then its
+    // reviewers, each with the keys its file holds now.
+    fn agent_lines(&self) -> Vec<AgentLine> {
+        let line = |name: &AgentName, role: Role, default: bool| {
+            let fit = self.book.get(name).map(|agent| &agent.fit);
+            AgentLine {
+                name: name.to_string(),
+                role,
+                default,
+                tier: fit.map_or_else(Tier::default, Fit::tier),
+                kinds: fit
+                    .and_then(|fit| fit.kinds.as_ref())
+                    .map(|kinds| kinds.iter().map(str::to_owned).collect()),
+                description: fit
+                    .and_then(|fit| fit.description.as_ref())
+                    .map(|text| self.shown(one_line(text.as_str()))),
+            }
+        };
+        let default = &self.agents.default_implementer.name;
+        let implementers = (self.agents.implementers.iter())
+            .map(|i| line(&i.name, Role::Implementer, &i.name == default));
+        let reviewers = (self.lineup.iter()).map(|r| line(&r.name, Role::Reviewer, false));
+        implementers.chain(reviewers).collect()
+    }
+
     fn ready_lines(&self) -> Option<Ready> {
         let (read, _) = self.brief.ready.as_ref()?;
         let issues = self
@@ -574,6 +601,11 @@ impl Runner {
             issues,
         })
     }
+}
+
+// `text` on one line, its runs of whitespace closed up
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 // Why the board passes over an issue, and whether the board may still take

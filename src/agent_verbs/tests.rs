@@ -200,7 +200,8 @@ fn list_shows_bound_agents_unbound_files_and_baselines_that_bind_nothing_with_no
 
     let has = |line: &str| assert!(lines.iter().any(|l| l == line), "{line} in {lines:#?}");
     has("pm: pm, claude-code, claude-opus-5-5, high");
-    has("sonnet-high: implementer, claude-code, claude-sonnet-5-5, high");
+    let shipped = "sonnet-high: implementer, claude-code, claude-sonnet-5-5, high, tier standard";
+    assert!(lines.iter().any(|l| l.starts_with(shipped)), "{lines:#?}");
     has("scribe: pm, unbound: run `shep kelpie agents new pm --name scribe`");
     has("triager: baseline, no file: run `shep kelpie agents new triager`");
     has("spec: baseline, no file: run `shep kelpie agents new reviewer --baseline spec`");
@@ -208,6 +209,29 @@ fn list_shows_bound_agents_unbound_files_and_baselines_that_bind_nothing_with_no
     let unbound = lines.iter().position(|l| l.starts_with("scribe:")).unwrap();
     let baseline = lines.iter().position(|l| l.starts_with("spec:")).unwrap();
     assert!(bound < unbound && unbound < baseline, "{lines:#?}");
+}
+
+#[test]
+fn list_shows_each_agents_tier_kinds_and_description() {
+    let dir = tempfile::tempdir().unwrap();
+    agents(dir.path(), PM_ON_CLAUDE).unwrap();
+    let heavy = "---\nrole: implementer\nharness: claude-code\nmodel: claude-opus-5-5\n\
+                 effort: high\ndescription: Design work that\n  needs the strongest agent.\n\
+                 kinds: [design, migration]\ntier: heavy\n---\n";
+    let bare = "---\nrole: reviewer\nharness: claude-code\nmodel: claude-sonnet-5\n\
+                effort: medium\n---\nReview the change.\n";
+    std::fs::write(dir.path().join("heavy.md"), heavy).unwrap();
+    std::fs::write(dir.path().join("bare.md"), bare).unwrap();
+
+    let lines = agents(dir.path(), "list").unwrap();
+
+    let has = |line: &str| assert!(lines.iter().any(|l| l == line), "{line} in {lines:#?}");
+    has(
+        "heavy: implementer, claude-code, claude-opus-5-5, high, tier heavy, \
+         kinds [design, migration], description: Design work that needs the strongest agent.",
+    );
+    has("bare: reviewer, claude-code, claude-sonnet-5, medium, tier standard");
+    has("pm: pm, claude-code, claude-opus-5-5, high");
 }
 
 #[test]
