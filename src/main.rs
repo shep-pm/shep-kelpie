@@ -48,7 +48,7 @@ fn main() -> ExitCode {
         [role, project] if role == "runner" => shep_kelpie::sheep::run(project, arrival),
         [command, rest @ ..] if command == "lease" => shep_kelpie::lease::cli::main(rest),
         [role, git_common_dir, worktree, local @ ..] if role == "guard" => {
-            let home = std::env::var_os("HOME").map(PathBuf::from);
+            let home = shep_kelpie::home::user_home();
             let (pin, local) = guard::pin_flag(local);
             let (here, local) = guard::here_flag(&local);
             let (after, local) = guard::after_flag(&local);

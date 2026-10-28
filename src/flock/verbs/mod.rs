@@ -156,9 +156,7 @@ async fn run(
     if help::asked(command, args) {
         return Ok(USAGE.lines().map(str::to_owned).collect());
     }
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or("HOME is not set")?;
+    let home = crate::home::user_home().ok_or(crate::home::HOME_UNSET)?;
     let kelpie_home_set = std::env::var_os(crate::home::KELPIE_VAR)
         .filter(|v| !v.is_empty())
         .map(PathBuf::from);

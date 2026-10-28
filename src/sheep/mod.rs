@@ -9,7 +9,7 @@
 //! one. A finished runner asks the shepherd to stop its own sheep.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -141,9 +141,7 @@ fn serve(project: &str, arrival: Option<Arrival<Carry>>) -> Result<(), Exit> {
     crate::home::running();
     let project = ProjectName::try_from(project).map_err(|e| e.to_string())?;
     let shep_home = shep_home::required(shep_home::FLOCKFILE_FIX)?;
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or("HOME is not set")?;
+    let home = crate::home::user_home().ok_or(crate::home::HOME_UNSET)?;
     let kelpie_home = crate::home::kelpie_home_of(&shep_home);
     let mut paths = ProjectPaths::under(&kelpie_home, &shep_home, &project);
     let (door, why) = crate::lease::door::checked_socket(&shep_home);

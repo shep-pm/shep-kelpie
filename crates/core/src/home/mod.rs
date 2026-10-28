@@ -95,13 +95,37 @@ pub fn dog_folder(shep_home: &Path) -> PathBuf {
     under(shep_home).join("dog")
 }
 
+/// What a refusal says when [`user_home`] finds nothing
+#[cfg(not(windows))]
+pub const HOME_UNSET: &str = "HOME is not set";
+
+/// What a refusal says when [`user_home`] finds nothing
+#[cfg(windows)]
+pub const HOME_UNSET: &str = "neither HOME nor USERPROFILE is set";
+
+#[cfg(not(windows))]
+const SHEP_HOME_UNSET: &str = "neither SHEP_HOME nor HOME is set";
+
+#[cfg(windows)]
+const SHEP_HOME_UNSET: &str = "neither SHEP_HOME, HOME nor USERPROFILE is set";
+
+/// The user's home, which a Windows desktop names in `USERPROFILE` and no `HOME`
+pub fn user_home() -> Option<PathBuf> {
+    user_home_from(&|key| std::env::var_os(key))
+}
+
+/// [`user_home`] reading its variables through `var`
+pub fn user_home_from(var: &dyn Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    shep_client::shep_core::paths::user_home(var)
+}
+
 /// The shepherd's home: `SHEP_HOME`, or shep's own default `~/.shep`
 ///
 /// # Errors
 ///
-/// A message when `SHEP_HOME` is not an absolute path, or neither it nor `HOME` is set.
+/// A message when `SHEP_HOME` is not an absolute path, or neither it nor the user's home is set.
 pub fn shep_home() -> Result<PathBuf, String> {
-    shep_home_from(std::env::var_os("SHEP_HOME"), std::env::var_os("HOME"))
+    shep_home_from(std::env::var_os("SHEP_HOME"), user_home().map(Into::into))
 }
 
 /// Kelpie's home: `KELPIE_HOME`, or `kelpie` under [`shep_home`]
@@ -113,7 +137,7 @@ pub fn kelpie_home() -> Result<PathBuf, String> {
     kelpie_home_from(
         std::env::var_os(KELPIE_VAR),
         std::env::var_os("SHEP_HOME"),
-        std::env::var_os("HOME"),
+        user_home().map(Into::into),
     )
 }
 
@@ -130,13 +154,13 @@ pub fn old_home() -> Option<PathBuf> {
     if std::env::var_os(KELPIE_VAR).is_some_and(|v| !v.is_empty()) {
         return None;
     }
-    old_home_of(std::env::var_os("HOME"))
+    old_home_of(user_home().map(Into::into))
 }
 
 /// The old home the dog's book would still be in, `~/.kelpie`, since shep
 /// never hands the adopted dog `KELPIE_HOME`
 pub fn old_dog_home() -> Option<PathBuf> {
-    old_home_of(std::env::var_os("HOME"))
+    old_home_of(user_home().map(Into::into))
 }
 
 /// Refuses project `name`'s runner a start in `home` while the old home
@@ -247,7 +271,7 @@ fn shep_home_from(shep: Option<OsString>, home: Option<OsString>) -> Result<Path
             Path::new(&shep).display()
         )),
         (None, Some(home)) => Ok(Path::new(&home).join(SHEP_DEFAULT)),
-        (None, None) => Err("neither SHEP_HOME nor HOME is set".into()),
+        (None, None) => Err(SHEP_HOME_UNSET.into()),
     }
 }
 
@@ -441,6 +465,52 @@ mod tests {
             assert!(ProjectName::try_from(name).is_err(), "{name}");
         }
         assert!(!is_own("githubs"));
+    }
+
+    fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<OsString> + 'a {
+        move |key| {
+            let found = pairs.iter().find(|(k, _)| *k == key);
+            found.map(|(_, v)| OsString::from(*v))
+        }
+    }
+
+    #[test]
+    fn home_is_read_first() {
+        let pairs = [("HOME", "/Users/me"), ("USERPROFILE", r"C:\Users\me")];
+        assert_eq!(
+            user_home_from(&env(&pairs)),
+            Some(PathBuf::from("/Users/me"))
+        );
+        assert_eq!(user_home_from(&env(&[("HOME", "")])), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn without_home_windows_reads_userprofile() {
+        let pairs = [("USERPROFILE", r"C:\Users\me")];
+        assert_eq!(
+            user_home_from(&env(&pairs)),
+            Some(PathBuf::from(r"C:\Users\me"))
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn without_home_unix_reads_nothing() {
+        let pairs = [("USERPROFILE", r"C:\Users\me")];
+        assert_eq!(user_home_from(&env(&pairs)), None);
+    }
+
+    #[test]
+    fn the_refusals_name_the_variables_to_set() {
+        assert!(HOME_UNSET.contains("HOME"), "{HOME_UNSET}");
+        let error = shep_home_from(None, None).unwrap_err();
+        assert!(
+            error.contains("SHEP_HOME") && error.contains("HOME"),
+            "{error}"
+        );
+        assert_eq!(HOME_UNSET.contains("USERPROFILE"), cfg!(windows));
+        assert_eq!(error.contains("USERPROFILE"), cfg!(windows), "{error}");
     }
 
     #[test]
