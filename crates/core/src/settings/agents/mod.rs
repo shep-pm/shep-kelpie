@@ -19,7 +19,7 @@ pub use facts::{DoctorProbe, HarnessFacts, SessionIds};
 use super::gateway::ModelHost;
 use super::local::ContextSize;
 use super::reviewers::lowercase_name;
-use super::{HookPoint, RoleModel, Settings, SettingsError};
+use super::{Gateways, HookPoint, RoleModel, Settings, SettingsError};
 use crate::agents::{Agent, Agents, FOLDER, Role, Runs};
 use crate::forwarder::Upstream;
 
@@ -419,6 +419,35 @@ impl Settings {
             })
         };
         allowed.filter_map(implementer).collect()
+    }
+
+    /// The implementers [`Settings::allowed_implementers`] holds that no turn can
+    /// run on, by name, each with why: the worker's fence would not hold on it, or
+    /// kelpie's `gateways` cannot route to it. The agent board is never asked
+    /// about them.
+    pub fn refused_implementers(
+        &self,
+        agents: &Agents,
+        gateways: &Gateways,
+    ) -> Vec<(AgentName, String)> {
+        let why = |i: &Implementer| {
+            let fenced = self.under_worker_fence(&i.name, &i.model);
+            let routed = || gateways.check_listed(agents, [&i.name]);
+            let refused = fenced.and_then(|()| routed()).err()?;
+            Some(match refused {
+                SettingsError::Invalid { reason, .. } => {
+                    let named = format!("{}: ", i.name);
+                    reason
+                        .strip_prefix(&named)
+                        .map_or(reason.clone(), str::to_owned)
+                }
+                other => other.to_string(),
+            })
+        };
+        let allowed = self.allowed_implementers(agents);
+        (allowed.iter())
+            .filter_map(|i| Some((i.name.clone(), why(i)?)))
+            .collect()
     }
 
     /// The project manager the project names, from `agents`

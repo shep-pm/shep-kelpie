@@ -219,11 +219,12 @@ impl Runner {
             self.notes.extend(book.skipped());
         }
         self.book = book;
-        // A new implementer file needs its `agent:` label made, listed or not.
+        // A new implementer file needs its `agent:` label made.
         if self.implementer_files() != had_labels || to_github {
             self.make_agent_labels();
             self.make_priority_labels();
         }
+        self.notes.extend(self.left_out_notes());
         self.gpu.point_at(gpu_metrics_url);
         self.extra_instructions = extra_instructions;
         self.webhook = webhook;

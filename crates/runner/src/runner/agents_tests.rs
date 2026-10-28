@@ -296,6 +296,26 @@ fn an_agent_on_a_gateway_kelpie_cannot_route_to_stops_the_runner() {
     );
 }
 
+#[test]
+fn an_implementer_on_a_gateway_kelpie_cannot_route_to_is_noted_and_left_off_the_boards_ask() {
+    let rig = Rig::new("shep");
+    rig.write_agent(
+        "local",
+        "---\nrole: implementer\nharness: pi\nmodel: m\neffort: low\n\
+         gateway: paddock\ncontext: 65536\n---\n",
+    );
+    let runner = rig.open().unwrap();
+    let notes = runner.lock().unwrap().take_notes();
+    let left = "implementer local is left out of the agent board's ask: gateway paddock is \
+                not in kelpie's settings";
+    assert!(notes.iter().any(|n| n.starts_with(left)), "{notes:?}");
+
+    rig.ask(&runner, "add", Some("7"));
+    let asks = rig.agent_board.asks();
+    let agents: Vec<&str> = asks[0].agents.iter().map(|a| a.as_str()).collect();
+    assert_eq!(agents, ["opus-high", "sonnet-high"]);
+}
+
 // An implementer on a local model, which no setting lists
 const CODER: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-coder\n\
                       effort: low\nusage: none\n---\n";

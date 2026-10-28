@@ -9,7 +9,7 @@ use crate::board::check::label_kind;
 use crate::board::{LabelError, agent_label, old_worker_label, pinned};
 use crate::lease::door::{Pick, PickAsk};
 use crate::ports::{ForgeError, Issue};
-use crate::settings::{AgentName, Implementer};
+use crate::settings::AgentName;
 use crate::state::StateError;
 use crate::ticket::TicketId;
 use crate::work_item::new_session_id;
@@ -317,15 +317,26 @@ impl Runner {
     }
 
     // The implementers the agent board may rank, by name: `implementer_files`
-    // the worker's fence holds on and whose gateway routes, since a turn on
-    // any other is refused.
+    // but those no turn can run on (`left_out`).
     pub(super) fn board_agents(&self) -> Vec<AgentName> {
-        let allowed = self.settings.allowed_implementers(&self.book).into_iter();
-        let runs = |i: &Implementer| {
-            self.settings.under_worker_fence(&i.name, &i.model).is_ok()
-                && self.gateways.check_listed(&self.book, [&i.name]).is_ok()
+        let refused = self.left_out();
+        let refused: Vec<&AgentName> = refused.iter().map(|(name, _)| name).collect();
+        let files = self.implementer_files().into_iter();
+        files.filter(|name| !refused.contains(&name)).collect()
+    }
+
+    // The implementers the agent board is never asked about, each with why: the
+    // worker's fence would not hold on it, or the gateways cannot route to it.
+    fn left_out(&self) -> Vec<(AgentName, String)> {
+        (self.settings).refused_implementers(&self.book, &self.gateways)
+    }
+
+    // A log line for each implementer `left_out`, told once per start or reread.
+    pub(super) fn left_out_notes(&self) -> Vec<String> {
+        let line = |(name, why): (AgentName, String)| {
+            format!("implementer {name} is left out of the agent board's ask: {why}")
         };
-        allowed.filter(runs).map(|i| i.name).collect()
+        self.left_out().into_iter().map(line).collect()
     }
 
     // Every agent an `agent:` label may name for this project, by name: each

@@ -596,3 +596,32 @@ fn a_name_in_allow_with_no_file_loads_and_is_no_pick_for_the_board() {
          `agents/fable.md` in kelpie's home"
     );
 }
+
+// A pi implementer on the gateway `paddock`, which no gateway in `Gateways::default()` names
+const ON_PADDOCK: &str = "---\nrole: implementer\nharness: pi\nmodel: m\neffort: low\n\
+                          gateway: paddock\ncontext: 65536\n---\n";
+
+#[test]
+fn an_implementer_no_turn_can_run_on_is_refused_with_why_and_the_rest_are_not() {
+    let book = book().with("local", ON_PADDOCK);
+    let settings = project("");
+    let refused = settings.refused_implementers(&book, &Gateways::default());
+    let [(name, why)] = refused.as_slice() else {
+        panic!("{refused:?}");
+    };
+    assert_eq!(name.as_str(), "local");
+    assert!(
+        why.starts_with("gateway paddock is not in kelpie's settings"),
+        "{why}"
+    );
+
+    let hooked = hooked(project(""));
+    let refused = hooked.refused_implementers(&book, &Gateways::default());
+    let names: Vec<&str> = refused.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["gpt", "local", "qwen"]);
+    let (_, why) = &refused[1];
+    assert!(
+        why.starts_with("implementer local runs on pi, which cannot run"),
+        "{why}"
+    );
+}

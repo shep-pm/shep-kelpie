@@ -168,8 +168,9 @@ pub(super) fn checks(
     lines.extend(super::mcp::hosts(at("repo mcp servers"), &settings, here));
     lines.extend(super::registries::line(at("package registries"), &settings));
     let gateways = kelpie.map(KelpieSettings::gateways).unwrap_or_default();
-    let (book, line) = implementers(at("implementers"), &settings, &paths);
+    let (book, line) = implementers(at("implementers"), &settings, &paths, &gateways);
     lines.push(line);
+    lines.extend(left_out(&at, &settings, &book, &gateways));
     lines.extend(gone_keys(at("old keys"), &settings));
     // The forge lines need the repo, and the checkout line says why when it is unknown.
     if let Some(repo) = &remote {
@@ -394,7 +395,12 @@ fn forge_lines(
 
 // The agent files, and whether the implementers the agent board may pick can be used.
 // Files that cannot be read leave kelpie's own agents for the other lines.
-fn implementers(subject: String, settings: &Settings, paths: &ProjectPaths) -> (Agents, Line) {
+fn implementers(
+    subject: String,
+    settings: &Settings,
+    paths: &ProjectPaths,
+    gateways: &Gateways,
+) -> (Agents, Line) {
     let book = match Agents::load(&paths.agents) {
         Ok(book) => book,
         Err(e) => {
@@ -407,6 +413,11 @@ fn implementers(subject: String, settings: &Settings, paths: &ProjectPaths) -> (
     };
     let skipped: Vec<String> = book.skipped().collect();
     let allowed = settings.allowed_implementers(&book);
+    let refused = settings.refused_implementers(&book, gateways);
+    let usable: Vec<&AgentName> = (allowed.iter())
+        .map(|i| &i.name)
+        .filter(|name| !refused.iter().any(|(r, _)| r == *name))
+        .collect();
     let line = match settings.role_agents(&book) {
         Err(e) => Line::missing(
             subject,
@@ -419,11 +430,15 @@ fn implementers(subject: String, settings: &Settings, paths: &ProjectPaths) -> (
             "add an implementer to `agents.allow`, or write one with \
              `shep kelpie agents new implementer`",
         ),
+        Ok(_) if usable.is_empty() => Line::missing(
+            subject,
+            "every implementer `agents.allow` holds is left out of the agent board's ask",
+            "correct what each `implementer` line names",
+        ),
         Ok(_) => {
             let described =
                 |name: &AgentName| book.get(name).is_some_and(|a| a.fit.description.is_some());
-            let bare: Vec<&AgentName> = (allowed.iter())
-                .map(|i| &i.name)
+            let bare: Vec<&AgentName> = (usable.iter().copied())
                 .filter(|name| !described(name))
                 .collect();
             let mut fixes = Vec::new();
@@ -448,7 +463,7 @@ fn implementers(subject: String, settings: &Settings, paths: &ProjectPaths) -> (
                 fixes.push(format!("add a `description` key to {}", files.join(", ")));
             }
             if found.is_empty() {
-                let names: Vec<&str> = allowed.iter().map(|i| i.name.as_str()).collect();
+                let names: Vec<&str> = usable.iter().map(|name| name.as_str()).collect();
                 Line::ok(
                     subject,
                     format!("the agent board picks among {}", names.join(", ")),
@@ -459,6 +474,24 @@ fn implementers(subject: String, settings: &Settings, paths: &ProjectPaths) -> (
         }
     };
     (book, line)
+}
+
+// A line for each implementer the agent board is never asked about, saying why.
+fn left_out(
+    at: &impl Fn(&str) -> String,
+    settings: &Settings,
+    book: &Agents,
+    gateways: &Gateways,
+) -> Vec<Line> {
+    let line = |(name, why): (AgentName, String)| {
+        Line::unsure(
+            at(&format!("implementer {name}")),
+            format!("{name} is left out: {why}"),
+            "correct what it names, or leave it out of `agents.allow`",
+        )
+    };
+    let refused = settings.refused_implementers(book, gateways);
+    refused.into_iter().map(line).collect()
 }
 
 // The keys kelpie reads no longer that the project's table still holds, in one line.
