@@ -10,6 +10,8 @@ use std::path::Path;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
+pub use crabpot::ProfileExclusions;
+
 use crate::adapters::files::is_executable;
 use crate::adapters::{LOGIN_VAR, LoginToken};
 
@@ -107,6 +109,9 @@ pub struct WindowsInstall {
     /// Whether this process runs in the desktop session, and not in session 0,
     /// the services' session, where crabpot refuses to start a sandbox.
     pub desktop_session: bool,
+    /// What the profile read grant keeps out of a session's grants, as `profile
+    /// status` lists it: empty when there is no grant.
+    pub profile_exclusions: ProfileExclusions,
 }
 
 impl WindowsInstall {
@@ -120,6 +125,16 @@ impl WindowsInstall {
             loopback_open,
             seclogon_runs: true,
             desktop_session: true,
+            profile_exclusions: ProfileExclusions::default(),
+        }
+    }
+
+    /// The same, with `exclusions` as what the profile read grant keeps out
+    #[must_use]
+    pub fn excluding(self, exclusions: ProfileExclusions) -> Self {
+        Self {
+            profile_exclusions: exclusions,
+            ..self
         }
     }
 
@@ -166,6 +181,7 @@ pub fn read_windows_status() -> Result<WindowsInstall, String> {
             loopback_open: status.loopback == crabpot::LoopbackMode::Open,
             seclogon_runs: status.seclogon_runs,
             desktop_session: status.in_desktop_session,
+            profile_exclusions: status.profile_exclusions,
         })
         .map_err(|e| e.to_string())
 }

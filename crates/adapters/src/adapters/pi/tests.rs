@@ -56,6 +56,33 @@ pub(super) fn stand_in(world: &World, stdout: &str) -> PiCli {
         .with_program(world.path("pi"))
 }
 
+// The wrapper prints crabpot's own refusal when a Windows session's grant meets
+// the profile read grant's exclusions. The turn's error must carry every conflict.
+#[test]
+fn a_start_refused_for_profile_conflicts_names_each_conflict() {
+    let conflicts = vec![
+        crabpot::ProfileConflict {
+            path: r"C:\Users\R\.cargo".into(),
+            exclusion: r"\\?\C:\Users\R\.cargo\credentials".into(),
+            write: false,
+        },
+        crabpot::ProfileConflict {
+            path: r"C:\Users\R\.rustup".into(),
+            exclusion: r"\\?\C:\Users\R\.rustup\NTUSER.DAT*".into(),
+            write: false,
+        },
+    ];
+    let stderr = format!(
+        "crabpot: {}\n",
+        crabpot::StartError::ProfileConflicts(conflicts.clone())
+    );
+    let err = parse_result(&output(1, "", &stderr), &id(FRESH_ID)).unwrap_err();
+    let said = err.to_string();
+    for conflict in &conflicts {
+        assert!(said.contains(&conflict.to_string()), "{conflict}: {said}");
+    }
+}
+
 #[test]
 fn a_pi_workers_commands_ask_for_the_test_lease_at_the_dogs_door() {
     let w = World::new();

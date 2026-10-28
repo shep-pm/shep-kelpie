@@ -34,10 +34,12 @@ fn has_glob(path: &str) -> bool {
 mod tests {
     use serde_json::{Value, json};
 
+    use super::super::profile::Profile;
     use super::super::{Platform, settings_in};
+    use crate::adapters::host::ProfileExclusions;
     use crate::ports::Policy;
 
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn policy() -> Policy {
         let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
@@ -68,7 +70,13 @@ mod tests {
     }
 
     fn files(platform: Platform) -> Value {
-        settings_in(&policy(), platform, false, None, &|_| true)["filesystem"].clone()
+        let none = ProfileExclusions::default();
+        let profile = Profile {
+            exclusions: &none,
+            entries: &|_| None,
+            resolve: &|_| None,
+        };
+        settings_in(&policy(), platform, false, None, &|_| true, &profile).0["filesystem"].clone()
     }
 
     #[test]
@@ -132,6 +140,72 @@ mod tests {
         );
     }
 
+    // The filesystem settings of a policy that meets no profile exclusion
+    fn files_under(policy: &Policy, platform: Platform, home: &Path) -> Value {
+        let none = ProfileExclusions::default();
+        let profile = Profile {
+            exclusions: &none,
+            entries: &|_| None,
+            resolve: &|_| None,
+        };
+        let settings = settings_in(policy, platform, false, Some(home), &Path::exists, &profile);
+        settings.0["filesystem"].clone()
+    }
+
+    // A path srt-win denies that is not there gets an empty placeholder it never
+    // deletes, so the fence names only what exists when the call starts.
+    fn denying(home: &Path) -> Policy {
+        let wt = home.join("wt");
+        std::fs::create_dir_all(wt.join(".codex")).unwrap();
+        std::fs::create_dir_all(home.join(".ssh")).unwrap();
+        std::fs::write(wt.join(".mcp.json"), "{}").unwrap();
+        std::fs::write(home.join(".netrc"), "machine").unwrap();
+        Policy {
+            no_write: vec![
+                wt.join(".codex"),
+                wt.join("**").join(".codex"),
+                wt.join(".mcp.json"),
+                wt.join(".pi"),
+                wt.join(".agents"),
+            ],
+            no_read: vec![
+                "~/.netrc".into(),
+                "~/.git-credentials".into(),
+                "~/.ssh/**".into(),
+                "~/.aws/**".into(),
+                "~/.kelpie/settings.toml".into(),
+                home.join(".cargo")
+                    .join("credentials")
+                    .display()
+                    .to_string(),
+            ],
+            ..Policy::default()
+        }
+    }
+
+    #[test]
+    fn on_windows_a_missing_deny_target_is_left_out_of_both_lists_and_an_existing_one_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let policy = denying(home);
+        let wt = home.join("wt");
+        let files = &files_under(&policy, Platform::Windows, home);
+        let kept = [wt.join(".codex"), wt.join(".mcp.json")];
+        assert_eq!(files["denyWrite"], json!(super::paths(kept)));
+        assert_eq!(files["denyRead"], json!([r"~\.netrc", r"~\.ssh"]));
+    }
+
+    #[test]
+    fn macos_and_linux_keep_every_deny_target_whether_it_exists_or_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let policy = denying(dir.path());
+        for platform in [Platform::Macos, Platform::Linux] {
+            let files = &files_under(&policy, platform, dir.path());
+            assert_eq!(files["denyWrite"], json!(policy.no_write), "{platform:?}");
+            assert_eq!(files["denyRead"], json!(policy.no_read), "{platform:?}");
+        }
+    }
+
     // Only a Windows path parses into a drive and a root, so only Windows runs it.
     #[cfg(windows)]
     #[test]
@@ -157,13 +231,7 @@ mod tests {
             ..Policy::default()
         };
 
-        let files = &settings_in(
-            &policy,
-            Platform::Windows,
-            false,
-            Some(home),
-            &std::path::Path::exists,
-        )["filesystem"];
+        let files = &files_under(&policy, Platform::Windows, home);
 
         assert_eq!(
             files["allowRead"],

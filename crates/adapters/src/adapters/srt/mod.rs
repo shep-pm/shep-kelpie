@@ -14,9 +14,11 @@ use std::process::Command;
 
 use serde_json::{Value, json};
 
-use crate::adapters::host::WindowsInstall;
+use crate::adapters::host::{ProfileExclusions, WindowsInstall};
 use crate::ports::{Policy, Sandbox, SandboxError};
+use profile::Profile;
 
+mod profile;
 mod windows;
 
 // The Mach services a command asks the keychain through, which a covered call may not look up
@@ -180,12 +182,25 @@ impl Sandbox for SandboxRuntime {
         let loopback_open = install
             .as_ref()
             .is_some_and(|install| install.loopback_open);
-        if install.is_some_and(|install| !install.loopback_open) && policy.listen {
+        if install
+            .as_ref()
+            .is_some_and(|install| !install.loopback_open)
+            && policy.listen
+        {
             return Err(SandboxError::Loopback);
         }
+        let exclusions = install.map(|install| install.profile_exclusions);
         let mut wrapped = self.runtime()?;
-        let text = serde_json::to_string_pretty(&settings_on(policy, self.platform, loopback_open))
-            .expect("settings are JSON");
+        let (settings_json, notes) = settings_for(
+            policy,
+            self.platform,
+            loopback_open,
+            &exclusions.unwrap_or_default(),
+        );
+        for note in notes {
+            eprintln!("kelpie: {note}");
+        }
+        let text = serde_json::to_string_pretty(&settings_json).expect("settings are JSON");
         let folder = settings.parent().unwrap_or(Path::new("/"));
         std::fs::create_dir_all(folder)
             .and_then(|()| std::fs::write(settings, text))
@@ -220,12 +235,35 @@ pub fn srt_settings(policy: &Policy) -> Value {
 // is the install's loopback mode, not the policy's `listen`, since srt-win
 // refuses a session that asks for the other mode the install fixed.
 fn settings_on(policy: &Policy, platform: Platform, loopback_open: bool) -> Value {
+    settings_for(
+        policy,
+        platform,
+        loopback_open,
+        &ProfileExclusions::default(),
+    )
+    .0
+}
+
+// The same, with `exclusions` as what the Windows profile read grant keeps out
+// of a session, and the notes of what it left out of the read list
+fn settings_for(
+    policy: &Policy,
+    platform: Platform,
+    loopback_open: bool,
+    exclusions: &ProfileExclusions,
+) -> (Value, Vec<String>) {
+    let profile = Profile {
+        exclusions,
+        entries: &profile::list,
+        resolve: &profile::real,
+    };
     settings_in(
         policy,
         platform,
         loopback_open,
         crate::home::user_home().as_deref(),
         &Path::exists,
+        &profile,
     )
 }
 
@@ -237,7 +275,9 @@ fn settings_in(
     loopback_open: bool,
     home: Option<&Path>,
     present: &dyn Fn(&Path) -> bool,
-) -> Value {
+    profile: &Profile<'_>,
+) -> (Value, Vec<String>) {
+    let mut notes = Vec::new();
     // Without `strictAllowlist`, a host off the list is asked about rather than refused.
     let mut network = json!({
         "allowedDomains": policy.hosts,
@@ -286,7 +326,7 @@ fn settings_in(
         .filter(|folder| platform != Platform::Windows || below_a_drive(folder));
     let (mut read, mut write, deny_read, deny_write) = match platform {
         Platform::Windows => (
-            json!(windows::paths(read_list)),
+            json!(profile.grants(windows::paths(read_list), &mut notes)),
             json!(windows::paths(&policy.write)),
             json!(windows::paths(existing(&policy.no_read, home, present))),
             json!(windows::paths(existing(&policy.no_write, home, present))),
@@ -305,7 +345,7 @@ fn settings_in(
             write.extend([json!(glob), json!(format!("{glob}/*"))]);
         }
     }
-    json!({
+    let settings = json!({
         "network": network,
         "filesystem": {
             "denyRead": deny_read,
@@ -314,7 +354,8 @@ fn settings_in(
             "denyWrite": deny_write,
         },
         "enableWeakerNetworkIsolation": policy.verify_tls,
-    })
+    });
+    (settings, notes)
 }
 
 // What `paths` holds that is there, since srt-win makes an empty placeholder
@@ -414,6 +455,7 @@ mod tests {
                 loopback_open: false,
                 seclogon_runs: true,
                 desktop_session: true,
+                profile_exclusions: Default::default(),
             });
         let settings = dir.path().join("call.srt.json");
         let err = srt
@@ -586,60 +628,6 @@ mod tests {
         }
     }
 
-    // A path srt-win denies that is not there gets an empty placeholder it never
-    // deletes, so the fence names only what exists when the call starts.
-    fn denying(home: &Path) -> Policy {
-        let wt = home.join("wt");
-        std::fs::create_dir_all(wt.join(".codex")).unwrap();
-        std::fs::create_dir_all(home.join(".ssh")).unwrap();
-        std::fs::write(wt.join(".mcp.json"), "{}").unwrap();
-        std::fs::write(home.join(".netrc"), "machine").unwrap();
-        Policy {
-            no_write: vec![
-                wt.join(".codex"),
-                wt.join("**").join(".codex"),
-                wt.join(".mcp.json"),
-                wt.join(".pi"),
-                wt.join(".agents"),
-            ],
-            no_read: vec![
-                "~/.netrc".into(),
-                "~/.git-credentials".into(),
-                "~/.ssh/**".into(),
-                "~/.aws/**".into(),
-                "~/.kelpie/settings.toml".into(),
-                home.join(".cargo")
-                    .join("credentials")
-                    .display()
-                    .to_string(),
-            ],
-            ..Policy::default()
-        }
-    }
-
-    #[test]
-    fn on_windows_a_missing_deny_target_is_left_out_of_both_lists_and_an_existing_one_is_kept() {
-        let dir = tempfile::tempdir().unwrap();
-        let home = dir.path();
-        let policy = denying(home);
-        let wt = home.join("wt");
-        let files = &settings_in(&policy, Platform::Windows, false, Some(home), &Path::exists)["filesystem"];
-        let kept = [wt.join(".codex"), wt.join(".mcp.json")];
-        assert_eq!(files["denyWrite"], json!(windows::paths(kept)));
-        assert_eq!(files["denyRead"], json!([r"~\.netrc", r"~\.ssh"]));
-    }
-
-    #[test]
-    fn macos_and_linux_keep_every_deny_target_whether_it_exists_or_not() {
-        let dir = tempfile::tempdir().unwrap();
-        let policy = denying(dir.path());
-        for platform in [Platform::Macos, Platform::Linux] {
-            let files = &settings_in(&policy, platform, false, Some(dir.path()), &Path::exists)["filesystem"];
-            assert_eq!(files["denyWrite"], json!(policy.no_write), "{platform:?}");
-            assert_eq!(files["denyRead"], json!(policy.no_read), "{platform:?}");
-        }
-    }
-
     #[test]
     fn on_macos_a_socket_folder_is_listed_after_the_sockets_and_off_macos_it_is_not() {
         let socket = PathBuf::from("/k/dog/lease.sock");
@@ -771,6 +759,7 @@ mod tests {
                 loopback_open: false,
                 seclogon_runs: true,
                 desktop_session: true,
+                profile_exclusions: Default::default(),
             });
         let err = outdated.clone().check().unwrap_err();
         assert!(matches!(err, SandboxError::Install(_)), "{err:?}");
