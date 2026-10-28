@@ -114,6 +114,20 @@ whose file names none is `standard`. A work item's tier is the least the
 project manager's pick said it needs.
 _Avoid_: size, level
 
+**Agent board**:
+The dog's reading of every agent across projects, for choosing an
+implementer: how soon each could start a turn, from its model's load or its
+plan's hold, and its typical time and cost for a kind of work, from the
+usage ledger. It orders the agents that fit a work item by when each would
+finish and what it costs.
+_Avoid_: board (one project's work items), queue
+
+**Slack**:
+How far past the soonest finish a work item may finish, so the agent board
+can take a cheaper agent: 1 hour, unless the project manager's pick names
+its own minutes, such as 0 for a hotfix.
+_Avoid_: max wait
+
 **Baseline**:
 A shipped agent file that says what a role does: its `role` and a body, and
 none of the binding keys. `extends: kelpie:<name>` reaches it. A role may
