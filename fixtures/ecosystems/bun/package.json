@@ -1,0 +1,14 @@
+{
+  "name": "ecosystem-bun",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist",
+    "test": "bun test",
+    "lint": "bun run scripts/lint.ts"
+  },
+  "dependencies": {
+    "ms": "2.1.3"
+  }
+}

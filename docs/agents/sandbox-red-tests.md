@@ -30,7 +30,7 @@ Of the sites that used `tempdir_in("/tmp")`:
 - Pass in a worker: `adapters::claude::sandbox`, `adapters::codex` and `adapters::pi::tests`.
 - Pass by skipping: the `adapters::srt::live` tests on a machine without macOS, kelpie's tools or a keychain (with them, two fail in a worker, as the table says), and `adapters::mcp::live`, which needs macOS, kelpie's tools with the code graph and a short `TMPDIR`. Each says why on stderr.
 - Fail in a worker for a reason above: the 23 `adapters::forwarder::tests` with a stand-in model server on loopback.
-- `#[ignore]`d, and run by the `sandbox` CI job: `adapters::claude::escapes`.
+- `#[ignore]`d, and run by the `sandbox` CI job: `adapters::claude::escapes`, `adapters::claude::ecosystems` and `adapters::pi::ecosystems`. The last two copy a fixture of `fixtures/ecosystems` (Rust, Go with `golangci-lint`, bun, npm, and a hook script) into a worktree, fetch its dependencies outside the fence, then build, test, lint and `git push` inside it. They need `cargo`, `go`, `golangci-lint`, `bun` and `node` on `PATH` and the network for the fetch, so a worker's sandbox cannot run them. The job runs them on Linux only. A macOS run is by hand, after `cargo build`, with `cargo test --lib -- --ignored ecosystems`.
 
 ## Tests Windows cannot run yet
 
