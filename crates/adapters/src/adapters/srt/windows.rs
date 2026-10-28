@@ -34,7 +34,7 @@ fn has_glob(path: &str) -> bool {
 mod tests {
     use serde_json::{Value, json};
 
-    use super::super::{Platform, settings_on};
+    use super::super::{Platform, settings_in};
     use crate::ports::Policy;
 
     use std::path::PathBuf;
@@ -68,7 +68,7 @@ mod tests {
     }
 
     fn files(platform: Platform) -> Value {
-        settings_on(&policy(), platform, false)["filesystem"].clone()
+        settings_in(&policy(), platform, false, None, &|_| true)["filesystem"].clone()
     }
 
     #[test]
