@@ -101,6 +101,8 @@ fn a_worker_reads_its_own_toolchain_and_no_other_repo_of_the_home() {
         (".cargo/credentials.toml", "token\n"),
         (".rustup/toolchains/stable/bin/rustc", "x\n"),
         (".gitconfig", "[user]\n"),
+        (".config/git/ignore", ".DS_Store\n"),
+        (".config/git/credentials", "https://x:token@github.com\n"),
         ("skills/tdd/SKILL.md", "step skills\n"),
     ] {
         let path = home.join(rel);
@@ -139,6 +141,7 @@ fn a_worker_reads_its_own_toolchain_and_no_other_repo_of_the_home() {
         home.join(".cargo").as_path(),
         home.join(".rustup").as_path(),
         home.join(".gitconfig").as_path(),
+        home.join(".config/git/ignore").as_path(),
         skills.as_path(),
     ] {
         assert!(
@@ -153,6 +156,7 @@ fn a_worker_reads_its_own_toolchain_and_no_other_repo_of_the_home() {
         home.join("other-repo/.env"),
         home.join("other-repo/src/lib.rs"),
         home.join(".claude/projects/-x/session.jsonl"),
+        home.join(".config/git/credentials"),
     ] {
         let spelled = path.to_str().unwrap();
         assert!(

@@ -395,10 +395,10 @@ impl WorkerProfile<'_> {
     // holding the App's token gets a `gh` config folder of its own in its build
     // folder, and the maintainer's stays denied.
     fn login_carve_outs(&self) -> impl Iterator<Item = PathBuf> {
-        [self.home.join(".gitconfig")]
+        let gh = self.token.is_none().then(|| self.home.join(".config/gh"));
+        git_config(self.home)
             .into_iter()
-            .chain(self.token.is_none().then(|| self.home.join(".config/gh")))
-            .filter(|path| path.exists())
+            .chain(gh.filter(|path| path.exists()))
     }
 
     fn env(&self) -> BTreeMap<String, String> {
@@ -443,6 +443,24 @@ fn push_to_base(base: &str) -> impl Iterator<Item = String> {
     [" {b}", " {b} *", ":{b}*", "/{b}*"]
         .into_iter()
         .map(move |p| format!("git push *{}", p.replace("{b}", base)))
+}
+
+/// The files of git's own config under `home` that are on disk
+///
+/// The global config, and the config, ignore and attributes files of git's folder
+/// under `~/.config`. Cargo lists a package's files through gix, which fails on an
+/// ignore file it cannot read. That folder's `credentials` file is not one of them.
+pub fn git_config(home: &Path) -> Vec<PathBuf> {
+    [
+        ".gitconfig",
+        ".config/git/config",
+        ".config/git/ignore",
+        ".config/git/attributes",
+    ]
+    .into_iter()
+    .map(|file| home.join(file))
+    .filter(|path| path.is_file())
+    .collect()
 }
 
 /// Each of `homes` as a deny over the folder whole, less one another already
