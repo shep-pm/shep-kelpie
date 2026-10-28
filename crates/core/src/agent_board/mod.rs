@@ -9,6 +9,6 @@ mod pick;
 mod typical;
 mod wait;
 
-pub use pick::{Candidate, Choice, DEFAULT_SLACK_MINUTES, Item, pick};
+pub use pick::{Candidate, Choice, DEFAULT_SLACK_MINUTES, Item, pick, within_slack};
 pub use typical::{DEFAULT_SECS, History, SAMPLES, Typical};
 pub use wait::{Availability, wait};

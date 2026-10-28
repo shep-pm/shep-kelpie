@@ -544,7 +544,7 @@ pub fn agent_label(
 }
 
 /// Whether an issue's `agent:` label ends in `!`, which keeps its work item
-/// on that implementer: it never falls back to another
+/// on that implementer: it is never handed off to another
 pub fn pinned(labels: &[String]) -> bool {
     labels.iter().any(|l| {
         l.get(..AGENT_LABEL.len())

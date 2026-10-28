@@ -453,7 +453,7 @@ fn a_fresh_repo_gets_every_implementers_label_when_the_runner_opens() {
 }
 
 #[test]
-fn the_fallback_alone_is_a_change() {
+fn a_fallback_after_alone_is_no_change() {
     let rig = Rig::new("shep");
     let runner = rig.open().unwrap();
     let next = settings_with(&rig, |s| {
@@ -464,12 +464,5 @@ fn the_fallback_alone_is_a_change() {
     });
     let mut runner = runner.lock().unwrap();
     let line = runner.reread(next, rig.kelpie_settings()).unwrap();
-    assert_eq!(
-        line.as_deref(),
-        Some("settings changed: agents now in effect")
-    );
-    assert_eq!(
-        runner.settings().agents.fallback_after.map(|m| m.get()),
-        Some(15)
-    );
+    assert_eq!(line, None, "nothing reads it");
 }

@@ -128,8 +128,8 @@ pub struct WorkItem {
     /// until it ends. Each turn runs that agent's file as it then stands.
     pub agent: AgentName,
     /// Whether its issue's `agent:` label ends in `!`, or the project
-    /// manager's pick named `agent`, which keeps it on `agent`: its first
-    /// turn never falls back to another implementer
+    /// manager's pick named `agent`, which keeps it on `agent`: it is never
+    /// handed off to another implementer
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pinned: bool,
     /// The kind its issue's one `kind:` label named when it opened, as `fix`
@@ -141,6 +141,14 @@ pub struct WorkItem {
     /// The minutes past its quickest finish the project manager's pick allows it
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slack: Option<u32>,
+    /// The implementers it was handed off from, oldest first, which the
+    /// agent board leaves out of every later pick for it
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub left: Vec<AgentName>,
+    /// The note kelpie wrote at its last handoff, which the first prompt of
+    /// the new session carries. Cleared once that turn starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff: Option<String>,
     /// The worker's session, chosen before its first turn
     pub session: SessionId,
     /// Where the worker's turn stands
@@ -490,6 +498,8 @@ impl WorkItem {
             kind: None,
             tier: None,
             slack: None,
+            left: Vec::new(),
+            handoff: None,
             session,
             turn: Turn::Due,
             pull_request: None,

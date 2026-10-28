@@ -110,28 +110,6 @@ fn holder_in(body: &str, model: &str) -> Result<Option<PaddockHolder>, String> {
         }))
 }
 
-pub(crate) fn queued(gateway: &Upstream, model: &str) -> bool {
-    let asked = ("GET", "/paddock/status");
-    match send(gateway, asked, None, true, STATUS_WITHIN) {
-        Ok((200, body)) => queued_in(&body, model),
-        _ => false,
-    }
-}
-
-fn queued_in(body: &str, model: &str) -> bool {
-    let Ok(read) = serde_json::from_str::<Value>(body) else {
-        return false;
-    };
-    let Some(turns) = on_model(&read, "models", model)
-        .next()
-        .and_then(|entry| entry["turns"]["lease"].as_u64())
-        .filter(|turns| *turns > 0)
-    else {
-        return false;
-    };
-    held_on(&read, model) >= turns && on_model(&read, "waiters", model).next().is_some()
-}
-
 // The entries of the status's `list` that name `model`.
 fn on_model<'a>(read: &'a Value, list: &str, model: &'a str) -> impl Iterator<Item = &'a Value> {
     let entries = read[list].as_array().into_iter().flatten();

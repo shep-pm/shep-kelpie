@@ -316,9 +316,7 @@ pub struct RoleAgentNames {
     /// where it runs on the first implementer listed, which is the default.
     #[serde(default)]
     pub implementer_choice: ImplementerChoice,
-    /// Minutes a work item's first turn may wait for its model, with no
-    /// output yet, before it moves to the next implementer listed. Off when
-    /// absent.
+    /// Read by nothing: the agent board's handoff moves a work item now
     #[serde(default)]
     pub fallback_after: Option<NonZeroU32>,
     /// The agents that review each pull request, from kelpie's agent files,

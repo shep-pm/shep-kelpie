@@ -12,9 +12,9 @@ pub mod runner;
 
 // The modules of `shep-kelpie-core` the runner uses, each kept under the name it had here
 use shep_kelpie_core::{
-    agents, board, bridge, dep_sources, fence, forge_ledger, guard, home, hooks, ipc, lease,
-    local_paths, local_tickets, metrics, owner_only, pacer, package_managers, pm_answer, ports,
-    profile, review_bot, settings, skills, state, ticket, totp, transcripts, usage, webhook,
+    agent_board, agents, board, bridge, dep_sources, fence, forge_ledger, guard, home, hooks, ipc,
+    lease, local_paths, local_tickets, metrics, owner_only, pacer, package_managers, pm_answer,
+    ports, profile, review_bot, settings, skills, state, ticket, totp, transcripts, usage, webhook,
     work_item, work_kind,
 };
 

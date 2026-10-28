@@ -21,7 +21,7 @@ use super::super::attach::live;
 use super::super::briefing::Watched;
 use super::super::in_flight::{Key, Open};
 use super::super::transcript_count::Mark;
-use super::{End, Flight, News, Tell, unstarted, waiting};
+use super::{End, Flight, News, Tell, unstarted};
 use crate::lease::wire::AskerCarry;
 use crate::ports::{Adopted, Ending, Flying, KeptServer, NotAdopted, Timestamp};
 use crate::settings::{GatewayName, Harness};
@@ -264,7 +264,6 @@ impl Runner {
                 },
                 first: flying.first,
                 compact: flying.compact,
-                fallback: waiting::Fallback::Stays,
                 browser: None,
                 requests: None,
                 record_gone: None,

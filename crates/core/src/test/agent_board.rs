@@ -2,8 +2,8 @@
 //!
 //! It answers in memory, so a test of dispatch never reaches the dog. It
 //! starts by ranking every agent an ask allows in the order the ask lists
-//! them, with no wait. A test ranks its own order, ranks nobody, or makes
-//! the board unreachable.
+//! them, with no wait. A test ranks its own order, with its own finishes,
+//! ranks nobody, or makes the board unreachable.
 
 use std::sync::{Arc, Mutex};
 
@@ -19,7 +19,8 @@ enum Answers {
     // The ask's own agents, in its order
     #[default]
     Listed,
-    Ranks(Vec<AgentName>),
+    // Each agent with the seconds to its finish
+    Ranks(Vec<(AgentName, u64)>),
     Unreachable,
 }
 
@@ -40,7 +41,14 @@ impl FakeAgentBoard {
     /// and nobody when `agents` is empty
     pub fn ranks(&self, agents: &[&str]) {
         let name = |a: &&str| AgentName::try_from((*a).to_owned()).unwrap();
-        let agents = agents.iter().map(name).collect();
+        let agents = agents.iter().map(|a| (name(a), TYPICAL_SECS)).collect();
+        self.book.lock().unwrap().answers = Answers::Ranks(agents);
+    }
+
+    /// Each pick ranks `agents` in this order, each finishing in its seconds
+    pub fn ranks_finishing(&self, agents: &[(&str, u64)]) {
+        let name = |a: &str| AgentName::try_from(a.to_owned()).unwrap();
+        let agents = agents.iter().map(|(a, secs)| (name(a), *secs)).collect();
         self.book.lock().unwrap().answers = Answers::Ranks(agents);
     }
 
@@ -65,18 +73,20 @@ impl AgentBoard for FakeAgentBoard {
         let mut book = self.book.lock().unwrap();
         book.asks.push(item.clone());
         let order = match &book.answers {
-            Answers::Listed => item.agents.clone(),
+            Answers::Listed => (item.agents.iter())
+                .map(|agent| (agent.clone(), TYPICAL_SECS))
+                .collect(),
             Answers::Ranks(agents) => agents.clone(),
             Answers::Unreachable => return None,
         };
-        let fits = |agent: &AgentName| {
+        let fits = |(agent, _): &(AgentName, u64)| {
             item.agents.contains(agent)
                 && !item.leave_out.contains(agent)
                 && item.pin.as_ref().is_none_or(|pin| pin == agent)
         };
-        let picks = order.into_iter().filter(fits).map(|agent| Pick {
+        let picks = order.into_iter().filter(fits).map(|(agent, finish)| Pick {
             agent,
-            finish: TYPICAL_SECS,
+            finish,
             wait: 0,
             cost_usd: None,
         });

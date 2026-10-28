@@ -876,6 +876,7 @@ fn a_version_53_file_loads_with_no_disputes_and_saves_at_the_current_version() {
     assert_eq!(saved["version"], VERSION);
 }
 
+mod handed_off;
 mod picked;
 mod tickets;
 
