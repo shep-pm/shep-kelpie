@@ -23,6 +23,10 @@ use crate::work_item::Phase;
 /// characters
 pub(super) const WORDS: usize = 300;
 
+/// The most of a passed-on question's `problem` a ruling carries, in
+/// characters: the first thing the maintainer reads in it
+pub(super) const PROBLEM_WORDS: usize = 600;
+
 impl Runner {
     /// Acts on `answer` as far as the board allows, and returns what it
     /// did and what it dropped, each in words. `picking` is how many issues
@@ -281,15 +285,41 @@ impl Runner {
     }
 }
 
-// `text` on one line with no control characters, cut past `most` characters,
-// since it reaches the maintainer's webhook and the state file as it is.
+// `text` on one line with no control characters, cut past `most` characters
+// at the last word that fits, or between characters where the cut text holds
+// none, since it reaches the maintainer's webhook and the state file as it is.
 pub(super) fn plain(text: &str, most: usize) -> String {
     let spaced: String = (text.chars())
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
     let line = spaced.split_whitespace().collect::<Vec<_>>().join(" ");
     match line.char_indices().nth(most) {
-        Some((end, _)) => format!("{} …", &line[..end]),
+        Some((end, _)) => {
+            let head = &line[..end];
+            let kept = match line[end..].starts_with(' ') {
+                true => head,
+                false => head.rfind(' ').map_or(head, |space| &head[..space]),
+            };
+            format!("{kept} …")
+        }
         None => line,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_past_the_cap_is_cut_at_the_last_word_that_fits() {
+        assert_eq!(plain("one two three four", 10), "one two …");
+        assert_eq!(plain("one two three", 7), "one two …");
+        assert_eq!(plain("one two", 7), "one two");
+    }
+
+    #[test]
+    fn one_word_longer_than_the_cap_is_cut_between_characters() {
+        assert_eq!(plain("abcdefghij klm", 5), "abcde …");
+        assert_eq!(plain(&"é".repeat(9), 4), "éééé …");
     }
 }
