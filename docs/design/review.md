@@ -6,14 +6,14 @@ Review passes, bots, rulings. CI and the merge are in merge.md.
 
 - One pass at green CI on draft head: `agents.reviewers` in order, each once; no loop or judge (the gains come early). ADR 0006, ADR 0008, `runner/review/`
 - Any finding, nits included, goes to one fix turn; next reviewer reads the fix (skipped nits left open threads). Nit-only fix starts nothing new; bot nits on a head it read stay open. ADR 0007, #354
-- A round waits for CI on its head (red costs no read or window); `doctor` names CI that skips drafts. A head behind `main` whose checks settle with none (a conflict runs no CI) is caught up and returns here; one with CI is not. None at all: merge.md. #423, #1163, #1194
+- A round waits for CI on its head (red costs no read or window); `doctor` names CI that skips drafts. A head behind `main` whose checks settle with none (a conflict runs no CI; a draft's lone skipped bot check counts) is caught up and returns; one with CI is not. None at all: merge.md. #423, #1163, #1194
 - A contribution's head gets its held runs approved only after the security review, CI in `contributions[].ci`, and no reviewer reads it before `green` (ADR 0008); one pass of `contributions.reviewers` records findings, posting none. A released one's work item runs the full `agents.reviewers` pass (`contribution-release.md`). #622, #623, #634
 - Pass restarts only on a new head that needs it (merge `rework`, accepted foreign change, rework). ADR 0006
 - Merge ruling `no <note>` = fix turn back to the ruling, no new pass; restarts pass only after unread/open-thread warning. #354
 - Reviewer = agent file on session harness (read-only), `command`, `endpoint` or `bot`; runs no commands (running tests found fewer). #314
 - `paths` limit a reviewer to matching changes; every round reads `<base>...HEAD`. Gets the issue title and acceptance criteria (4,000 bytes). #314, #484
 - `defect-hunter` (Opus 5.5 high, maintainer's prompt verbatim) uses `second_look`. Default: `iq3-xxs-review` (endpoint on `paddock`) where kelpie holds that gateway, then `defect-hunter-lite` (same prompt, medium, none); `add` writes it. #1224, `crates/core/src/settings/reviewers/mod.rs`
-- `standards` and `spec` (Opus 5.5 high, one read, no `second_look`) are the two axes of the vendored `code-review` skill, one agent each, no sub-agents. Smells are `LOW`; `add` writes both and lists neither (a project's `reviewers` replaces the default, so name a hunter too). They sit beside the hunters, which find the defects they miss. `agents/standards.md`, `agents/spec.md`, `crates/core/src/agents/mod.rs`. #363
+- `standards` and `spec` (Opus 5.5 high, one read, no `second_look`) are the two axes of the vendored `code-review` skill, one agent each, no sub-agents. Smells are `LOW`; `add` writes both and lists neither (a project's `reviewers` replaces the default, so name a hunter too). Hunters find the defects they miss. `agents/standards.md`, `agents/spec.md`, `crates/core/src/agents/mod.rs`. #363
 - Reviewer failing 3 times passed over; pass nobody read marks item unreviewed (an outage can't auto-merge). #314
 - Round reads only pushed head; dirty worktree gets one turn to push, then parks `unpushed` (CI and merge take `origin`'s head). #290
 - Merge trusts only heads a round read or kelpie sent to CI unread on purpose; others raise `unread_head`. #290

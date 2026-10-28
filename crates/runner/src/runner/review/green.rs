@@ -518,6 +518,27 @@ fn a_review_head_behind_main_with_no_checks_is_caught_up_and_read_after_green() 
     assert_eq!(reads(&rig), 1, "the first reviewer reads the rebased head");
 }
 
+// CodeRabbit's own check run, skipped, is on a head whose workflows never ran.
+#[test]
+fn a_draft_that_conflicts_with_main_and_shows_only_a_skipped_check_gets_the_conflict_turn() {
+    let (rig, runner, head) = pushed();
+    rig.land_on_origin("work.txt");
+    rig.forge.set_checks(&head, Checks::Skipped);
+
+    assert_eq!(step(&runner).unwrap(), None, "no run is reported yet");
+    rig.clock.advance(CHECKS_SETTLE);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Conflicted {
+            issue: crate::test::ticket(7),
+            pull_request: 71,
+            head,
+            files: vec!["work.txt".into()],
+        })
+    );
+    assert_eq!(reads(&rig), 0);
+}
+
 #[test]
 fn a_review_head_that_conflicts_with_main_gets_the_conflict_turn_and_comes_back_to_review() {
     let (rig, runner, head) = pushed();
