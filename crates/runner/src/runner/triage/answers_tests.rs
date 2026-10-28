@@ -2,6 +2,7 @@
 //! second triager call, what it writes, and what it is not made or written from
 
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -18,15 +19,14 @@ use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
 #[test]
 fn answers_settling_everything_on_a_maintainer_issue_make_it_ready_for_agent() {
     let (rig, runner) = filed("pick = \"maintainer\"", MAINTAINER, asked());
-    assert_eq!(step(&runner).unwrap(), None);
+    questions_posted(&rig, &runner);
 
     wrote(&rig, MAINTAINER, "Q1: Linux, on start. That is all of it.");
     rig.claude
         .script_for(Role::Triager, [reply(settled_ready())]);
     rig.claude
         .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
+    answers_called(&rig, &runner, 2);
 
     let body = settled_ready()["body"]
         .as_str()
@@ -56,14 +56,13 @@ fn answers_settling_everything_on_a_maintainer_issue_make_it_ready_for_agent() {
 #[test]
 fn answers_on_an_outside_issue_go_under_the_authors_text_and_end_needs_triage() {
     let (rig, runner) = filed("pick = \"all\"", "newcomer", asked());
-    assert_eq!(step(&runner).unwrap(), None);
+    questions_posted(&rig, &runner);
 
     wrote(&rig, "newcomer", "Q1: Linux, on start.");
     rig.claude.script_for(Role::Triager, [reply(settled())]);
     rig.claude
         .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
+    answers_called(&rig, &runner, 2);
 
     assert_eq!(
         rig.github.issue_edits(),
@@ -99,15 +98,14 @@ fn the_priority_the_issue_was_filed_with_stands_over_the_one_the_answers_pass_ra
         list(rig, filed);
         rig.forge.label(30, "P2");
     });
-    assert_eq!(step(&runner).unwrap(), None);
+    questions_posted(&rig, &runner);
 
     wrote(&rig, "newcomer", "Q1: Linux, on start.");
     let found = json!({ "type": "bug", "priority": "P1", "body": "## Settled\n\n- Linux.\n" });
     rig.claude.script_for(Role::Triager, [reply(found)]);
     rig.claude
         .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
+    answers_called(&rig, &runner, 2);
 
     assert_eq!(
         moves(&rig),
@@ -119,14 +117,13 @@ fn the_priority_the_issue_was_filed_with_stands_over_the_one_the_answers_pass_ra
 #[test]
 fn a_question_still_open_after_the_answers_ends_needs_triage_with_no_second_round() {
     let (rig, runner) = filed("pick = \"maintainer\"", MAINTAINER, asked());
-    assert_eq!(step(&runner).unwrap(), None);
+    questions_posted(&rig, &runner);
 
     wrote(&rig, MAINTAINER, "Q1: Linux.");
     rig.claude.script_for(Role::Triager, [reply(asked())]);
     rig.claude
         .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
+    answers_called(&rig, &runner, 2);
 
     assert_eq!(
         calls(&rig, Role::Triager).len(),
@@ -178,8 +175,7 @@ fn a_restart_while_waiting_on_the_answers_keeps_the_questions_and_their_clock() 
     rig.claude.script_for(Role::Triager, [reply(settled())]);
     rig.claude
         .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
+    answers_called(&rig, &runner, 2);
 
     assert_eq!(calls(&rig, Role::Triager).len(), 2);
     assert_eq!(
@@ -282,7 +278,7 @@ fn the_answers_call_is_not_made_when_its_questions_cannot_be_read() {
 #[test]
 fn a_hand_label_while_the_answers_call_runs_is_not_settled_under_it() {
     let (rig, runner) = filed("pick = \"maintainer\"", MAINTAINER, asked());
-    assert_eq!(step(&runner).unwrap(), None);
+    questions_posted(&rig, &runner);
 
     wrote(&rig, MAINTAINER, "Q1: Linux, on start.");
     let hold = Hold::default();
@@ -332,7 +328,7 @@ fn a_hand_label_while_the_answers_call_runs_is_not_settled_under_it() {
 // The answers pass on an outside issue, up to its comment: the ask went up, the
 // author said `github`, the questions went up and they answered them.
 pub(super) fn asked_and_answered(rig: &Rig, runner: &Mutex<Runner>, author: &str, answers: &str) {
-    assert_eq!(step(runner).unwrap(), None);
+    questions_posted(rig, runner);
     wrote(rig, author, answers);
 }
 // A settled body a project's own publish hook refuses
@@ -353,8 +349,7 @@ fn answers_a_hook_refused_still_put_the_type_and_priority_on() {
     rig.claude
         .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
 
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
+    answers_called(&rig, &runner, 2);
 
     assert_eq!(
         rig.github.issue_edits(),
@@ -397,8 +392,7 @@ fn answers_whose_issue_body_cannot_be_read_post_nothing_and_are_tried_again() {
     // The pass reads its labels, then cannot read its body.
     rig.forge.fail_issue_reads_after(30, 1);
 
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
+    answers_called(&rig, &runner, 2);
     let posted = posted(&rig);
     assert_eq!(posted.len(), 1, "{posted:?}");
     assert_eq!(moves(&rig), ["comment"], "no label goes on");
@@ -407,8 +401,7 @@ fn answers_whose_issue_body_cannot_be_read_post_nothing_and_are_tried_again() {
     assert_eq!(held["step"], "commented", "the round is still open");
 
     rig.forge.let_issue_read(30);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
+    answers_called(&rig, &runner, 3);
     assert_eq!(
         rig.github.issue_edits(),
         [(
@@ -442,16 +435,41 @@ fn answers_given(rig: &Rig) -> String {
     rest.to_owned()
 }
 
+// Steps until `done`, each step waiting for the call it starts to end. A pass
+// that finds nothing due is not the last word: its read may have been dropped
+// for a write that came after it, and the next pass reads again.
+fn step_until(runner: &Mutex<Runner>, mut done: impl FnMut() -> bool) {
+    let by = Instant::now() + CALL_PATIENCE;
+    while !done() {
+        assert!(Instant::now() < by, "it never came about");
+        assert_eq!(step(runner).unwrap(), None);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+// The first pass ran and its questions comment is up, which the author's reply
+// has to come after
+fn questions_posted(rig: &Rig, runner: &Mutex<Runner>) {
+    assert_eq!(step(runner).unwrap(), None);
+    step_until(runner, || posted(rig).len() == 1);
+}
+
+// The poll goes by and the triager's `n`th call is made and heard, whichever
+// pass starts it
+fn answers_called(rig: &Rig, runner: &Mutex<Runner>, n: usize) {
+    rig.next_look();
+    step_until(runner, || calls(rig, Role::Triager).len() == n);
+}
+
 // The author replies and the second pass runs, which settles everything
 fn replied(found: Value, author: &str, reply_text: &str) -> (Rig, Mutex<Runner>) {
     let (rig, runner) = filed("pick = \"maintainer\"", author, found);
-    assert_eq!(step(&runner).unwrap(), None);
+    questions_posted(&rig, &runner);
     wrote(&rig, author, reply_text);
     rig.claude.script_for(Role::Triager, [reply(settled())]);
     rig.claude
         .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
+    answers_called(&rig, &runner, 2);
     (rig, runner)
 }
 
@@ -532,8 +550,7 @@ fn ok_after_a_restart_still_takes_the_recommended_answers_from_the_comment() {
     rig.claude.script_for(Role::Triager, [reply(settled())]);
     rig.claude
         .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
+    answers_called(&rig, &runner, 2);
 
     let given = answers_given(&rig);
     assert!(given.contains("Q1: the 1th"), "{given}");
