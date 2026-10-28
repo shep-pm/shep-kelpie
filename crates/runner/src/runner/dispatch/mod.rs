@@ -234,9 +234,9 @@ impl Runner {
                 }
                 paced = true;
             }
-            let ticket = match self.pm_pick(&takeable) {
-                Choice::Take(n) => n,
-                Choice::Rule => picked,
+            let (ticket, chosen) = match self.pm_pick(&takeable) {
+                Choice::Take(chosen) => (chosen.issue, Some(chosen)),
+                Choice::Rule => (picked, None),
                 Choice::Wait => {
                     skipped.push(Skip::PmWaits { issue: picked });
                     skipped.sort_by_key(Skip::issue);
@@ -244,11 +244,14 @@ impl Runner {
                     return Ok(Begin::Idle);
                 }
             };
-            // The agent its label names may be one the project does not list, whose
+            // The agent its pick or label names may be one the project does not list, whose
             // account `pace_dispatch` has not read. A label that fails is `add`'s to refuse.
-            let labelled = (ready.iter().find(|i| i.ticket == ticket))
-                .and_then(|found| self.labelled_agent(ticket, &found.labels).ok());
-            if let Some((agent, _)) = labelled {
+            let pinned = chosen.as_ref().and_then(|c| self.pinned_agent(c));
+            let labelled = pinned.or_else(|| {
+                let found = ready.iter().find(|i| i.ticket == ticket)?;
+                Some(self.labelled_agent(ticket, &found.labels).ok()?.0)
+            });
+            if let Some(agent) = labelled {
                 let pace = self.pace_agent(&agent)?;
                 if let Some(hold) = pace.reason() {
                     account_held.push(Skip::Paced {
@@ -262,7 +265,7 @@ impl Runner {
                     continue;
                 }
             }
-            match self.add(ticket) {
+            match self.add_picked(ticket, chosen.as_ref()) {
                 Ok(agent) => {
                     self.pm_started(ticket);
                     self.set_skipped(skipped.clone());

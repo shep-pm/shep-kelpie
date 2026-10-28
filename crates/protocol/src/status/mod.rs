@@ -166,7 +166,7 @@ pub struct WorkItemStatus {
     pub worktree: PathBuf,
     /// The implementer its worker runs on
     pub agent: AgentName,
-    /// Whether its `agent:` label pins it to that implementer
+    /// Whether its `agent:` label or the project manager's pick pins it to that implementer
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pinned: bool,
     /// Its worker's turn in flight, while that waits for its model

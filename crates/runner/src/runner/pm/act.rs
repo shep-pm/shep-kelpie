@@ -1,17 +1,17 @@
 //! Checking the project manager's answer against the board, and acting on
 //! what holds
 //!
-//! A pick or a hold must name a ready issue the board shows, and an unstick
-//! a work item that is stuck now: parked on a ruling a stuck item raises,
-//! or with a call the board reads as idle. Anything else is dropped, and
-//! named in the log. Each unstick in the answer runs on its own, so one wake
-//! that carried several stuck items can settle each, and one naming the same
-//! item twice acts once.
+//! A pick or a hold must name a ready issue the board shows, a pick's agent
+//! an implementer, and an unstick a work item that is stuck now: parked on a
+//! ruling a stuck item raises, or with a call the board reads as idle.
+//! Anything else is dropped, and named in the log. Each unstick in the answer
+//! runs on its own, so one wake that carried several stuck items can settle
+//! each, and one naming the same item twice acts once.
 
 use super::answer::{Action, Answer, Unstick};
 use super::maintainer::Held;
 use super::red::Settled;
-use super::{Pick, StuckState, stuck_on};
+use super::{Pick, Picked, StuckState, stuck_on};
 use crate::board::briefing::ticket_ref;
 use crate::runner::thread_replies::Settler;
 use crate::runner::{Answer as Ruled, RuleError, Runner};
@@ -90,23 +90,30 @@ impl Runner {
         let now = self.ports.clock.now();
         // A wake for free slots takes a pick for each; any other takes one.
         let slots = picking.unwrap_or(1);
-        let mut picks: Vec<TicketId> = Vec::new();
-        for &ticket in &answer.picks {
+        let implementers = self.implementer_files();
+        let mut picks: Vec<Picked> = Vec::new();
+        for picked in &answer.picks {
+            let ticket = picked.issue;
             let named = ticket_ref(ticket);
+            let unlisted = (picked.agent.as_ref()).filter(|a| !implementers.contains(a));
             if picks.len() >= slots {
                 dropped.push(format!(
                     "pick {named}: only {slots} can start from this wake"
                 ));
             } else if held.iter().any(|h| h.issue == ticket) {
                 dropped.push(format!("pick {named}: it holds {named} too"));
-            } else if ready.contains(&ticket) {
-                picks.push(ticket);
-            } else {
+            } else if !ready.contains(&ticket) {
                 dropped.push(format!("pick {named}: not a ready issue on the board"));
+            } else if let Some(agent) = unlisted {
+                dropped.push(format!(
+                    "pick {named}: `{agent}` is no implementer agent file `agents.allow` holds"
+                ));
+            } else {
+                picks.push(picked.clone());
             }
         }
         if !picks.is_empty() {
-            let named: Vec<String> = picks.iter().map(|&t| ticket_ref(t)).collect();
+            let named: Vec<String> = picks.iter().map(|p| ticket_ref(p.issue)).collect();
             acted.push(format!("picked {}", named.join(", ")));
             self.pm.pick = Some(Pick::Issues(picks));
         } else if picking.is_some() && (!answer.picks.is_empty() || fixed) {

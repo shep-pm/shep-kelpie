@@ -347,6 +347,16 @@ fn an_issues_kind_is_its_kind_label_else_its_titles_conventional_prefix() {
 }
 
 #[test]
+fn a_work_items_kind_is_the_one_kind_its_label_names() {
+    let kind = |names: &[&str]| label_kind(&labels(names));
+    assert_eq!(kind(&["priority: P4", "Kind: Fix "]), Some("fix"));
+    assert_eq!(kind(&["kind:docs"]), Some("docs"));
+    assert_eq!(kind(&["priority: P4"]), None);
+    assert_eq!(kind(&["kind:bug"]), None);
+    assert_eq!(kind(&["kind:fix", "kind:docs"]), None);
+}
+
+#[test]
 fn each_failure_names_the_part_it_is_about() {
     let said = [
         (Failure::NoTouches, "`Touches:`"),

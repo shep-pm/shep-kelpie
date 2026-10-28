@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use serde_json::{Value, json};
 
 use super::{PICK_12, answered, pm_on, pm_seen, step_until, with_pm};
+use crate::agents::Tier;
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Rig, Scripted, ticket};
 
@@ -169,4 +170,105 @@ fn a_list_longer_than_the_free_slots_drops_the_rest() {
 
     assert_eq!(acted, ["picked #14, #12, #9"]);
     assert_eq!(dropped, ["pick #15: only 3 can start from this wake"]);
+}
+
+#[test]
+fn a_picks_agent_pins_its_work_item_over_the_issues_label_and_its_tier_and_slack_are_kept() {
+    let (rig, runner) = with_pm("koji");
+    rig.forge.list_ready(9, false);
+    rig.forge.list_ready(12, false);
+    rig.forge.label(12, "agent:sonnet-high");
+    rig.forge.label(12, "kind:docs");
+    rig.claude.script([Scripted::Say(
+        "```json\n{\"pick\": {\"issue\": 12, \"agent\": \"opus-high\", \"tier\": \"heavy\", \
+         \"slack\": 0}, \"why\": \"#12 is hard to undo.\"}\n```",
+    )]);
+    let (_, acted, dropped) = answered(step(&runner).unwrap());
+    assert_eq!((acted, dropped), (vec!["picked #12".to_owned()], vec![]));
+
+    let report = step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+
+    assert!(
+        matches!(&report, StepReport::Dispatched { issue, agent, .. }
+            if *issue == ticket(12) && agent.as_str() == "opus-high"),
+        "{report:?}"
+    );
+    let held = runner.lock().unwrap();
+    let item = held.state.item(ticket(12)).unwrap();
+    assert_eq!(
+        (item.pinned, item.tier, item.slack, item.kind.as_deref()),
+        (true, Some(Tier::Heavy), Some(0), Some("docs"))
+    );
+    assert!(
+        rig.forge
+            .labels_of(12)
+            .contains(&"agent:sonnet-high".to_owned()),
+        "the issue's label is left as it was"
+    );
+}
+
+#[test]
+fn a_pick_of_an_agent_that_is_no_implementer_file_is_dropped() {
+    let (rig, runner) = with_pm("koji");
+    rig.forge.list_ready(9, false);
+    rig.forge.list_ready(12, false);
+    rig.claude.script([Scripted::Say(
+        "```json\n{\"pick\": [{\"issue\": 12, \"agent\": \"pm\"}, {\"issue\": 9, \"agent\": \
+         \"nobody\"}], \"why\": \"w\"}\n```",
+    )]);
+
+    let (_, acted, dropped) = answered(step(&runner).unwrap());
+
+    assert_eq!(acted, Vec::<String>::new());
+    assert_eq!(
+        dropped,
+        [
+            "pick #12: `pm` is no implementer agent file `agents.allow` holds",
+            "pick #9: `nobody` is no implementer agent file `agents.allow` holds",
+        ]
+    );
+}
+
+#[test]
+fn a_picks_agent_that_allow_drops_before_dispatch_opens_on_its_label_and_keeps_tier_and_slack() {
+    let (rig, runner) = with_pm("koji");
+    rig.forge.list_ready(9, false);
+    rig.forge.list_ready(12, false);
+    rig.forge.label(12, "agent:sonnet-high");
+    rig.claude.script([Scripted::Say(
+        "```json\n{\"pick\": {\"issue\": 12, \"agent\": \"opus-high\", \"tier\": \"light\", \
+         \"slack\": 45}, \"why\": \"w\"}\n```",
+    )]);
+    let (_, acted, _) = answered(step(&runner).unwrap());
+    assert_eq!(acted, ["picked #12"]);
+    rig.edit_settings(|s| {
+        let listed = "\nimplementers = [\"sonnet-high\"]\n";
+        assert!(s.contains(listed), "the example's implementers moved");
+        let allow = "\nallow = [\"sonnet-high\", \"pm\", \"qwen\", \"claude\"]";
+        s.replace(listed, &format!("{allow}{listed}"))
+    });
+    let (settings, kelpie) = (rig.settings(), rig.kelpie_settings());
+    runner.lock().unwrap().reread(settings, kelpie).unwrap();
+    runner.lock().unwrap().take_notes();
+
+    let report = step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+
+    assert!(
+        matches!(&report, StepReport::Dispatched { issue, agent, .. }
+            if *issue == ticket(12) && agent.as_str() == "sonnet-high"),
+        "{report:?}"
+    );
+    let mut held = runner.lock().unwrap();
+    let item = held.state.item(ticket(12)).unwrap();
+    assert_eq!(
+        (item.pinned, item.tier, item.slack),
+        (false, Some(Tier::Light), Some(45))
+    );
+    let notes = held.take_notes();
+    assert!(
+        notes.iter().any(|n| n
+            == "#12: the project manager picked it for opus-high, which is no longer an \
+                implementer `agents.allow` holds, so its labels choose"),
+        "{notes:?}"
+    );
 }

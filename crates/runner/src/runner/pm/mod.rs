@@ -36,6 +36,7 @@ mod ci_logs;
 mod diffs;
 mod maintainer;
 mod notes;
+mod picked;
 mod prompt;
 mod question;
 mod red;
@@ -48,6 +49,7 @@ mod wakes;
 pub(super) use asked::{PmReply, pm_reply};
 pub(super) use ci_logs::wake_off_lock;
 pub use maintainer::{Held, PmAttaching, PmError, PmStatus, Settled};
+pub(super) use picked::Picked;
 
 use answer::Action;
 use ci_logs::Woke;
@@ -199,7 +201,7 @@ impl Wake {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Pick {
     /// These ready issues, in the order dispatch starts them, one a step
-    Issues(Vec<TicketId>),
+    Issues(Vec<Picked>),
     /// Nothing, decided at this time, until its next wake, or for
     /// [`NOTHING_FOR`] while no work item is open
     Nothing(Timestamp),
@@ -208,10 +210,10 @@ pub(super) enum Pick {
 }
 
 /// What dispatch does about a pick
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Choice {
     /// Starts this issue, the project manager's pick
-    Take(TicketId),
+    Take(Picked),
     /// Starts what the board rule picked
     Rule,
     /// Starts nothing now: the project manager is deciding, or said so
@@ -411,13 +413,14 @@ impl Runner {
                 // The head stays until its work item opens (`pm_started`). One
                 // it cannot start falls to the next it named, and when none is
                 // left, to the board rule.
-                while let Some(&n) = named.first() {
-                    if takeable.contains(&n) {
+                while let Some(head) = named.first().cloned() {
+                    if takeable.contains(&head.issue) {
                         self.pm.pick = Some(Pick::Issues(named));
-                        return Choice::Take(n);
+                        return Choice::Take(head);
                     }
                     named.remove(0);
-                    self.pick_dropped(n, "it is not an issue the board can take now".to_owned());
+                    let why = "it is not an issue the board can take now".to_owned();
+                    self.pick_dropped(head.issue, why);
                 }
                 Choice::Rule
             }
@@ -450,7 +453,7 @@ impl Runner {
     /// opened
     pub(super) fn pm_started(&mut self, ticket: TicketId) {
         if let Some(Pick::Issues(named)) = &mut self.pm.pick {
-            named.retain(|&n| n != ticket);
+            named.retain(|p| p.issue != ticket);
             if named.is_empty() {
                 self.pm.pick = None;
             }
