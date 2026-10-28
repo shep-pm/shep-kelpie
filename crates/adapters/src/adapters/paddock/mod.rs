@@ -19,7 +19,9 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use crate::forwarder::Upstream;
-use crate::ports::{Ending, KeyCheck, ModelGateway, PaddockHolder, Stand, Taking, Unheld};
+use crate::ports::{
+    Ending, KeyCheck, ModelGateway, ModelLoad, PaddockHolder, Stand, Taking, Unheld,
+};
 use crate::settings::Timing;
 
 // Paddock's default is 60s. Twice that rides out one lost renewal.
@@ -144,6 +146,40 @@ fn queued_in(body: &str, model: &str) -> bool {
             .into_iter()
             .flatten()
             .any(|waiter| waiter["model"] == model)
+}
+
+/// How busy `model` is, by `GET /paddock/status`
+///
+/// # Errors
+///
+/// Why the gateway did not answer with its status.
+pub(crate) fn load(gateway: &Upstream, model: &str) -> Result<ModelLoad, String> {
+    let asked = ("GET", "/paddock/status");
+    let (status, body) = send(gateway, asked, None, true, STATUS_WITHIN)?;
+    if status != 200 {
+        return Err(format!("`GET /paddock/status` answered HTTP {status}"));
+    }
+    load_in(&body, model)
+}
+
+fn load_in(body: &str, model: &str) -> Result<ModelLoad, String> {
+    let not_a_status =
+        || "`GET /paddock/status` answered something other than its status".to_owned();
+    let read: Value = serde_json::from_str(body).map_err(|_| not_a_status())?;
+    let models = read["models"].as_array().ok_or_else(not_a_status)?;
+    let on_model = |key: &str| {
+        let entries = read[key].as_array().into_iter().flatten();
+        entries.filter(move |entry| entry["model"] == model)
+    };
+    let slots = models.iter().find(|entry| entry["model"] == model);
+    let live = |lease: &&Value| lease["revoked"].is_null() && lease["reclaimable"] == false;
+    Ok(ModelLoad {
+        slots: slots
+            .and_then(|entry| entry["turns"]["lease"].as_u64())
+            .unwrap_or(0),
+        held: on_model("leases").filter(live).count() as u64,
+        waiting: on_model("waiters").filter(|w| w["kind"] == "lease").count() as u64,
+    })
 }
 
 /// The gateway port for a paddock, taking its leases on `timing`'s schedule
