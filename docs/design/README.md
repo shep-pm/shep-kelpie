@@ -23,7 +23,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 
 | file | covers | touch (`core/`: `crates/core/src/`, `dog/`: `crates/dog/src/dog/`, `adapters/`: `crates/adapters/src/`, `runner/`: `crates/runner/src/runner/`) |
 |---|---|---|
-| work.md | projects, slots, issues | `src/issues/check.rs`, `runner/slots.rs`, `src/flock/verbs.rs`, `core/board/check.rs` |
+| work.md | projects, slots, issues | `src/{issues/check,flock/verbs}.rs`, `runner/slots.rs`, `core/board/check.rs` |
 | board.md | board, items, adoption | `core/board/`, `runner/{dispatch,adopt}/` |
 | pm.md | the project manager | `runner/pm/` |
 | pm-board.md | its board | `core/board/briefing/`, `runner/briefing/` |
@@ -36,7 +36,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | fence-reads.md | reads | `core/dep_sources.rs`, `adapters/harness/`, `runner/turn/` |
 | fence-reach.md | hosts | `core/package_managers/` |
 | browser.md | a worker's browser: bridge, filter, tools | `core/{bridge,browse,settings/browser}.rs`, `adapters/bridge/`, `runner/browser.rs`, `process/tools/` |
-| browser-proxy.md | the browser's proxy | `adapters/bridge/proxy/`, `adapters/forwarder/http.rs` |
+| browser-proxy.md | the browser's proxy | `adapters/{bridge/proxy/,forwarder/http.rs}` |
 | browser-dev-server.md | a worker's dev server | `runner/dev_server/`, `core/ports/dev_server.rs`, `adapters/dev_server/` |
 | compaction.md | when a session compacts, `COMPACT` | `runner/compact/`, `adapters/{pi/compact,goose/compact,codex/context}.rs` |
 | skills.md | step skills, copies, wording skill | `core/skills/*.rs` |
@@ -44,9 +44,10 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | agent-files.md | agent file, `extends`, baselines | `core/agents/`, `src/flock/add/` |
 | agent-migration.md | `agents migrate` | `core/agents/legacy.rs` |
 | agent-allow.md | allow list | `core/settings/agents/`, `runner/add.rs` |
+| agent-board.md | pick estimate | `core/agent_board/` |
 | agents.md | harnesses, gateways | `adapters/`, `core/settings/agents/`, `process/spawn.rs` |
 | cli-adapter.md | a new CLI | `adapters/cli/` |
-| handover.md | in-flight turns handed on | `src/sheep/handover/`, `runner/flight/carry/`, `adapters/process/adopt/`, `src/upgrade/handover.rs` |
+| handover.md | in-flight turns handed on | `src/{sheep/handover/,upgrade/handover.rs}`, `runner/flight/carry/`, `adapters/process/adopt/` |
 | windows.md | `sh`, `env`, test fakes | `process/spawn.rs`, `test_support/` |
 | windows-crates.md | crates on Windows | `owner_only/` |
 | waits-and-spend.md | waits, held-up turns, failing steps, spend | `runner/{turn/unreachable,looks}/`, `adapters/{unreachable,codex}/`, `core/usage/` |
@@ -60,7 +61,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | github-app.md | App tokens, posting, answers | `runner/voice/`, `core/guard/gh.rs`, `worker_folder/` |
 | who-answers.md | who answers | `runner/pm/rulings.rs` |
 | contributions.md | others' pull requests | `core/{settings/{contributions.rs,reviewers/},state/contributions.rs}`, `runner/contributions/` |
-| contribution-security.md | its security review | `runner/contributions/`, `runner/flight/security.rs`, `process/worktree/` |
+| contribution-security.md | its security review | `runner/{contributions/,flight/security.rs}`, `process/worktree/` |
 | contribution-pass.md | reviewers' pass, green head | `runner/contributions/pass.rs`, `process/worktree/` |
 | contribution-talk.md | contributors' words, quiet clock | `runner/contributions/{heard,clock}.rs`, `runner/thread_replies/` |
 | contribution-push.md | a fork worker's push; red-CI comment | `runner/contributions/{push,after}.rs` |
@@ -68,7 +69,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | contribution-merge.md | merge ruling: yes, thanks, no | `runner/contributions/{merge,ruling}.rs`, `core/settings/rulings.rs` |
 | representative.md | agent file, `agents.representative`, post wording | `runner/representative/`, `core/{agents/front,settings/agents}/`, `agents/representative.md` |
 | dependencies.md | bot bumps: rebase, proof, merge, red | `core/{settings/dependencies,state/bumps}.rs`, `runner/{dependencies,dev_server/bump,flight/proving.rs}`, `adapters/{e2e_runner.rs,pages.rs,bridge/client/}` |
-| triage.md | settings, triager, pick rule, `since`, the verb, `status` | `core/settings/triage.rs`, `runner/{triage,open_checks.rs}`, `core/ports/issue.rs` |
+| triage.md | settings, triager, pick rule, `since`, the verb, `status` | `core/{settings/triage,ports/issue}.rs`, `runner/{triage,open_checks.rs}` |
 | triage-limits.md | limits | `runner/triage/limits.rs` |
 | triage-pass.md | a pass: post, labels, duplicate, agent-ready | `runner/{triage,flight}/`, `core/ports/voice.rs` |
 | triage-images.md | an issue's images | `runner/triage/images.rs`, `adapters/gh/attachment.rs` |
@@ -83,7 +84,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | metrics-work-items.md | work-item series, `finished` line | `core/usage/finished.rs`, `runner/ci_failure/` |
 | metrics-dog.md | leases, summons, forge | `core/metrics/{dog,forge,model_lease}.rs`, `dog/watch/` |
 | metrics-transcripts.md | a call's transcript: MCP, tools, `usage` | `crates/facts/`, `runner/transcript_count/`, `core/usage/` |
-| budget.md | pacing, dog + leases, time, usage, settings | `runner/pace.rs`, `dog/`, `core/usage/`, `core/settings/`, `src/sheep/mod.rs` |
+| budget.md | pacing, dog + leases, time, usage, settings | `runner/pace.rs`, `dog/`, `core/{usage,settings}/`, `src/sheep/mod.rs` |
 
 Each file is under 8 KB; over it, split, add a row. A changed decision updates its bullet.
 
