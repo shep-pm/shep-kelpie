@@ -62,6 +62,8 @@ fn finished(issue: u64, merged: bool, worker: u64, reviewer: u64, wall: u64) -> 
         agent: None,
         harness: None,
         model: None,
+        kind: None,
+        tier: None,
         ci_fix_turns: 0,
         ci_failures: CiFailures::default(),
         held: HeldFindings::default(),

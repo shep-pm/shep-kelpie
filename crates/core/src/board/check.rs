@@ -240,6 +240,17 @@ pub fn kind_of(label: &str) -> Option<&str> {
     head.eq_ignore_ascii_case(KIND).then(|| kind.trim())
 }
 
+/// The kind an issue's one `kind:` label names, as [`kinds`] spells it, or
+/// `None` where it has no such label, two of them, or one naming no kind
+pub fn label_kind(labels: &[String]) -> Option<&'static str> {
+    let mut named = labels.iter().filter_map(|l| kind_of(l));
+    let kind = named.next()?;
+    if named.next().is_some() {
+        return None;
+    }
+    kinds().find(|k| k.eq_ignore_ascii_case(kind))
+}
+
 // What follows `label` on the first line it starts, past list and bold marks.
 fn labelled_line<'a>(body: &'a str, label: &str) -> Option<&'a str> {
     labelled(body, label).map(|(_, text)| text)

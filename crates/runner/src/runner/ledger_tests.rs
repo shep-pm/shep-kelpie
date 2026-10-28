@@ -29,7 +29,7 @@ fn usd(dollars: f64) -> Cost {
 
 #[test]
 fn a_merged_work_item_leaves_a_line_for_each_call_and_one_for_itself() {
-    let (rig, runner, _) = Rig::parked("koji");
+    let (rig, runner, _) = Rig::parked_set("koji", |rig| rig.forge.label(7, "kind:fix"));
     rig.ask(&runner, "rule", Some("71 yes"));
     assert!(matches!(
         step(&runner).unwrap(),
@@ -110,6 +110,11 @@ fn a_merged_work_item_leaves_a_line_for_each_call_and_one_for_itself() {
         (&turn["agent"], &turn["harness"], &turn["model"])
     );
     assert_eq!(item.get("held"), None, "no finding was sent to the worker");
+    assert_eq!(
+        (&item["kind"], item.get("tier")),
+        (&json!("fix"), None),
+        "the kind is the issue's label, and no pick gave a tier"
+    );
 
     // The state file's record keeps the same.
     let state = std::fs::read_to_string(rig.paths().state).unwrap();

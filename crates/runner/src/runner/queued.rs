@@ -54,7 +54,7 @@ fn read_and_add(runner: &Mutex<Runner>, ticket: TicketId) -> Result<(), AddError
         (held.ports.tickets.clone(), held.remote.clone())
     };
     let found = (tickets.issue(&remote, ticket)).map_err(AddError::Forge)?;
-    lock(runner).add_found(ticket, found).map(drop)
+    lock(runner).add_found(ticket, found, None).map(drop)
 }
 
 fn rework(runner: &Mutex<Runner>, number: u64) -> Result<(), String> {

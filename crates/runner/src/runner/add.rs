@@ -3,7 +3,9 @@
 use std::fmt;
 
 use super::Runner;
+use super::pm::Picked;
 use super::trigger::issue_list;
+use crate::board::check::label_kind;
 use crate::board::{AGENT_LABEL, LabelError, agent_label, old_worker_label, pinned};
 use crate::ports::{ForgeError, Issue};
 use crate::settings::AgentName;
@@ -77,10 +79,19 @@ impl Runner {
     /// implementer kelpie has an agent file for, or the change cannot be saved.
     /// Nothing changes then.
     pub fn add(&mut self, ticket: TicketId) -> Result<AgentName, AddError> {
+        self.add_picked(ticket, None)
+    }
+
+    // `add`, on what `picked`, the project manager's pick of `ticket`, says.
+    pub(super) fn add_picked(
+        &mut self,
+        ticket: TicketId,
+        picked: Option<&Picked>,
+    ) -> Result<AgentName, AddError> {
         self.looks.poll_reset();
         self.add_allowed(ticket)?;
         let found = (self.ports.tickets.issue(&self.remote, ticket)).map_err(AddError::Forge)?;
-        self.add_found(ticket, found)
+        self.add_found(ticket, found, picked)
     }
 
     // Whether a work item for `ticket` may open now, before the issue is read.
@@ -97,25 +108,36 @@ impl Runner {
         Ok(())
     }
 
-    // Opens the work item for `ticket` from the issue as read. The guards are
-    // checked again, since the runner may have moved since they were.
+    // Opens the work item for `ticket` from the issue as read, on what
+    // `picked` says. The agent it names pins the work item over any label.
+    // The guards are checked again, since the runner may have moved since.
     pub(super) fn add_found(
         &mut self,
         ticket: TicketId,
         found: Issue,
+        picked: Option<&Picked>,
     ) -> Result<AgentName, AddError> {
         self.add_allowed(ticket)?;
         if !found.open {
             return Err(AddError::Closed(ticket));
         }
-        let (labelled, note) = self
-            .labelled_agent(ticket, &found.labels)
-            .map_err(AddError::Label)?;
+        let (pin, pin_note) = self.pin(ticket, picked);
+        let by_pm = pin.is_some();
+        let (labelled, note) = match pin {
+            Some(agent) => (agent, None),
+            None => (self.labelled_agent(ticket, &found.labels)).map_err(AddError::Label)?,
+        };
         let session = new_session_id().map_err(|e| AddError::Session(e.to_string()))?;
         let mut next = self.state.clone();
-        let (agent, moved) = self.opening_agent(ticket, &found.labels, labelled);
+        let (agent, moved) = match by_pm {
+            true => (labelled, None),
+            false => self.opening_agent(ticket, &found.labels, labelled),
+        };
         let mut item = self.fresh(ticket, found.title, agent.clone(), session);
-        item.pinned = pinned(&found.labels);
+        item.pinned = by_pm || pinned(&found.labels);
+        item.kind = label_kind(&found.labels).map(str::to_owned);
+        item.tier = picked.and_then(|p| p.tier);
+        item.slack = picked.and_then(|p| p.slack);
         next.work_items.push(item);
         if let Some(moved) = &moved {
             next.record_event(self.ports.clock.now(), moved.event.clone());
@@ -127,9 +149,41 @@ impl Runner {
             }
             return Err(AddError::State(e));
         }
+        self.notes.extend(pin_note);
         self.notes.extend(note);
         self.mark_held(ticket, true);
         Ok(agent)
+    }
+
+    // The agent `picked` pins its work item to, while it is an implementer
+    // `agents.allow` holds.
+    pub(super) fn pinned_agent(&self, picked: &Picked) -> Option<AgentName> {
+        let agent = picked.agent.as_ref()?;
+        self.implementer_files()
+            .contains(agent)
+            .then(|| agent.clone())
+    }
+
+    // `pinned_agent` of `picked`, and the note for an agent it names that is
+    // no implementer now.
+    fn pin(
+        &self,
+        ticket: TicketId,
+        picked: Option<&Picked>,
+    ) -> (Option<AgentName>, Option<String>) {
+        let Some(picked) = picked else {
+            return (None, None);
+        };
+        let pin = self.pinned_agent(picked);
+        let lapsed = picked.agent.as_ref().filter(|_| pin.is_none());
+        let note = lapsed.map(|agent| {
+            format!(
+                "{}: the project manager picked it for {agent}, which is no longer an \
+                 implementer `agents.allow` holds, so its labels choose",
+                ticket.shown()
+            )
+        });
+        (pin, note)
     }
 
     // The implementer a work item for `ticket` opens on, given the one its
