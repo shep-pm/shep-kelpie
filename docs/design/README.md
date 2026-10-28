@@ -49,7 +49,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | handover.md | in-flight turns handed on | `src/sheep/handover/`, `runner/flight/carry/`, `adapters/process/adopt/`, `src/upgrade/handover.rs` |
 | windows.md | `sh`, `env`, test fakes | `process/spawn.rs`, `test_support/` |
 | windows-crates.md | crates on Windows | `owner_only/` |
-| waits-and-spend.md | waits, held-up turns, failing steps | `runner/{turn/unreachable,looks}/`, `adapters/{unreachable,codex}/`, `core/usage/` |
+| waits-and-spend.md | waits, held-up turns, failing steps, spend | `runner/{turn/unreachable,looks}/`, `adapters/{unreachable,codex}/`, `core/usage/` |
 | review.md | review, bots, rulings | `runner/{review,ruling}/`, `core/webhook.rs` |
 | review-outcomes.md | fix turn outcomes | `runner/review/outcomes/` |
 | local-review.md | local reviewers, kept rounds | `runner/review/keep.rs`, `core/settings/{local_rounds,local}.rs`, `adapters/local/` |
@@ -67,7 +67,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | contribution-release.md | asking for a release: its answers | `runner/contributions/{release,ruling}.rs` |
 | contribution-merge.md | merge ruling: yes, thanks, no | `runner/contributions/{merge,ruling}.rs`, `core/settings/rulings.rs` |
 | representative.md | agent file, `agents.representative`, post wording | `runner/representative/`, `core/{agents/front,settings/agents}/`, `agents/representative.md` |
-| dependencies.md | bot bumps: rebase, proof, merge, red | `core/settings/dependencies.rs`, `core/state/bumps.rs`, `runner/{dependencies,dev_server/bump}/`, `runner/flight/proving.rs`, `adapters/{e2e_runner,pages}.rs`, `adapters/bridge/client/` |
+| dependencies.md | bot bumps: rebase, proof, merge, red | `core/{settings/dependencies,state/bumps}.rs`, `runner/{dependencies,dev_server/bump,flight/proving.rs}`, `adapters/{e2e_runner.rs,pages.rs,bridge/client/}` |
 | triage.md | settings, triager, pick rule, `since`, the verb, `status` | `core/settings/triage.rs`, `runner/{triage,open_checks.rs}`, `core/ports/issue.rs` |
 | triage-limits.md | limits | `runner/triage/limits.rs` |
 | triage-pass.md | a pass: post, labels, duplicate, agent-ready | `runner/{triage,flight}/`, `core/ports/voice.rs` |
