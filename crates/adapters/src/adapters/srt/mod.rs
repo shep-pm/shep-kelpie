@@ -17,6 +17,8 @@ use serde_json::{Value, json};
 use crate::adapters::host::WindowsInstall;
 use crate::ports::{Policy, Sandbox, SandboxError};
 
+mod windows;
+
 // The Mach services a command asks the keychain through, which a covered call may not look up
 const KEYCHAIN_SERVICES: [&str; 2] = ["com.apple.securityd.xpc", "com.apple.SecurityServer"];
 
@@ -264,8 +266,20 @@ fn settings_on(policy: &Policy, platform: Platform, loopback_open: bool) -> Valu
         .read
         .iter()
         .filter(|folder| platform != Platform::Windows || below_a_drive(folder));
-    let mut read = json!(read_list.collect::<Vec<_>>());
-    let mut write = json!(policy.write);
+    let (mut read, mut write, deny_read, deny_write) = match platform {
+        Platform::Windows => (
+            json!(windows::paths(read_list)),
+            json!(windows::paths(&policy.write)),
+            json!(windows::paths(&policy.no_read)),
+            json!(windows::paths(&policy.no_write)),
+        ),
+        _ => (
+            json!(read_list.collect::<Vec<_>>()),
+            json!(policy.write),
+            json!(policy.no_read),
+            json!(policy.no_write),
+        ),
+    };
     if platform.macos() {
         let (read, write) = (array(&mut read), array(&mut write));
         read.extend(policy.open.iter().map(|folder| alone(folder).into()));
@@ -276,10 +290,10 @@ fn settings_on(policy: &Policy, platform: Platform, loopback_open: bool) -> Valu
     json!({
         "network": network,
         "filesystem": {
-            "denyRead": policy.no_read,
+            "denyRead": deny_read,
             "allowRead": read,
             "allowWrite": write,
-            "denyWrite": policy.no_write,
+            "denyWrite": deny_write,
         },
         "enableWeakerNetworkIsolation": policy.verify_tls,
     })

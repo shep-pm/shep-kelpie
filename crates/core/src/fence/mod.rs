@@ -119,29 +119,35 @@ fn root_names() -> impl Iterator<Item = &'static str> {
 
 /// The sandbox's `denyWrite` paths that fence these files in `worktree`
 ///
-/// srt skips every glob in `denyWrite` on Linux, so there the harness folders
-/// already below the worktree are listed as paths too. One made during the
-/// call is caught by [`differ`] after it.
+/// srt skips every glob in `denyWrite` on Linux, and on Windows expands one to
+/// every file that exists. On both the harness folders already below the
+/// worktree are listed as paths too, and on Windows the globs are left out.
+/// One made during the call is caught by [`differ`] after it.
 pub fn deny_write(worktree: &Path) -> Vec<PathBuf> {
-    deny_write_on(worktree, cfg!(target_os = "linux"))
+    deny_write_on(worktree, std::env::consts::OS)
 }
 
-// The same, as on Linux or not, which a test runs on either.
-fn deny_write_on(worktree: &Path, linux: bool) -> Vec<PathBuf> {
+// The same, as on the operating system `os` names, which a test runs on any.
+fn deny_write_on(worktree: &Path, os: &str) -> Vec<PathBuf> {
+    let windows = os == "windows";
     let mut paths = Vec::new();
     for own in &HARNESSES {
         for folder in own.folders {
             paths.push(worktree.join(folder));
-            paths.push(worktree.join("**").join(folder));
+            if !windows {
+                paths.push(worktree.join("**").join(folder));
+            }
         }
         for [parent, folder] in own.nested {
             let inside = Path::new(parent).join(folder);
             paths.push(worktree.join(&inside));
-            paths.push(worktree.join("**").join(inside));
+            if !windows {
+                paths.push(worktree.join("**").join(inside));
+            }
         }
         paths.extend(own.root_files.iter().map(|file| worktree.join(file)));
     }
-    if linux {
+    if matches!(os, "linux" | "windows") {
         for path in nested::existing(worktree) {
             if !paths.contains(&path) {
                 paths.push(path);
@@ -656,7 +662,7 @@ mod tests {
             assert!(!fenced(Path::new(path)), "{path}");
         }
         let wt = Path::new("/k/wt/7");
-        let deny = deny_write(wt);
+        let deny = deny_write_on(wt, "macos");
         for path in ["/k/wt/7/.config/goose", "/k/wt/7/**/.config/goose"] {
             assert!(deny.contains(&PathBuf::from(path)), "{path}");
         }
@@ -665,7 +671,7 @@ mod tests {
     #[test]
     fn the_sandbox_denies_every_harnesss_files_in_the_worktree() {
         let wt = Path::new("/k/wt/7");
-        let deny: Vec<String> = deny_write(wt)
+        let deny: Vec<String> = deny_write_on(wt, "macos")
             .iter()
             .map(|p| p.display().to_string())
             .collect();
@@ -709,15 +715,15 @@ mod tests {
         }
         // A link is listed and never followed.
         symlink("/etc", wt.join("lib/.codex")).unwrap();
-        let listed = |linux| -> Vec<String> {
-            deny_write_on(wt, linux)
+        let listed = |os| -> Vec<String> {
+            deny_write_on(wt, os)
                 .iter()
                 .map(|p| p.strip_prefix(wt).unwrap().display().to_string())
                 .collect()
         };
 
-        let linux = listed(true);
-        assert_eq!(linux[..13], listed(false)[..]);
+        let linux = listed("linux");
+        assert_eq!(linux[..13], listed("macos")[..]);
         assert_eq!(
             linux[13..],
             [
@@ -743,7 +749,7 @@ mod tests {
         fs::create_dir_all(wt.join(&deep).join(".claude")).unwrap();
         fs::create_dir_all(wt.join(".git/.claude")).unwrap();
         fs::create_dir_all(wt.join("near/.claude")).unwrap();
-        let listed = deny_write_on(wt, true);
+        let listed = deny_write_on(wt, "linux");
         assert_eq!(listed[13..], [wt.join("near/.claude")]);
     }
 
