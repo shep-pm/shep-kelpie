@@ -9,6 +9,7 @@
 
 use std::fs;
 use std::io::Read;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -164,6 +165,7 @@ pub fn stage(layout: &Layout, source: &Path) -> Result<Staged, String> {
             path.display()
         )
     })?;
+    #[cfg(unix)]
     fs::set_permissions(&staged.path, fs::Permissions::from_mode(0o755))
         .map_err(|e| failed("make executable", &e))?;
     sign(&staged.path, &layout.identifier())?;
@@ -294,6 +296,7 @@ mod tests {
 
     use crate::test::Fake;
 
+    #[cfg(unix)]
     use std::os::unix::fs::MetadataExt;
 
     use super::*;
@@ -365,13 +368,17 @@ mod tests {
         let staged = stage(&layout, &source).unwrap();
         let path = staged.path().to_owned();
         assert_eq!(path.parent(), layout.installed().parent());
-        let mode = fs::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o111, 0o111);
+        #[cfg(unix)]
+        {
+            let mode = fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o111, 0o111);
+        }
         drop(staged);
         assert!(!path.exists());
     }
 
     // The test binary is a real executable, so this signs on macOS and is a copy elsewhere.
+    #[cfg(unix)]
     #[test]
     fn a_real_executable_is_staged_and_still_runs() {
         let dir = tempfile::tempdir().unwrap();
@@ -422,8 +429,10 @@ mod tests {
         let read = |p: &Path| fs::read_to_string(p).unwrap();
 
         assert_eq!(install(&layout, build(b"one")), Ok(Change::First));
+        #[cfg(unix)]
         let first = fs::metadata(layout.installed()).unwrap().ino();
         assert_eq!(install(&layout, build(b"two")), Ok(Change::Replaced));
+        #[cfg(unix)]
         assert_ne!(
             fs::metadata(layout.installed()).unwrap().ino(),
             first,
@@ -447,6 +456,7 @@ mod tests {
         assert!(!layout.held().exists());
     }
 
+    #[cfg(unix)]
     #[test]
     fn an_installed_symlink_stays_a_link_and_its_target_is_what_is_kept() {
         let dir = tempfile::tempdir().unwrap();

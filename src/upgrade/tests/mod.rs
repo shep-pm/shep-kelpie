@@ -68,11 +68,17 @@ impl Rig {
         let bin = shepherd.scratch("bin");
         let builds = shepherd.scratch("builds");
         let installed = bin.join("shep-kelpie");
+        #[cfg(unix)]
         if linked {
             let real = bin.join("real-kelpie");
             write_script(&real, &answering("0.1.0", "0.17.0"));
             std::os::unix::fs::symlink(&real, &installed).unwrap();
         } else {
+            write_script(&installed, &answering("0.1.0", "0.17.0"));
+        }
+        #[cfg(not(unix))]
+        {
+            assert!(!linked, "a symlinked install is built on Unix only");
             write_script(&installed, &answering("0.1.0", "0.17.0"));
         }
         shepherd.holds_dog_at("kelpie", &installed.display().to_string(), true);
