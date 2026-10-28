@@ -2,6 +2,7 @@
 
 use serde_json::json;
 
+use super::availability::Availability;
 use super::desk::{Delivery, Desk, deliveries};
 use crate::lease::book::Asked;
 use crate::lease::{Holder, LeaseKind};
@@ -10,22 +11,37 @@ use crate::lease::{Holder, LeaseKind};
 pub const ACTIONS: [&str; 3] = ["status", "take", "return"];
 
 impl Desk {
+    /// Shorthand for <code>[Desk::answer_with]</code> with nothing read of availability
+    pub fn answer(&mut self, action: &str, params: Option<&str>) -> (String, Vec<Delivery>) {
+        self.answer_with(action, params, &Availability::default())
+    }
+
     /// Answers one of the maintainer's triggers with a JSON body
     ///
-    /// `status` lists every lease. `take`
+    /// `status` lists every lease and `availability`. `take`
     /// and `return` name a book lease and act for the maintainer. Asking
     /// with `take` again is how a waiting maintainer learns of the grant.
-    pub fn answer(&mut self, action: &str, params: Option<&str>) -> (String, Vec<Delivery>) {
-        let answered = self.respond(action, params);
+    pub fn answer_with(
+        &mut self,
+        action: &str,
+        params: Option<&str>,
+        availability: &Availability,
+    ) -> (String, Vec<Delivery>) {
+        let answered = self.respond(action, params, availability);
         self.look(true);
         answered
     }
 
-    fn respond(&mut self, action: &str, params: Option<&str>) -> (String, Vec<Delivery>) {
+    fn respond(
+        &mut self,
+        action: &str,
+        params: Option<&str>,
+        availability: &Availability,
+    ) -> (String, Vec<Delivery>) {
         let error = |message: String| (json!({ "error": message }).to_string(), Vec::new());
         let params = params.map(str::trim).filter(|p| !p.is_empty());
         let kind = match (action, params) {
-            ("status", None) => return (self.status().to_string(), Vec::new()),
+            ("status", None) => return (self.status(availability).to_string(), Vec::new()),
             ("status", Some(_)) => return error("`status` takes no params".into()),
             ("take" | "return", Some(kind)) => match LeaseKind::try_from(kind) {
                 Ok(kind) => kind,
@@ -47,11 +63,11 @@ impl Desk {
         (body.to_string(), Vec::new())
     }
 
-    fn status(&self) -> serde_json::Value {
+    fn status(&self, availability: &Availability) -> serde_json::Value {
         let mut leases = vec![json!(self.tests.status())];
         leases.extend(self.e2e.values().map(|l| json!(l.status())));
         leases.extend(self.book.status().iter().map(|l| json!(l)));
-        json!({ "leases": leases })
+        json!({ "leases": leases, "availability": availability.status() })
     }
 }
 
@@ -60,6 +76,7 @@ mod tests {
     use serde_json::json;
 
     use super::ACTIONS;
+    use crate::dog::availability::{Availability, Sources};
     use crate::dog::desk::tests::{grant, stand_in, world};
     use crate::lease::Epoch;
     use crate::lease::counted::{Taker, Ticket};
@@ -105,7 +122,25 @@ mod tests {
                 "since": null,
                 "queue": [],
                 "window": { "quota": 1, "summons": [], "opens": null },
-            }] })
+            }], "availability": { "models": [], "accounts": [] } })
+        );
+    }
+
+    #[test]
+    fn status_shows_each_account_and_model_the_dog_reads() {
+        let mut w = world();
+        let agents = crate::agents::Agents::embedded();
+        let sources = Sources::of(&agents, &crate::settings::Gateways::default());
+        let (body, _) = w
+            .desk
+            .answer_with("status", None, &Availability::new(&sources));
+        let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            body["availability"],
+            json!({
+                "models": [],
+                "accounts": [{ "account": "claude", "unknown": true, "read_at": null }],
+            })
         );
     }
 
