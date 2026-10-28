@@ -294,7 +294,7 @@ fn runnable(tables: &Tables, name: &ProjectName, place: Place<'_>) -> Result<Set
     let loaded = source::load(tables, name.as_str(), place.home, &paths.folder).map_err(invalid)?;
     let settings = loaded.settings;
     let book = Agents::load(&paths.agents).map_err(|e| e.to_string())?;
-    let agents = settings.role_agents(&book).map_err(invalid)?;
+    settings.role_agents(&book).map_err(invalid)?;
     let gateways = loaded.kelpie.gateways();
     let lineup = settings
         .lineup(&book, &gateways, place.home)
@@ -302,7 +302,7 @@ fn runnable(tables: &Tables, name: &ProjectName, place: Place<'_>) -> Result<Set
     if let Some(refused) = settings.rulings.refusal() {
         return Err(invalid(refused));
     }
-    check_gateway_shapes(&gateways, &book, &agents, &lineup).map_err(invalid)?;
+    check_gateway_shapes(&gateways, &book, &lineup).map_err(invalid)?;
     gateways
         .check_triage_spam(&settings.triage.spam)
         .map_err(invalid)?;

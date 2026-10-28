@@ -191,8 +191,8 @@ fn a_contribution_first_asked_at_quiet_days_is_asked_and_not_ruled_on() {
 }
 
 // A released contribution whose pull request closes no issue: kelpie files one
-// from its title and body, labelled for the project's default implementer, and
-// names it on the pull request so the merge closes it.
+// from its title and body, with no `agent:` label so the agent board picks at
+// dispatch, and names it on the pull request so the merge closes it.
 #[test]
 fn a_pull_request_that_closes_no_issue_gets_one_filed_and_resolves_is_added_to_its_body() {
     let (rig, runner) = taken_over();
@@ -212,7 +212,7 @@ fn a_pull_request_that_closes_no_issue_gets_one_filed_and_resolves_is_added_to_i
         body.contains("Body of pull request #30."),
         "the contributor's own body: {body}"
     );
-    assert_eq!(filed[0]["labels"], json!(["agent:sonnet-high"]));
+    assert_eq!(filed[0]["labels"], json!([]));
     let edited = rig.forge.pull_request_body(30);
     assert_eq!(
         edited,

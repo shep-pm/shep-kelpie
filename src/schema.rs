@@ -186,9 +186,7 @@ mod tests {
                 "[app.dogs.kelpie.dependencies]\npick = \"off\"\nbots = [\"dependabot\"]\non_red = \"close\"\nweb = [\"web/\", \"package.json\"]\nwait_hours = 24\n",
             )
             .replace("# allow =", "allow =")
-            .replace("# implementer_choice =", "implementer_choice =")
             .replace("# representative =", "representative =")
-            .replace("# fallback_after =", "fallback_after =")
             .replace("# slack =", "slack =")
             .replace("# maintainer =", "maintainer =")
             .replace("# base =", "base =")
@@ -250,11 +248,7 @@ mod tests {
             .flat_map(|text| keys_of_table(&root, sheep_schema, text))
             .collect();
         assert_same_keys(&sheep, &set);
-        for key in [
-            "agents.reviewers",
-            "agents.implementers",
-            "worker.build_env",
-        ] {
+        for key in ["agents.reviewers", "worker.build_env"] {
             assert!(
                 sheep.contains(key),
                 "{key} is not a key of the project schema"

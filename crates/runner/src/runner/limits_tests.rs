@@ -14,22 +14,29 @@ const CODEX: &str = Rig::CODEX_IMPLEMENTER;
 const QWEN: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-coder\n\
                     effort: low\nusage: none\n---\n";
 
-/// The example's own `[agents]` table, which `named` replaces
-const LISTED: &str = "[app.dogs.kelpie.agents]\nimplementers = [\"sonnet-high\"]\n";
+/// The example's own `[agents]` table, which `named` adds to
+const LISTED: &str = "[app.dogs.kelpie.agents]\n";
+
+/// The board's own ranking and the example's `[agents]` table
+const AS_IS: Agents = (&[], "");
 
 const CODEX_REVIEW: &str = "---\nrole: reviewer\nharness: stand-in\nmodel: gpt-5-codex\n\
                             effort: medium\nusage: codex\n---\nReview {{DIFF}}.\n";
 const CODER_REVIEW: &str = "---\nrole: reviewer\nharness: stand-in\nmodel: qwen3-coder\n\
                             effort: low\nusage: none\n---\nReview {{DIFF}}.\n";
 
-const ALL_CODEX: &str = "implementers = [\"codex\"]\nreviewers = [\"qwen\", \"codex-review\"]\n";
-const BESIDE_QWEN: &str = "implementers = [\"sonnet-high\", \"coder\"]\n";
-const ALL_QWEN: &str = "implementers = [\"sonnet-high\", \"coder\"]\nreviewers = [\"qwen\"]\n";
+// The agents the board ranks, in order, or its own ranking when none, and the
+// `[agents]` table's keys
+type Agents = (&'static [&'static str], &'static str);
 
-// A running project whose `[agents]` table is `names`, over kelpie's agent
-// files and four more: `codex` on the Codex account and `coder` on a local model,
-// which build, and a reviewer on each, `codex-review` and `coder-review`.
-fn named(project: &str, names: &str) -> (Rig, Mutex<Runner>) {
+const ALL_CODEX: Agents = (&["codex"], "reviewers = [\"qwen\", \"codex-review\"]\n");
+const BESIDE_QWEN: Agents = (&["sonnet-high", "coder"], "");
+const ALL_QWEN: Agents = (&["sonnet-high", "coder"], "reviewers = [\"qwen\"]\n");
+
+// A running project whose board ranks `ranked` and whose `[agents]` table holds `names`,
+// over kelpie's agent files and four more: `codex` on the Codex account and `coder` on a
+// local model, which build, and a reviewer on each, `codex-review` and `coder-review`.
+fn named(project: &str, (ranked, names): Agents) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
     rig.write_agent("codex", CODEX);
     rig.write_agent("coder", QWEN);
@@ -43,6 +50,9 @@ fn named(project: &str, names: &str) -> (Rig, Mutex<Runner>) {
             false => s,
         }
     });
+    if !ranked.is_empty() {
+        rig.agent_board.ranks(ranked);
+    }
     let runner = rig.open().unwrap();
     (rig, runner)
 }
@@ -60,7 +70,7 @@ fn dispatched(report: &Option<StepReport>) -> bool {
 
 #[test]
 fn a_claude_worker_waits_on_claudes_window_and_never_reads_codexs() {
-    let (rig, runner) = named("shep", "");
+    let (rig, runner) = named("shep", AS_IS);
     rig.forge.list_ready(7, false);
     rig.meter.set(Rig::utilization(0, 55));
     rig.codex_meter.set(Rig::utilization(0, 0));
@@ -76,7 +86,7 @@ fn a_claude_worker_waits_on_claudes_window_and_never_reads_codexs() {
 
 #[test]
 fn an_item_on_an_unlisted_implementer_paces_on_its_account_too() {
-    let (rig, runner) = named("shep", "");
+    let (rig, runner) = named("shep", AS_IS);
     rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 2"));
     rig.forge.label(7, "agent:codex!");
     rig.ask(&runner, "add", Some("7"));
@@ -98,10 +108,10 @@ fn an_item_on_an_unlisted_implementer_paces_on_its_account_too() {
     );
 }
 
-// The `named("shep", "")` rig, reopened on a Codex day that began with `used` percent of
+// The `named("shep", AS_IS)` rig, reopened on a Codex day that began with `used` percent of
 // its week spent, with a ready issue 7 pinned to `codex`, which the project does not list.
 fn codex_day_began(used: u32) -> (Rig, Mutex<Runner>) {
-    let (rig, runner) = named("shep", "");
+    let (rig, runner) = named("shep", AS_IS);
     let runner = reopened(&rig, runner, || rig.codex_day_began(used));
     rig.forge.list_ready(7, false);
     rig.forge.label(7, "agent:codex!");
@@ -110,7 +120,7 @@ fn codex_day_began(used: u32) -> (Rig, Mutex<Runner>) {
 
 #[test]
 fn a_first_pick_the_pacer_holds_gives_the_boards_second() {
-    let (rig, runner) = named("shep", "");
+    let (rig, runner) = named("shep", AS_IS);
     let runner = reopened(&rig, runner, || rig.codex_day_began(0));
     rig.forge.list_ready(7, false);
     rig.agent_board.ranks(&["codex", "sonnet-high"]);
@@ -131,7 +141,7 @@ fn a_first_pick_the_pacer_holds_gives_the_boards_second() {
 }
 
 // A local implementer listed alone, so no account is read before the board's ranking is.
-const ONLY_QWEN: &str = "implementers = [\"coder\"]\nreviewers = [\"qwen\"]\n";
+const ONLY_QWEN: Agents = (&["coder"], "reviewers = [\"qwen\"]\n");
 
 #[test]
 fn a_later_pick_whose_account_is_unread_is_read_before_the_walk_gives_up() {
@@ -193,8 +203,8 @@ fn a_ready_issue_on_an_unlisted_labelled_implementer_is_held_by_its_account() {
 }
 
 #[test]
-fn a_pick_pinning_an_unlisted_implementer_is_held_by_its_account() {
-    let (rig, runner) = named("shep", "implementers = [\"sonnet-high\"]\npm = \"pm\"\n");
+fn a_pick_pinning_an_implementer_is_held_by_its_account() {
+    let (rig, runner) = named("shep", (&["sonnet-high", "codex"], "pm = \"pm\"\n"));
     let runner = reopened(&rig, runner, || rig.codex_day_began(0));
     rig.forge.list_ready(7, false);
     rig.forge.list_ready(9, false);
@@ -368,7 +378,7 @@ fn codex_usage_that_cannot_be_read_holds_until_it_can() {
 
 #[test]
 fn a_review_round_waits_on_its_reviewers_account_while_the_worker_works_on() {
-    let names = "implementers = [\"codex\"]\nreviewers = [\"claude\"]\n";
+    let names: Agents = (&["codex"], "reviewers = [\"claude\"]\n");
     let (rig, runner) = named("chelone", names);
     rig.meter.set(Rig::utilization(0, 60));
     rig.ask(&runner, "add", Some("7"));
@@ -406,7 +416,7 @@ fn a_review_round_waits_on_its_reviewers_account_while_the_worker_works_on() {
 #[test]
 fn a_local_worker_is_never_paced_and_shows_no_lease() {
     let (rig, runner) = named("rotom", ALL_QWEN);
-    // A new item may run on Claude, unlabelled, so its window is read once.
+    // The new item is pinned to the local model, so no window is read for it.
     rig.meter.set(Rig::utilization(0, 1));
     rig.codex_meter.set(Rig::utilization(90, 90));
     rig.forge.list_ready(7, false);
@@ -430,7 +440,7 @@ fn a_local_worker_is_never_paced_and_shows_no_lease() {
         hold.release();
         turn.join().unwrap();
     });
-    assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (1, 0));
+    assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (0, 0));
     let call = &rig.claude.all_calls()[0];
     assert_eq!(
         (call.harness.clone(), call.model.as_str()),
@@ -454,7 +464,7 @@ fn status_shows_who_holds_the_paddock_lease_on_a_gateway_model() {
         );
     let rig = Rig::new("rotom");
     rig.write_agent("mine", BEHIND_PADDOCK);
-    rig.implementers(&["sonnet-high", "mine"]);
+    rig.agent_board.ranks(&["sonnet-high", "mine"]);
     let settings = std::fs::read_to_string(rig.kelpie_settings_file()).unwrap();
     let gateway = format!(
         "[gateways.paddock]\nurl = \"{}\"\nkey_env = \"CARGO_PKG_NAME\"\n",
@@ -492,7 +502,7 @@ fn a_work_item_keeps_its_agent_and_runs_its_file_as_it_now_stands() {
             "coder",
             &QWEN.replace("qwen3-coder\neffort: low", "next\neffort: high"),
         );
-        rig.implementers(&["sonnet-high"]);
+        rig.agent_board.ranks(&["sonnet-high"]);
     });
     rig.claude.script([Scripted::Say("done")]);
     step(&runner).unwrap();
@@ -514,7 +524,7 @@ fn a_work_item_whose_agent_file_is_gone_fails_its_turn_saying_so() {
     rig.ask(&runner, "add", Some("7"));
     let runner = reopened(&rig, runner, || {
         std::fs::remove_file(rig.paths().agents.join("coder.md")).unwrap();
-        rig.implementers(&["sonnet-high"]);
+        rig.agent_board.ranks(&["sonnet-high"]);
     });
     let Some(StepReport::Failed { question, .. }) = step(&runner).unwrap() else {
         panic!("the turn did not fail");
@@ -531,7 +541,7 @@ fn a_work_item_whose_agent_file_is_gone_fails_its_turn_saying_so() {
 
 #[test]
 fn a_review_round_on_a_local_agent_runs_on_that_agent() {
-    let names = "implementers = [\"sonnet-high\"]\nreviewers = [\"coder-review\"]\n";
+    let names: Agents = (&["sonnet-high"], "reviewers = [\"coder-review\"]\n");
     let (rig, runner) = named("chelone", names);
     rig.meter.set(Rig::utilization(0, 1));
     rig.ask(&runner, "add", Some("7"));
@@ -554,7 +564,7 @@ fn a_review_round_on_a_local_agent_runs_on_that_agent() {
 
 #[test]
 fn beside_a_local_implementer_listed_first_an_issue_labelled_for_sonnet_is_paced_on_claude() {
-    let (rig, runner) = named("rotom", "implementers = [\"coder\", \"sonnet-high\"]\n");
+    let (rig, runner) = named("rotom", (&["coder", "sonnet-high"], ""));
     rig.forge.list_ready(7, false);
     rig.forge.label(7, "agent:sonnet-high!");
     rig.meter.set(Rig::utilization(0, 1));
@@ -576,7 +586,7 @@ fn beside_a_local_implementer_listed_first_an_issue_labelled_for_sonnet_is_paced
 
 #[test]
 fn a_project_with_no_local_agent_shows_no_leases() {
-    let (rig, runner) = named("chelone", "");
+    let (rig, runner) = named("chelone", AS_IS);
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status.get("local_leases"), None);
 }
@@ -647,7 +657,7 @@ fn a_role_with_priced_and_unpriced_calls_counts_both() {
 // meanwhile is answered.
 #[test]
 fn a_trigger_is_answered_while_a_new_work_items_usage_is_read() {
-    let (rig, runner) = named("shep", "");
+    let (rig, runner) = named("shep", AS_IS);
     rig.forge.list_ready(7, false);
     let read = rig.meter.hold_next_read();
 
@@ -662,7 +672,7 @@ fn a_trigger_is_answered_while_a_new_work_items_usage_is_read() {
 
 #[test]
 fn a_trigger_is_answered_while_a_turns_usage_is_read() {
-    let (rig, runner) = named("shep", "");
+    let (rig, runner) = named("shep", AS_IS);
     rig.forge.list_ready(7, false);
     assert!(dispatched(&step(&runner).unwrap()));
     let read = rig.meter.hold_next_read();
@@ -678,7 +688,7 @@ fn a_trigger_is_answered_while_a_turns_usage_is_read() {
 
 #[test]
 fn a_board_with_nothing_ready_reads_no_usage() {
-    let (rig, runner) = named("shep", "");
+    let (rig, runner) = named("shep", AS_IS);
 
     step(&runner).unwrap();
 

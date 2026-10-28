@@ -21,7 +21,7 @@ fn behind(rig: &Rig, url: &str) -> Mutex<Runner> {
     // `name_pm` and `implementers` each rewrite the example's `implementers`
     // line, so the one that checks it goes first.
     name_pm(rig);
-    rig.implementers(&["sonnet-high", "mine"]);
+    rig.agent_board.ranks(&["sonnet-high", "mine"]);
     let settings = std::fs::read_to_string(rig.kelpie_settings_file()).unwrap();
     let gateway = format!(
         "[gateways.paddock]\nurl = \"{}\"\nkey_env = \"CARGO_PKG_NAME\"\n",

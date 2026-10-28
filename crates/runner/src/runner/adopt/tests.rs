@@ -22,11 +22,16 @@ fn running(rig: &Rig) -> Mutex<Runner> {
     rig.open().unwrap()
 }
 
+// Pull request 80 adopted on `sonnet-high`, the rig's board's first pick
 fn adopted_80() -> StepReport {
+    adopted_80_on("sonnet-high")
+}
+
+fn adopted_80_on(agent: &str) -> StepReport {
     StepReport::Adopted {
         issue: ticket(5),
         pull_request: 80,
-        agent: "sonnet-high".to_owned().try_into().unwrap(),
+        agent: agent.to_owned().try_into().unwrap(),
     }
 }
 
@@ -117,12 +122,25 @@ fn adopt_starts_at_ci_and_the_first_turn_names_the_file_ahead_of_the_red_run() {
 }
 
 #[test]
-fn a_waiting_pull_request_on_an_unlisted_labelled_implementer_is_held_by_its_account() {
+fn an_adopted_pull_request_opens_on_the_agent_boards_pick() {
+    let rig = Rig::new("shep");
+    opened_80(&rig);
+    rig.agent_board.ranks(&["opus-high", "sonnet-high"]);
+    let runner = running(&rig);
+    rig.ask(&runner, "adopt", Some("80"));
+
+    assert_eq!(step(&runner).unwrap(), Some(adopted_80_on("opus-high")));
+    let [ask] = rig.agent_board.asks().try_into().unwrap();
+    assert_eq!(ask.pin, None);
+}
+
+#[test]
+fn a_waiting_pull_request_pinned_to_an_implementer_is_held_by_its_account() {
     let rig = Rig::new("shep");
     rig.ci_on();
     opened_80(&rig);
     rig.write_codex_implementer();
-    rig.forge.label(5, "agent:codex");
+    rig.forge.label(5, "agent:codex!");
     rig.codex_day_began(0);
     // 15% of Codex's week since the day began, past its allowance of 100 / 7.
     rig.codex_meter.set(Rig::utilization(15, 0));
@@ -150,7 +168,8 @@ fn a_pull_request_held_by_its_labelled_account_leaves_the_ones_behind_it_to_star
     rig.push_by_hand("fix/other", "other.txt");
     rig.forge.open_pull_request(81, "fix/other", &[6]);
     rig.write_codex_implementer();
-    rig.forge.label(5, "agent:codex");
+    rig.forge.label(5, "agent:codex!");
+    rig.agent_board.ranks(&["sonnet-high", "codex"]);
     rig.codex_day_began(0);
     rig.codex_meter.set(Rig::utilization(15, 0));
     let runner = running(&rig);

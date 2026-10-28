@@ -70,8 +70,8 @@ pub struct Briefing<'a> {
     pub red: Vec<RedLine>,
     /// The ready queue as last read, `None` before the first read
     pub ready: Option<Ready>,
-    /// The agents the project lists: its implementers, the default first, then
-    /// its reviewers in their order
+    /// The implementers the agent board may pick, by name, then the
+    /// project's reviewers in their order
     pub agents: Vec<AgentLine>,
     /// The board events the project manager has not read
     pub events: Vec<BoardEvent>,
@@ -238,8 +238,6 @@ pub struct AgentLine {
     pub name: String,
     /// An implementer or a reviewer
     pub role: Role,
-    /// Whether it is the implementer an issue with no `agent:` label runs on
-    pub default: bool,
     /// Its tier, `standard` when its file names none
     pub tier: Tier,
     /// The kinds of work it takes, `None` for every kind
@@ -480,18 +478,18 @@ fn agents(out: &mut String, agents: &[AgentLine]) {
         return;
     }
     out.push_str(
-        "Implementers, the default first, then reviewers in their order. An `agent:` label \
-         picks a work item's implementer: tier and kinds are shown, nothing picks by them.\n\n",
+        "Implementers by name, then reviewers in their order. The agent board picks a work \
+         item's implementer by its kind, tier and slack, and a pick's agent or an \
+         `agent:<name>!` label pins it.\n\n",
     );
     for agent in agents {
-        let default = if agent.default { ", default" } else { "" };
         let kinds = match &agent.kinds {
             Some(kinds) => format!("kinds {}", kinds.join(", ")),
             None => "every kind".to_owned(),
         };
         let _ = writeln!(
             out,
-            "- {} ({}{default}): {} tier, {kinds}; {}",
+            "- {} ({}): {} tier, {kinds}; {}",
             agent.name,
             agent.role.as_str(),
             agent.tier.as_str(),

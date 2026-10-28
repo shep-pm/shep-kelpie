@@ -12,11 +12,12 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::Runner;
+use super::add::AddError;
 use super::pace::{Passed, Started};
 use super::report::{Begin, ReworkBy, StepReport};
 use super::trigger::{self, issue_list};
 use super::turn;
-use crate::board::{HUMAN, LabelError, OpenPullRequest, READY, Skip};
+use crate::board::{HUMAN, OpenPullRequest, READY, Skip};
 use crate::ports::{ForgeError, MaintainerReview, PullRequestState, Reviewed};
 use crate::settings::AgentName;
 use crate::state::StateError;
@@ -24,13 +25,14 @@ use crate::ticket::TicketId;
 use crate::work_item::{Known, Phase, Review, WorkItem, new_session_id};
 use crate::worktree::{self, Remote};
 
-// A pull request that can be reworked, and the agent its issue runs it on
+// A pull request that can be reworked, and the agent the board picked for it
 struct Target {
     pr: Reviewed,
     ticket: TicketId,
     review: MaintainerReview,
     title: String,
     agent: AgentName,
+    pinned: bool,
     note: Option<String>,
 }
 
@@ -57,8 +59,8 @@ pub enum ReworkError {
     NothingToRework(u64),
     /// The forge could not show the pull request's issue
     Issue(u64, ForgeError),
-    /// The issue's `agent:` label cannot be used
-    Label(LabelError),
+    /// The issue's `agent:` label cannot be used, or the agent board named no agent
+    Agent(AddError),
     /// No random session id could be drawn, with the OS's reason
     Session(String),
     /// The review could not be written for the worker, with the reason
@@ -96,7 +98,7 @@ impl fmt::Display for ReworkError {
             ),
             Self::Viewer(e) => write!(f, "cannot read the account kelpie acts as: {e}"),
             Self::Issue(issue, e) => write!(f, "cannot read issue #{issue}: {e}"),
-            Self::Label(e) => e.fmt(f),
+            Self::Agent(e) => e.fmt(f),
             Self::Session(e) => write!(f, "cannot draw a session id: {e}"),
             Self::ReviewFile(e) => f.write_str(e),
             Self::Unlabel(number, label, e) => {
@@ -120,7 +122,10 @@ impl ReworkError {
     fn settled(&self) -> bool {
         matches!(
             self,
-            Self::NotOpen(..) | Self::NotKelpies(_) | Self::NothingToRework(_) | Self::Label(_)
+            Self::NotOpen(..)
+                | Self::NotKelpies(_)
+                | Self::NothingToRework(_)
+                | Self::Agent(AddError::Label(_))
         )
     }
 }
@@ -390,16 +395,17 @@ impl Runner {
             .tickets
             .issue(repo, ticket)
             .map_err(|e| ReworkError::Issue(issue, e))?;
-        let (agent, note) = self
-            .labelled_agent(ticket, &found.labels)
-            .map_err(ReworkError::Label)?;
+        let opening = self
+            .board_opening(ticket, &found.labels)
+            .map_err(ReworkError::Agent)?;
         Ok(Target {
             pr,
             ticket,
             review,
             title: found.title,
-            agent,
-            note,
+            agent: opening.agent,
+            pinned: opening.pinned,
+            note: opening.note,
         })
     }
 
@@ -412,6 +418,7 @@ impl Runner {
             review,
             title,
             agent,
+            pinned,
             note,
         } = target;
         let repo = &self.remote;
@@ -420,6 +427,7 @@ impl Runner {
         // `git.base` says now.
         let fresh = WorkItem {
             base: Some(pr.base.clone()),
+            pinned,
             ..self.fresh(ticket, title, agent.clone(), session)
         };
         // A rework stays on its pull request, so a listed bot's `rounds`

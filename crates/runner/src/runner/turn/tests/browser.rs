@@ -127,7 +127,7 @@ fn a_codex_worker_turn_on_a_project_with_the_browser_on_gets_one_and_is_told_of_
     let agent =
         "---\nrole: implementer\nharness: codex\nmodel: gpt-6-sol\neffort: low\n---\nWork.\n";
     rig.write_agent("codex-box", agent);
-    rig.implementers(&["codex-box"]);
+    rig.agent_board.ranks(&["codex-box"]);
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
@@ -148,7 +148,7 @@ fn a_goose_worker_turn_on_a_project_with_the_browser_on_gets_one_and_is_told_of_
     let agent = "---\nrole: implementer\nharness: goose\nmodel: qwen3.8:27b\neffort: low\n\
                  url: http://box:11434/v1\ncontext: 65536\n---\nWork.\n";
     rig.write_agent("goose-box", agent);
-    rig.implementers(&["goose-box"]);
+    rig.agent_board.ranks(&["goose-box"]);
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
@@ -170,7 +170,7 @@ fn goose_turn_killed_and_resumed(
     let agent = "---\nrole: implementer\nharness: goose\nmodel: qwen3.8:27b\neffort: low\n\
                  url: http://box:11434/v1\ncontext: 65536\n---\nWork.\n";
     rig.write_agent("goose-box", agent);
-    rig.implementers(&["goose-box"]);
+    rig.agent_board.ranks(&["goose-box"]);
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.claude.script([Scripted::Kill]);

@@ -33,6 +33,8 @@ pub struct Candidate<'a> {
     pub wait: Option<u64>,
     /// What it typically takes for the item
     pub typical: Typical,
+    /// Whether it runs on a local model, which costs nothing when its history names no cost
+    pub local: bool,
 }
 
 /// An agent the board would pick
@@ -50,33 +52,36 @@ pub struct Choice<'a> {
 
 /// The candidates that fit `item`, in the order the board tries them
 ///
-/// Those within the slack of the soonest finish come first, cheapest first.
-/// The rest follow, soonest first.
+/// Those within the slack of the soonest finish come first, cheapest first,
+/// a local agent whose history names no cost counting as free. The rest
+/// follow, soonest first. The last tie is the agent's name.
 pub fn pick<'a>(item: &Item<'_>, candidates: &[Candidate<'a>]) -> Vec<Choice<'a>> {
-    let mut fits: Vec<Choice<'a>> = candidates
+    // Each fit beside the cost it is ranked on.
+    let mut fits: Vec<(Choice<'a>, Option<f64>)> = candidates
         .iter()
         .filter(|c| item.pin.is_none_or(|pin| pin == c.agent))
         .filter(|c| !item.leave_out.contains(c.agent))
         .filter(|c| takes(c.fit, item.kind) && item.tier.is_none_or(|t| c.fit.tier() >= t))
         .filter_map(|c| {
             let wait = c.wait?;
-            Some(Choice {
+            let choice = Choice {
                 agent: c.agent,
                 finish: wait.saturating_add(c.typical.secs),
                 wait,
                 cost_usd: c.typical.cost_usd,
-            })
+            };
+            Some((choice, c.typical.cost_usd.or(c.local.then_some(0.0))))
         })
         .collect();
-    let Some(soonest) = fits.iter().map(|c| c.finish).min() else {
-        return fits;
+    let Some(soonest) = fits.iter().map(|(c, _)| c.finish).min() else {
+        return Vec::new();
     };
-    fits.sort_by_key(|c| c.finish);
+    fits.sort_by_key(|(c, _)| (c.finish, c.agent));
     let (mut eligible, rest): (Vec<_>, Vec<_>) =
-        (fits.into_iter()).partition(|c| within_slack(c.finish, soonest, item.slack));
-    eligible.sort_by(|a, b| cheaper(a.cost_usd, b.cost_usd));
+        (fits.into_iter()).partition(|(c, _)| within_slack(c.finish, soonest, item.slack));
+    eligible.sort_by(|(_, a), (_, b)| cheaper(*a, *b));
     eligible.extend(rest);
-    eligible
+    eligible.into_iter().map(|(choice, _)| choice).collect()
 }
 
 /// Whether `finish` is within `slack` minutes of `soonest`, both seconds
@@ -135,6 +140,7 @@ mod tests {
             fit,
             wait,
             typical: Typical { secs, cost_usd },
+            local: false,
         }
     }
 
@@ -264,6 +270,50 @@ mod tests {
         ];
         assert_eq!(order(&pick(&Item::default(), &candidates)), ["sonnet"]);
         assert!(pick(&Item::default(), &candidates[..1]).is_empty());
+    }
+
+    #[test]
+    fn a_local_agent_with_no_history_counts_as_free_and_beats_a_priced_one() {
+        let (local, sonnet) = (name("local"), name("sonnet"));
+        let any = Fit::default();
+        let candidates = [
+            candidate(&sonnet, &any, Some(0), 600, Some(0.5)),
+            Candidate {
+                local: true,
+                ..candidate(&local, &any, Some(0), 600, None)
+            },
+        ];
+        let choices = pick(&Item::default(), &candidates);
+        assert_eq!(order(&choices), ["local", "sonnet"]);
+        assert_eq!(
+            choices[0].cost_usd, None,
+            "its cost is ranked, not reported, as free"
+        );
+    }
+
+    #[test]
+    fn the_last_tie_is_the_agents_name() {
+        let (alpha, beta, gamma) = (name("alpha"), name("beta"), name("gamma"));
+        let any = Fit::default();
+        let candidates = [
+            candidate(&gamma, &any, Some(0), 600, Some(1.0)),
+            candidate(&beta, &any, Some(0), 600, Some(1.0)),
+            candidate(&alpha, &any, Some(0), 600, Some(1.0)),
+        ];
+        assert_eq!(
+            order(&pick(&Item::default(), &candidates)),
+            ["alpha", "beta", "gamma"]
+        );
+        let late = Item {
+            slack: Some(0),
+            ..Item::default()
+        };
+        let past = [
+            candidate(&alpha, &any, Some(0), 600, Some(1.0)),
+            candidate(&gamma, &any, Some(0), 900, Some(1.0)),
+            candidate(&beta, &any, Some(0), 900, Some(1.0)),
+        ];
+        assert_eq!(order(&pick(&late, &past)), ["alpha", "beta", "gamma"]);
     }
 
     #[test]

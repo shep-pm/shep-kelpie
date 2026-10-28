@@ -162,7 +162,8 @@ pub struct Rig {
     /// The login's forge hold and pace, which no test's calls reach the cap of
     /// until it swaps in a pacer with one
     pub pace: Arc<dyn Pace>,
-    /// The agent board, which ranks the project's implementers in order until a test sets it
+    /// The agent board, which ranks kelpie's own default implementer first, then the
+    /// project's other implementers by name, until a test sets it
     pub agent_board: FakeAgentBoard,
     /// GitHub as kelpie's App sees it: the rig has registered no App until
     /// [`Rig::with_app`]

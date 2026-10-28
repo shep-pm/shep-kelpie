@@ -90,7 +90,6 @@ pending_rulings = 2
 per_item_usd = 10
 
 [agents]
-implementers = ["sonnet-high"]
 
 [pacing]
 enabled = true

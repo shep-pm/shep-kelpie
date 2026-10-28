@@ -46,13 +46,13 @@ fn ready_for_agent_on_a_pull_request_kelpie_opened_starts_its_rework_and_comes_o
 }
 
 #[test]
-fn a_rework_on_an_unlisted_labelled_implementer_is_held_by_its_account() {
+fn a_rework_pinned_to_an_implementer_is_held_by_its_account() {
     let rig = Rig::new("webapp");
     reviewed_71(&rig);
     rig.forge.label_pull_request(71, READY);
     rig.forge.label_pull_request(71, HUMAN);
     rig.write_codex_implementer();
-    rig.forge.label(7, "agent:codex");
+    rig.forge.label(7, "agent:codex!");
     rig.codex_day_began(0);
     // 15% of Codex's week since the day began, past its allowance of 100 / 7.
     rig.codex_meter.set(Rig::utilization(15, 0));
@@ -78,7 +78,8 @@ fn a_rework_held_by_its_labelled_account_leaves_the_ones_after_it_to_start() {
     reviewed_71(&rig);
     rig.forge.label_pull_request(71, READY);
     rig.write_codex_implementer();
-    rig.forge.label(6, "agent:codex");
+    rig.forge.label(6, "agent:codex!");
+    rig.agent_board.ranks(&["sonnet-high", "codex"]);
     rig.codex_day_began(0);
     rig.codex_meter.set(Rig::utilization(15, 0));
     let runner = running(&rig);

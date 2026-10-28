@@ -189,26 +189,32 @@ async fn the_panels_expert_keys_and_roles_are_deleted_and_named_and_the_table_lo
 }
 
 #[tokio::test]
-async fn the_issue_writers_implementer_choice_is_deleted_and_order_is_left() {
-    let chosen = |value: &str| {
-        TABLE.replace(
-            "[agents]\n",
-            &format!("[agents]\nimplementer_choice = \"{value}\"\n"),
-        )
-    };
-    let scene = Scene::holding(&chosen("issue-writer")).await;
+async fn the_keys_the_agent_board_replaced_are_deleted_and_named_and_the_rest_is_kept() {
+    let old = TABLE.replace(
+        "[agents]\n",
+        "[agents]\nimplementers = [\"sonnet-high\", \"opus-high\"]\n\
+         implementer_choice = \"issue-writer\"\nfallback_after = 15\n",
+    );
+    let scene = Scene::holding_each(&old, TABLE).await;
 
     let said = scene.migrate().await.unwrap();
 
     assert!(
-        said[1].contains("removed agents.implementer_choice = \"issue-writer\""),
+        said[1].contains(
+            "removed agents.implementers, agents.implementer_choice, agents.fallback_after"
+        ),
         "{said:?}"
     );
-    assert!(scene.table()["agents"].get("implementer_choice").is_none());
-
-    let scene = Scene::holding(&chosen("order")).await;
-    scene.migrate().await.unwrap();
-    assert_eq!(scene.table()["agents"]["implementer_choice"], "order");
+    // Only the checkout and the repo tell the two projects apart.
+    let rest = |mut table: Map<String, Value>| {
+        table.remove("git");
+        table
+    };
+    assert_eq!(
+        rest(scene.table()),
+        rest(scene.table_of("eevee")),
+        "every other key is as it was"
+    );
 }
 
 #[tokio::test]

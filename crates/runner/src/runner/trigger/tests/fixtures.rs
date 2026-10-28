@@ -137,9 +137,9 @@ pub(in crate::runner) fn seed(rig: &Rig, count: u64) {
 // The project manager the fixture's `pm` names
 fn name_pm(rig: &Rig) {
     rig.edit_settings(|s| {
-        let listed = "\nimplementers = [\"sonnet-high\"]\n";
-        assert!(s.contains(listed), "the example's implementers moved");
-        s.replace(listed, "\nimplementers = [\"sonnet-high\"]\npm = \"pm\"\n")
+        let listed = "[app.dogs.kelpie.agents]\n";
+        assert!(s.contains(listed), "the example's agents table moved");
+        s.replace(listed, "[app.dogs.kelpie.agents]\npm = \"pm\"\n")
     });
 }
 

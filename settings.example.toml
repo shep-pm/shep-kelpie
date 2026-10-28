@@ -105,30 +105,28 @@ pending_rulings = 2
 # refused.
 per_item_usd = 10
 
-# The agents that build the project's work items, by the names of kelpie's
-# agent files, `$SHEP_HOME/kelpie/agents/<name>.md`, which `shep kelpie add`
-# writes out, a local model (`usage: none`) as well as any. An issue
-# labelled `agent:<name>` runs on that one, listed here or not, as long as
-# its file says `role: implementer`. Any other runs on the first listed.
-# A work item keeps the agent it opened on, unless its first turn falls
-# back (below). `sonnet-high` alone when absent.
+# The agent board picks each work item's implementer from kelpie's agent
+# files, `$SHEP_HOME/kelpie/agents/<name>.md`, whose role is `implementer`,
+# a local model (`usage: none`) as well as any. `shep kelpie add` writes
+# kelpie's own out. Of those that would finish within the slack (below) of
+# the soonest, it takes the cheapest by the ledgers' typical cost, a local
+# agent with none counting as free, and then the first by name. An issue
+# labelled `agent:<name>!` runs on that one, as does the project manager's
+# pick that names an agent. `implementers`, `implementer_choice` and
+# `fallback_after` are read by nothing: `shep kelpie upgrade` deletes them.
 [app.dogs.kelpie.agents]
-implementers = ["sonnet-high"]
 # The only agents this project may use, by the names of kelpie's agent
 # files, for a private project that keeps its code to the models its owner
-# names. With it set, no other agent is named or chosen: every setting that
-# names an agent (`implementers`, `reviewers`, `pm`, `representative`,
-# `contributions.reviewers`, `contributions.security_reviewer` and
-# `triage.agent`) is refused when it names one left out, so is the default
-# `reviewers`, and an `agent:<name>` label naming one is skipped. Names are
+# names. With it set, no other agent is named or chosen: the agent board
+# picks no implementer it leaves out, every setting that names an agent
+# (`reviewers`, `pm`, `representative`, `contributions.reviewers`,
+# `contributions.security_reviewer` and `triage.agent`) is refused when it
+# names one left out, so is the default `reviewers`, and an `agent:<name>`
+# label naming one is skipped. Names are
 # not checked against the agents folder: a missing file is refused where the
 # name is used. Leave it out, or leave it empty (`allow = []`), to allow
 # every agent.
 # allow = ["sonnet-high", "iq3-xxs-review", "defect-hunter-lite", "pm", "representative", "security-reviewer", "triager"]
-# How an issue with no `agent:` label gets its implementer: `order`, where
-# it runs on the first implementer listed and no call runs, the only choice
-# and the default.
-# implementer_choice = "order"
 # The agents that review each pull request, from the same files, whose
 # role is `reviewer`: each reads it once, in this order. After each one that
 # finds anything above a nit, the worker gets one turn to fix all of that
@@ -167,9 +165,6 @@ implementers = ["sonnet-high"]
 # `representative` when absent. Only a project whose `contributions.pick` is
 # not `off` needs the file, and a missing or mis-roled one stops the runner.
 # representative = "representative"
-# Read by nothing: the agent board's handoff moves a work item now, and a
-# later release removes this.
-# fallback_after = 15
 # Minutes past the soonest finish that the agent board lets a work item's
 # agent take: a new item opens on the cheapest ranked agent finishing within
 # it, and a later turn moves to the next pick when its own agent would finish

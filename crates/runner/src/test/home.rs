@@ -39,6 +39,8 @@ impl Rig {
         rig.forge.threads.use_clock(rig.clock.clone());
         rig.github.use_threads(rig.forge.coderabbit.clone());
         rig.forge.use_app_comments(Arc::new(rig.github.clone()));
+        rig.agent_board
+            .ranks_first(&[crate::agents::DEFAULT_IMPLEMENTER]);
         rig
     }
 

@@ -124,7 +124,8 @@ impl Runner {
                 // Its turn fails at once, saying why, so nothing waits on a window.
                 Err(_) => return Ok(Pace::Clear),
             },
-            None => self.agents.default_implementer.limit.clone(),
+            // A turn is begun only on a work item, so nothing waits on a window.
+            None => return Ok(Pace::Clear),
         };
         self.pace(scope, &limit)
     }
@@ -287,15 +288,12 @@ impl Runner {
         self.pace(Scope::Dispatch, &limit)
     }
 
-    // Each implementer's limit, each listed reviewer's that runs sessions, and
-    // each open work item's own agent's, listed or not.
+    // Each listed reviewer's limit that runs sessions, and each open work
+    // item's own agent's. A new item's agent is paced as the board picks it.
     fn spent_limits(&self) -> impl Iterator<Item = &Limit> {
         let sessions = self.lineup.iter().filter_map(|r| r.runs.session());
-        let implementers = self.agents.implementers.iter().map(|i| &i.limit);
         let items = self.item_runs().filter_map(|runs| runs.session());
-        implementers
-            .chain(sessions.map(|(_, limit)| limit))
-            .chain(items.map(|(_, limit)| limit))
+        (sessions.map(|(_, limit)| limit)).chain(items.map(|(_, limit)| limit))
     }
 
     // What each open work item's worker runs on, from its agent file, which
@@ -356,7 +354,7 @@ impl Runner {
                 ModelHost::Url(_) => None,
             }
         };
-        let implementers = self.agents.implementers.iter().map(|i| &i.model);
+        let implementers = self.settings.allowed_implementers(&self.book);
         let sessions = self.lineup.iter().filter_map(|r| r.runs.session());
         let items = self.item_runs().filter_map(|runs| runs.session());
         let endpoints = self.lineup.iter().filter_map(|r| match &r.runs {
@@ -368,7 +366,7 @@ impl Runner {
             },
             _ => None,
         });
-        let sessions = implementers
+        let sessions = (implementers.iter().map(|i| &i.model))
             .chain(sessions.map(|(model, _)| model))
             .chain(items.map(|(model, _)| model))
             .filter_map(|m| behind(&m.harness, m.model.as_str()));

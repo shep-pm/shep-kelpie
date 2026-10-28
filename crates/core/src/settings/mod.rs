@@ -44,9 +44,9 @@ mod tickets;
 mod triage;
 
 pub use agents::{
-    Account, AgentHarness, AgentName, Allow, DEFAULT_SLACK_MINUTES, DoctorProbe, ExpertAgent,
-    Harness, HarnessFacts, Implementer, ImplementerChoice, Limit, ModelServer, PmAgent,
-    RoleAgentNames, RoleAgents, SessionIds, UsageReader,
+    Account, AgentHarness, AgentName, Allow, DEFAULT_SLACK_MINUTES, DoctorProbe, ExpertAgent, Gone,
+    Harness, HarnessFacts, Implementer, Limit, ModelServer, PmAgent, RoleAgentNames, RoleAgents,
+    SessionIds, UsageReader,
 };
 pub use browser::Browser;
 pub use budget::{Budget, PerItemUsd};
@@ -252,18 +252,19 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "agents.worker",
         because: AGENT_FILES,
-        fix: "list the agents that build in `agents.implementers`, the first being the default",
+        fix: "delete it: the agent board picks each work item's implementer from the agent \
+              files whose role is `implementer`",
     },
     Removed {
         key: "models.worker",
         because: AGENT_FILES,
-        fix: "name the agent that builds in `agents.implementers`, such as `sonnet-high`, \
-              which is Sonnet 5.5 at high",
+        fix: "write an agent file whose role is `implementer`, such as kelpie's own \
+              `sonnet-high`, which is Sonnet 5.5 at high",
     },
     Removed {
         key: "models.labels",
         because: "an `agent:<name>` label names its agent file, which holds the model id",
-        fix: "list each agent a label may name in `agents.implementers`",
+        fix: "write an agent file whose role is `implementer` for each agent a label names",
     },
     Removed {
         key: "models.reviewer",

@@ -9,7 +9,7 @@ use crate::board::check::label_kind;
 use crate::board::{LabelError, agent_label, old_worker_label, pinned};
 use crate::lease::door::{Pick, PickAsk};
 use crate::ports::{ForgeError, Issue};
-use crate::settings::AgentName;
+use crate::settings::{AgentName, Implementer};
 use crate::state::StateError;
 use crate::ticket::TicketId;
 use crate::work_item::new_session_id;
@@ -74,9 +74,9 @@ pub(super) struct Ranked {
 
 /// The implementer a new work item opens on, out of a [`Ranked`]
 pub(super) struct Opening {
-    agent: AgentName,
-    pinned: bool,
-    note: Option<String>,
+    pub(super) agent: AgentName,
+    pub(super) pinned: bool,
+    pub(super) note: Option<String>,
 }
 
 impl Ranked {
@@ -288,49 +288,51 @@ impl Runner {
         (pin, note)
     }
 
-    // The implementer a ticket with `labels` runs on: the one its `agent:`
-    // label names, or the default. Beside it, the log line an old `worker:`
-    // label gets once the work item opens, since it no longer picks anything.
-    pub(super) fn labelled_agent(
+    // The implementer a work item no project manager picked, a rework or an
+    // adoption, opens on: the agent board's first pick for `ticket`, whose issue
+    // has `labels`. Its note is the log line an old `worker:` label gets once the
+    // work item opens, since it no longer picks anything.
+    pub(super) fn board_opening(
         &self,
         ticket: TicketId,
         labels: &[String],
-    ) -> Result<(AgentName, Option<String>), LabelError> {
-        if let Some(agent) = agent_label(labels, &self.implementer_files())? {
-            return Ok((agent, None));
-        }
-        let agent = self.agents.default_implementer.name.clone();
-        let note = old_worker_label(labels).map(|old| {
+    ) -> Result<Opening, AddError> {
+        let mut opening = self.ranked(ticket, labels, None)?.first();
+        let agent = &opening.agent;
+        opening.note = old_worker_label(labels).map(|old| {
             format!(
                 "{} is labelled `{old}`, which kelpie no longer reads, so it runs on the \
-                 default implementer, {agent}: an `agent:<name>` label picks another \
+                 agent board's pick, {agent}: an `agent:<name>!` label pins another \
                  implementer",
                 ticket.named().to_lowercase()
             )
         });
-        Ok((agent, note))
+        Ok(opening)
     }
 
-    // The implementers the agent board may rank: `implementer_files`, those
-    // the project lists first, in its order.
+    // Why a work item whose issue has `labels` has no agent to run on, where it
+    // has none: its `agent:` label names no implementer, or more than one.
+    pub(super) fn label_refuses(&self, labels: &[String]) -> Option<LabelError> {
+        agent_label(labels, &self.implementer_files()).err()
+    }
+
+    // The implementers the agent board may rank, by name: `implementer_files`
+    // the worker's fence holds on and whose gateway routes, since a turn on
+    // any other is refused.
     pub(super) fn board_agents(&self) -> Vec<AgentName> {
-        let listed = self.agents.implementer_names();
-        let mut files = self.implementer_files();
-        files.sort_by_key(|n| listed.iter().position(|l| l == n).unwrap_or(listed.len()));
-        files
+        let allowed = self.settings.allowed_implementers(&self.book).into_iter();
+        let runs = |i: &Implementer| {
+            self.settings.under_worker_fence(&i.name, &i.model).is_ok()
+                && self.gateways.check_listed(&self.book, [&i.name]).is_ok()
+        };
+        allowed.filter(runs).map(|i| i.name).collect()
     }
 
-    // Every agent an `agent:` label may name for this project: each agent
-    // file whose role is `implementer`, listed in `agents.implementers` or
-    // not, that `agents.allow` holds. A listed one always has such a file and
-    // passed that check at load, so this holds them all.
+    // Every agent an `agent:` label may name for this project, by name: each
+    // agent file whose role is `implementer` that `agents.allow` holds.
     pub(super) fn implementer_files(&self) -> Vec<AgentName> {
-        let allow = self.settings.agents.allow.as_ref();
-        let files = self.book.implementer_files();
-        let allowed = files
-            .into_iter()
-            .filter(|n| allow.is_none_or(|a| a.holds(n)));
-        allowed.collect()
+        let allowed = self.settings.allowed_implementers(&self.book).into_iter();
+        allowed.map(|i| i.name).collect()
     }
 }
 

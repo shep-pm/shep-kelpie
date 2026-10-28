@@ -50,8 +50,7 @@ fn the_example_holds_the_first_build_defaults() {
     assert_eq!(s.ci.fix_attempts.cap(), None);
     assert_eq!(s.concurrency.active_items.get(), 1);
     assert_eq!(s.concurrency.pending_rulings, 2);
-    let implementers: Vec<&str> = s.agents.implementers.iter().map(|n| n.as_str()).collect();
-    assert_eq!(implementers, ["sonnet-high"]);
+    assert_eq!(s.agents.gone_keys(), Vec::<&str>::new());
     assert_eq!(
         s.agents.reviewers, None,
         "kelpie's default list, with no bot"
@@ -236,7 +235,9 @@ fn one_work_item_is_open_at_a_time_when_the_table_does_not_say() {
 #[test]
 fn a_table_with_no_concurrency_table_takes_its_defaults() {
     let start = EXAMPLE.find("[app.dogs.kelpie.concurrency]").unwrap();
-    let end = EXAMPLE.find("# The agents that build").unwrap();
+    let end = EXAMPLE
+        .find("# The agent board picks each work item")
+        .unwrap();
     let text = format!("{}{}", &EXAMPLE[..start], &EXAMPLE[end..]);
     assert!(!text.contains("pending_rulings"));
     let s = parse(&text).unwrap();
@@ -448,15 +449,16 @@ fn the_worker_settings_agent_files_replace_are_refused_saying_what_replaces_each
         (
             "agents.worker",
             with_agents("worker = \"opus-high\"\n"),
-            "list the agents that build in `agents.implementers`, the first being the default",
+            "delete it: the agent board picks each work item's implementer from the agent \
+             files whose role is `implementer`",
         ),
         (
             "models.worker",
             format!(
                 "{EXAMPLE}\n[app.dogs.kelpie.models.worker]\nmodel = \"m\"\neffort = \"low\"\n"
             ),
-            "name the agent that builds in `agents.implementers`, such as `sonnet-high`, \
-             which is Sonnet 5.5 at high",
+            "write an agent file whose role is `implementer`, such as kelpie's own \
+             `sonnet-high`, which is Sonnet 5.5 at high",
         ),
     ];
     for (key, text, fix) in removed {
@@ -473,7 +475,7 @@ fn the_worker_settings_agent_files_replace_are_refused_saying_what_replaces_each
         parse_err(&labels),
         "the [app.dogs.kelpie] table on shep: `models.labels` is no longer a setting, \
          because an `agent:<name>` label names its agent file, which holds the model id: \
-         list each agent a label may name in `agents.implementers`"
+         write an agent file whose role is `implementer` for each agent a label names"
     );
 }
 

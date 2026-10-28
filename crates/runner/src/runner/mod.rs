@@ -294,7 +294,7 @@ pub struct Runner {
     // The reviewers a contribution's pass walks, in order. None while the
     // project picks no contributions.
     contribution_lineup: Vec<ListedReviewer>,
-    // The project's implementers
+    // The project's project manager
     agents: RoleAgents,
     // Every agent kelpie's files define, from which each turn runs its work item's agent
     book: Agents,
@@ -476,7 +476,7 @@ impl Runner {
         let agents = settings.role_agents(&book)?;
         let gateways = kelpie_settings.gateways();
         let lineup = settings.lineup(&book, &gateways, home)?;
-        check_gateways(&gateways, &book, &agents, &lineup)?;
+        check_gateways(&gateways, &book, &lineup)?;
         gateways.check_triage_spam(&settings.triage.spam)?;
         let webhook = kelpie_settings.webhook;
         if webhook.is_none() {

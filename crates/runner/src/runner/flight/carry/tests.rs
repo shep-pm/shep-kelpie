@@ -26,7 +26,7 @@ impl Drop for Live {
 fn a_handover_waits_while_a_pi_session_is_attached() {
     let (rig, runner, _) = Rig::with_pull_request_set("rotom", |rig| {
         rig.write_agent("pi-box", PI);
-        rig.implementers(&["pi-box"]);
+        rig.agent_board.ranks(&["pi-box"]);
     });
     assert!(runner.lock().unwrap().carry_calls().is_ok());
     let child = Command::new("cat")
@@ -59,7 +59,7 @@ fn a_handover_waits_while_a_pi_session_is_attached() {
 fn a_handover_waits_while_a_goose_session_is_attached() {
     let (rig, runner, _) = Rig::with_pull_request_set("rotom", |rig| {
         rig.write_agent("goose-box", GOOSE);
-        rig.implementers(&["goose-box"]);
+        rig.agent_board.ranks(&["goose-box"]);
     });
     assert!(runner.lock().unwrap().carry_calls().is_ok());
     let child = Command::new("cat")
@@ -93,7 +93,7 @@ fn a_handover_waits_while_a_goose_session_is_attached() {
 fn a_handover_waits_while_a_codex_session_is_attached() {
     let (rig, runner, _) = Rig::with_pull_request_set("rotom", |rig| {
         rig.write_agent("codex-box", CODEX);
-        rig.implementers(&["codex-box"]);
+        rig.agent_board.ranks(&["codex-box"]);
     });
     assert!(runner.lock().unwrap().carry_calls().is_ok());
     let child = Command::new("cat")
@@ -123,7 +123,7 @@ fn a_handover_waits_while_a_codex_session_is_attached() {
 fn a_drain_waits_while_a_pi_session_is_attached() {
     let (rig, runner, _) = Rig::with_pull_request_set("rotom", |rig| {
         rig.write_agent("pi-box", PI);
-        rig.implementers(&["pi-box"]);
+        rig.agent_board.ranks(&["pi-box"]);
     });
     let child = Command::new("cat")
         .stdin(Stdio::piped())
@@ -149,7 +149,7 @@ fn a_drain_waits_while_a_pi_session_is_attached() {
 fn a_drain_waits_while_a_goose_session_is_attached() {
     let (rig, runner, _) = Rig::with_pull_request_set("rotom", |rig| {
         rig.write_agent("goose-box", GOOSE);
-        rig.implementers(&["goose-box"]);
+        rig.agent_board.ranks(&["goose-box"]);
     });
     let child = Command::new("cat")
         .stdin(Stdio::piped())
@@ -175,7 +175,7 @@ fn a_drain_waits_while_a_goose_session_is_attached() {
 fn a_drain_waits_while_a_codex_session_is_attached() {
     let (rig, runner, _) = Rig::with_pull_request_set("rotom", |rig| {
         rig.write_agent("codex-box", CODEX);
-        rig.implementers(&["codex-box"]);
+        rig.agent_board.ranks(&["codex-box"]);
     });
     let child = Command::new("cat")
         .stdin(Stdio::piped())

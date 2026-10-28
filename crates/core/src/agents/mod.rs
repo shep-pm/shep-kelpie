@@ -19,11 +19,10 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use self::baseline::{Baseline, Unbound, shipped_text};
-use crate::board::AGENT_LABEL;
 use crate::review_bot::BotReviewer;
 use crate::settings::{
-    AgentName, Effort, Endpoint, GatewayName, Implementer, Limit, LocalCommand, LocalRound,
-    ModelHost, ModelServer, NonBlank, RoleAgents, RoleModel,
+    AgentName, Effort, Endpoint, GatewayName, Limit, LocalCommand, LocalRound, ModelHost,
+    ModelServer, NonBlank, RoleModel,
 };
 
 pub mod baseline;
@@ -46,7 +45,7 @@ const IGNORED: char = '_';
 /// The folder of `agents` that holds each baseline whole, for reading and diffing
 pub const BASELINES: &str = ".defaults";
 
-/// The implementer a project lists when it names none
+/// Kelpie's own Sonnet 5.5 implementer, at high effort
 pub const DEFAULT_IMPLEMENTER: &str = "sonnet-high";
 
 /// The reviewer that reads a pull request twice, Opus 5.5 at high effort
@@ -137,7 +136,7 @@ const DEFAULTS: [(&str, &str, Written); 8] = [
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Role {
-    /// It builds a work item, once a project lists it in `agents.implementers`
+    /// It builds a work item, once the agent board picks it
     Implementer,
     /// It reads a pull request once a pass, once a project lists it in
     /// `agents.reviewers`
@@ -505,7 +504,7 @@ impl Agents {
     }
 
     /// Every agent file whose role is `implementer`, by name: every agent an
-    /// `agent:` label may name, listed in `agents.implementers` or not
+    /// `agent:` label may name
     pub fn implementer_files(&self) -> Vec<AgentName> {
         self.agents
             .iter()
@@ -893,32 +892,6 @@ impl fmt::Display for AgentsError {
 }
 
 impl core::error::Error for AgentsError {}
-
-/// The listed implementers, the default first, as an `agent:` label names them
-pub fn implementers(agents: &RoleAgents) -> String {
-    let default = &agents.default_implementer;
-    let line = |i: &Implementer| {
-        let what = match (i.name == default.name, i.is_local()) {
-            (true, true) => ", the default, a local model",
-            (true, false) => ", the default",
-            (false, true) => ", a local model",
-            (false, false) => "",
-        };
-        format!(
-            "- `{}`: {} at {} effort{what}",
-            i.name,
-            i.model.model.as_str(),
-            i.model.effort.as_str()
-        )
-    };
-    let rest = (agents.implementers.iter()).filter(|i| i.name != default.name);
-    let lines: Vec<String> = std::iter::once(default).chain(rest).map(line).collect();
-    format!(
-        "The implementers this project lists, the default first. Each issue's \
-         `{AGENT_LABEL}` label, where it has one, names one of them, and no other:\n\n{}",
-        lines.join("\n")
-    )
-}
 
 #[cfg(test)]
 mod tests;
