@@ -133,11 +133,14 @@ async fn each_pass_reads_every_model_and_a_meter_at_most_every_recheck() {
 
 #[tokio::test(start_paused = true)]
 async fn a_failed_load_is_unknown_and_a_failed_meter_keeps_its_last_reading() {
-    let (_dir, agents) = agents(&[(
-        "gpt.md",
-        "---\nrole: implementer\nharness: codex\nmodel: gpt-6-sol\neffort: medium\n---\n"
-            .to_owned(),
-    )]);
+    let (_dir, agents) = agents(&[
+        ("coder.md", on_gateway("paddock", "coder")),
+        (
+            "gpt.md",
+            "---\nrole: implementer\nharness: codex\nmodel: gpt-6-sol\neffort: medium\n---\n"
+                .to_owned(),
+        ),
+    ]);
     let sources = Sources::of(&agents, &gateways());
     let shown = Mutex::new(Availability::new(&sources));
     let leases = Arc::new(LeaseReads::default());
@@ -154,6 +157,8 @@ async fn a_failed_load_is_unknown_and_a_failed_meter_keeps_its_last_reading() {
         clock: Arc::new(clock.clone()),
     };
     read(&shown, &sources, &readers).await;
+    let read_at = |status: &Value| status["models"][0]["read_at"].clone();
+    assert_eq!(read_at(&shown.lock().unwrap().status()), EPOCH);
 
     leases.loaded(None);
     claude.fail(MeterError::TimedOut);
@@ -161,13 +166,9 @@ async fn a_failed_load_is_unknown_and_a_failed_meter_keeps_its_last_reading() {
     read(&shown, &sources, &readers).await;
     assert_eq!(claude.reads(), 2);
     let codex = json!({ "account": "codex", "unknown": true, "read_at": null });
-    assert_eq!(
-        shown.lock().unwrap().status(),
-        json!({
-            "models": [model("iq3_xxs", unknown())],
-            "accounts": [idle_claude(EPOCH), codex],
-        })
-    );
+    let status = shown.lock().unwrap().status();
+    assert_eq!(status["models"][0], model("coder", unknown()));
+    assert_eq!(status["accounts"], json!([idle_claude(EPOCH), codex]));
 }
 
 // Cargo sets it for every test binary it runs, and nothing the dog starts reads it.
