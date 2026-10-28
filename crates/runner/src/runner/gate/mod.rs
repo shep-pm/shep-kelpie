@@ -174,10 +174,6 @@ impl Runner {
             Ok(open) => open,
             Err(begin) => return Ok(*begin),
         };
-        let disputes = match self.post_disputes(number)? {
-            Ok(disputes) => disputes,
-            Err(reason) => return Ok(self.gate_failed(reason)),
-        };
         let open_pull_requests = match self.open_now() {
             Ok(open) => open,
             Err(reason) => return Ok(self.gate_failed(reason)),
@@ -189,6 +185,10 @@ impl Runner {
         let borrowed = match self.borrowed(&open_pull_requests, &head) {
             Ok(borrowed) => borrowed,
             Err(begin) => return Ok(*begin),
+        };
+        let disputes = match self.post_disputes(number)? {
+            Ok(disputes) => disputes,
+            Err(reason) => return Ok(self.gate_failed(reason)),
         };
         let unreviewed = self.current().and_then(|item| item.unreviewed.clone());
         let unread_head = self.current().is_some_and(|item| !item.vouches_for(&head));

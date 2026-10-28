@@ -44,6 +44,13 @@ impl Rig {
         git(&self.repo, &["rev-parse", "HEAD"])
     }
 
+    // A second clone of origin, as another worker's checkout
+    fn other_clone(&self) -> PathBuf {
+        let root = self.repo.parent().unwrap();
+        git(root, &["clone", "--quiet", "origin.git", "other"]);
+        root.join("other")
+    }
+
     fn borrowed(&self, head: &str, tips: &[String]) -> Vec<String> {
         borrowed(&self.repo, head, "main", tips).unwrap()
     }
@@ -96,15 +103,25 @@ fn main_is_fetched_before_the_tips_are_read() {
     let tip = rig.commit_on("kelpie/9", "main", "other");
     let head = rig.head_merging(&tip);
     // Main moves to hold the tip on origin only; the clone's `origin/main` is stale
-    let other = rig.repo.parent().unwrap().join("other");
-    git(
-        rig.repo.parent().unwrap(),
-        &["clone", "--quiet", "origin.git", "other"],
-    );
+    let other = rig.other_clone();
     git(
         &other,
         &["merge", "--quiet", "--ff-only", "origin/kelpie/9"],
     );
     git(&other, &["push", "--quiet", "origin", "main"]);
     assert_eq!(rig.borrowed(&head, &[tip]), Vec::<String>::new());
+}
+
+#[test]
+fn a_tip_that_moved_on_after_the_head_merged_it_is_still_borrowed() {
+    let rig = Rig::new();
+    let merged = rig.commit_on("kelpie/9", "main", "other");
+    let head = rig.head_merging(&merged);
+    // The pull request gets a fix on origin that this clone never fetched
+    let other = rig.other_clone();
+    git(&other, &["checkout", "--quiet", "kelpie/9"]);
+    git(&other, &["commit", "--quiet", "--allow-empty", "-m", "fix"]);
+    git(&other, &["push", "--quiet", "origin", "kelpie/9"]);
+    let moved = git(&other, &["rev-parse", "HEAD"]);
+    assert_eq!(rig.borrowed(&head, std::slice::from_ref(&moved)), [moved]);
 }

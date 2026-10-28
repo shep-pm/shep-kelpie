@@ -11,6 +11,7 @@ use crate::runner::flight::{Pass, advance};
 use crate::runner::step;
 use crate::state::Ruling;
 use crate::test::{CALL_PATIENCE, Rig, Scripted, git};
+use crate::work_item::Dispute;
 
 pub(super) fn ruling_report(report: Option<StepReport>) -> (TicketId, String) {
     match report {
@@ -859,6 +860,31 @@ fn a_borrowing_head_gets_the_merge_ruling_under_auto_too() {
     let (id, question) = ruling_report(rig.verdict(&runner));
 
     assert_eq!(id, ticket(71));
+    assert!(question.contains("#72 (a draft)"), "{question}");
+}
+
+#[test]
+fn a_borrowing_head_s_ruling_keeps_the_count_of_the_disputes_just_posted() {
+    let (rig, runner, head) = borrowing("shep", |_| {});
+    rig.forge.set_checks(&head, Checks::Passed);
+    {
+        let mut runner = runner.lock().unwrap();
+        let finding = Finding::new(Severity::Low, "src/lib.rs", 3, "a nit", "it reads wrong");
+        runner.state.work_items[0].disputes = vec![Dispute {
+            finding,
+            reason: "src/lib.rs:3 is as the spec says".to_owned(),
+            raised_by: "reader".to_owned(),
+            round: 1,
+            shown: false,
+        }];
+    }
+
+    let (_, question) = ruling_report(rig.verdict(&runner));
+
+    assert!(
+        question.contains("The worker disputed 1 finding that no reviewer read again"),
+        "{question}"
+    );
     assert!(question.contains("#72 (a draft)"), "{question}");
 }
 
