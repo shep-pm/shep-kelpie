@@ -21,6 +21,14 @@ fn name_agents(rig: &Rig, names: &str) {
     });
 }
 
+// The `agent:` labels the repo holds, apart from the priority labels the runner
+// makes beside them
+fn agent_labels_now(rig: &Rig) -> Vec<String> {
+    let mut have = rig.forge.repo_labels_now();
+    have.retain(|l| !crate::board::is_priority_label(l));
+    have
+}
+
 // Issue 7 from dispatch to merge under `auto`: the worker's turn, a qwen
 // round whose one MEDIUM finding goes to the worker, the fix, and a clean
 // Claude round that reads it, each reviewer once.
@@ -272,7 +280,7 @@ fn an_agent_file_named_with_an_underscore_is_ignored_quietly_and_gets_no_label()
     let runner = rig.open().unwrap();
     assert_eq!(runner.lock().unwrap().take_notes(), [] as [String; 0]);
     assert_eq!(
-        rig.forge.repo_labels_now(),
+        agent_labels_now(&rig),
         ["agent:opus-high", "agent:sonnet-high"]
     );
 }
@@ -346,10 +354,7 @@ fn an_agent_label_naming_an_implementer_allow_leaves_out_is_skipped_listing_the_
 fn agent_labels_are_made_only_for_allowed_implementers() {
     let rig = allowing_coder();
     rig.open().unwrap();
-    assert_eq!(
-        rig.forge.repo_labels_now(),
-        ["agent:coder", "agent:sonnet-high"]
-    );
+    assert_eq!(agent_labels_now(&rig), ["agent:coder", "agent:sonnet-high"]);
 }
 
 #[test]
@@ -386,7 +391,7 @@ fn an_empty_allow_holds_every_implementer_file_as_an_absent_one_does() {
     name_agents(&rig, "allow = []\nimplementers = [\"sonnet-high\"]\n");
     let runner = rig.open().unwrap();
     assert_eq!(
-        rig.forge.repo_labels_now(),
+        agent_labels_now(&rig),
         ["agent:coder", "agent:opus-high", "agent:sonnet-high"]
     );
 

@@ -65,9 +65,11 @@ fn a_maintainer_pass_that_is_not_sure_lists_what_it_could_not_settle() {
 
     let said = facts(&rig);
     assert!(said.contains("still theirs to settle"), "{said}");
-    assert!(said.contains("the priority"), "{said}");
+    assert!(!said.contains("the priority"), "{said}");
     assert!(!said.contains("the type"), "{said}");
     assert!(!said.contains("would recommend"), "{said}");
+    assert!(said.contains("kelpie set priority P3 itself"), "{said}");
+    assert!(said.contains("the maintainer can change it"), "{said}");
 }
 
 #[test]

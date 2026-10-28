@@ -405,30 +405,33 @@ fn a_change_that_does_not_hold_keeps_the_settings_the_runner_has() {
 const CODER: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-coder\n\
                       effort: low\nusage: none\n---\n";
 
+// The repo's labels apart from the priority labels the runner makes beside them
+fn kept_labels(rig: &Rig) -> Vec<String> {
+    let mut have = rig.forge.repo_labels_now();
+    have.retain(|l| !crate::board::is_priority_label(l));
+    have
+}
+
 #[test]
 fn every_implementer_agents_label_is_made_on_open_and_none_on_a_new_list_only() {
     let rig = Rig::new("shep");
     rig.forge.set_repo_labels(&["bug", "Agent:Sonnet-high"]);
     let runner = rig.open().unwrap();
     let made = ["bug", "Agent:Sonnet-high", "agent:opus-high"];
-    assert_eq!(
-        rig.forge.repo_labels_now(),
-        made,
-        "sonnet-high's is there already"
-    );
+    assert_eq!(kept_labels(&rig), made, "sonnet-high's is there already");
 
     rig.implementers(&["sonnet-high", "opus-high"]);
     let mut runner = runner.lock().unwrap();
     runner
         .reread(rig.settings(), rig.kelpie_settings())
         .unwrap();
-    assert_eq!(rig.forge.repo_labels_now(), made);
+    assert_eq!(kept_labels(&rig), made);
 
     rig.implementers(&["opus-high"]);
     runner
         .reread(rig.settings(), rig.kelpie_settings())
         .unwrap();
-    assert_eq!(rig.forge.repo_labels_now(), made, "none is removed");
+    assert_eq!(kept_labels(&rig), made, "none is removed");
 }
 
 #[test]
@@ -446,10 +449,7 @@ fn an_unlisted_implementers_agent_label_is_made_too() {
 fn a_fresh_repo_gets_every_implementers_label_when_the_runner_opens() {
     let rig = Rig::new("shep");
     rig.open().unwrap();
-    assert_eq!(
-        rig.forge.repo_labels_now(),
-        ["agent:opus-high", "agent:sonnet-high"]
-    );
+    assert_eq!(kept_labels(&rig), ["agent:opus-high", "agent:sonnet-high"]);
 }
 
 #[test]

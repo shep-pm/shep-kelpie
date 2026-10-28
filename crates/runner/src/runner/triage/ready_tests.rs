@@ -220,7 +220,7 @@ fn a_rewrite_the_check_refuses_goes_under_the_body_and_ends_needs_triage() {
 }
 
 #[test]
-fn a_reply_with_an_open_question_or_no_priority_is_not_made_ready() {
+fn a_reply_with_an_open_question_is_not_made_ready() {
     // An open question on the maintainer's own issue goes to its author first,
     // and no label goes on while it waits. The round itself is `ask_tests`.
     let open = json!({
@@ -239,27 +239,54 @@ fn a_reply_with_an_open_question_or_no_priority_is_not_made_ready() {
         "commented",
         "{open}"
     );
+}
 
-    // With no priority the check refuses the rewrite: it goes under the body,
-    // and the issue ends `needs-triage`.
+// A reply that names no priority is not left unranked, which the check would
+// refuse: kelpie sets `P3` and says so, and the rewrite passes.
+#[test]
+fn a_reply_with_no_priority_gets_p3_and_the_issue_passes_the_check() {
+    let (rig, runner) = filed_at("maintainer", MAINTAINER, &BOARD_LABELS, |_| {});
     let found = json!({ "type": "bug", "kind": "fix", "body": BODY });
-    let (rig, runner) = filed("maintainer", MAINTAINER);
-    rig.claude.script_for(Role::Triager, [reply(found.clone())]);
+    rig.claude.script_for(Role::Triager, [reply(found)]);
 
-    assert_eq!(step(&runner).unwrap(), None, "{found}");
+    assert_eq!(step(&runner).unwrap(), None);
 
-    let written = under("It crashes when I run it.", BODY.trim_end());
-    assert_eq!(rig.github.issue_edits(), [(30, written)]);
+    assert_eq!(rig.github.issue_edits(), [(30, BODY.trim_end().to_owned())]);
     assert_eq!(
-        moves(&rig).last().map(String::as_str),
-        Some("label needs-triage"),
-        "{found}"
+        moves(&rig),
+        [
+            "comment",
+            "label bug",
+            "label priority: P3",
+            "label kind:fix",
+            "label ready-for-agent"
+        ]
     );
-    assert_eq!(
-        triage(&rig, &runner)["issues"][0]["step"],
-        "done",
-        "{found}"
+    assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "ready");
+    let said = facts(&rig);
+    assert!(said.contains("kelpie set priority P3"), "{said}");
+    assert!(said.contains("the maintainer can change it"), "{said}");
+}
+
+// `P0` is the author's to rate: kelpie asks, and puts no priority on yet
+#[test]
+fn a_reply_of_p0_asks_the_author_and_sets_no_p0() {
+    let (rig, runner) = filed_at("maintainer", MAINTAINER, &BOARD_LABELS, |_| {});
+    let found = json!({ "type": "bug", "kind": "fix", "priority": "P0", "body": BODY });
+    rig.claude.script_for(Role::Triager, [reply(found)]);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let said = facts(&rig);
+    assert!(said.contains("which only the maintainer sets"), "{said}");
+    assert!(rig.github.issue_edits().is_empty());
+    let on = moves(&rig);
+    assert!(on.iter().all(|m| !m.contains("P0")), "{on:?}");
+    assert!(
+        on.iter().all(|m| !m.starts_with("label priority")),
+        "{on:?}"
     );
+    assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "commented");
 }
 
 #[test]
@@ -618,11 +645,15 @@ fn a_board_named_priority_label_is_the_one_that_goes_on_a_readied_issue() {
     );
 }
 
-// A repo with no label for the triager's priority gets the board's name made,
-// so the priority is not dropped
+// A repo with no label for the triager's priority gets the board's name made
+// at the runner's start, so the priority is not dropped
 #[test]
 fn a_priority_the_repo_has_no_label_for_is_made_under_the_board_s_name() {
     let (rig, runner) = filed_at("maintainer", MAINTAINER, &BOARD_LABELS, |_| {});
+    let at_start = (rig.github.writes().into_iter())
+        .filter_map(|(_, call)| serde_json::from_str::<Value>(call.body.as_deref()?).ok())
+        .any(|body| body["name"] == "priority: P4");
+    assert!(at_start, "the runner made the label when it opened");
     let mut found = sure();
     found["priority"] = json!("P4");
     rig.claude.script_for(Role::Triager, [reply(found)]);
@@ -632,7 +663,6 @@ fn a_priority_the_repo_has_no_label_for_is_made_under_the_board_s_name() {
     assert_eq!(
         moves(&rig),
         [
-            "make priority: P4",
             "comment",
             "label bug",
             "label priority: P4",

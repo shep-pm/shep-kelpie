@@ -112,6 +112,8 @@ mod points;
 #[cfg(test)]
 mod points_tests;
 mod posted;
+#[cfg(test)]
+mod priority_labels_tests;
 mod pull_request_file;
 mod question;
 mod queued;
@@ -692,6 +694,7 @@ impl Runner {
         runner.settle_older_bots()?;
         runner.settle_labels();
         runner.make_agent_labels();
+        runner.make_priority_labels();
         runner.brief_now();
         // A trigger asked before the loop's first pass is answered from this.
         runner.post();

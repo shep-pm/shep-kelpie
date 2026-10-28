@@ -41,7 +41,7 @@ Kelpie drops the questions past the cap for the author's role, so put the one th
 Report:
 
 - What the issue is: a `bug` or an `enhancement`, its one kind as the issue skill names them, and one sentence on what is wanted.
-- A priority by the repo's own rules, or none when the repo sets none.
+- A priority by the repo's own rules, or your best judgement of one when the repo sets none. Always name one.
 - The related open issues by number, from the list in the prompt only.
 - Whether something already covers it, from the lists in the prompt only: the one open issue or open pull request that does the same thing this one asks for, or nothing.
 - The files the work would touch, and the tests that would pin it, by name.
@@ -61,7 +61,7 @@ How to reply: exactly one JSON object and nothing else, no code fence, with thes
 
 - `type`: `"bug"`, `"enhancement"` or `null`.
 - `kind`: one of `"feat"`, `"fix"`, `"docs"`, `"refactor"`, `"perf"`, `"test"`, `"ci"`, `"chore"` or `"style"`, or `null`. Kelpie puts it on as `kind:<type>`, unless the issue carries a kind label already.
-- `priority`: `"P0"`, `"P1"`, `"P2"`, `"P3"`, `"P4"` or `null`. Kelpie never sets `P0`: if you think it is, answer `"P0"` and kelpie asks the author how urgent it is.
+- `priority`: `"P1"`, `"P2"`, `"P3"` or `"P4"`, always one. Kelpie never sets `P0`: if you think it is, answer `"P0"` and kelpie asks the author how urgent it is.
 - `related`: the numbers of the related open issues.
 - `addressed_by`: `null`, or `{ "number": n, "kind": "issue" | "pull_request", "why": "one sentence" }` naming the open issue or open pull request that already covers this one. `n` is a number from the prompt's lists, `kind` says which list it came from and is exactly one of those two words, and `why` is the one sentence you would give the author. `null` when nothing covers it or you are unsure.
 - `files`: the repo paths the work would touch.

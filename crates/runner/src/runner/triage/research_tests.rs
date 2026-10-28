@@ -106,9 +106,9 @@ pub(super) fn moves(rig: &Rig) -> Vec<String> {
             match call.path.rsplit('/').next()? {
                 "comments" => Some("comment".to_owned()),
                 "labels" if on_issue => Some(format!("label {}", body["labels"][0].as_str()?)),
-                // The runner makes the agent labels at its start.
+                // The runner makes the agent labels and the priority labels at its start.
                 "labels" => Some(body["name"].as_str()?)
-                    .filter(|name| !name.starts_with("agent:"))
+                    .filter(|name| !name.starts_with("agent:") && !name.starts_with("priority:"))
                     .map(|name| format!("make {name}")),
                 _ => None,
             }
@@ -165,7 +165,12 @@ fn an_untouched_issue_gets_one_comment_with_the_marker_and_needs_triage_last() {
     assert_eq!(rig.github.comments(), [(30, handed(WORDS))]);
     assert_eq!(
         moves(&rig),
-        ["comment", "make needs-triage", "label needs-triage"]
+        [
+            "comment",
+            "label priority: P3",
+            "make needs-triage",
+            "label needs-triage"
+        ]
     );
     let triaged = triage(&rig, &runner);
     assert_eq!(triaged["issues"][0]["issue"], 30);
@@ -357,12 +362,7 @@ fn a_type_the_repo_lacks_is_left_off_and_a_priority_it_lacks_is_made() {
 
     assert_eq!(
         moves(&rig),
-        [
-            "make priority: P2",
-            "comment",
-            "label priority: P2",
-            "label needs-triage"
-        ]
+        ["comment", "label priority: P2", "label needs-triage"]
     );
     let said = facts(&rig);
     assert!(said.contains("priority: P2"), "{said}");

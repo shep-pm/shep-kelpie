@@ -121,7 +121,7 @@ fn label_moves(rig: &Rig) -> Vec<String> {
                 _ => None,
             }
         })
-        .filter(|m| !m.starts_with("make agent:"))
+        .filter(|m| !m.starts_with("make agent:") && !m.starts_with("make priority:"))
         .collect()
 }
 
@@ -233,7 +233,12 @@ fn an_issue_under_the_threshold_is_researched() {
     );
     assert_eq!(
         moves(&rig),
-        ["comment", "make needs-triage", "label needs-triage"],
+        [
+            "comment",
+            "label priority: P3",
+            "make needs-triage",
+            "label needs-triage"
+        ],
         "and nothing was labelled possible-spam"
     );
     assert_eq!(record(&rig, &runner, 30).get("spam"), None);
