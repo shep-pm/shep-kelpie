@@ -257,7 +257,14 @@ fn settings_on(policy: &Policy, platform: Platform, loopback_open: bool) -> Valu
     if policy.no_keychain && platform.macos() {
         network["denyMachLookup"] = json!(KEYCHAIN_SERVICES);
     }
-    let mut read = json!(policy.read);
+    // On Windows the profile read grant gives the home and default ACLs the
+    // system drive, and crabpot refuses a read grant on a root or above a
+    // profile exclusion, so the list holds only paths with a drive below it.
+    let read_list = policy
+        .read
+        .iter()
+        .filter(|folder| platform != Platform::Windows || below_a_drive(folder));
+    let mut read = json!(read_list.collect::<Vec<_>>());
     let mut write = json!(policy.write);
     if platform.macos() {
         let (read, write) = (array(&mut read), array(&mut write));
@@ -276,6 +283,16 @@ fn settings_on(policy: &Policy, platform: Platform, loopback_open: bool) -> Valu
         },
         "enableWeakerNetworkIsolation": policy.verify_tls,
     })
+}
+
+// Whether `folder` is a Windows path with a drive letter and something below
+// the drive's root, read from its text since a Unix build reads no drive in a path
+fn below_a_drive(folder: &Path) -> bool {
+    let text = folder.to_string_lossy();
+    let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+    let mut chars = text.chars();
+    let drive = chars.next().is_some_and(|c| c.is_ascii_alphabetic()) && chars.next() == Some(':');
+    drive && !chars.as_str().trim_matches(['\\', '/']).is_empty()
 }
 
 fn array(value: &mut Value) -> &mut Vec<Value> {
@@ -479,6 +496,37 @@ mod tests {
         let files = &settings_on(&policy, Platform::Linux, false)["filesystem"];
         assert_eq!(files["allowRead"], json!(["/k/wt/7"]));
         assert_eq!(files["allowWrite"], json!(["/k/wt/7"]));
+    }
+
+    #[test]
+    fn on_windows_the_read_list_holds_no_root_and_no_path_without_a_drive() {
+        let read = [
+            r"C:\Users\R\.kelpie\wt\7",
+            r"C:\Users\R\.kelpie\build",
+            r"\\?\C:\Users\R\AppData\Roaming\npm",
+            "/",
+            "/bin",
+            "/bin/sh",
+            r"C:\",
+            r"\\?\C:\",
+        ];
+        let policy = Policy {
+            read: read.iter().map(PathBuf::from).collect(),
+            ..Policy::default()
+        };
+        let files = &settings_on(&policy, Platform::Windows, false)["filesystem"];
+        assert_eq!(
+            files["allowRead"],
+            json!([
+                r"C:\Users\R\.kelpie\wt\7",
+                r"C:\Users\R\.kelpie\build",
+                r"\\?\C:\Users\R\AppData\Roaming\npm",
+            ])
+        );
+        for platform in [Platform::Macos, Platform::Linux] {
+            let files = &settings_on(&policy, platform, false)["filesystem"];
+            assert_eq!(files["allowRead"], json!(read), "{platform:?}");
+        }
     }
 
     #[test]
