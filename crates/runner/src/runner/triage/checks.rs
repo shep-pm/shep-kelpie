@@ -16,7 +16,6 @@ use super::TRIAGE_LABELS;
 use super::comment::NEEDS_TRIAGE;
 use super::ready::READY_LABEL;
 use crate::board::{READY, ReadyIssue, Skip, TRIAGE, check};
-use crate::guard::conventional_type;
 use crate::ports::{ForgeError, NewLabel, OpenIssue, OpenPull};
 use crate::settings::TriagePick;
 use crate::state::{CheckTriage, IssueCheck, TriageStep};
@@ -41,7 +40,7 @@ struct Poll<'a> {
     // The forge said it is busy, so the check stops until the next poll
     busy: bool,
     // The labels made on the repo this poll
-    made: BTreeSet<&'static str>,
+    made: BTreeSet<String>,
     // The maintainer's login, once read, if it could be
     maintainer: Option<Option<String>>,
     // The open pull requests the poll read
@@ -171,8 +170,7 @@ impl Runner {
         issue: &OpenIssue,
         poll: &mut Poll,
     ) -> Result<Option<String>, ()> {
-        let kind = conventional_type(&issue.title).filter(|t| check::kinds().any(|k| k == *t));
-        let Some(kind) = kind else {
+        let Some(kind) = check::title_kind(&issue.title) else {
             return Ok(None);
         };
         if issue.labels.iter().any(|l| check::kind_of(l).is_some()) {
@@ -188,10 +186,13 @@ impl Runner {
             color: "c5def5",
             description: "The kind of work, from the issue's title",
         };
-        if let Err(why) = self.make_missing_labels([wanted]) {
-            self.notes
-                .push(format!("check #{number}: cannot make `{label}`: {why}"));
-            return Ok(None);
+        if !poll.made.contains(&label) {
+            if let Err(why) = self.make_missing_labels([wanted]) {
+                self.notes
+                    .push(format!("check #{number}: cannot make `{label}`: {why}"));
+                return Ok(None);
+            }
+            poll.made.insert(label.clone());
         }
         poll.writes -= 1;
         match self.label_issue(number, &label, true) {
@@ -307,7 +308,7 @@ impl Runner {
                         .push(format!("check #{number}: cannot make `{label}`: {why}"));
                     return false;
                 }
-                poll.made.insert(label);
+                poll.made.insert(label.to_owned());
             }
             poll.writes -= 1;
             if let Err(e) = self.label_issue(number, label, on) {
