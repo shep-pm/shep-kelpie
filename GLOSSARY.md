@@ -125,8 +125,8 @@ _Avoid_: board (one project's work items), queue
 
 **Slack**:
 How far past the soonest finish a work item may finish, so the agent board
-can take a cheaper agent: 1 hour, unless the project manager's pick names
-its own minutes, such as 0 for a hotfix.
+can take a cheaper agent: `agents.slack` minutes (60 when absent), unless
+the project manager's pick names its own, such as 0 for a hotfix.
 _Avoid_: max wait
 
 **Baseline**:

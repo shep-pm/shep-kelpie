@@ -266,6 +266,18 @@ fn an_md_file_named_for_no_agent_is_skipped_and_logged_and_the_runner_starts() {
 }
 
 #[test]
+fn an_agent_file_named_with_an_underscore_is_ignored_quietly_and_gets_no_label() {
+    let rig = Rig::new("shep");
+    rig.write_agent("_coder", CODER);
+    let runner = rig.open().unwrap();
+    assert_eq!(runner.lock().unwrap().take_notes(), [] as [String; 0]);
+    assert_eq!(
+        rig.forge.repo_labels_now(),
+        ["agent:opus-high", "agent:sonnet-high"]
+    );
+}
+
+#[test]
 fn an_agent_on_a_gateway_kelpie_cannot_route_to_stops_the_runner() {
     let rig = Rig::new("shep");
     rig.write_agent(
@@ -365,4 +377,21 @@ fn an_open_work_item_whose_agent_allow_now_leaves_out_fails_its_turn_saying_so()
         "{question}"
     );
     assert_eq!(rig.claude.calls(), []);
+}
+
+#[test]
+fn an_empty_allow_holds_every_implementer_file_as_an_absent_one_does() {
+    let rig = Rig::new("shep");
+    rig.write_agent("coder", CODER);
+    name_agents(&rig, "allow = []\nimplementers = [\"sonnet-high\"]\n");
+    let runner = rig.open().unwrap();
+    assert_eq!(
+        rig.forge.repo_labels_now(),
+        ["agent:coder", "agent:opus-high", "agent:sonnet-high"]
+    );
+
+    rig.forge.label(8, "agent:coder!");
+    rig.ask(&runner, "add", Some("8"));
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["agent"], serde_json::json!("coder"));
 }

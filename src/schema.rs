@@ -189,6 +189,7 @@ mod tests {
             .replace("# implementer_choice =", "implementer_choice =")
             .replace("# representative =", "representative =")
             .replace("# fallback_after =", "fallback_after =")
+            .replace("# slack =", "slack =")
             .replace("# maintainer =", "maintainer =")
             .replace("# base =", "base =")
             .replace(

@@ -23,6 +23,7 @@ A key kelpie no longer reads, such as `review.reviewers`, `coderabbit` or `plann
 - `budget.per_item_usd = 10`
 - `agents.implementers = ["sonnet-high"]`
 - no `agents.implementer_choice`, which reads `"order"`, its only choice: the agent board picks the implementer a new work item opens on. `agents.md` says the picking
+- no `agents.allow`, which allows every agent, and no `agents.slack`, which reads 60 minutes: how far past the soonest finish the agent board lets a work item's agent finish
 - `agents.reviewers = ["defect-hunter-lite"]`, with `iq3-xxs-review` first when kelpie's settings hold a gateway named `paddock`, and no review bot
 - `contributions.pick = "off"`, `contributions.security_reviewer = "security-reviewer"`, `contributions.quiet_days = 7` and `contributions.nudge_days = 3`
 - `triage.pick = "off"`, `triage.hand_ready = false`, `triage.wait_days = 7`, `triage.max_questions = 10` and `triage.agent = "triager"`

@@ -548,10 +548,39 @@ fn an_absent_allow_lets_every_agent_through_as_before() {
 }
 
 #[test]
-fn an_empty_allow_is_refused_naming_the_key() {
-    let err = try_project("allow = []\n").unwrap_err().to_string();
-    assert!(err.contains("agents.allow"), "{err}");
-    assert!(err.contains("leave it out to allow every agent"), "{err}");
+fn an_empty_allow_allows_every_agent_as_an_absent_one_does() {
+    let settings = project("allow = []\nimplementers = [\"opus-high\", \"qwen\"]\npm = \"pm\"\n");
+    let agents = settings.role_agents(&book()).unwrap();
+    assert_eq!(names(&agents), ["opus-high", "qwen"]);
+    assert!(agents.pm.is_some());
+    settings.representative(&book()).unwrap();
+    settings.triager(&book()).unwrap();
+    settings.security_reviewer(&book()).unwrap();
+    assert_eq!(lineup(&settings).unwrap(), ["defect-hunter-lite"]);
+    let allow = settings.agents.allow.as_ref().unwrap();
+    assert!(allow.holds(&AgentName::kelpies("anything-at-all")));
+}
+
+#[test]
+fn slack_is_an_hour_when_absent_and_read_in_minutes_with_zero_allowed() {
+    let absent = project("implementers = [\"sonnet-high\"]\n");
+    assert_eq!(absent.agents.slack, 60);
+
+    let none = project("implementers = [\"sonnet-high\"]\nslack = 0\n");
+    assert_eq!(none.agents.slack, 0);
+
+    let long = project("implementers = [\"sonnet-high\"]\nslack = 240\n");
+    assert_eq!(long.agents.slack, 240);
+}
+
+#[test]
+fn a_slack_that_is_not_whole_minutes_is_refused_naming_the_key() {
+    for bad in ["-5", "1.5", "\"soon\""] {
+        let err = try_project(&format!("slack = {bad}\n"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("slack"), "{bad}: {err}");
+    }
 }
 
 #[test]

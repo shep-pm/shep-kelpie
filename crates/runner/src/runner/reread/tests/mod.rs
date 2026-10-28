@@ -466,3 +466,20 @@ fn a_fallback_after_alone_is_no_change() {
     let line = runner.reread(next, rig.kelpie_settings()).unwrap();
     assert_eq!(line, None, "nothing reads it");
 }
+
+#[test]
+fn a_changed_agents_slack_takes_effect_at_once() {
+    let rig = Rig::new("shep");
+    let runner = rig.open().unwrap();
+    let next = settings_with(&rig, |s| {
+        s.replace("\nimplementers = ", "\nslack = 20\nimplementers = ")
+    });
+    let mut runner = runner.lock().unwrap();
+    assert_eq!(runner.settings().agents.slack, 60);
+    let line = runner.reread(next, rig.kelpie_settings()).unwrap();
+    assert_eq!(
+        line.as_deref(),
+        Some("settings changed: agents now in effect")
+    );
+    assert_eq!(runner.settings().agents.slack, 20);
+}

@@ -124,8 +124,9 @@ impl Runner {
         if settings.triage != self.settings.triage {
             open_checks::triage(&settings, self.ports.voice.as_ref(), &self.remote, &book)?;
         }
+        // `allow` and `slack` are read live, so a change to either must replace the settings
         let (was, now) = (&self.settings.agents, &settings.agents);
-        let picking = was.allow != now.allow;
+        let picking = was.allow != now.allow || was.slack != now.slack;
         if agents != self.agents || lineup != self.lineup || book != self.book || picking {
             changed.push("agents");
         }
