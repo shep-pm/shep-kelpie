@@ -97,6 +97,14 @@ impl Runner {
                 )));
             }
             How::Escalate(choice) => {
+                if let Some((letter, listed)) =
+                    choice.as_deref().and_then(|c| self.past_the_list(id, c))
+                {
+                    return Ok(Err(format!(
+                        "answer {named}: choice {letter} is past the {listed} options the \
+                         question lists"
+                    )));
+                }
                 let choice = (choice.as_deref()).map(|c| plain(&self.shown(c.to_owned()), WORDS));
                 let words = |text: &Option<String>| {
                     (text.as_ref()).map(|t| plain(&self.shown(t.clone()), WORDS))
@@ -276,6 +284,19 @@ impl Runner {
         })
     }
 
+    // The letter `choice` is and how many options the question of ruling `id`
+    // lists, when it names a letter past them.
+    fn past_the_list(&self, id: TicketId, choice: &str) -> Option<(char, usize)> {
+        let ruling = self.state.rulings.iter().find(|r| r.id == id)?;
+        let RulingKind::Question { asked, .. } = &ruling.kind else {
+            return None;
+        };
+        let lines: Vec<&str> = asked.lines().collect();
+        let listed = lines.len() - list_start(&lines);
+        let (letter, at) = letter_of(choice)?;
+        (listed > 0 && at >= listed).then_some((letter, listed))
+    }
+
     // Adds the recommendation to ruling `id`, to be posted as it is.
     fn recommend(&mut self, id: TicketId, passed: &Passed<'_>) -> Result<(), StateError> {
         let mut next = self.state.clone();
@@ -330,9 +351,7 @@ fn recommended(asked: &str, passed: &Passed<'_>) -> String {
     } = passed;
     let (choice, why) = (*choice, *why);
     let lines: Vec<&str> = asked.lines().collect();
-    let listed = |line: &str| line.trim_start().starts_with("- ");
-    let start = lines.iter().rposition(|l| !listed(l)).map_or(0, |i| i + 1);
-    let (head, list) = lines.split_at(start);
+    let (head, list) = lines.split_at(list_start(&lines));
     let head: Vec<&str> = head
         .iter()
         .copied()
@@ -342,9 +361,13 @@ fn recommended(asked: &str, passed: &Passed<'_>) -> String {
     let mut placed = false;
     let list: Vec<String> = {
         let mut list: Vec<String> = list.iter().map(|l| (*l).to_owned()).collect();
+        let listed = list.len();
         let drafted = draft(&mut list, candidates);
         let named = choice.map(plain_choice);
-        let at = named.and_then(|n| list.iter().position(|line| plain_choice(line) == n));
+        let at = match choice.and_then(letter_of) {
+            Some((_, at)) if at < listed => Some(at),
+            _ => named.and_then(|n| list.iter().position(|line| plain_choice(line) == n)),
+        };
         match (choice, at) {
             (Some(_), Some(at)) => {
                 let line = list.remove(at);
@@ -407,6 +430,23 @@ fn draft(list: &mut Vec<String>, candidates: &[String]) -> bool {
         }
     }
     list.len() > before
+}
+
+// Where the `- ` list that ends `lines` starts
+fn list_start(lines: &[&str]) -> usize {
+    let listed = |line: &str| line.trim_start().starts_with("- ");
+    lines.iter().rposition(|l| !listed(l)).map_or(0, |i| i + 1)
+}
+
+// The letter `choice` is, with its place in the list the card shows: `A` is
+// the first. Anything but one capital letter is not one.
+fn letter_of(choice: &str) -> Option<(char, usize)> {
+    let mut chars = choice.trim().chars();
+    let letter = chars.next().filter(char::is_ascii_uppercase)?;
+    chars
+        .next()
+        .is_none()
+        .then(|| (letter, usize::from(letter as u8 - b'A')))
 }
 
 // A choice as it is compared: without its `- `, the effect written after it,
