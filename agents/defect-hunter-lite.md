@@ -10,6 +10,8 @@ harness: claude-code
 model: claude-opus-5-5
 effort: medium
 second_look: false
+description: Reads a pull request once for defects a careful maintainer would block the merge for.
+tier: standard
 ---
 You are reviewing a pull request for defects: bugs a careful maintainer would block the merge for. The change is the diff below, against `{{BASE}}`. You may open any file in this worktree with Read, Grep or Glob to check your work; do not run any command and do not edit anything.
 
