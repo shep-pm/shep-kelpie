@@ -750,8 +750,8 @@ impl Runner {
     ///
     /// # Errors
     ///
-    /// Why not, when kelpie no longer has that agent, or the worker's fence
-    /// would not hold on it.
+    /// Why not, when kelpie no longer has that agent, `agents.allow` now leaves
+    /// it out, or the worker's fence would not hold on it.
     pub(super) fn worker_agent(&self, item: &WorkItem) -> Result<WorkerAgent, String> {
         let name = &item.agent;
         let Some(agent) = self.book.get(name) else {
@@ -767,6 +767,13 @@ impl Runner {
                 item.issue
             ));
         };
+        if (self.settings.agents.allow.as_ref()).is_some_and(|allow| !allow.holds(name)) {
+            return Err(format!(
+                "issue #{} runs on agent {name}, which `agents.allow` leaves out: add it to \
+                 `agents.allow`, or drop and add the issue",
+                item.issue
+            ));
+        }
         let Some((model, limit)) = agent
             .runs
             .session()

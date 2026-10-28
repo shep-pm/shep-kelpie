@@ -339,3 +339,30 @@ fn agent_labels_are_made_only_for_allowed_implementers() {
         ["agent:coder", "agent:sonnet-high"]
     );
 }
+
+#[test]
+fn an_open_work_item_whose_agent_allow_now_leaves_out_fails_its_turn_saying_so() {
+    let rig = allowing_coder();
+    let runner = rig.open().unwrap();
+    rig.forge.label(8, "agent:coder");
+    rig.ask(&runner, "add", Some("8"));
+    drop(runner);
+
+    rig.edit_settings(|s| {
+        let coder = "allow = [\"sonnet-high\", \"coder\", ";
+        assert!(s.contains(coder), "the allow list moved");
+        s.replace(coder, "allow = [\"sonnet-high\", ")
+    });
+    let runner = rig.open().unwrap();
+    let Some(StepReport::Failed { question, .. }) = step(&runner).unwrap() else {
+        panic!("the turn did not fail");
+    };
+    assert!(
+        question.contains(
+            "issue #8 runs on agent coder, which `agents.allow` leaves out: add it to \
+             `agents.allow`, or drop and add the issue"
+        ),
+        "{question}"
+    );
+    assert_eq!(rig.claude.calls(), []);
+}
