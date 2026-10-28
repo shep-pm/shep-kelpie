@@ -89,8 +89,8 @@ pub struct Settings {
     /// when absent.
     #[serde(default)]
     pub budget: Budget,
-    /// The agents that build the project's work items and review its pull
-    /// requests, from kelpie's agent files
+    /// The agents that review the project's pull requests and the ones it
+    /// may use, from kelpie's agent files
     #[serde(default)]
     pub agents: RoleAgentNames,
     /// Usage pacing

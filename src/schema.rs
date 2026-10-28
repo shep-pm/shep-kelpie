@@ -188,6 +188,9 @@ mod tests {
             .replace("# allow =", "allow =")
             .replace("# representative =", "representative =")
             .replace("# slack =", "slack =")
+            .replace("# implementers =", "implementers =")
+            .replace("# implementer_choice =", "implementer_choice =")
+            .replace("# fallback_after =", "fallback_after =")
             .replace("# maintainer =", "maintainer =")
             .replace("# base =", "base =")
             .replace(
@@ -353,6 +356,37 @@ mod tests {
         ] {
             assert!(properties[old].is_null(), "{old}");
         }
+    }
+
+    // A table an older build wrote loads, so the schema takes it too: each key
+    // the agent board replaced is there, deprecated, with no type, so any value fits.
+    #[test]
+    fn the_keys_the_agent_board_replaced_are_deprecated_and_take_any_value() {
+        let root = schema();
+        let sheep = &root[SHEEP_SCHEMA_KEY];
+        let project = resolve(&root, sheep);
+        let agents = resolve(&root, &project["properties"]["agents"]);
+        assert_eq!(agents["additionalProperties"], false, "{agents}");
+        for old in ["implementers", "implementer_choice", "fallback_after"] {
+            let key = &agents["properties"][old];
+            assert_eq!(key["deprecated"], true, "{old}: {key}");
+            let resolved = resolve(&root, key);
+            assert!(resolved.get("type").is_none(), "{old}: {resolved}");
+            let said = key["description"].as_str().unwrap_or_default();
+            assert!(
+                said.contains("`shep kelpie upgrade` deletes it"),
+                "{old}: {said}"
+            );
+        }
+        let old = "[app.dogs.kelpie.agents]\nimplementers = [\"sonnet-high\"]\n\
+                   implementer_choice = \"order\"\nfallback_after = 15\n";
+        let text =
+            include_str!("../settings.example.toml").replace("[app.dogs.kelpie.agents]\n", old);
+        let table = toml::to_string(&crate::test::project_table(&text)).unwrap();
+        let keys = keys_of_table(&root, sheep, &table);
+        let mut known = BTreeSet::new();
+        schema_keys(&root, sheep, "", &mut known);
+        assert!(keys.is_subset(&known), "{:?}", keys.difference(&known));
     }
 
     #[test]

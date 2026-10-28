@@ -112,8 +112,7 @@ per_item_usd = 10
 # the soonest, it takes the cheapest by the ledgers' typical cost, a local
 # agent with none counting as free, and then the first by name. An issue
 # labelled `agent:<name>!` runs on that one, as does the project manager's
-# pick that names an agent. `implementers`, `implementer_choice` and
-# `fallback_after` are read by nothing: `shep kelpie upgrade` deletes them.
+# pick that names an agent.
 [app.dogs.kelpie.agents]
 # The only agents this project may use, by the names of kelpie's agent
 # files, for a private project that keeps its code to the models its owner
@@ -171,6 +170,14 @@ per_item_usd = 10
 # past it. 0 keeps only the soonest. A pick of the project manager's own
 # `slack` wins for its item. 60 when absent.
 # slack = 60
+# Read by nothing: the agent board picks each work item's implementer, and
+# `shep kelpie upgrade` deletes it, as `shep kelpie settings migrate` does.
+# implementers = ["sonnet-high"]
+# Read by nothing, as `implementers` is, and deleted with it.
+# implementer_choice = "order"
+# Read by nothing: the agent board's handoff moves a work item, and
+# `shep kelpie upgrade` deletes it.
+# fallback_after = 15
 
 # Turn `enabled` off for a stretch when usage limits do not matter: neither
 # the daily allowance nor the 5-hour window then holds anything, and `status`

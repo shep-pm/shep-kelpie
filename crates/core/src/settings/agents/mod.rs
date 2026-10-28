@@ -245,6 +245,21 @@ impl<'de> Deserialize<'de> for Gone {
     }
 }
 
+// Any value, as an older build may have written one.
+impl JsonSchema for Gone {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Gone".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "deprecated": true })
+    }
+}
+
 /// The agents a project may use, or every agent when it lists none
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(from = "Vec<AgentName>")]
@@ -274,17 +289,20 @@ pub struct RoleAgentNames {
     /// Every agent with a file when absent or empty.
     #[serde(default)]
     pub allow: Option<Allow>,
-    /// Read by nothing: the agent board picks each work item's implementer
+    /// Read by nothing: the agent board picks each work item's implementer,
+    /// and `shep kelpie upgrade` deletes it
     #[serde(default)]
-    #[schemars(skip)]
+    #[schemars(extend("deprecated" = true))]
     pub implementers: Option<Gone>,
-    /// Read by nothing: the agent board picks each work item's implementer
+    /// Read by nothing: the agent board picks each work item's implementer,
+    /// and `shep kelpie upgrade` deletes it
     #[serde(default)]
-    #[schemars(skip)]
+    #[schemars(extend("deprecated" = true))]
     pub implementer_choice: Option<Gone>,
-    /// Read by nothing: the agent board's handoff moves a work item
+    /// Read by nothing: the agent board's handoff moves a work item, and
+    /// `shep kelpie upgrade` deletes it
     #[serde(default)]
-    #[schemars(skip)]
+    #[schemars(extend("deprecated" = true))]
     pub fallback_after: Option<Gone>,
     /// Minutes past the soonest finish the agent board lets a work item's agent
     /// take: a new item opens on the cheapest agent finishing within it, and a
