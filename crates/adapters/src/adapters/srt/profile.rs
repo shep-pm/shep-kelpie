@@ -433,8 +433,8 @@ mod tests {
     fn macos_and_linux_keep_the_folder_whole_with_the_deny_beside_it() {
         let kept_out = exclusions(&[r"\\?\C:\Users\R\.cargo\credentials"], &[]);
         let policy = Policy {
-            read: vec![PathBuf::from("/Users/r/.cargo")],
-            no_read: vec!["/Users/r/.cargo/credentials".into()],
+            read: vec![PathBuf::from("/Users/me/.cargo")],
+            no_read: vec!["/Users/me/.cargo/credentials".into()],
             ..Policy::default()
         };
         let disk = cargo_disk();
@@ -448,12 +448,12 @@ mod tests {
             let files = &settings["filesystem"];
             assert_eq!(
                 files["allowRead"],
-                json!(["/Users/r/.cargo"]),
+                json!(["/Users/me/.cargo"]),
                 "{platform:?}"
             );
             assert_eq!(
                 files["denyRead"],
-                json!(["/Users/r/.cargo/credentials"]),
+                json!(["/Users/me/.cargo/credentials"]),
                 "{platform:?}"
             );
             assert!(notes.is_empty(), "{notes:?}");
