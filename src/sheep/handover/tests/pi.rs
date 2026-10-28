@@ -394,7 +394,11 @@ fn a_pi_turn_whose_record_is_gone_keeps_the_handover_queued_until_its_end_is_hea
     assert!(tried.carried.lock().unwrap().is_empty());
     assert!(!handing.pending());
     eventually("the turn's end", || turn_of_7(&rig, &runner) == "ended");
-    assert!(worker.stop(JOIN_BOUND, || {}));
+    // The turn reads `ended` once the runner has saved it, and the pass that
+    // heard it goes on to move #7 with git calls. A stop waits out that pass,
+    // which a loaded runner can hold past `JOIN_BOUND`, so this one waits as
+    // long as any other call, and a thread that never stops still fails it.
+    assert!(worker.stop(CALL_PATIENCE, || {}));
 }
 
 #[test]
