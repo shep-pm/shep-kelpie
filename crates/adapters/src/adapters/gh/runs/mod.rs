@@ -30,7 +30,7 @@ pub(super) fn failed_run_logs(
     let mut text = String::new();
     let mut timed_out = 0;
     for run in failed.iter().take(RUNS) {
-        let read = read_run(repo, run.id, &mut gh)?;
+        let read = read_run(repo, run.id, run.conclusion != "failure", &mut gh)?;
         text.push_str(&format!("--- run {}\n{}\n", run.id, read.text));
         timed_out += usize::from(read.timed_out);
     }
@@ -42,7 +42,7 @@ pub(super) fn failed_run_logs(
 }
 
 pub(super) fn run_log_tail(repo: &ForgeSlug, run: u64) -> Result<String, ForgeError> {
-    read_run(repo, run, &mut gh).map(|read| read.text)
+    read_run(repo, run, true, &mut gh).map(|read| read.text)
 }
 
 /// What kelpie read of one run's log
@@ -53,39 +53,52 @@ struct RunLog {
     timed_out: bool,
 }
 
-// The end of `run`'s failed log. Where `--log-failed` answers nothing, the
-// log is the cancelled job's, after a line saying its timeout ended it.
+// The end of `run`'s failed log. Where `--log-failed` answers nothing and the
+// run may have been cut short (`cut_short`: it did not conclude `failure`), the
+// log is the cancelled job's, after a line saying its timeout ended it. A
+// fallback that cannot be read leaves the empty log, as before it existed.
 fn read_run(
     repo: &ForgeSlug,
     run: u64,
+    cut_short: bool,
     ask: &mut impl FnMut(&[&str]) -> Result<Vec<u8>, ForgeError>,
 ) -> Result<RunLog, ForgeError> {
     let id = run.to_string();
     let repo = repo.as_str();
     let log = ask(&["run", "view", &id, "--repo", repo, "--log-failed"])?;
     let tail = failure_tail(&String::from_utf8_lossy(&log), LOG_BYTES);
-    if !tail.is_empty() {
+    if !tail.is_empty() || !cut_short {
         return Ok(RunLog {
             text: tail,
             timed_out: false,
         });
     }
-    let jobs = ask(&["run", "view", &id, "--json", "jobs", "--repo", repo])?;
-    let Some(job) = cancelled_job(&jobs)? else {
-        return Ok(RunLog {
+    Ok(cancelled_log(&id, repo, ask)
+        .ok()
+        .flatten()
+        .unwrap_or(RunLog {
             text: tail,
             timed_out: false,
-        });
+        }))
+}
+
+// The log of the job of run `id` that a timeout cancelled, if it has one
+fn cancelled_log(
+    id: &str,
+    repo: &str,
+    ask: &mut impl FnMut(&[&str]) -> Result<Vec<u8>, ForgeError>,
+) -> Result<Option<RunLog>, ForgeError> {
+    let jobs = ask(&["run", "view", id, "--json", "jobs", "--repo", repo])?;
+    let Some(job) = cancelled_job(&jobs)? else {
+        return Ok(None);
     };
     let job_id = job.id.to_string();
-    let log = ask(&[
-        "run", "view", &id, "--job", &job_id, "--log", "--repo", repo,
-    ])?;
+    let log = ask(&["run", "view", id, "--job", &job_id, "--log", "--repo", repo])?;
     let tail = failure_tail(&String::from_utf8_lossy(&log), LOG_BYTES);
-    Ok(RunLog {
+    Ok(Some(RunLog {
         text: format!("{}\n{tail}", job.note()).trim_end().to_owned(),
         timed_out: true,
-    })
+    }))
 }
 
 /// The latest completed run of each workflow and event among the 50 newest completed runs on `branch`
@@ -356,7 +369,10 @@ fn failed_runs(listed: &[u8], head: &str, merge_group: bool) -> Result<Vec<Faile
         .into_iter()
         .filter(|r| READ_FOR_A_LOG.contains(&r.conclusion.as_str()))
         .filter(|r| match merge_group {
-            true => r.event == "merge_group",
+            // GitHub cancels the runs of the groups queued behind one it
+            // removes, and nothing ties a queue run to this head, so a
+            // `cancelled` one is no sign of a timeout here
+            true => r.event == "merge_group" && r.conclusion != "cancelled",
             false => r.head_sha == head,
         })
         .map(|r| FailedRun {

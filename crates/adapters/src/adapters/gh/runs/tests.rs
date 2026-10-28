@@ -50,11 +50,13 @@ fn a_run_ended_by_its_timeout_is_listed_for_a_log() {
         {"conclusion":"failure","databaseId":5,"event":"pull_request","headSha":"abc"},
         {"conclusion":"cancelled","databaseId":4,"event":"pull_request","headSha":"old"},
         {"conclusion":"timed_out","databaseId":3,"event":"merge_group","headSha":"queue"},
+        {"conclusion":"cancelled","databaseId":10,"event":"merge_group","headSha":"queue"},
         {"conclusion":"skipped","databaseId":2,"event":"pull_request","headSha":"abc"}
     ]"#;
 
     let of_head = failed_runs(listed, "abc", false).unwrap();
     assert_eq!(ids(of_head), [8, 7, 5]);
+    // The queue's cancelled runs are other groups' that GitHub stopped
     let of_queue = failed_runs(listed, "abc", true).unwrap();
     assert_eq!(ids(of_queue), [3]);
 }
@@ -417,7 +419,7 @@ fn answer(args: &[&str], failed: &str, job_log: &str) -> Result<Vec<u8>, ForgeEr
 fn read(failed: &str, job_log: &str) -> (RunLog, Vec<String>) {
     let repo = ForgeSlug::try_from("shep-pm/shep-kelpie".to_owned()).unwrap();
     let mut asked = Vec::new();
-    let read = read_run(&repo, RUN, &mut |args: &[&str]| {
+    let read = read_run(&repo, RUN, true, &mut |args: &[&str]| {
         asked.push(args.join(" "));
         answer(args, failed, job_log)
     })
@@ -492,9 +494,38 @@ fn a_run_cancelled_in_no_job_has_no_log_to_read() {
     let repo = ForgeSlug::try_from("shep-pm/shep-kelpie".to_owned()).unwrap();
     let no_jobs = br#"{"jobs":[{"databaseId":1,"name":"lint","conclusion":"success","startedAt":"2026-10-12T16:12:47Z","completedAt":"2026-10-12T16:13:44Z","steps":[]}]}"#;
 
-    let read = read_run(&repo, 5, &mut |args: &[&str]| match args {
+    let read = read_run(&repo, 5, true, &mut |args: &[&str]| match args {
         [.., "--log-failed"] => Ok(Vec::new()),
         _ => Ok(no_jobs.to_vec()),
+    })
+    .unwrap();
+
+    assert_eq!(read.text, "");
+    assert!(!read.timed_out);
+}
+
+#[test]
+fn a_run_that_failed_is_never_asked_for_its_jobs() {
+    let repo = ForgeSlug::try_from("shep-pm/shep-kelpie".to_owned()).unwrap();
+    let mut asked = 0;
+
+    let read = read_run(&repo, 5, false, &mut |_: &[&str]| {
+        asked += 1;
+        Ok(Vec::new())
+    })
+    .unwrap();
+
+    assert_eq!(read.text, "");
+    assert_eq!(asked, 1);
+}
+
+#[test]
+fn a_job_listing_gh_cannot_answer_leaves_the_log_empty() {
+    let repo = ForgeSlug::try_from("shep-pm/shep-kelpie".to_owned()).unwrap();
+
+    let read = read_run(&repo, 5, true, &mut |args: &[&str]| match args {
+        [.., "--log-failed"] => Ok(Vec::new()),
+        _ => Err(ForgeError::Failed("rate limited".to_owned())),
     })
     .unwrap();
 
