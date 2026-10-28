@@ -465,6 +465,8 @@ fn handle(runner: &mut Runner, posted: &Posted, request: &Request) -> Reply {
         Request::Gate(ticket) => runner.gate(*ticket).map_err(|e| e.to_string()),
         Request::Drop(ticket) => runner.drop_work_item(*ticket).map_err(|e| e.to_string()),
         Request::Triage(issue) => runner.triage_ask(*issue),
+        // The socket serves a watch before it gets here, and no trigger reads as one.
+        Request::Watch => return Reply::Refused("`watch` is answered by the socket alone".into()),
     };
     // A refusal the queue left stands until the verb goes through, however it did.
     if let (Ok(()), Some(key)) = (&changed, &queued) {
@@ -481,12 +483,12 @@ fn handle(runner: &mut Runner, posted: &Posted, request: &Request) -> Reply {
 
 /// Whether `action` asks the runner's loop for a pass
 ///
-/// `status` and `timings` only ask, and `drain` starts its retro itself, so
-/// none wakes the loop: a drain's wait asks `drain` and
+/// `status`, `timings` and `watch` only ask, and `drain` starts its retro
+/// itself, so none wakes the loop: a drain's wait asks `drain` and
 /// `status` twice a second. `undrain` wakes it, to start the calls it lets go,
 /// and so does each verb that is queued while a pass holds the lock.
 pub fn wakes(action: &str) -> bool {
-    !matches!(action, "status" | "timings" | "drain")
+    !matches!(action, "status" | "timings" | "drain" | "watch")
 }
 
 // Answers `request` from what the loop last posted, for a runner whose lock a

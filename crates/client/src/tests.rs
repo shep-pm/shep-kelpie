@@ -19,6 +19,10 @@ enum Script {
     Answers(String),
     // Reads requests and answers none
     Silent,
+    // Answers the first request with these lines and goes on reading
+    Streams(Vec<String>),
+    // Answers the first request with these lines and closes
+    Closes(Vec<String>),
 }
 
 // A fake runner at a short socket, answering `hello` first, and the lines it was asked
@@ -48,12 +52,25 @@ fn runner(hello: &'static str, script: Script) -> Fake {
                 return;
             }
             let _ = asked_tx.send(line.trim_end().to_owned());
-            if let Script::Answers(reply) = &script {
-                stream
+            match &script {
+                Script::Answers(reply) => stream
                     .get_mut()
                     .write_all(format!("{reply}\n").as_bytes())
                     .await
-                    .unwrap();
+                    .unwrap(),
+                Script::Streams(lines) | Script::Closes(lines) => {
+                    for line in lines {
+                        stream
+                            .get_mut()
+                            .write_all(format!("{line}\n").as_bytes())
+                            .await
+                            .unwrap();
+                    }
+                    if matches!(script, Script::Closes(_)) {
+                        return;
+                    }
+                }
+                Script::Silent => {}
             }
         }
     });
@@ -152,4 +169,76 @@ async fn a_request_past_a_frame_is_refused_before_it_is_sent() {
 
     drop(connection);
     assert_eq!(fake.asked.recv().await, None, "nothing was sent");
+}
+
+// The recorded status of protocol, as the event line of project `project`
+fn status_event(project: &str) -> String {
+    let mut status: Value =
+        serde_json::from_str(include_str!("../../protocol/fixtures/status.json")).unwrap();
+    status["project"] = project.into();
+    serde_json::json!({"event": "status", "status": status}).to_string()
+}
+
+#[tokio::test]
+async fn a_runner_that_does_not_know_watch_is_named_as_too_old() {
+    let mut fake = runner(
+        r#"{"protocol":1}"#,
+        Script::Answers(r#"{"request":"watch","version":"1.2.3"}"#.into()),
+    );
+    let error = watch(&fake.socket, PATIENCE).await.unwrap_err();
+    assert_eq!(
+        error,
+        WatchError::Failed(Failure::Unknown(UnknownRequest {
+            request: "watch".into(),
+            version: "1.2.3".into(),
+        }))
+    );
+    assert_eq!(
+        error.to_string(),
+        "this runner (1.2.3) has no `watch` request: upgrade kelpie"
+    );
+    assert_eq!(
+        fake.asked.recv().await.as_deref(),
+        Some(r#"{"action":"watch"}"#)
+    );
+}
+
+#[tokio::test]
+async fn watch_yields_each_changed_status_in_order() {
+    let fake = runner(
+        r#"{"protocol":1}"#,
+        Script::Streams(vec![
+            status_event("first"),
+            status_event("second"),
+            status_event("third"),
+        ]),
+    );
+    let mut watching = watch(&fake.socket, PATIENCE).await.unwrap();
+    for want in ["first", "second", "third"] {
+        let status = watching.next().await.unwrap().expect("a status");
+        assert_eq!(status.project, want);
+    }
+}
+
+#[tokio::test]
+async fn a_watch_ends_when_the_runner_closes_it() {
+    let fake = runner(
+        r#"{"protocol":1}"#,
+        Script::Closes(vec![status_event("only")]),
+    );
+    let mut watching = watch(&fake.socket, PATIENCE).await.unwrap();
+    assert!(watching.next().await.unwrap().is_some());
+    assert_eq!(watching.next().await, Ok(None));
+}
+
+#[tokio::test]
+async fn a_line_that_is_no_status_breaks_the_watch() {
+    let fake = runner(
+        r#"{"protocol":1}"#,
+        Script::Streams(vec![status_event("first"), r#"{"event":"gone"}"#.into()]),
+    );
+    let mut watching = watch(&fake.socket, PATIENCE).await.unwrap();
+    assert!(watching.next().await.unwrap().is_some());
+    let broken = watching.next().await;
+    assert!(matches!(broken, Err(Failure::Broken(_))), "{broken:?}");
 }

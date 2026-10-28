@@ -13,6 +13,16 @@ A runner answers the typed protocol on `run/<project>.sock` under kelpie's home,
 - A reply is `trigger::answer_request`, the function `shep trigger` runs through `answer`, so the two cannot drift. It answers `status`, `timings` and the board listing from `Posted` while a pass holds the runner's lock. `request_of` is the one reader of `<action> [params]` text, exported for the client's callers.
 - A request wakes the loop as `on_trigger` does: `wakes(action)` or `Posted::needs_wake`, through `Handles::wake`.
 
+## The watch
+
+`runner/socket/watch.rs`. A `watch` request turns the connection into a stream: the full status now, then again after each change, each a line `{"event":"status","status":{...}}` (`Event::Status`). It is not in `ACTIONS`, wakes no pass, and `shep trigger` cannot send it. An older runner answers the unknown-request error, and the client's `watch` names it as too old; the protocol stays at 1.
+
+- `Posted` keeps the latest snapshot, a sequence number and a condvar. `Posted::post` and `Runner::post` move it. The snapshot is the protocol `Status` that `trigger::wire` builds, and it is built only while a client watches, so a runner with none pays nothing per post. The first snapshot of a watch, made before any post since the watch began, is the posted body read back.
+- `draining` is filled in as `status_of` does. A `drain` or `undrain` that lands while a pass holds the lock changes `status` with no post, so `ask_drain`, `ask_undrain` and `set_draining` publish too.
+- Merge rule: a watcher writes an event only when its line differs from the last it wrote. Whole snapshots are compared and nothing is stripped, so `timings` and `lock`, which move with the clock, make fewer merges on a real clock than on the rig's stand-in. A field the wire leaves out (a skill's plugin path) cannot tell two snapshots apart.
+- Each watcher is two threads. One waits on the condvar and writes the newest snapshot, so a slow client skips the ones it missed and nothing queues. The other reads the peer's half, so a client that closes ends both. A failed write and `Serving::end` end them too. Neither holds the runner's lock while it writes.
+- The watch has no idle bound: a connection that watches is silent by design.
+
 ## Opening it
 
 `core/ipc` `open_owner_only` is the one routine for the dog's door and the runner's socket. The runner makes `run/` 0700 first.
@@ -29,6 +39,7 @@ A runner answers the typed protocol on `run/<project>.sock` under kelpie's home,
 
 - `connect(socket, deadline)` makes the hello. A socket that is missing or refused, a runner silent at the hello, one that answers no hello, and one below this protocol are one outcome, `Unreachable`.
 - `Connection::ask(&Request, deadline)` gives a `Reply` (a refusal is `Reply::Refused`), or a `Failure`: `TimedOut`, `Unknown` (the runner has no such request) or `Broken`.
+- `watch(socket, deadline)` sends `watch` and reads the first status before it returns, so a runner that predates it fails there (`WatchError::Failed(Failure::Unknown)`). `Watching::next()` gives the current status first, then each change, and `None` once the runner ends the stream.
 - A timeout spends the connection. A later ask sends nothing, since an answer may still arrive and would be read as the next ask's.
 
 ## The verbs

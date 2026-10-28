@@ -16,6 +16,6 @@ pub mod reply;
 pub mod request;
 pub mod status;
 
-pub use reply::Reply;
+pub use reply::{Event, Reply};
 pub use request::{Request, RuleAction, RuleAnswer};
 pub use status::Status;

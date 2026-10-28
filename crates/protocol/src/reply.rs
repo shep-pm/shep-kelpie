@@ -58,6 +58,16 @@ impl Reply {
     }
 }
 
+/// A line a runner pushes after a `watch`, which `Reply` is not: a reply
+/// answers a request, an event comes unasked
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "event", content = "status", rename_all = "snake_case")]
+pub enum Event {
+    /// The whole status, now or after a change. Boxed for the reason
+    /// [`Reply::Status`] is
+    Status(Box<Status>),
+}
+
 impl Serialize for Reply {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
@@ -175,4 +185,31 @@ pub enum PmAttaching {
     },
     /// It is held while the session's process runs too
     Running,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn recorded() -> Status {
+        crate::status::tests::recorded_status()
+    }
+
+    #[test]
+    fn a_status_event_names_itself_and_round_trips() {
+        let event = Event::Status(Box::new(recorded()));
+        let shown = serde_json::to_value(&event).unwrap();
+        assert_eq!(shown["event"], "status");
+        assert_eq!(shown["status"]["project"], recorded().project);
+        assert_eq!(serde_json::from_value::<Event>(shown).unwrap(), event);
+    }
+
+    #[test]
+    fn a_status_is_not_an_event() {
+        let bare = serde_json::to_value(recorded()).unwrap();
+        assert!(serde_json::from_value::<Event>(bare).is_err());
+        assert!(serde_json::from_value::<Event>(json!({ "event": "other" })).is_err());
+    }
 }

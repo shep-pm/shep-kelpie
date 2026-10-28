@@ -15,6 +15,11 @@ pub(super) fn recorded() -> Value {
     serde_json::from_str(&text).expect("the recorded status is JSON")
 }
 
+/// The recorded status, read
+pub(crate) fn recorded_status() -> Status {
+    serde_json::from_value(recorded()).expect("the recorded status reads")
+}
+
 #[test]
 fn the_recorded_status_round_trips() {
     let shown = recorded();

@@ -60,11 +60,17 @@ pub enum Request {
     Board(Option<(TicketId, u64)>),
     /// `triage <issue>`: ask the triager about an issue other people opened
     Triage(u64),
+    /// `watch`: the status now, then again after each change, as [`Event`]s
+    ///
+    /// Not an action of `shep trigger`, and it wakes no pass.
+    ///
+    /// [`Event`]: crate::reply::Event
+    Watch,
 }
 
 // The action names serde reads for `Request`'s variants: each variant name in
 // snake_case, which is what a frame's `action` carries
-const NAMES: [&str; 20] = [
+const NAMES: [&str; 21] = [
     "status",
     "add",
     "rework",
@@ -85,10 +91,11 @@ const NAMES: [&str; 20] = [
     "pausing",
     "board",
     "triage",
+    "watch",
 ];
 
 impl Request {
-    /// The action `shep trigger` names this request
+    /// The action `shep trigger` names this request, and `watch` for the one it has no action for
     pub fn action(&self) -> &'static str {
         match self {
             Self::Status => "status",
@@ -110,6 +117,7 @@ impl Request {
             Self::Pausing => "pausing",
             Self::Board(_) => "board",
             Self::Triage(_) => "triage",
+            Self::Watch => "watch",
         }
     }
 
@@ -197,6 +205,7 @@ mod tests {
             Request::Pausing,
             Request::Board(Some((ticket(282), 2))),
             Request::Triage(9),
+            Request::Watch,
         ]
     }
 
@@ -220,7 +229,7 @@ mod tests {
             [
                 "status", "add", "rework", "adopt", "rule", "gate", "drop", "timings", "attach",
                 "detach", "tell", "pm", "pm", "drain", "undrain", "finish", "start", "pausing",
-                "board", "triage",
+                "board", "triage", "watch",
             ]
         );
     }

@@ -282,4 +282,4 @@ fn is_zero(n: &usize) -> bool {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
