@@ -2,6 +2,7 @@
 //! owner, installed on it, that mints a token
 
 use super::Line;
+use crate::adapters::host::Host;
 use crate::github::{GithubApp, TokenError};
 use crate::ports::{Forge, InstallationToken};
 use crate::settings::{ForgeSlug, Settings};
@@ -104,8 +105,14 @@ pub(super) fn reads(subject: String, repo: &ForgeSlug, github: &dyn GithubApp) -
 }
 
 /// The line for what a worker on `repo` holds: a token that pushes its branch
-/// where the App covers the repo, else the maintainer's own login
-pub(super) fn workers(subject: String, repo: &ForgeSlug, github: &dyn GithubApp) -> Line {
+/// where the App covers the repo, else the maintainer's own login, which a
+/// Windows worker gets as `GH_TOKEN` and any other reads from `gh`'s config
+pub(super) fn workers(
+    subject: String,
+    repo: &ForgeSlug,
+    github: &dyn GithubApp,
+    host: &dyn Host,
+) -> Line {
     let slug = repo.as_str();
     match github.worker(repo) {
         Ok(worker) => {
@@ -130,10 +137,16 @@ pub(super) fn workers(subject: String, repo: &ForgeSlug, github: &dyn GithubApp)
         }
         // Not covered: the worker runs as the maintainer, as before the App.
         Err(TokenError::Owner(_) | TokenError::NoApp(_) | TokenError::NotInstalled { .. }) => {
+            let login = match host.os() == "windows" {
+                true => "a worker gets your gh login as `GH_TOKEN`",
+                false => "a worker holds your own gh login",
+            };
             Line::unsure(
                 subject,
-                "a worker holds your own gh login: it can comment, approve and merge as you, \
-                 and kelpie's guard only parses its commands",
+                format!(
+                    "{login}: it can comment, approve and merge as you, and kelpie's guard only \
+                     parses its commands"
+                ),
                 format!(
                     "install kelpie's App on {slug} (`shep kelpie github setup` registers it), \
                      so a worker holds a token for the repo that pushes and nothing more"

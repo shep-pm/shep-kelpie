@@ -79,6 +79,7 @@ impl World {
             shep_home: Path::new("/k/shep"),
             door: &self.path("d.sock"),
             token: None,
+            login_token: None,
         };
         profile.reach()
     }

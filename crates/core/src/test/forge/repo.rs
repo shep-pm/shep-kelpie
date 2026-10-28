@@ -41,6 +41,11 @@ impl FakeForge {
         *self.viewer_down.lock().unwrap() = Some(error);
     }
 
+    /// Makes reading the account's token (`gh auth token`) fail with `error`
+    pub fn set_login_token_down(&self, error: ForgeError) {
+        *self.login_token_down.lock().unwrap() = Some(error);
+    }
+
     /// Lets asking who the account is succeed again, after [`Self::set_viewer_down`]
     pub fn set_viewer_up(&self) {
         *self.viewer_down.lock().unwrap() = None;

@@ -245,6 +245,26 @@ async fn without_an_app_doctor_says_a_worker_holds_the_maintainers_login() {
     assert!(report.passed());
 }
 
+// A Windows sandbox user cannot read the maintainer's Credential Manager, so
+// doctor does not claim the worker reads the login from gh's config.
+#[tokio::test]
+async fn on_windows_doctor_says_a_worker_gets_the_maintainers_login_as_gh_token() {
+    let mut scene = Scene::new().await;
+    scene.host.os = "windows";
+    scene.runs("golbat", |t| {
+        t["git"]["remote"] = json!("someone-else/golbat");
+    });
+
+    let report = scene.report().await;
+
+    let Verdict::Unsure { what, next } = verdict(&report, "golbat: workers") else {
+        panic!("{:#?}", report.render());
+    };
+    assert!(what.contains("gets your gh login as `GH_TOKEN`"), "{what}");
+    assert!(!what.contains("holds your own gh login"), "{what}");
+    assert!(next.contains("shep kelpie github setup"), "{next}");
+}
+
 // An App registered before workers held its tokens lacks the permission.
 #[tokio::test]
 async fn an_app_without_the_contents_permission_is_missing_and_names_the_fix() {

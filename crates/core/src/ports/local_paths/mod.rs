@@ -221,6 +221,10 @@ impl Forge for Guarded {
         self.forge.viewer()
     }
 
+    fn login_token(&self) -> Result<InstallationToken, ForgeError> {
+        self.forge.login_token()
+    }
+
     // A login is one a listing gave, and the read asks for no path of the repo.
     fn account_created(&self, login: &str) -> Result<Timestamp, ForgeError> {
         self.forge.account_created(login)

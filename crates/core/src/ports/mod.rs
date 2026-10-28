@@ -255,6 +255,16 @@ pub trait Forge: Send + Sync {
     /// [`ForgeError`] when the forge cannot be asked or its answer read.
     fn viewer(&self) -> Result<String, ForgeError>;
 
+    /// The token of that account, which `gh auth token` prints
+    ///
+    /// A Windows worker with no App token is handed it as `GH_TOKEN`: its
+    /// sandbox user cannot read the maintainer's Credential Manager.
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when `gh` has no login, or its answer is empty.
+    fn login_token(&self) -> Result<InstallationToken, ForgeError>;
+
     /// When the account `login` was created, for telling a new account from an
     /// established one
     ///

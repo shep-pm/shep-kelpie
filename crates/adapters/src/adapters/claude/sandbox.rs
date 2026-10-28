@@ -14,6 +14,7 @@ use crate::adapters::harness::{bind_in_scratch, call_policy, program_folder, pro
 use crate::dep_sources::ProcessEnv;
 use crate::fence;
 use crate::ports::{AgentCall, AgentError, Policy, Role};
+use crate::profile;
 
 impl Claude {
     // `claude` with `argv`, in the call's folder and with its own temporary files.
@@ -39,6 +40,11 @@ impl Claude {
             .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
         if let Some(login) = &self.login {
             command.env(LOGIN_VAR, login.expose());
+        }
+        // The maintainer's gh login, for a worker with no App token on Windows.
+        let fence = call.reach.fence.as_deref();
+        if let Some(token) = fence.and_then(|fence| fence.env.get(profile::GH_TOKEN_VAR)) {
+            command.env(profile::GH_TOKEN_VAR, token);
         }
         command
     }
@@ -167,11 +173,12 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::adapters::claude::write_settings;
     use crate::adapters::{Base, ClaudeCli, LoginToken, SandboxRuntime};
     use crate::ports::Ending;
     use crate::ports::{Agents, Role, Session, SessionId, Tools};
-    use crate::profile::CREDENTIALS;
     use crate::profile::WorkerProfile;
+    use crate::profile::{CREDENTIALS, GH_TOKEN_VAR};
     use crate::settings::Effort;
     use crate::test::OpenSandbox;
 
@@ -243,6 +250,7 @@ mod tests {
                 shep_home: Path::new("/k/shep"),
                 door: Path::new("/k/dog/lease.sock"),
                 token: None,
+                login_token: None,
             };
             AgentCall {
                 tools: Tools::Work,
@@ -624,6 +632,39 @@ mod tests {
                 login(&with, terminal),
                 Some(Some(token.to_owned())),
                 "{role:?}"
+            );
+        }
+    }
+
+    // The settings file stays on disk under kelpie's home and is rewritten each
+    // turn, so the maintainer's own gh token is a variable of the command and
+    // never a line of that file or an argument, which `ps` shows.
+    #[test]
+    fn the_maintainers_gh_token_is_a_variable_of_the_command_and_in_no_settings_file() {
+        let w = World::new();
+        let token = "gho_the_maintainers_login";
+        let mut call = w.worker();
+        let fence = call.reach.fence.as_mut().unwrap();
+        fence.env.insert(GH_TOKEN_VAR.to_owned(), token.to_owned());
+        let names = fence.env.len();
+
+        write_settings(&call, &[]).unwrap();
+        let written = std::fs::read_to_string(&call.settings).unwrap();
+        let cli = w.cli(Arc::new(OpenSandbox::default()));
+
+        assert!(!written.contains(token), "{written}");
+        assert!(!written.contains(GH_TOKEN_VAR), "{written}");
+        assert!(names > 1, "the other variables are still written");
+        assert!(written.contains("CARGO_TARGET_DIR"), "{written}");
+        for command in [
+            cli.sandboxed_command(&call).unwrap(),
+            cli.terminal_command(&call).unwrap(),
+        ] {
+            let set = command.get_envs().find(|(n, _)| *n == GH_TOKEN_VAR);
+            assert_eq!(set.and_then(|(_, v)| v), Some(std::ffi::OsStr::new(token)));
+            assert!(
+                !(command.get_args()).any(|a| a.to_string_lossy().contains(token)),
+                "an argument shows the token"
             );
         }
     }

@@ -42,6 +42,7 @@ fn a_kelpie_home_outside_the_shepherds_is_denied_around_the_workers_own() {
         shep_home: &shep,
         door: Path::new("/s/kelpie/dog/lease.sock"),
         token: None,
+        login_token: None,
     }
     .settings();
 
@@ -129,6 +130,7 @@ fn a_worker_reads_its_own_toolchain_and_no_other_repo_of_the_home() {
         skills: &skills,
         door: Path::new("/s/kelpie/dog/lease.sock"),
         token: None,
+        login_token: None,
     }
     .settings();
 
@@ -242,6 +244,7 @@ fn a_worker_reads_go_s_and_bun_s_homes_and_builds_into_its_own_caches() {
         skills: &home.join("skills"),
         door: Path::new("/s/kelpie/dog/lease.sock"),
         token: None,
+        login_token: None,
     }
     .settings();
 

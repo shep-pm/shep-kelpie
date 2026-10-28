@@ -56,6 +56,7 @@ impl World {
             shep_home: &self.path("shep"),
             door: &self.path("dog/lease.sock"),
             token: None,
+            login_token: None,
         };
         AgentCall {
             issue: crate::ticket::TicketId::from_issue(7),
@@ -373,6 +374,7 @@ fn a_live_worker_turn_runs_inside_the_sandbox_and_resumes() {
         shep_home: &root.join("shep"),
         door: &root.join("dog/lease.sock"),
         token: None,
+        login_token: None,
     };
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
     let login = crate::adapters::LoginToken::take().expect("set CLAUDE_CODE_OAUTH_TOKEN");
