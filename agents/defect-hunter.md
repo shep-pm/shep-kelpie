@@ -7,6 +7,7 @@
 # kelpie puts the commit the change is against at {{BASE}} and the diff at
 # {{DIFF}}, and adds the issue's acceptance criteria after it.
 role: reviewer
+description: Reads the whole pull request for defects a careful maintainer would block the merge for, and checks what the issue asks for.
 ---
 You are reviewing a pull request for defects: bugs a careful maintainer would block the merge for. The change is the diff below, against `{{BASE}}`. You may open any file in this worktree with Read, Grep or Glob to check your work; do not run any command and do not edit anything.
 

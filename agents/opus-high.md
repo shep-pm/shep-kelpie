@@ -7,4 +7,6 @@ role: implementer
 harness: claude-code
 model: claude-opus-5-5
 effort: high
+description: Builds work that is hard to undo, such as a data migration, a release step or a change to a public interface.
+tier: heavy
 ---

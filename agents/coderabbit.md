@@ -12,4 +12,6 @@ harness: bot
 bot: coderabbit
 reviews: 1
 hours: 1
+description: Reviews the pull request on GitHub as the CodeRabbit bot, for a public repo.
+tier: standard
 ---
