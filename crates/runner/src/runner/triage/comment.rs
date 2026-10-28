@@ -34,10 +34,14 @@ pub(super) const NEEDS_TRIAGE: NewLabel<'static> = NewLabel {
     description: "Kelpie researched this issue; it waits on the maintainer",
 };
 
+// The priority an issue gets when the research names none
+const FALLBACK_PRIORITY: &str = "P3";
+
 // The label made for a priority on a repo that has no label for it, under
 // the name the board ranks by
-fn priority_label(priority: &str) -> Option<NewLabel<'static>> {
+pub(in crate::runner) fn priority_label(priority: &str) -> Option<NewLabel<'static>> {
     let (name, description) = match priority {
+        "P0" => ("priority: P0", "Drop everything"),
         "P1" => ("priority: P1", "Next up"),
         "P2" => ("priority: P2", "After P1"),
         "P3" => ("priority: P3", "Wanted, once higher priorities are done"),
@@ -387,10 +391,7 @@ impl Runner {
             labels.extend(board::repo_label(&have, kind).map(str::to_owned));
         }
         let ranked = (self.triage_seen(issue).iter()).any(|l| board::is_priority_label(l));
-        if let Some(priority) = found.priority.filter(|_| !ranked) {
-            let named = board::repo_priority(&have, priority).map(str::to_owned);
-            labels.extend(named.or_else(|| self.made_priority(issue, priority)));
-        }
+        let priority_at = labels.len();
         labels.extend(self.kind_label(issue, found.work, &have));
         // A triage label the maintainer put on while the call ran stands, and
         // it is read for before the comment is worded: the comment never
@@ -414,6 +415,27 @@ impl Runner {
             && stood.is_none()
             && !found.open.is_empty()
             && self.askable(author);
+        // An issue with no priority gets one. The research naming none, or `P0`,
+        // which kelpie never sets, leaves the fallback. A pass that asks its author
+        // owes the label with the rest, put on when the wait ends: the answers
+        // pass may rank the issue, and silence ends with the fallback.
+        let fallback = !ranked && found.priority.is_none();
+        let wanted = found.priority.or(fallback.then_some(FALLBACK_PRIORITY));
+        let named = (wanted.filter(|_| !ranked)).and_then(|priority| {
+            let named = board::repo_priority(&have, priority).map(str::to_owned);
+            named.or_else(|| self.made_priority(issue, priority))
+        });
+        // The comment says kelpie set the fallback only where the label is owed
+        // and the pass does not wait on the author.
+        let set = fallback && !ask && named.is_some();
+        labels.splice(priority_at..priority_at, named);
+        let found = &match set {
+            true => Found {
+                priority: Some(FALLBACK_PRIORITY),
+                ..found.clone()
+            },
+            false => found.clone(),
+        };
         let ready = ready::readiness(self, issue, author, found, &labels);
         // A rewrite the check still refuses is written as settled answers are,
         // and the issue ends `needs-triage`.
@@ -508,6 +530,7 @@ impl Runner {
             settled: answers_body.is_some() && !rewritten,
             rewrite: rewritten,
             stood: stood.is_some(),
+            fallback: set,
         };
         let mut facts = facts(found, &labels, wording, reader);
         if plain {

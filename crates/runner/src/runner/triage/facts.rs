@@ -37,6 +37,8 @@ pub(super) struct Wording {
     pub(super) rewrite: bool,
     /// A triage label put on by hand stands, so kelpie labels nothing
     pub(super) stood: bool,
+    /// The research named no priority, so kelpie set the fallback itself
+    pub(super) fallback: bool,
 }
 
 // What the representative words the comment of a duplicate from: the other
@@ -69,6 +71,7 @@ pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: 
         ready,
         ask,
         settled,
+        fallback,
         ..
     } = wording;
     let mut facts = String::from("Kelpie read the issue against the repo's main branch.\n");
@@ -80,6 +83,12 @@ pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: 
         facts.push_str(&format!(
             "\nKelpie labels it: {}{when}.\n",
             labels.join(", ")
+        ));
+    }
+    if let (true, Some(priority)) = (fallback, found.priority) {
+        facts.push_str(&format!(
+            "\nThe research ranked the issue nowhere, so kelpie set priority {priority} itself. \
+             Say kelpie set it and the maintainer can change it.\n"
         ));
     }
     if !found.related.is_empty() {
@@ -150,6 +159,7 @@ fn closing(found: &Found, wording: Wording, reader: Reader) -> String {
         local,
         rewrite,
         stood,
+        fallback,
         ..
     } = wording;
     let next = match (ask, answers || local) {
@@ -167,7 +177,7 @@ fn closing(found: &Found, wording: Wording, reader: Reader) -> String {
         (false, false) => "\nThe maintainer triages it next.\n",
     };
     match reader {
-        Reader::Maintainer => maintainers(found, ask, stood, rewrite),
+        Reader::Maintainer => maintainers(found, ask, stood, rewrite, fallback),
         Reader::Mentioned => format!(
             "{next}Kelpie adds a line under your words that mentions the maintainer, so they are \
              notified. Promise nothing else of them.\n"
@@ -179,7 +189,7 @@ fn closing(found: &Found, wording: Wording, reader: Reader) -> String {
 // What the representative is told of a pass that does not make the
 // maintainer's own issue ready: it speaks to them, says what is theirs to
 // settle, and recommends a priority
-fn maintainers(found: &Found, ask: bool, stood: bool, rewrite: bool) -> String {
+fn maintainers(found: &Found, ask: bool, stood: bool, rewrite: bool, fallback: bool) -> String {
     let mut theirs = Vec::new();
     if !found.open.is_empty() {
         theirs.push("the questions above");
@@ -220,7 +230,7 @@ fn maintainers(found: &Found, ask: bool, stood: bool, rewrite: bool) -> String {
             theirs.join(", ")
         ));
     }
-    if let Some(priority) = found.priority {
+    if let Some(priority) = found.priority.filter(|_| !fallback) {
         said.push_str(&format!(" Say kelpie would recommend priority {priority}."));
     }
     said.push('\n');

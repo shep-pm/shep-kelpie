@@ -80,6 +80,31 @@ impl Runner {
         }
     }
 
+    // Makes each priority label `priority: P0` to `priority: P4` the repo has under
+    // neither that name nor the bare `P0` to `P4`, so an issue can be ranked and the
+    // maintainer has the label to use. Only adds, like the agent labels, and a
+    // project on the local store makes none.
+    pub(super) fn make_priority_labels(&mut self) {
+        if self.local_store() {
+            return;
+        }
+        let have = match self.ports.forge.repo_labels(&self.remote) {
+            Ok(have) => have,
+            Err(e) => {
+                self.notes
+                    .push(format!("cannot read the repo's labels for priorities: {e}"));
+                return;
+            }
+        };
+        let wanted = ["P0", "P1", "P2", "P3", "P4"]
+            .into_iter()
+            .filter(|p| crate::board::repo_priority(&have, p).is_none())
+            .filter_map(super::triage::comment::priority_label);
+        if let Err(e) = self.make_missing_labels(wanted) {
+            self.notes.push(e);
+        }
+    }
+
     /// What the runner could not do and carried on without, oldest first
     ///
     /// Each note is handed out once.

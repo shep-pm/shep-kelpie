@@ -224,6 +224,7 @@ impl Runner {
         // A new implementer file needs its `agent:` label made, listed or not.
         if self.implementer_files() != had_labels || to_github {
             self.make_agent_labels();
+            self.make_priority_labels();
         }
         self.gpu.point_at(gpu_metrics_url);
         self.extra_instructions = extra_instructions;

@@ -131,7 +131,12 @@ fn a_number_not_in_the_listing_or_closed_or_itself_is_dropped_and_the_issue_is_t
         assert_eq!(rig.github.comments(), [(30, handed(WORDS))], "{what}");
         assert_eq!(
             moves(&rig),
-            ["comment", "make needs-triage", "label needs-triage"],
+            [
+                "comment",
+                "label priority: P3",
+                "make needs-triage",
+                "label needs-triage"
+            ],
             "{what}"
         );
         let triaged = triage(&rig, &runner);

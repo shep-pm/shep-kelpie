@@ -305,7 +305,7 @@ pub(super) fn prompt(
          it `ready-for-agent`, and otherwise under the issue's text.\n\n\
          Reply with exactly one JSON object and nothing else: {{\"type\": \"bug\" | \
          \"enhancement\" | null, \"kind\": \"feat\" | \"fix\" | \"docs\" | \"refactor\" | \
-         \"perf\" | \"test\" | \"ci\" | \"chore\" | \"style\" | null, \"priority\":\"P0\" | \"P1\" | \"P2\" | \"P3\" | \"P4\" | null, \
+         \"perf\" | \"test\" | \"ci\" | \"chore\" | \"style\" | null, \"priority\": \"P0\" | \"P1\" | \"P2\" | \"P3\" | \"P4\", \
          \"related\": [issue numbers], \"addressed_by\": null | {{\"number\": n, \"kind\": \
          \"issue\" | \"pull_request\", \"why\": \"one sentence\"}}, \"files\": [repo paths], \
          \"tests\": [test names], \"criteria\": [strings], \"open\": [{{\"question\": \"...\", \
