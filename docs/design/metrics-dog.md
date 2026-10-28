@@ -26,3 +26,11 @@ The calls waiting for, and holding, a lease on a gateway's model, by `model`. Th
 - `kelpie_model_lease_wait_seconds_total{model}`, `kelpie_model_lease_grants_total{model}`: counted at each begin, the wait from when the call first said it waited. A model on a URL host and a round that runs a command have no `Watched.lease`, so are not counted
 - A call carried through a handover keeps its gateway lease, so the new image counts it held from `Kept.model` (`crates/core/src/ports/agent.rs`) and `Kept.lease`; one carried by an image that did not note the model counts on none until it ends
 - Four series a model, so 20 for five models, which the budget test counts against `SERIES_CAP`
+
+## Availability
+
+What the agent board (ADR 0018) will choose by, read by the dog for every agent file it loads. Only the dog's `status` trigger shows it so far, as `availability`. `crates/dog/src/dog/availability/`, `crates/adapters/src/adapters/paddock/mod.rs`
+
+- Each model an agent calls behind a `paddock` gateway (`Runs::gateway`), every 30s (`LOAD_TICK`), from `GET /paddock/status`: `slots` (`turns.lease`, 0 when none is listed), `held` (leases neither revoked nor reclaimable) and `waiting` (waiters of kind `lease`), with `read_at`. A failed read, or a gateway whose key is unset, is `unknown`, never free. An `openai` gateway has no status and is not listed
+- Each account an agent's `limit` names (`claude`, `codex`), at most every `RECHECK_SECS` (600) in the same pass: the `session` and `week` windows with `read_at`. A failed read keeps the last reading; one never read is `unknown`. A Codex home the settings cannot give leaves `codex` unknown
+- The reads block, so each runs off the dog's loop; the root builds the ports (`dog_ports`, `src/main.rs`) and the dog crate names only core's

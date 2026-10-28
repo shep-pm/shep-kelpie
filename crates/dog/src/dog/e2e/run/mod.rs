@@ -3,9 +3,9 @@
 //!
 //! The dog starts two programs here, `ssh` and `rsync`, each with an argument
 //! list and no shell between. Everything that names a place comes from the
-//! [`Plan`], which the project's settings made. Every program is killed if
-//! the run is dropped, which is how a worker hanging up, or the ceiling, ends
-//! it.
+//! [`Plan`], which the project's settings made. Neither sees a hidden
+//! variable. Every program is killed if the run is dropped, which is how a
+//! worker hanging up, or the ceiling, ends it.
 
 use std::ffi::OsString;
 
@@ -18,7 +18,7 @@ use tokio::sync::mpsc::Sender;
 
 use super::{Plan, Remote};
 use crate::lease::door::LONGEST_LINE;
-use crate::spawn::shell_quote;
+use crate::spawn::{self, shell_quote};
 use crate::status::shell_number;
 
 /// The longest message kept of what rsync said when it failed
@@ -86,7 +86,7 @@ async fn command(remote: &Remote, plan: &Plan, lines: &Sender<String>) -> Result
         shell_quote(&plan.remote_dir()),
         shell_quote(&format!("./{}", plan.command.display()))
     );
-    let mut child = Command::new(&remote.ssh)
+    let mut child = Command::from(spawn::command(&remote.ssh))
         .args(["-tt"])
         .arg(&plan.host)
         .arg(words)
@@ -143,7 +143,7 @@ async fn stage_and_deliver(remote: &Remote, plan: &Plan, staging: &Path) -> Resu
 }
 
 async fn rsync(remote: &Remote, args: &[OsString]) -> Result<(), String> {
-    let done = Command::new(&remote.rsync)
+    let done = Command::from(spawn::command(&remote.rsync))
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

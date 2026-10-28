@@ -79,7 +79,7 @@ pub use issue::{
     SubIssue, SubIssueState,
 };
 pub use keychain::KeychainBlocked;
-pub use leased::{LocalLeases, PaddockHolder};
+pub use leased::{LocalLeases, ModelLoad, PaddockHolder};
 pub use local_paths::{Guarded, GuardedVoice, with_comments_in_body};
 pub use metrics::{Sample, SeriesKind, Sink};
 pub use pace::{AT_ONCE, CallPacer, LocalPace, PER_MINUTE, Pace, Pass};

@@ -18,6 +18,18 @@ pub struct PaddockHolder {
     pub since: String,
 }
 
+/// How busy one model is, as the gateway's `GET /paddock/status` lists it
+// wire format: the dog's `status` shows it, so a rename breaks readers of status
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelLoad {
+    /// The leases it serves at once, its `turns.lease`, or 0 when none is listed
+    pub slots: u64,
+    /// The leases on it that are neither revoked nor reclaimable
+    pub held: u64,
+    /// The lease asks queued for it
+    pub waiting: u64,
+}
+
 /// Reads the leases on a gateway's models
 pub trait LocalLeases: Send + Sync {
     /// Who holds a lease on `model` at `gateway`, or `None` when it is free
@@ -29,5 +41,10 @@ pub trait LocalLeases: Send + Sync {
     /// An unreadable status or a model with no turn limit counts as free.
     fn paddock_queued(&self, _gateway: &Upstream, _model: &str) -> bool {
         false
+    }
+
+    /// How busy `model` at `gateway` is, or `None` when the gateway cannot be asked
+    fn paddock_load(&self, _gateway: &Upstream, _model: &str) -> Option<ModelLoad> {
+        None
     }
 }

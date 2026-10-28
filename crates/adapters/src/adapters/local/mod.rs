@@ -17,7 +17,9 @@ use super::files::is_executable;
 use super::paddock;
 use super::process::Processes;
 use crate::forwarder::Upstream;
-use crate::ports::{Finding, LocalLeases, PaddockHolder, Reviewer, ReviewerError, RoundStage};
+use crate::ports::{
+    Finding, LocalLeases, ModelLoad, PaddockHolder, Reviewer, ReviewerError, RoundStage,
+};
 #[cfg(any(test, feature = "test-support"))]
 use crate::settings::Timing;
 use crate::settings::{Gateways, LocalRound};
@@ -116,6 +118,10 @@ impl LocalLeases for LocalReviewer {
 
     fn paddock_queued(&self, gateway: &Upstream, model: &str) -> bool {
         paddock::queued(gateway, model)
+    }
+
+    fn paddock_load(&self, gateway: &Upstream, model: &str) -> Option<ModelLoad> {
+        paddock::load(gateway, model).ok()
     }
 }
 
