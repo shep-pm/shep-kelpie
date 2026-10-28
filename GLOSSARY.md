@@ -100,10 +100,18 @@ A definition file, `<kelpie home>/agents/<name>.md`, naming what it is for
 (its **role**: `implementer`, `reviewer`, `pm` and the
 others), its harness, the model and effort it runs on, and its prompt as the
 body. A file is a **baseline** plus a **binding**, or says both itself.
-Kelpie ships whole agents and baselines, and `add` writes the whole ones
-out. A project names its implementers, its reviewers and its PM by agent.
+An implementer or reviewer file may also say what it is chosen by:
+`description`, `kinds` and `tier`. Kelpie ships whole agents and baselines,
+and `add` writes the whole ones out. A project names its implementers, its
+reviewers and its PM by agent.
 _Avoid_: model (one part of an agent), bot (a review bot is one kind of
 reviewer)
+
+**Tier**:
+How much work an implementer or reviewer is trusted with: `light`,
+`standard` or `heavy`, in that order, set by its file's `tier`. An agent
+whose file names none is `standard`.
+_Avoid_: size, level
 
 **Baseline**:
 A shipped agent file that says what a role does: its `role` and a body, and

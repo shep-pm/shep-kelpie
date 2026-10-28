@@ -34,7 +34,6 @@ So the roles that decide are cut to one, the project manager, and choosing an ag
   - `description`: free text for the project manager (absorbs #1378).
   - `kinds`: the kinds of work it takes, such as `docs` or `mechanical` (absorbs #1379).
   - `tier`: `light`, `standard` or `heavy`.
-  - `limits`: optional `$` per day and the hours it may run. The 5-hour and weekly windows come from the meters, not the file.
 - Concurrency is not in the file. The board reads it from where it lives: a gateway model's slots, queue and load time from the paddock's status, a hosted plan's windows from its meter, and a review bot's window from the lease dog.
 - A project names no agents. It keeps `agents.allow`, an optional list of agents it may use, so a private project can keep its code to the models its owner chooses, and `reviews.need`. This finishes #1232's last slice (#1287) without shep-pm/shep#1079, since no project lineup is left to inherit, and kelpie keeps no agent names in code.
 

@@ -11,6 +11,7 @@ mod axes;
 mod bots;
 mod debug;
 mod extends;
+mod fit;
 mod goose;
 mod init;
 mod legacy;

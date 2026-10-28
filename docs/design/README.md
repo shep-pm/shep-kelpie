@@ -37,11 +37,12 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Mainta
 | browser-dev-server.md | a worker's dev server: launch, port, readiness | `runner/dev_server/`, `core/ports/dev_server.rs`, `adapters/dev_server/` |
 | compaction.md | when a session compacts, `compact_window`, `COMPACT` | `runner/compact/`, `adapters/{pi/compact,goose/compact,codex/context}.rs` |
 | skills.md | step skills, the skill copy, the wording skill | `core/skills/*.rs` |
-| plugins.md | repo plugins: sources, the copy of each, harness loading, their MCP | `core/skills/repo/`, `adapters/{skills,claude/mcp,pi/skills,codex/skills,goose/skills}.rs` |
+| plugins.md | repo plugins: sources, copies, harness loading, MCP | `core/skills/repo/`, `adapters/{skills,claude/mcp,pi/skills,codex/skills,goose/skills}.rs` |
 | agent-files.md | agent file, `extends`, baselines | `core/agents/`, `src/flock/add/` |
+| agent-migration.md | `agents migrate` | `core/agents/legacy.rs` |
 | agents.md | harnesses, gateways | `adapters/`, `core/settings/agents/`, `process/spawn.rs` |
 | cli-adapter.md | a new CLI | `adapters/cli/` |
-| handover.md | in-flight turns handed to a new image, `upgrade` | `src/sheep/handover/`, `runner/flight/carry/`, `adapters/process/adopt/`, `src/upgrade/handover.rs` |
+| handover.md | in-flight turns handed to a new build, `upgrade` | `src/sheep/handover/`, `runner/flight/carry/`, `adapters/process/adopt/`, `src/upgrade/handover.rs` |
 | windows.md | `sh`, `env`, test fakes on Windows | `process/spawn.rs`, `test_support/` |
 | waits-and-spend.md | waits, held-up turns, failing steps, spend | `runner/{turn/unreachable,looks}/`, `adapters/{unreachable,codex}/`, `core/usage/`, `core/settings/agents/` |
 | review.md | review, bots, rulings | `runner/{review,ruling}/`, `core/webhook.rs` |
@@ -62,7 +63,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Mainta
 | representative.md | agent file, `agents.representative`, post wording | `runner/representative/`, `core/agents/front/`, `core/settings/agents/`, `agents/representative.md` |
 | dependencies.md | bot bumps: rebase, proof, merge, red | `core/settings/dependencies.rs`, `runner/{dependencies,dev_server/bump}/`, `runner/flight/proving.rs`, `core/state/bumps.rs`, `adapters/{e2e_runner,pages}.rs`, `adapters/bridge/client/` |
 | triage.md | settings, triager, pick rule, `since`, the verb, `status` | `core/settings/triage.rs`, `runner/triage/`, `runner/open_checks.rs`, `core/ports/issue.rs` |
-| triage-limits.md | the limits | `runner/triage/limits.rs` |
+| triage-limits.md | limits | `runner/triage/limits.rs` |
 | triage-pass.md | a pass: post, labels, duplicate, agent-ready | `runner/{triage,flight}/`, `core/ports/voice.rs` |
 | triage-images.md | an issue's images | `runner/triage/images.rs`, `adapters/gh/attachment.rs` |
 | triage-author.md | author's round: ask, answers, silence | `runner/triage/{ask,heard}.rs` |
@@ -75,9 +76,9 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Mainta
 | metrics.md | kelpie's series, alerts, dashboard | `core/metrics/`, `core/ports/metrics.rs`, `assets/{prometheus,grafana}/` |
 | metrics-work-items.md | work-item series, `finished` line | `core/usage/finished.rs`, `runner/ci_failure.rs` |
 | metrics-dog.md | leases, summons, forge | `core/metrics/{dog,forge,model_lease}.rs`, `dog/watch/` |
-| metrics-transcripts.md | series from a call's transcript: MCP, tools, `usage` | `crates/facts/`, `runner/transcript_count/`, `core/usage/` |
+| metrics-transcripts.md | a call's transcript: MCP, tools, `usage` | `crates/facts/`, `runner/transcript_count/`, `core/usage/` |
 | budget.md | pacing, dog + leases, time, usage, settings | `runner/pace.rs`, `dog/`, `core/usage/`, `core/settings/`, `src/sheep/mod.rs` |
 
-Each file stays under 8 KB; over it, split in two with a new row here (`scripts/design-size.sh`). A changed decision updates its bullet.
+Each file stays under 8 KB; over it, split in two and add a row here. A changed decision updates its bullet.
 
 Elsewhere: `docs/design-log.md` (history, old file formats), `docs/facts/`, `docs/adr/`, `GLOSSARY.md`.

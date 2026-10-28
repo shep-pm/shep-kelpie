@@ -28,11 +28,13 @@ use crate::settings::{
 
 pub mod baseline;
 mod extends;
+pub mod fit;
 mod front;
 pub mod init;
 pub mod legacy;
 mod needs;
 
+pub use fit::{Fit, Kinds, Tier};
 pub use needs::Need;
 
 /// The folder in kelpie's home that holds the agent files
@@ -254,6 +256,9 @@ pub struct Agent {
     /// Whether this reviewer reads twice, the second time shown what it found
     /// the first and asked only for what it missed. Never for another role.
     pub second_look: bool,
+    /// What the project manager and the board choose it by. Empty for a
+    /// role other than an implementer or a reviewer.
+    pub fit: Fit,
 }
 
 /// Every agent kelpie knows: its defaults, and the files that replace or add to them

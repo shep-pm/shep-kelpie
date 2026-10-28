@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
-use super::{Agent, Need, Role, Runs};
+use super::{Agent, Fit, Kinds, Need, Role, Runs, Tier};
 use crate::forwarder::Upstream;
 use crate::review_bot::Bot;
 
@@ -81,6 +81,12 @@ struct Implementer {
     context: Option<ContextSize>,
     #[serde(default)]
     tools: Option<NonBlank>,
+    #[serde(default)]
+    description: Option<NonBlank>,
+    #[serde(default)]
+    kinds: Option<Kinds>,
+    #[serde(default)]
+    tier: Option<Tier>,
 }
 
 // The project manager's keys: a Claude Code session, since it is held by a
@@ -181,6 +187,12 @@ struct Reviewer {
     review_wait: Option<NonZeroU32>,
     #[serde(default)]
     tools: Option<NonBlank>,
+    #[serde(default)]
+    description: Option<NonBlank>,
+    #[serde(default)]
+    kinds: Option<Kinds>,
+    #[serde(default)]
+    tier: Option<Tier>,
 }
 
 // A session's keys, whichever role runs it
@@ -272,6 +284,11 @@ pub(super) fn parse(text: &str) -> Result<Agent, String> {
                 prompt,
                 paths: Vec::new(),
                 second_look: false,
+                fit: Fit {
+                    description: keys.description,
+                    kinds: keys.kinds,
+                    tier: keys.tier,
+                },
             })
         }
         Front::Reviewer(keys) => {
@@ -282,6 +299,11 @@ pub(super) fn parse(text: &str) -> Result<Agent, String> {
                 prompt,
                 paths: keys.paths,
                 second_look: keys.second_look,
+                fit: Fit {
+                    description: keys.description,
+                    kinds: keys.kinds,
+                    tier: keys.tier,
+                },
             })
         }
         Front::Pm(keys) => keys.agent(Role::Pm, prompt, &yaml, "the project manager"),
@@ -347,6 +369,7 @@ impl Expert {
             prompt,
             paths: Vec::new(),
             second_look: false,
+            fit: Fit::default(),
         })
     }
 }
@@ -417,6 +440,7 @@ impl OnClaude {
             prompt,
             paths: Vec::new(),
             second_look: false,
+            fit: Fit::default(),
         })
     }
 }
@@ -697,16 +721,28 @@ pub(super) fn parse_named(name: &str, text: &str) -> Result<Agent, String> {
 }
 
 // The parser's message, led by the key whose value it refuses. A missing or
-// unknown key is already named, and placed at the start of a line.
+// unknown key is already named, and placed at the start of a line. An item of
+// a block list is led by the key of its list.
 fn yaml_error(yaml: &str, error: &serde_saphyr::Error) -> String {
     let message = error.without_snippet().to_string();
     let key = error
         .location()
         .filter(|at| at.column() > 1)
         .and_then(|at| {
-            let line = yaml
-                .lines()
-                .nth(usize::try_from(at.line()).ok()?.checked_sub(1)?)?;
+            let lines: Vec<&str> = yaml.lines().collect();
+            let at = usize::try_from(at.line()).ok()?.checked_sub(1)?;
+            let indent = |line: &str| line.len() - line.trim_start().len();
+            let line = lines.get(at)?;
+            let line = if line.trim_start().starts_with("- ") {
+                let own = indent(line);
+                let key = |l: &&&str| {
+                    let t = l.trim_start();
+                    !t.is_empty() && !t.starts_with(['#', '-']) && indent(l) <= own
+                };
+                lines[..at].iter().rev().find(key)?
+            } else {
+                line
+            };
             let (key, _) = line.split_once(':')?;
             Some(key.trim()).filter(|k| !k.is_empty() && !k.starts_with('#'))
         });
