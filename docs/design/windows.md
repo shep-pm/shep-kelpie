@@ -28,25 +28,10 @@ What the person starting the shepherd needs on a Windows machine (#1271). Measur
 - A file's mode is a Unix answer, and `core` gives Windows one of its own where it can (#1262):
   - the home stamp reads `Metadata::modified`.
   - the fence takes no executable bit from a Windows disk, since git there keeps none: a fenced file matches either regular mode of the commit.
-  - a file or folder only its owner can use is the `owner_only` crate's (#1264), below.
+  - a file or folder only its owner can use is the `owner_only` crate's (#1264), in `docs/design/windows-crates.md`.
 - A test that reads or sets a mode, or makes a symlink, is `#[cfg(unix)]`: its body names a Unix API, and a symlink needs Developer Mode or an administrator. One that only needs a Unix script or secret is `#[cfg_attr(windows, ignore = "...")]`.
 - The dog's e2e run works on Windows too (#1302):
   - `deliver` has no `openat`, so it opens each folder from the worktree down by path with `FILE_FLAG_OPEN_REPARSE_POINT` and a share mode of read only, holds every handle until the copy ends, and refuses a folder whose attributes say reparse point (a symlink or a junction). It reads the attributes of every held folder again before each file. A worker that turns a results folder into a junction in place (write-attributes access is not subject to sharing) between that read and the write can land one result file outside the worktree. Unix has no such gap. Closing it needs a handle-relative open, which needs `unsafe` or a Windows crate, so it waits on the maintainer reopening the no-new-dependency and no-`unsafe` ruling. It removes a file already there and makes it again with `create_new`, so a link put in its place fails the write. The flag values are local constants, since `dog` takes no Windows crate.
   - The `ssh` and `rsync` stand-ins are `.sh` scripts run by a `.cmd` that calls Git for Windows' `sh` with `MSYS=winsymlinks:nativestrict`. The `.cmd` is the process the dog kills, so the `ssh` script ends its command when the dog closes its input. `ended` is `!tree::alive(pid)`.
-- The adapters crate gives Windows these answers (#1298):
-  - the App store's folders and key use the `owner_only` crate on both platforms (#1264): `private`, `put` and the owner and mode checks of `save` call it, in place of `rustix` and `PermissionsExt`. On Windows the key and its folders are the user's alone, and a link, another owner or any other ACE is `StoreError::Exposed`.
-  - `StatDisk` uses `disk` (#1300). `GetDiskFreeSpaceExW` reads caller-available bytes. One file handle supplies volume serial, index and link count (`GetFileInformationByHandle`), and `AllocationSize` (`GetFileInformationByHandleEx(FileStandardInfo)`). Hard links count once. Missing, inaccessible and delete-pending files are skipped at open.
-  - `adapters::files::is_executable` is the mode bits on Unix and a regular file on Windows, and `on_path` also tries each `PATHEXT` extension there.
-  - `adapters::files::link` is `symlink` on Unix, and `symlink_file` or `symlink_dir` by the target on Windows. The Codex login and both skill folders use it.
-  - `adapters::mcp::live`, which binds a Unix socket named by a uid, is built on Unix only.
-- The runner crate gives Windows these answers (#1299):
-  - `code_graph::too_long` says `None`, since the daemon's `cbm-daemon-<uid>` folder and the socket path limit it explains are Unix ones.
-  - the rig's `hook` sets no mode on Windows, and `write_totp_secret` makes its file with `owner_only::create_private`.
-- The `owner_only` crate keeps a folder or file to its owner on both platforms (#1264). It is the one leaf crate that holds Windows ACL code, and denies `unsafe_code` except in `owner_only/windows.rs`, as `tree` does. `totp::private_dir` re-exports it for the runner.
-  - On Unix: `private_dir` and `create_private` use mode 0700 and 0600. `is_owner_only` is the uid and `mode & 0o077 == 0`.
-  - On Windows: a new folder or file takes a protected DACL of one ACE, full control for the current user, and the owner is set to that user, so one made from an elevated shell is not Administrators'. A folder's ACE is inherited by what it holds. `restrict_dir` does the same for a folder that is already there.
-  - `is_owner_only` on Windows is false for a null DACL, an owner that is not the current user, or any allow ACE for another SID, Administrators and SYSTEM included. Deny ACEs are ignored.
-  - `private_dir` narrows only the folders it makes, as `DirBuilder::mode` does.
-  - `Secret::write` draws its bytes from `getrandom` on every platform. It and `write_atomically` skip the folder sync on Windows, which cannot open a folder to sync it and whose NTFS journals the rename and link.
-  - A refusal's advice on Windows is `icacls <path> /inheritance:r /grant:r %USERNAME%:F`, or `:(OI)(CI)F` for a folder.
-  - The ACL tests run in the `windows` job's non-gating step, `id: totp`.
+- A cold start reads `BootError::Unsupported` from `shep_handover::boot` as no arrival, since Windows has no `execve` and no handover to arrive from (#1448). `handover_boot::arrival` maps it, and any other `BootError` stays fatal.
+- The adapters, runner and `owner_only` crates' Windows answers are in `docs/design/windows-crates.md`.
