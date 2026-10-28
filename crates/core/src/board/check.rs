@@ -333,62 +333,138 @@ fn criteria<'a>(lines: &[&'a str]) -> Vec<(&'a str, String)> {
     items
 }
 
-// The words that change an issue, each with its endings.
-const CHANGES: [&str; 26] = [
-    "edit",
-    "edits",
-    "edited",
-    "editing",
-    "update",
-    "updates",
-    "updated",
-    "updating",
-    "comment",
-    "comments",
-    "commented",
-    "commenting",
-    "label",
-    "labels",
-    "labeled",
-    "labelled",
-    "labeling",
-    "labelling",
-    "close",
-    "closes",
-    "closed",
-    "closing",
-    "reopen",
-    "reopens",
-    "reopened",
-    "reopening",
+// The verbs that change the issue they stand before, as "close #12".
+const CHANGES: [&str; 9] = [
+    "edit", "update", "comment", "label", "close", "reopen", "retitle", "assign", "unassign",
 ];
 
-// Whether a criterion names an issue, as `#12` or `owner/repo#12`, and asks
-// for it to be edited, updated, commented on, labelled, closed or reopened.
-// Words in backticks are code, and a criterion about the pull request's own
-// body is no change to an issue.
+// The verbs that change an issue only when a preposition makes its name their
+// target, as "add a row to #12" and not "add a test for #12".
+const CHANGES_TO: [&str; 9] = [
+    "add", "append", "tick", "untick", "uncheck", "check", "post", "remove", "delete",
+];
+
+// The prepositions that make an issue the target of a verb in `CHANGES_TO`.
+const TARGET: [&str; 5] = ["to", "on", "in", "from", "at"];
+
+// The words a verb may follow and still start what is asked of the worker.
+const LEADS: [&str; 9] = [
+    "to", "must", "should", "will", "can", "also", "then", "and", "or",
+];
+
+// A word of a clause, and whether it names an issue as `#12` or `owner/repo#12`.
+type Word = (bool, String);
+
+// Whether a criterion asks for an issue to be edited, updated, commented on,
+// labelled, ticked, closed or reopened, one clause at a time. Words in
+// backticks are code unless they name an issue, and a verb whose object is
+// the pull request's own body changes no issue.
 fn changes_an_issue(text: &str) -> bool {
-    let names = text
-        .match_indices('#')
-        .any(|(at, _)| text[at + 1..].starts_with(|c: char| c.is_ascii_digit()));
-    let prose = text.split('`').step_by(2).collect::<Vec<_>>().join(" ");
-    let words = words(&prose);
-    let own_body = words.iter().enumerate().any(|(i, w)| {
-        let after = match w.as_str() {
-            "request" if i > 0 && words[i - 1] == "pull" => 3,
-            "pr" => 2,
-            _ => return false,
-        };
-        (words.iter().skip(i + 1).take(after)).any(|w| w == "body" || w == "description")
-    });
-    names && !own_body && words.iter().any(|w| CHANGES.contains(&w.as_str()))
+    clauses(text).iter().any(|clause| {
+        let words = clause_words(clause);
+        (0..words.len()).any(|at| asks_to_change(&words, at))
+    })
 }
 
-// The words of `text` in lower case, an underscore inside a word.
-fn words(text: &str) -> Vec<String> {
-    let parts = text.split(|c: char| !(c.is_alphanumeric() || c == '_'));
-    (parts.filter(|w| !w.is_empty()))
-        .map(str::to_lowercase)
+// Whether the verb at `at` leads a request, is one of the issue-changing
+// verbs, and has an issue after it as its target.
+fn asks_to_change(words: &[Word], at: usize) -> bool {
+    let (is_issue, word) = &words[at];
+    let leads = at == 0 || LEADS.contains(&words[at - 1].1.as_str());
+    let rest = &words[at + 1..];
+    let direct = CHANGES.iter().any(|stem| is_form(word, stem));
+    let aimed = CHANGES_TO.iter().any(|stem| is_form(word, stem))
+        && (word != "check" || rest.first().is_some_and(|(_, w)| w == "off"));
+    if *is_issue || !leads || !(direct || aimed) {
+        return false;
+    }
+    let object: Vec<&str> = (rest.iter())
+        .map(|(_, w)| w.as_str())
+        .take_while(|w| !["and", "then", "or"].contains(w))
+        .collect();
+    if names_own_body(&object) {
+        return false;
+    }
+    (rest.iter().enumerate())
+        .any(|(i, (is_issue, _))| *is_issue && (direct || aims_at(words, at + 1 + i)))
+}
+
+// Whether the word before the issue at `issue`, past "the" and "issue", is a
+// preposition that makes it a target.
+fn aims_at(words: &[Word], issue: usize) -> bool {
+    let before = words[..issue].iter().rev();
+    let mut before =
+        before.skip_while(|(_, w)| ["the", "issue", "ticket", "tracker"].contains(&w.as_str()));
+    before
+        .next()
+        .is_some_and(|(_, w)| TARGET.contains(&w.as_str()))
+}
+
+// Whether `words` hold "pull request" or "PR" with "body" or "description"
+// within three words of it.
+fn names_own_body(words: &[&str]) -> bool {
+    words.iter().enumerate().any(|(i, w)| {
+        let pull_request = *w == "request" && i > 0 && words[i - 1] == "pull";
+        let near = &words[i.saturating_sub(3)..(i + 4).min(words.len())];
+        (pull_request || *w == "pr") && near.iter().any(|w| ["body", "description"].contains(w))
+    })
+}
+
+// Whether `word` is `stem` or one of its endings: `closes`, `closed`,
+// `closing`, `labelled`.
+fn is_form(word: &str, stem: &str) -> bool {
+    let ending = word.strip_prefix(stem).map_or_else(
+        || {
+            let dropped = stem.strip_suffix('e')?;
+            word.strip_prefix(dropped).filter(|r| *r == "ing")
+        },
+        Some,
+    );
+    ending.is_some_and(|e| ["", "s", "es", "d", "ed", "ing", "led", "ling"].contains(&e))
+}
+
+// The clauses of `text`, split at commas, colons, semicolons, brackets and
+// sentence ends. Code in backticks that names no issue is one word, `code`.
+fn clauses(text: &str) -> Vec<String> {
+    let mut plain = String::new();
+    for (i, part) in text.split('`').enumerate() {
+        let names = part
+            .match_indices('#')
+            .any(|(at, _)| part[at + 1..].starts_with(|c: char| c.is_ascii_digit()));
+        plain.push(' ');
+        plain.push_str(if i % 2 == 0 || names { part } else { "code" });
+        plain.push(' ');
+    }
+    let mut clauses = vec![String::new()];
+    let mut chars = plain.chars().peekable();
+    while let Some(c) = chars.next() {
+        let ends = ",;:()".contains(c)
+            || (".!?".contains(c) && chars.peek().is_none_or(|n| n.is_whitespace()));
+        if ends {
+            clauses.push(String::new());
+        } else if let Some(last) = clauses.last_mut() {
+            last.push(c);
+        }
+    }
+    clauses
+}
+
+// The words of a clause in lower case, each flagged when it names an issue.
+fn clause_words(clause: &str) -> Vec<Word> {
+    let names = |t: &str| {
+        t.match_indices('#')
+            .any(|(at, _)| t[at + 1..].starts_with(|c: char| c.is_ascii_digit()))
+    };
+    (clause.split_whitespace())
+        .map(|token| {
+            let word = token
+                .strip_suffix("'s")
+                .or(token.strip_suffix("\u{2019}s"))
+                .unwrap_or(token);
+            let word = word.trim_matches(|c: char| !(c.is_alphanumeric() || c == '_' || c == '#'));
+            (names(token), word.to_lowercase())
+        })
+        .filter(|(_, w)| !w.is_empty())
         .collect()
 }
 

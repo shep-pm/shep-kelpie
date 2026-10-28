@@ -327,6 +327,40 @@ fn every_way_to_change_an_issue_is_caught() {
 }
 
 #[test]
+fn a_criterion_that_adds_to_or_ticks_another_issue_is_caught() {
+    for text in [
+        "Add a row to shep-pm/shep#1075",
+        "Tick the step 7 box on #1075",
+        "Check off step 7 on the tracker #1075",
+        "Append a row to issue #1075",
+        "Retitle #12",
+        "The worker should assign #12 to the maintainer",
+        "Update the pull request body to say Resolves #12, and close #13",
+        "Update the pull request body and close #13",
+    ] {
+        assert_eq!(
+            criterion(text),
+            [Failure::ChangesIssue(text.to_owned())],
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn a_change_word_that_is_not_about_the_issue_passes() {
+    for text in [
+        "Closing the window no longer loses state, as reported in #12",
+        "The status label updates as #12 describes",
+        "A code comment cites #12",
+        "Add a regression test for #12",
+        "Check #12 still passes",
+        "Edit the check, which #12 asks for",
+    ] {
+        assert_eq!(criterion(text), [], "{text}");
+    }
+}
+
+#[test]
 fn a_criterion_that_only_names_an_issue_passes() {
     for text in [
         "Resolves #12",
