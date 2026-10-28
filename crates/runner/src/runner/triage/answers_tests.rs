@@ -2,6 +2,7 @@
 //! second triager call, what it writes, and what it is not made or written from
 
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -442,16 +443,31 @@ fn answers_given(rig: &Rig) -> String {
     rest.to_owned()
 }
 
+// Steps until `done`, each step waiting for the call it starts to end. A pass
+// that finds nothing due is not the last word: its read may have been dropped
+// for a write that came after it, and the next pass reads again.
+fn step_until(runner: &Mutex<Runner>, mut done: impl FnMut() -> bool) {
+    let by = Instant::now() + CALL_PATIENCE;
+    while !done() {
+        assert!(Instant::now() < by, "it never came about");
+        assert_eq!(step(runner).unwrap(), None);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 // The author replies and the second pass runs, which settles everything
 fn replied(found: Value, author: &str, reply_text: &str) -> (Rig, Mutex<Runner>) {
     let (rig, runner) = filed("pick = \"maintainer\"", author, found);
     assert_eq!(step(&runner).unwrap(), None);
+    // The author replies to the questions, so they are posted first.
+    step_until(&runner, || posted(&rig).len() == 1);
     wrote(&rig, author, reply_text);
     rig.claude.script_for(Role::Triager, [reply(settled())]);
     rig.claude
         .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
     rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
+    // The second triager call is made and heard, whichever pass starts it.
+    step_until(&runner, || calls(&rig, Role::Triager).len() == 2);
     (rig, runner)
 }
 
