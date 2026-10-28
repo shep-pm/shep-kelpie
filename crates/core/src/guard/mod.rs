@@ -164,7 +164,7 @@ pub fn pinned(input: &[u8], worktree: &Path, again: &[String]) -> Result<String,
     let quote = |text: &str| format!("'{}'", text.replace('\'', r"'\''"));
     // `pwd -P` prints the folder with every link resolved.
     let folder = |path: &Path| {
-        let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+        let path = crate::canonical(path).unwrap_or_else(|_| path.to_owned());
         quote(&path.to_string_lossy())
     };
     let (judged, tree) = (folder(&call.cwd), folder(worktree));

@@ -73,7 +73,7 @@ impl Rule {
 
 // Whether `rule` denies `path`, as spelled or through its links
 fn covers(rule: &Rule, path: &Path) -> bool {
-    let real = rule.path.canonicalize().ok();
+    let real = crate::canonical(&rule.path).ok();
     [Some(&rule.path), real.as_ref()]
         .into_iter()
         .flatten()
@@ -105,7 +105,7 @@ fn named_files(command: &str, home: Option<&Path>, env: &dyn Env) -> Vec<PathBuf
     named
         .into_iter()
         .flat_map(|file| {
-            let real = file.canonicalize().ok();
+            let real = crate::canonical(&file).ok();
             std::iter::once(file).chain(real)
         })
         .collect()

@@ -64,7 +64,7 @@ pub async fn project_here(
     let here: Vec<&String> = settings
         .iter()
         .filter(|(_, s)| {
-            let repo = s.git.checkout.canonicalize();
+            let repo = crate::canonical(&s.git.checkout);
             roots.contains(&repo.unwrap_or_else(|_| s.git.checkout.clone()))
         })
         .map(|(sheep, _)| *sheep)
@@ -212,7 +212,7 @@ fn checkout_roots(folder: &Path) -> Vec<PathBuf> {
     [Some(top), main]
         .into_iter()
         .flatten()
-        .map(|root| root.canonicalize().unwrap_or(root))
+        .map(|root| crate::canonical(&root).unwrap_or(root))
         .collect()
 }
 
