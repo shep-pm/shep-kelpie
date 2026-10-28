@@ -117,7 +117,7 @@ pub(crate) fn program_folder(program: &Path, env: &dyn Env, home: &Path) -> Vec<
     }) else {
         return Vec::new();
     };
-    let real = found.canonicalize().unwrap_or_else(|_| found.clone());
+    let real = crate::canonical(&found).unwrap_or_else(|_| found.clone());
     let mut grants: BTreeSet<PathBuf> = [found.clone(), real.clone()].into_iter().collect();
     for file in [&found, &real] {
         grants.extend(install(file, home));
@@ -177,7 +177,7 @@ fn interpreter(file: &Path, env: &dyn Env, home: &Path) -> Vec<PathBuf> {
     let Some(program) = found else {
         return Vec::new();
     };
-    let real = program.canonicalize().unwrap_or_else(|_| program.clone());
+    let real = crate::canonical(&program).unwrap_or_else(|_| program.clone());
     let mut grants: BTreeSet<PathBuf> = [program.clone(), real.clone()].into_iter().collect();
     for file in [&program, &real] {
         grants.extend(install(file, home));
@@ -202,7 +202,7 @@ pub(super) fn shebang(file: &Path) -> Option<String> {
 /// srt matches the real path, so `scratch` is resolved where it exists.
 pub(crate) fn bind_in_scratch(policy: &mut Policy, call: &AgentCall, scratch: &Path) {
     if call.tools == Tools::Work {
-        let real = scratch.canonicalize();
+        let real = crate::canonical(scratch);
         policy
             .socket_folders
             .push(real.unwrap_or_else(|_| scratch.to_owned()));

@@ -48,7 +48,7 @@ impl Layout {
     // The file the installed path leads to: what an upgrade replaces, so a
     // link stays a link.
     fn target(&self) -> PathBuf {
-        fs::canonicalize(&self.installed).unwrap_or_else(|_| self.installed.clone())
+        crate::canonical(&self.installed).unwrap_or_else(|_| self.installed.clone())
     }
 
     // What a signature calls the build: the installed file's name, not the

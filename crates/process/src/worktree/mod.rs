@@ -756,7 +756,7 @@ fn common_dir(repo: &Path) -> Result<PathBuf, WorktreeError> {
 }
 
 fn canonical(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_owned())
+    crate::canonical(path).unwrap_or_else(|_| path.to_owned())
 }
 
 fn create(path: &Path) -> Result<(), WorktreeError> {
