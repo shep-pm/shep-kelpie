@@ -294,7 +294,10 @@ impl Runner {
         let lines: Vec<&str> = asked.lines().collect();
         let listed = lines.len() - list_start(&lines);
         let (letter, at) = letter_of(choice)?;
-        (listed > 0 && at >= listed).then_some((letter, listed))
+        let named = lines[lines.len() - listed..]
+            .iter()
+            .any(|line| plain_choice(line) == plain_choice(choice));
+        (listed > 0 && at >= listed && !named).then_some((letter, listed))
     }
 
     // Adds the recommendation to ruling `id`, to be posted as it is.
@@ -364,10 +367,9 @@ fn recommended(asked: &str, passed: &Passed<'_>) -> String {
         let listed = list.len();
         let drafted = draft(&mut list, candidates);
         let named = choice.map(plain_choice);
-        let at = match choice.and_then(letter_of) {
-            Some((_, at)) if at < listed => Some(at),
-            _ => named.and_then(|n| list.iter().position(|line| plain_choice(line) == n)),
-        };
+        let by_name = named.and_then(|n| list.iter().position(|line| plain_choice(line) == n));
+        let by_letter = choice.and_then(letter_of).filter(|&(_, at)| at < listed);
+        let at = by_name.or(by_letter.map(|(_, at)| at));
         match (choice, at) {
             (Some(_), Some(at)) => {
                 let line = list.remove(at);

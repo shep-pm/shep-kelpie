@@ -319,6 +319,29 @@ fn a_recommendation_naming_a_letter_past_the_list_is_dropped_and_the_question_st
     );
 }
 
+const LANGUAGES: &str = "<kelpie-question>\nWhich language?\n- Go\n- C\n- Rust\n\
+                         </kelpie-question>\n";
+
+const TWO_LANGUAGES: &str = "<kelpie-question>\nWhich language?\n- Rust\n- C\n\
+                             </kelpie-question>\n";
+
+#[test]
+fn a_recommendation_naming_an_option_that_is_a_letter_moves_that_option_up() {
+    for (project, asked, expected) in [
+        ("sandshrew", LANGUAGES, "- C\n- Go\n- Rust"),
+        ("sandslash", TWO_LANGUAGES, "- C\n- Rust"),
+    ] {
+        let (rig, runner) = asking(project, asked);
+        let text = passed_on(
+            &rig,
+            &runner,
+            "{\"answer\": {\"item\": 7, \"escalate\": \"C\", \"why\": \"\"}}",
+        );
+        assert!(text.contains("PM recommends: C\n"), "{text}");
+        assert!(text.contains(expected), "{text}");
+    }
+}
+
 #[test]
 fn a_recommendation_in_other_words_is_still_added_as_a_new_choice() {
     let (rig, runner) = asking("vileplume", CHOICES);
