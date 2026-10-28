@@ -272,7 +272,14 @@ async fn a_ruling_reaches_a_running_runner_at_once() {
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
     let answers = shepherd.scratch("kelpie/koji/answers");
     let client = client(&shepherd).await;
-    let ruled = in_time(rule(&client, &project("koji"), "14 yes", &answers)).await;
+    let ruled = in_time(rule(
+        &reach(),
+        &client,
+        &project("koji"),
+        "14 yes",
+        &answers,
+    ))
+    .await;
     assert_eq!(ruled, Ok(vec!["ruling 14 on koji: yes".to_owned()]));
     assert_eq!(asked(&shepherd.writes()), ["rule"]);
     assert!(!answers.join("14").exists());
@@ -284,7 +291,14 @@ async fn a_ruling_for_a_stopped_runner_is_left_for_its_start() {
     runner(&shepherd, "koji", Path::new("/src/koji"), false);
     let answers = shepherd.home().join("kelpie/koji/answers");
     let client = client(&shepherd).await;
-    let ruled = in_time(rule(&client, &project("koji"), "14 no rename it", &answers)).await;
+    let ruled = in_time(rule(
+        &reach(),
+        &client,
+        &project("koji"),
+        "14 no rename it",
+        &answers,
+    ))
+    .await;
     assert_eq!(
         ruled,
         Ok(vec![
@@ -312,7 +326,14 @@ async fn a_runner_s_refusal_of_a_ruling_is_its_error() {
     shepherd.says("koji", &[r#"{"error":"no ruling 14 is pending"}"#]);
     let answers = shepherd.home().join("kelpie/koji/answers");
     let client = client(&shepherd).await;
-    let err = in_time(rule(&client, &project("koji"), "14 yes", &answers)).await;
+    let err = in_time(rule(
+        &reach(),
+        &client,
+        &project("koji"),
+        "14 yes",
+        &answers,
+    ))
+    .await;
     assert_eq!(err, Err("no ruling 14 is pending".into()));
     assert!(!answers.exists());
 }

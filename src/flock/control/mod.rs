@@ -581,6 +581,7 @@ fn attached(status: &str) -> Vec<String> {
 /// cannot be left. A runner busy past the deadline is no error: the answer
 /// has most likely been taken, and the second line says how to check.
 pub async fn rule(
+    reach: &Reach,
     client: &dyn Connection,
     project: &ProjectName,
     params: &str,
@@ -590,7 +591,7 @@ pub async fn rule(
     let name = project.as_str();
     let (id, said) = params.split_once(' ').unwrap_or((params, ""));
     let ruled = format!("ruling {id} on {name}: {said}");
-    match trigger(client, name, "rule", Some(params)).await? {
+    match reach.trigger(client, name, "rule", Some(params)).await? {
         Answered::Runner(body) => match refusal(&body) {
             Some(why) => Err(why),
             None => Ok(vec![ruled]),
@@ -688,14 +689,18 @@ pub enum Format {
 /// # Errors
 ///
 /// A message when the shepherd cannot list the projects.
-pub async fn status(client: &dyn Connection, format: Format) -> Result<Vec<String>, String> {
+pub async fn status(
+    reach: &Reach,
+    client: &dyn Connection,
+    format: Format,
+) -> Result<Vec<String>, String> {
     let installed = match format {
         Format::Plain => installed_build(client).await,
         Format::Json => None,
     };
     let mut lines = Vec::new();
     for sheep in tables(client).await?.into_keys() {
-        match trigger(client, &sheep, "status", None).await? {
+        match reach.trigger(client, &sheep, "status", None).await? {
             Answered::Runner(body) => match format {
                 Format::Plain => lines.extend(plain_status(&sheep, &body, installed.as_deref())),
                 Format::Json => lines.push(json_status(&sheep, &body)),
@@ -722,6 +727,7 @@ pub async fn status(client: &dyn Connection, format: Format) -> Result<Vec<Strin
 /// A message when the project has no kelpie runner, it is not running, it
 /// did not answer in time, or it refused the trigger, with its reason.
 pub async fn send(
+    reach: &Reach,
     client: &dyn Connection,
     project: &ProjectName,
     action: &str,
@@ -729,7 +735,7 @@ pub async fn send(
 ) -> Result<Vec<String>, String> {
     kelpie_runner(client, &flock(client).await?, project).await?;
     let runner = project.as_str();
-    match trigger(client, runner, action, params).await? {
+    match reach.trigger(client, runner, action, params).await? {
         Answered::Runner(body) => match refusal(&body) {
             Some(why) => Err(why),
             None => Ok(vec![body]),
@@ -750,6 +756,7 @@ pub async fn send(
 /// A message when the project has no kelpie runner, it is not running or is
 /// starting, or it refused the action, with its reason.
 pub async fn change(
+    reach: &Reach,
     client: &dyn Connection,
     project: &ProjectName,
     action: &str,
@@ -758,7 +765,7 @@ pub async fn change(
 ) -> Result<Vec<String>, String> {
     kelpie_runner(client, &flock(client).await?, project).await?;
     let runner = project.as_str();
-    match trigger(client, runner, action, params).await? {
+    match reach.trigger(client, runner, action, params).await? {
         Answered::Runner(body) => match (refusal(&body), format) {
             (Some(why), _) => Err(why),
             (None, Format::Json) => Ok(vec![body]),
@@ -790,6 +797,7 @@ pub async fn change(
 /// it refused the note, with its reason. With [`Format::Json`] it returns the
 /// runner's answer as it came.
 pub async fn tell(
+    reach: &Reach,
     client: &dyn Connection,
     project: &ProjectName,
     note: &str,
@@ -797,7 +805,7 @@ pub async fn tell(
 ) -> Result<Vec<String>, String> {
     kelpie_runner(client, &flock(client).await?, project).await?;
     let runner = project.as_str();
-    match trigger(client, runner, "tell", Some(note)).await? {
+    match reach.trigger(client, runner, "tell", Some(note)).await? {
         Answered::Runner(body) => match refusal(&body) {
             Some(why) => Err(why),
             None if format == Format::Json => Ok(vec![body]),
@@ -933,6 +941,9 @@ pub(crate) async fn trigger(
 }
 
 mod plain;
+mod socket;
+
+pub use socket::Reach;
 
 #[cfg(test)]
 mod tests;

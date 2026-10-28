@@ -27,7 +27,15 @@ async fn changed(action: &str, params: Option<&str>, format: Format) -> (String,
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
     busy(&shepherd, &[]);
     let client = client(&shepherd).await;
-    let ran = in_time(change(&client, &project("koji"), action, params, format)).await;
+    let ran = in_time(change(
+        &reach(),
+        &client,
+        &project("koji"),
+        action,
+        params,
+        format,
+    ))
+    .await;
     (one(ran), asked(&shepherd.writes()))
 }
 
@@ -98,6 +106,7 @@ async fn a_change_the_runner_refuses_is_still_its_error() {
     shepherd.says("koji", &[r#"{"error":"no work item for #713 is open"}"#]);
     let client = client(&shepherd).await;
     let ran = in_time(change(
+        &reach(),
         &client,
         &project("koji"),
         "drop",
@@ -115,7 +124,14 @@ async fn a_rule_the_runner_answers_late_names_the_rulings_check() {
     busy(&shepherd, &[]);
     let client = client(&shepherd).await;
     let answers = shepherd.scratch("answers");
-    let ruled = in_time(rule(&client, &project("koji"), "14 yes", &answers)).await;
+    let ruled = in_time(rule(
+        &reach(),
+        &client,
+        &project("koji"),
+        "14 yes",
+        &answers,
+    ))
+    .await;
     let lines = ruled.expect("a late ruling is no error to retry");
     assert_eq!(lines[0], "ruling 14 on koji: yes");
     assert!(lines[1].contains("most likely been taken"), "{lines:?}");
@@ -162,6 +178,6 @@ async fn status_of_a_project_that_does_not_answer_in_time_is_still_an_error() {
     runner(&shepherd, "koji", Path::new("/src/koji"), true);
     busy(&shepherd, &[]);
     let client = client(&shepherd).await;
-    let err = in_time(send(&client, &project("koji"), "status", None)).await;
+    let err = in_time(send(&reach(), &client, &project("koji"), "status", None)).await;
     assert_eq!(err, Err("koji's runner did not answer in time".into()));
 }

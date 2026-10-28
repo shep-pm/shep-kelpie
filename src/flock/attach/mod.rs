@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use crate::shepherd::Connection;
 
-use super::control;
+use super::control::{self, Reach};
 use crate::home::ProjectName;
 use crate::runner::Attaching;
 use crate::terminal;
@@ -29,6 +29,7 @@ const ASK_AGAIN: Duration = Duration::from_secs(5);
 /// A message naming why the work item cannot be attached, with what to do
 /// instead, or why its session could not run or be let go.
 pub(super) async fn attach(
+    reach: &Reach,
     client: &dyn Connection,
     project: &ProjectName,
     ticket: TicketId,
@@ -39,7 +40,7 @@ pub(super) async fn attach(
             Some(session) => format!("{ticket} {me} {session}"),
             None => format!("{ticket} {me}"),
         };
-        let answer = control::send(client, project, action, Some(&params)).await?;
+        let answer = control::send(reach, client, project, action, Some(&params)).await?;
         Ok(answer.concat())
     };
     let wait = async || {

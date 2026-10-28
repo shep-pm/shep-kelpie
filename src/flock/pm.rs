@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use crate::shepherd::Connection;
 
-use super::control;
+use super::control::{self, Reach};
 use crate::home::ProjectName;
 use crate::runner::PmAttaching;
 use crate::terminal;
@@ -26,6 +26,7 @@ const ASK_AGAIN: Duration = Duration::from_secs(5);
 ///
 /// A message naming why its session cannot be held, run or let go.
 pub(super) async fn pm(
+    reach: &Reach,
     client: &dyn Connection,
     project: &ProjectName,
 ) -> Result<Vec<String>, String> {
@@ -35,7 +36,7 @@ pub(super) async fn pm(
             Some(session) => format!("{action} {me} {session}"),
             None => format!("{action} {me}"),
         };
-        let answer = control::send(client, project, "pm", Some(&params)).await?;
+        let answer = control::send(reach, client, project, "pm", Some(&params)).await?;
         Ok(answer.concat())
     };
     let wait = async || {
