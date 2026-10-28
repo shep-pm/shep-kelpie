@@ -13,6 +13,7 @@ mod finish;
 mod late;
 mod pause;
 mod plain;
+mod socket;
 
 use pause::{IN_TOOL_7, paused};
 

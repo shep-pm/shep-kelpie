@@ -27,6 +27,7 @@ const CONNECT_WITHIN: Duration = Duration::from_secs(5);
 /// fallback to `shep trigger` has been said yet
 pub struct Reach {
     kelpie_home: PathBuf,
+    deadline: Duration,
     said: AtomicBool,
     say: Box<dyn Fn(&str) + Send + Sync>,
 }
@@ -35,6 +36,7 @@ impl std::fmt::Debug for Reach {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Reach")
             .field("kelpie_home", &self.kelpie_home)
+            .field("deadline", &self.deadline)
             .field("said", &self.said)
             .finish_non_exhaustive()
     }
@@ -52,9 +54,19 @@ impl Reach {
     pub fn saying(kelpie_home: &Path, say: impl Fn(&str) + Send + Sync + 'static) -> Self {
         Self {
             kelpie_home: kelpie_home.to_owned(),
+            deadline: TRIGGER_DEADLINE,
             said: AtomicBool::new(false),
             say: Box::new(say),
         }
+    }
+
+    /// [`Reach`] that waits `deadline` for a runner's answer, in place of
+    /// `shep trigger`'s own
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn waiting(mut self, deadline: Duration) -> Self {
+        self.deadline = deadline;
+        self
     }
 
     /// What `sheep` made of `action`, asked on its socket, and of `shep trigger`
@@ -86,7 +98,7 @@ impl Reach {
                     .await;
             }
         };
-        match connection.ask(&request, TRIGGER_DEADLINE).await {
+        match connection.ask(&request, self.deadline).await {
             Ok(reply) => Ok(Answered::Runner(body(&reply))),
             Err(Failure::TimedOut) => Ok(Answered::TimedOut),
             Err(Failure::Unknown(unknown)) => {
