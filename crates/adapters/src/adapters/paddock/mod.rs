@@ -122,30 +122,26 @@ fn queued_in(body: &str, model: &str) -> bool {
     let Ok(read) = serde_json::from_str::<Value>(body) else {
         return false;
     };
-    let Some(turns) = read["models"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|entry| entry["model"] == model)
+    let Some(turns) = on_model(&read, "models", model)
+        .next()
         .and_then(|entry| entry["turns"]["lease"].as_u64())
         .filter(|turns| *turns > 0)
     else {
         return false;
     };
-    let held = read["leases"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|lease| {
-            lease["model"] == model && lease["revoked"].is_null() && lease["reclaimable"] == false
-        })
-        .count();
-    held as u64 >= turns
-        && read["waiters"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|waiter| waiter["model"] == model)
+    held_on(&read, model) >= turns && on_model(&read, "waiters", model).next().is_some()
+}
+
+// The entries of the status's `list` that name `model`.
+fn on_model<'a>(read: &'a Value, list: &str, model: &'a str) -> impl Iterator<Item = &'a Value> {
+    let entries = read[list].as_array().into_iter().flatten();
+    entries.filter(move |entry| entry["model"] == model)
+}
+
+// The leases on `model` that neither a revoke nor a reclaim has ended.
+fn held_on(read: &Value, model: &str) -> u64 {
+    let live = |lease: &&Value| lease["revoked"].is_null() && lease["reclaimable"] == false;
+    on_model(read, "leases", model).filter(live).count() as u64
 }
 
 /// How busy `model` is, by `GET /paddock/status`
@@ -166,19 +162,15 @@ fn load_in(body: &str, model: &str) -> Result<ModelLoad, String> {
     let not_a_status =
         || "`GET /paddock/status` answered something other than its status".to_owned();
     let read: Value = serde_json::from_str(body).map_err(|_| not_a_status())?;
-    let models = read["models"].as_array().ok_or_else(not_a_status)?;
-    let on_model = |key: &str| {
-        let entries = read[key].as_array().into_iter().flatten();
-        entries.filter(move |entry| entry["model"] == model)
-    };
-    let slots = models.iter().find(|entry| entry["model"] == model);
-    let live = |lease: &&Value| lease["revoked"].is_null() && lease["reclaimable"] == false;
+    read["models"].as_array().ok_or_else(not_a_status)?;
+    let slots = on_model(&read, "models", model).next();
+    let lease_ask = |waiter: &&Value| waiter["kind"] == "lease";
     Ok(ModelLoad {
         slots: slots
             .and_then(|entry| entry["turns"]["lease"].as_u64())
             .unwrap_or(0),
-        held: on_model("leases").filter(live).count() as u64,
-        waiting: on_model("waiters").filter(|w| w["kind"] == "lease").count() as u64,
+        held: held_on(&read, model),
+        waiting: on_model(&read, "waiters", model).filter(lease_ask).count() as u64,
     })
 }
 
