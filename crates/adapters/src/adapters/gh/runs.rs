@@ -7,9 +7,12 @@
 
 use serde::Deserialize;
 
+use self::timeout::cancelled_job;
 use super::{gh, unreadable};
 use crate::ports::{BranchRun, FailedLogs, ForgeError, Rerun, Timestamp, Workflow, WorkflowState};
 use crate::settings::ForgeSlug;
+
+mod timeout;
 
 /// How many failed runs are read
 const RUNS: usize = 3;
@@ -25,19 +28,64 @@ pub(super) fn failed_run_logs(
     let listed = list(repo)?;
     let failed = failed_runs(&listed, head, merge_group)?;
     let mut text = String::new();
-    for id in failed.iter().copied().take(RUNS) {
-        text.push_str(&format!("--- run {id}\n{}\n", run_log_tail(repo, id)?));
+    let mut timed_out = 0;
+    for run in failed.iter().take(RUNS) {
+        let read = read_run(repo, run.id, &mut gh)?;
+        text.push_str(&format!("--- run {}\n{}\n", run.id, read.text));
+        timed_out += usize::from(read.timed_out);
     }
     Ok(FailedLogs {
         text,
         omitted: failed.len().saturating_sub(RUNS),
+        timed_out,
     })
 }
 
 pub(super) fn run_log_tail(repo: &ForgeSlug, run: u64) -> Result<String, ForgeError> {
+    read_run(repo, run, &mut gh).map(|read| read.text)
+}
+
+/// What kelpie read of one run's log
+#[derive(Debug)]
+struct RunLog {
+    text: String,
+    /// Whether the run was cut short by a job's timeout, which `text` says in its first line
+    timed_out: bool,
+}
+
+// The end of `run`'s failed log. Where `--log-failed` answers nothing, the
+// log is the cancelled job's, after a line saying its timeout ended it.
+fn read_run(
+    repo: &ForgeSlug,
+    run: u64,
+    ask: &mut impl FnMut(&[&str]) -> Result<Vec<u8>, ForgeError>,
+) -> Result<RunLog, ForgeError> {
     let id = run.to_string();
-    let log = gh(&["run", "view", &id, "--repo", repo.as_str(), "--log-failed"])?;
-    Ok(failure_tail(&String::from_utf8_lossy(&log), LOG_BYTES))
+    let repo = repo.as_str();
+    let log = ask(&["run", "view", &id, "--repo", repo, "--log-failed"])?;
+    let tail = failure_tail(&String::from_utf8_lossy(&log), LOG_BYTES);
+    if !tail.is_empty() {
+        return Ok(RunLog {
+            text: tail,
+            timed_out: false,
+        });
+    }
+    let jobs = ask(&["run", "view", &id, "--json", "jobs", "--repo", repo])?;
+    let Some(job) = cancelled_job(&jobs)? else {
+        return Ok(RunLog {
+            text: tail,
+            timed_out: false,
+        });
+    };
+    let job_id = job.id.to_string();
+    let log = ask(&[
+        "run", "view", &id, "--job", &job_id, "--log", "--repo", repo,
+    ])?;
+    let tail = failure_tail(&String::from_utf8_lossy(&log), LOG_BYTES);
+    Ok(RunLog {
+        text: format!("{}\n{tail}", job.note()).trim_end().to_owned(),
+        timed_out: true,
+    })
 }
 
 /// The latest completed run of each workflow and event among the 50 newest completed runs on `branch`
@@ -165,16 +213,7 @@ fn latest_runs(listed: &[u8]) -> Result<Vec<BranchRun>, ForgeError> {
 /// caller records, so a refusal of another run does not hide it.
 pub(super) fn rerun_failed(repo: &ForgeSlug, head: &str) -> Result<(), ForgeError> {
     let listed = list(repo)?;
-    let ids = failed_runs(&listed, head, false)?;
-    if ids.is_empty() {
-        return Err(ForgeError::Failed(format!("no failed run on {head}")));
-    }
-    if ids.len() > RUNS {
-        return Err(ForgeError::Failed(format!(
-            "{} runs failed on {head}, more than the {RUNS} whose logs kelpie reads",
-            ids.len()
-        )));
-    }
+    let ids = rerun_list(&listed, head)?;
     let mut first_error = None;
     let mut started = false;
     for id in ids {
@@ -267,8 +306,43 @@ fn list(repo: &ForgeSlug) -> Result<Vec<u8>, ForgeError> {
     ])
 }
 
-// Every failed run of `head`, or of the merge queue, newest first
-fn failed_runs(listed: &[u8], head: &str, merge_group: bool) -> Result<Vec<u64>, ForgeError> {
+// The runs of `head` that `rerun_failed` reruns: those that failed. A run its
+// timeout ended would end the same way again, so it is left out, and a head
+// with only such runs has nothing to rerun.
+fn rerun_list(listed: &[u8], head: &str) -> Result<Vec<u64>, ForgeError> {
+    let red = failed_runs(listed, head, false)?;
+    if red.len() > RUNS {
+        return Err(ForgeError::Failed(format!(
+            "{} runs failed on {head}, more than the {RUNS} whose logs kelpie reads",
+            red.len()
+        )));
+    }
+    let failed: Vec<u64> = (red.iter())
+        .filter(|r| r.conclusion == "failure")
+        .map(|r| r.id)
+        .collect();
+    match (failed.is_empty(), red.is_empty()) {
+        (false, _) => Ok(failed),
+        (true, true) => Err(ForgeError::Failed(format!("no failed run on {head}"))),
+        (true, false) => Err(ForgeError::Failed(format!(
+            "no run failed on {head} but ones its timeout ended, which a rerun would end again"
+        ))),
+    }
+}
+
+/// A run that ended red, and how the forge worded it
+#[derive(Debug, PartialEq, Eq)]
+struct FailedRun {
+    id: u64,
+    conclusion: String,
+}
+
+// How a run concludes when kelpie reads its log: a job `timeout-minutes` stops
+// ends `cancelled`, and a run can also conclude `timed_out`
+const READ_FOR_A_LOG: [&str; 3] = ["failure", "timed_out", "cancelled"];
+
+// Every run of `head`, or of the merge queue, that ended red, newest first
+fn failed_runs(listed: &[u8], head: &str, merge_group: bool) -> Result<Vec<FailedRun>, ForgeError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Run {
@@ -280,12 +354,15 @@ fn failed_runs(listed: &[u8], head: &str, merge_group: bool) -> Result<Vec<u64>,
     let runs: Vec<Run> = serde_json::from_slice(listed).map_err(|_| unreadable(listed))?;
     Ok(runs
         .into_iter()
-        .filter(|r| r.conclusion == "failure")
+        .filter(|r| READ_FOR_A_LOG.contains(&r.conclusion.as_str()))
         .filter(|r| match merge_group {
             true => r.event == "merge_group",
             false => r.head_sha == head,
         })
-        .map(|r| r.database_id)
+        .map(|r| FailedRun {
+            id: r.database_id,
+            conclusion: r.conclusion,
+        })
         .collect())
 }
 

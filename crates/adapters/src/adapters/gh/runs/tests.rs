@@ -9,9 +9,13 @@ const LISTED: &[u8] = br#"[
     {"conclusion":"failure","databaseId":1,"event":"pull_request","headSha":"old"}
 ]"#;
 
+fn ids(runs: Vec<FailedRun>) -> Vec<u64> {
+    runs.into_iter().map(|r| r.id).collect()
+}
+
 #[test]
 fn a_pull_requests_failed_runs_are_those_of_its_head() {
-    assert_eq!(failed_runs(LISTED, "abc", false).unwrap(), [3]);
+    assert_eq!(ids(failed_runs(LISTED, "abc", false).unwrap()), [3]);
 }
 
 #[test]
@@ -22,12 +26,56 @@ fn every_failed_run_of_a_head_is_listed_not_only_the_ones_whose_logs_are_read() 
         {"conclusion":"failure","databaseId":2,"event":"pull_request","headSha":"abc"},
         {"conclusion":"failure","databaseId":1,"event":"pull_request","headSha":"abc"}
     ]"#;
-    assert_eq!(failed_runs(listed, "abc", false).unwrap(), [4, 3, 2, 1]);
+    assert_eq!(
+        ids(failed_runs(listed, "abc", false).unwrap()),
+        [4, 3, 2, 1]
+    );
 }
 
 #[test]
 fn the_queues_failed_runs_are_those_of_the_merge_group_event() {
-    assert_eq!(failed_runs(LISTED, "abc", true).unwrap(), [4]);
+    assert_eq!(ids(failed_runs(LISTED, "abc", true).unwrap()), [4]);
+}
+
+// A job `timeout-minutes` stops ends `cancelled`, and so does its run
+// (`fixtures/gh-run-view-jobs-timed-out.json`), so a run is read for a log
+// whichever of the three it concluded
+#[test]
+fn a_run_ended_by_its_timeout_is_listed_for_a_log() {
+    let listed = br#"[
+        {"conclusion":"success","databaseId":9,"event":"merge_group","headSha":"queue"},
+        {"conclusion":"cancelled","databaseId":8,"event":"pull_request","headSha":"abc"},
+        {"conclusion":"timed_out","databaseId":7,"event":"pull_request","headSha":"abc"},
+        {"conclusion":"success","databaseId":6,"event":"pull_request","headSha":"abc"},
+        {"conclusion":"failure","databaseId":5,"event":"pull_request","headSha":"abc"},
+        {"conclusion":"cancelled","databaseId":4,"event":"pull_request","headSha":"old"},
+        {"conclusion":"timed_out","databaseId":3,"event":"merge_group","headSha":"queue"},
+        {"conclusion":"skipped","databaseId":2,"event":"pull_request","headSha":"abc"}
+    ]"#;
+
+    let of_head = failed_runs(listed, "abc", false).unwrap();
+    assert_eq!(ids(of_head), [8, 7, 5]);
+    let of_queue = failed_runs(listed, "abc", true).unwrap();
+    assert_eq!(ids(of_queue), [3]);
+}
+
+#[test]
+fn a_rerun_list_is_the_runs_that_failed_alone() {
+    let listed = br#"[
+        {"conclusion":"timed_out","databaseId":4,"event":"pull_request","headSha":"abc"},
+        {"conclusion":"failure","databaseId":3,"event":"pull_request","headSha":"abc"},
+        {"conclusion":"cancelled","databaseId":2,"event":"pull_request","headSha":"abc"}
+    ]"#;
+    assert_eq!(rerun_list(listed, "abc").unwrap(), [3]);
+
+    // A rerun of a run its timeout ended would time out again
+    let only_timed_out = br#"[
+        {"conclusion":"timed_out","databaseId":4,"event":"pull_request","headSha":"abc"}
+    ]"#;
+    assert!(matches!(
+        rerun_list(only_timed_out, "abc"),
+        Err(ForgeError::Failed(_))
+    ));
 }
 
 // `gh run list --branch main --status completed --limit 50 --json
@@ -326,4 +374,132 @@ fn a_log_keeps_its_end_from_a_line_start_and_never_splits_a_character() {
     let log = "first line\nsecond line\nthird é line\n";
     assert_eq!(tail(log, 16), "third é line");
     assert_eq!(tail("é".repeat(10).as_str(), 5), "éé");
+}
+
+// `gh run view 38275563600 --json jobs` and `gh run view 38275563600 --job
+// 114900834180 --log` on shep-pm/shep-kelpie with gh 2.96: a run whose
+// `test-macos` job (`timeout-minutes: 20`) its timeout stopped, in the step
+// `Run cargo test --locked`. Its `--log-failed` answer is empty. The log is its
+// first three lines and its last sixty, with the runner folder written
+// `/home/me`.
+const JOBS: &[u8] = include_bytes!("../../../../../../fixtures/gh-run-view-jobs-timed-out.json");
+const JOB_LOG: &str = include_str!("../../../../../../fixtures/gh-run-log-timed-out.txt");
+
+const RUN: u64 = 38_275_563_600;
+const NOTE: &str = "note: job `test-macos` was cancelled in step `Run cargo test --locked` \
+                    after 20m27s: its `timeout-minutes` ended it, so this is a slow job and \
+                    not a failing test";
+
+// What `gh` answered for run 38275563600 to `args`, `failed` being its `--log-failed`
+fn answer(args: &[&str], failed: &str, job_log: &str) -> Result<Vec<u8>, ForgeError> {
+    let id = RUN.to_string();
+    let repo = "shep-pm/shep-kelpie";
+    let reply = match args {
+        ["run", "view", run, "--repo", r, "--log-failed"] if (*run, *r) == (&id, repo) => failed,
+        ["run", "view", run, "--json", "jobs", "--repo", r] if (*run, *r) == (&id, repo) => {
+            return Ok(JOBS.to_vec());
+        }
+        [
+            "run",
+            "view",
+            run,
+            "--job",
+            "114900834180",
+            "--log",
+            "--repo",
+            r,
+        ] if (*run, *r) == (&id, repo) => job_log,
+        other => panic!("gh was asked {other:?}"),
+    };
+    Ok(reply.as_bytes().to_vec())
+}
+
+// Reads run 38275563600 as `gh` answers with `failed` and `job_log`, and returns
+// what was read with each call `gh` was asked
+fn read(failed: &str, job_log: &str) -> (RunLog, Vec<String>) {
+    let repo = ForgeSlug::try_from("shep-pm/shep-kelpie".to_owned()).unwrap();
+    let mut asked = Vec::new();
+    let read = read_run(&repo, RUN, &mut |args: &[&str]| {
+        asked.push(args.join(" "));
+        answer(args, failed, job_log)
+    })
+    .unwrap();
+    (read, asked)
+}
+
+#[test]
+fn a_run_that_failed_keeps_reading_log_failed() {
+    let failed = "test\tRun cargo test\t2026-10-13T10:00:00.0000000Z error: boom";
+
+    let (read, asked) = read(failed, JOB_LOG);
+
+    assert_eq!(read.text, "test\tRun cargo test\terror: boom");
+    assert!(!read.timed_out);
+    assert_eq!(
+        asked,
+        [format!(
+            "run view {RUN} --repo shep-pm/shep-kelpie --log-failed"
+        )]
+    );
+}
+
+#[test]
+fn an_empty_failed_log_falls_back_to_the_cancelled_jobs_log() {
+    let (read, asked) = read("", JOB_LOG);
+
+    assert!(read.timed_out);
+    assert_eq!(
+        asked,
+        [
+            format!("run view {RUN} --repo shep-pm/shep-kelpie --log-failed"),
+            format!("run view {RUN} --json jobs --repo shep-pm/shep-kelpie"),
+            format!("run view {RUN} --job 114900834180 --log --repo shep-pm/shep-kelpie"),
+        ]
+    );
+}
+
+#[test]
+fn a_timed_out_tail_names_the_job_the_step_and_its_elapsed_time() {
+    let (read, _) = read("", JOB_LOG);
+
+    let mut lines = read.text.lines();
+    assert_eq!(lines.next(), Some(NOTE));
+    let kept: Vec<&str> = lines.collect();
+    assert!(!kept.is_empty());
+    assert!(
+        kept.iter()
+            .all(|l| l.starts_with("test-macos\tUNKNOWN STEP\t"))
+    );
+    assert!(
+        kept.contains(&"test-macos\tUNKNOWN STEP\t##[error]The operation was canceled."),
+        "{kept:?}"
+    );
+}
+
+#[test]
+fn a_timed_out_tail_is_cut_to_the_same_bytes_as_a_failed_one() {
+    let line = "test-macos\tUNKNOWN STEP\t2026-10-12T16:33:08.5367760Z test é::a_test ... ok\n";
+    let long = line.repeat(1000);
+
+    let (read, _) = read("", &long);
+
+    let kept = read.text.strip_prefix(&format!("{NOTE}\n")).unwrap();
+    assert!(kept.len() <= LOG_BYTES, "{}", kept.len());
+    assert_eq!(kept, failure_tail(&long, LOG_BYTES));
+    assert!(kept.starts_with("test-macos\tUNKNOWN STEP\ttest é::a_test"));
+}
+
+#[test]
+fn a_run_cancelled_in_no_job_has_no_log_to_read() {
+    let repo = ForgeSlug::try_from("shep-pm/shep-kelpie".to_owned()).unwrap();
+    let no_jobs = br#"{"jobs":[{"databaseId":1,"name":"lint","conclusion":"success","startedAt":"2026-10-12T16:12:47Z","completedAt":"2026-10-12T16:13:44Z","steps":[]}]}"#;
+
+    let read = read_run(&repo, 5, &mut |args: &[&str]| match args {
+        [.., "--log-failed"] => Ok(Vec::new()),
+        _ => Ok(no_jobs.to_vec()),
+    })
+    .unwrap();
+
+    assert_eq!(read.text, "");
+    assert!(!read.timed_out);
 }

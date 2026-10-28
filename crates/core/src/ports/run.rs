@@ -62,4 +62,7 @@ pub struct FailedLogs {
     pub text: String,
     /// How many failed runs kelpie did not read, because more failed than it reads
     pub omitted: usize,
+    /// How many of the runs kelpie read were cut short by a job's `timeout-minutes`,
+    /// whose text opens with a line saying so
+    pub timed_out: usize,
 }
