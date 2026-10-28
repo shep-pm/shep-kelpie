@@ -317,11 +317,10 @@ fn settings_in(
     })
 }
 
-// What `paths` holds that is there. srt-win makes an empty placeholder for a
-// deny target that is missing and never deletes it, and a path the worker
-// cannot make needs no deny: one it makes in the worktree is caught by
-// `fence::differ` after the call. A `<folder>/**` is there when the folder is,
-// a leading `~/` is under `home`, and any other glob is kept for the list to drop.
+// What `paths` holds that is there, since srt-win makes an empty placeholder
+// for a missing deny target and never deletes it. A worktree file made during
+// the call is caught by `fence::differ`. `<folder>/**` is there when the folder
+// is, `~/` is under `home`, and any other glob is kept for the list to drop.
 fn existing<'a, T: AsRef<Path>>(
     paths: &'a [T],
     home: Option<&Path>,
