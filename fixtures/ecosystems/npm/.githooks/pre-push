@@ -1,3 +1,3 @@
 #!/bin/sh
-echo "pre-push: npm run lint"
+echo "pre-push: npm run lint" >&2
 exec npm run lint

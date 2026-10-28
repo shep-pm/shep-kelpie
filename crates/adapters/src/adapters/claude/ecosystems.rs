@@ -428,10 +428,12 @@ pub(crate) fn project(through: &Through, eco: Ecosystem) {
         assert!(out.status.success(), "{step}: {}", said(&out));
         pushed = Some(out);
     }
-    let stderr = String::from_utf8_lossy(&pushed.unwrap().stderr).into_owned();
+    let pushed = pushed.unwrap();
+    let shown = [pushed.stdout.as_slice(), pushed.stderr.as_slice()].concat();
+    let shown = String::from_utf8_lossy(&shown);
     assert!(
-        stderr.contains(eco.hook_prints()),
-        "the pre-push hook did not run: {stderr}"
+        shown.contains(eco.hook_prints()),
+        "the pre-push hook did not run: {shown}"
     );
     assert_eq!(
         git(&remote, &["rev-parse", "wt"]),
