@@ -229,6 +229,14 @@ pub enum Limit {
     Gateway,
 }
 
+impl Limit {
+    /// Whether it is an account's windows, which the pacer reads: an agent on
+    /// any other runs on a local model
+    pub fn is_account(&self) -> bool {
+        matches!(self, Self::Account(_))
+    }
+}
+
 impl Default for Limit {
     fn default() -> Self {
         Self::Account(Account::Claude)
@@ -382,7 +390,7 @@ pub struct Implementer {
 impl Implementer {
     /// Whether it runs on a local model, behind a gateway or not, and never paced
     pub fn is_local(&self) -> bool {
-        !matches!(self.limit, Limit::Account(_))
+        !self.limit.is_account()
     }
 }
 

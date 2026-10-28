@@ -195,7 +195,9 @@ impl Rig {
     /// The part of [`Self::WEBHOOK_URL`] no output may carry
     pub const WEBHOOK_SECRET: &str = "s3cr3t";
 
-    /// A project with the example settings, pointed at a fresh repo
+    /// A project with the example settings, pointed at a fresh repo, whose
+    /// agent board ranks `sonnet-high` first (`FakeAgentBoard::ranks_first`),
+    /// then the ask's other agents by name, until a test sets it
     pub fn new(project: &str) -> Self {
         let rig = Self::stand_ins(project, Home::made());
         rig.make_repo();

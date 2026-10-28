@@ -503,16 +503,6 @@ impl Agents {
         self.agents.iter()
     }
 
-    /// Every agent file whose role is `implementer`, by name: every agent an
-    /// `agent:` label may name
-    pub fn implementer_files(&self) -> Vec<AgentName> {
-        self.agents
-            .iter()
-            .filter(|(_, agent)| agent.role == Role::Implementer)
-            .map(|(name, _)| name.clone())
-            .collect()
-    }
-
     /// Each file that binds nothing, by name: left out of the book, since a
     /// project that never names one is not stopped by it
     pub fn unbound(&self) -> &[Unbound] {

@@ -213,11 +213,12 @@ impl Runner {
         labels: &[String],
         picked: Option<&Picked>,
     ) -> Result<Ranked, AddError> {
-        let (pin, note) = self.pin(ticket, picked);
+        let files = self.implementer_files();
+        let (pin, note) = pin(ticket, picked, &files);
         let pin = match pin {
             Some(pin) => Some(pin),
             // A label naming no implementer is refused, pinned or not.
-            None => (agent_label(labels, &self.implementer_files()))
+            None => (agent_label(labels, &files))
                 .map_err(AddError::Label)?
                 .filter(|_| pinned(labels)),
         };
@@ -226,7 +227,7 @@ impl Runner {
             tier: picked.and_then(|p| p.tier),
             pin: pin.clone(),
             slack: Some(self.slack(picked.and_then(|p| p.slack))),
-            agents: self.board_agents(),
+            agents: self.board_agents_of(files),
             leave_out: Vec::new(),
         };
         let picks = self.board_picks(&ask).map_err(AddError::Unpicked)?;
@@ -257,37 +258,6 @@ impl Runner {
             .filter(|pick| ask.agents.contains(&pick.agent))
             .filter(|pick| ask.pin.as_ref().is_none_or(|pin| *pin == pick.agent));
         Ok(allowed.collect())
-    }
-
-    // The agent `picked` pins its work item to, while it is an implementer
-    // `agents.allow` holds.
-    pub(super) fn pinned_agent(&self, picked: &Picked) -> Option<AgentName> {
-        let agent = picked.agent.as_ref()?;
-        self.implementer_files()
-            .contains(agent)
-            .then(|| agent.clone())
-    }
-
-    // `pinned_agent` of `picked`, and the note for an agent it names that is
-    // no implementer now.
-    fn pin(
-        &self,
-        ticket: TicketId,
-        picked: Option<&Picked>,
-    ) -> (Option<AgentName>, Option<String>) {
-        let Some(picked) = picked else {
-            return (None, None);
-        };
-        let pin = self.pinned_agent(picked);
-        let lapsed = picked.agent.as_ref().filter(|_| pin.is_none());
-        let note = lapsed.map(|agent| {
-            format!(
-                "{}: the project manager picked it for {agent}, which is no longer an \
-                 implementer `agents.allow` holds, so the agent board picks",
-                ticket.shown()
-            )
-        });
-        (pin, note)
     }
 
     // What the agent board ranks for a work item no project manager picked, a
@@ -335,10 +305,16 @@ impl Runner {
     // The implementers the agent board may rank, by name: `implementer_files`
     // but those no turn can run on (`left_out`).
     pub(super) fn board_agents(&self) -> Vec<AgentName> {
+        self.board_agents_of(self.implementer_files())
+    }
+
+    // `files`, the project's `implementer_files`, but those `left_out`.
+    fn board_agents_of(&self, files: Vec<AgentName>) -> Vec<AgentName> {
         let refused = self.left_out();
         let refused: Vec<&AgentName> = refused.iter().map(|(name, _)| name).collect();
-        let files = self.implementer_files().into_iter();
-        files.filter(|name| !refused.contains(&name)).collect()
+        (files.into_iter())
+            .filter(|name| !refused.contains(&name))
+            .collect()
     }
 
     // The implementers the agent board is never asked about, each with why: the
@@ -361,6 +337,31 @@ impl Runner {
         let allowed = self.settings.allowed_implementers(&self.book).into_iter();
         allowed.map(|i| i.name).collect()
     }
+}
+
+// The agent `picked` pins its work item to, while it is one of `files`, the
+// implementers `agents.allow` holds, and the note for an agent it names that
+// is no implementer now.
+fn pin(
+    ticket: TicketId,
+    picked: Option<&Picked>,
+    files: &[AgentName],
+) -> (Option<AgentName>, Option<String>) {
+    let Some(picked) = picked else {
+        return (None, None);
+    };
+    let pin = (picked.agent.as_ref())
+        .filter(|agent| files.contains(agent))
+        .cloned();
+    let lapsed = picked.agent.as_ref().filter(|_| pin.is_none());
+    let note = lapsed.map(|agent| {
+        format!(
+            "{}: the project manager picked it for {agent}, which is no longer an \
+             implementer `agents.allow` holds, so the agent board picks",
+            ticket.shown()
+        )
+    });
+    (pin, note)
 }
 
 // What `ask` wanted, in words: its kind, its least tier and its pin.

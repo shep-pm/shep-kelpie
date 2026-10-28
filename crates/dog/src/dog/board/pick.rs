@@ -59,7 +59,7 @@ fn answer(view: &View, shown: &Availability, ask: &PickAsk, now: Timestamp) -> V
                 fit: &agent.fit,
                 wait: wait(agent, shown, turn, now),
                 typical: history.item(name.as_str(), tier, kind),
-                local: !matches!(agent.runs.session(), Some((_, Limit::Account(_)))),
+                local: !(agent.runs.session()).is_some_and(|(_, limit)| limit.is_account()),
             }
         })
         .collect();

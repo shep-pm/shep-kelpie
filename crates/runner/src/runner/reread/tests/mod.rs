@@ -458,18 +458,24 @@ fn a_fresh_repo_gets_every_implementers_label_when_the_runner_opens() {
 }
 
 #[test]
-fn a_fallback_after_alone_is_no_change() {
+fn a_key_the_agent_board_replaced_alone_is_no_change() {
     let rig = Rig::new("shep");
     let runner = rig.open().unwrap();
-    let next = settings_with(&rig, |s| {
-        s.replace(
-            "[app.dogs.kelpie.agents]\n",
-            "[app.dogs.kelpie.agents]\nfallback_after = 15\n",
-        )
-    });
     let mut runner = runner.lock().unwrap();
-    let line = runner.reread(next, rig.kelpie_settings()).unwrap();
-    assert_eq!(line, None, "nothing reads it");
+    for old in [
+        "fallback_after = 15",
+        "implementers = [\"opus-high\"]",
+        "implementer_choice = \"order\"",
+    ] {
+        let next = settings_with(&rig, |s| {
+            s.replace(
+                "[app.dogs.kelpie.agents]\n",
+                &format!("[app.dogs.kelpie.agents]\n{old}\n"),
+            )
+        });
+        let line = runner.reread(next, rig.kelpie_settings()).unwrap();
+        assert_eq!(line, None, "nothing reads {old}");
+    }
 }
 
 #[test]
