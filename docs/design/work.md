@@ -1,6 +1,6 @@
 # Work
 
-Projects, slots, the issue check. The board and work items are in `board.md`, the project manager in `pm.md`.
+Projects, slots, the issue check. The board and work items are in `board.md`, the project manager in `pm.md` and its board in `pm-board.md`.
 
 ## Projects
 

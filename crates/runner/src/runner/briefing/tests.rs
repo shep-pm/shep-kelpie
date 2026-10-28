@@ -62,6 +62,17 @@ fn a_new_project_gets_its_board_at_start_with_nothing_on_it() {
              \n\
              Not read since the runner started. The board reads it while a slot is free.\n\
              \n\
+             ## Agents\n\
+             \n\
+             Implementers, the default first, then reviewers in their order. An `agent:` label \
+             picks a work item's implementer: tier and kinds are shown, nothing picks by them.\n\
+             \n\
+             - sonnet-high (implementer, default): standard tier, every kind; Builds everyday \
+             features and anything with state, such as a store, a queue or a migration.\n\
+             - qwen (reviewer): light tier, every kind; Reads a diff for defects with the \
+             maintainer's local qwen-review script, as a first pass.\n\
+             - claude (reviewer): standard tier, every kind; no description\n\
+             \n\
              ## Recent events\n\
              \n\
              (none)\n\
@@ -115,6 +126,14 @@ const TWO_BRANCHES: &str = r#"# Board: acme, 2026-09-21 14:18 UTC
 ## Ready queue, read 5m ago (the board's order, first taken first; a new issue joins after the last of its priority)
 
 1. #9 [P1] "Title of #9"; waits: blocked by #4; names README.md, src/missing.rs
+
+## Agents
+
+Implementers, the default first, then reviewers in their order. An `agent:` label picks a work item's implementer: tier and kinds are shown, nothing picks by them.
+
+- sonnet-high (implementer, default): standard tier, every kind; Builds everyday features and anything with state, such as a store, a queue or a migration.
+- qwen (reviewer): light tier, every kind; Reads a diff for defects with the maintainer's local qwen-review script, as a first pass.
+- claude (reviewer): standard tier, every kind; no description
 
 ## Recent events
 
@@ -415,4 +434,40 @@ fn a_due_turn_that_has_not_started_names_what_it_waits_on_in_place_of_being_due(
                 the runner is draining, so no turn starts\n";
     assert_eq!(text.matches(held).count(), 2, "{text}");
     assert!(!text.contains("turn is due"), "{text}");
+}
+
+#[test]
+fn the_board_lists_the_projects_agents_from_their_files() {
+    let rig = Rig::new("acme");
+    rig.write_agent(
+        "heavy",
+        "---\nrole: implementer\nharness: claude-code\nmodel: claude-opus-5-5\neffort: high\n\
+         description: Design work that\n  needs the strongest agent.\nkinds: [design, migration]\n\
+         tier: heavy\n---\n",
+    );
+    rig.implementers(&["heavy", "sonnet-high"]);
+    rig.reviewers(&["claude", "qwen"]);
+    let runner = rig.open().unwrap();
+    let text = board(&rig);
+    let section = text.split("## Agents\n").nth(1).unwrap();
+    let section = section.split("\n## ").next().unwrap();
+    let lines: Vec<&str> = section.lines().filter(|l| l.starts_with("- ")).collect();
+    assert_eq!(
+        lines,
+        [
+            "- heavy (implementer, default): heavy tier, kinds design, migration; \
+             Design work that needs the strongest agent.",
+            "- sonnet-high (implementer): standard tier, every kind; Builds everyday features \
+             and anything with state, such as a store, a queue or a migration.",
+            "- claude (reviewer): standard tier, every kind; no description",
+            "- qwen (reviewer): light tier, every kind; Reads a diff for defects with the \
+             maintainer's local qwen-review script, as a first pass.",
+        ],
+        "{text}"
+    );
+    assert!(
+        !text.contains("claude-opus-5-5"),
+        "no model reaches the board"
+    );
+    drop(runner);
 }
