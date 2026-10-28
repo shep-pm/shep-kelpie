@@ -34,7 +34,7 @@ Of the sites that used `tempdir_in("/tmp")`:
 
 ## Tests Windows cannot run yet
 
-Not a sandbox list: `kelpie_ci_failures_total` and `SANDBOX_RED` do not read it. The Windows CI job runs `cargo check` only, so this is read from the source, not measured (#1149). Windows runs a file only if its name ends in `.cmd`, `.bat` or `.exe`, so a `#!/bin/sh` script a test starts itself cannot run there. A test that makes its stand-in with `write_fake` runs on both. `write_script` writes a script Windows runs only through Git for Windows' `sh.exe`, which `spawn::sh` finds (a hook, `sh -c`). A test that needs a FIFO is `#[cfg_attr(windows, ignore = "a FIFO is a Unix file")]`.
+Not a sandbox list: `kelpie_ci_failures_total` and `SANDBOX_RED` do not read it. The Windows CI job runs `cargo check` and the gating `save` step (`lease::saved::`, `state::tests::release::` and one atomic-write test) only, so this is read from the source, not measured (#1149). Windows runs a file only if its name ends in `.cmd`, `.bat` or `.exe`, so a `#!/bin/sh` script a test starts itself cannot run there. A test that makes its stand-in with `write_fake` runs on both. `write_script` writes a script Windows runs only through Git for Windows' `sh.exe`, which `spawn::sh` finds (a hook, `sh -c`). A test that needs a FIFO is `#[cfg_attr(windows, ignore = "a FIFO is a Unix file")]`.
 
 | Needs | Modules |
 |---|---|

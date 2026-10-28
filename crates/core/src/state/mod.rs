@@ -952,7 +952,8 @@ pub(crate) fn temporary_path(path: &Path) -> PathBuf {
 }
 
 /// The rename is the commit point. Syncing the file first means the name
-/// never points at unwritten bytes; syncing the folder keeps the rename.
+/// never points at unwritten bytes; syncing the folder keeps the rename. On
+/// Windows, which cannot open a folder to sync it, NTFS journals the rename.
 pub fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let temporary = temporary_path(path);
     let mut file = File::create(&temporary)?;
@@ -961,7 +962,11 @@ pub fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
     drop(file);
     fs::rename(&temporary, path)?;
     let folder = path.parent().filter(|p| !p.as_os_str().is_empty());
-    File::open(folder.unwrap_or(Path::new(".")))?.sync_all()
+    #[cfg(unix)]
+    File::open(folder.unwrap_or(Path::new(".")))?.sync_all()?;
+    #[cfg(windows)]
+    let _ = folder;
+    Ok(())
 }
 
 #[cfg(test)]
