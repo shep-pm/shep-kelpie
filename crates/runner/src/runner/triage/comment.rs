@@ -77,9 +77,10 @@ const ANSWERS_KIND: &str = "Write the triage comment that reads this issue again
 /// What kind of post the representative is asked for on an issue that
 /// something else already covers
 const DUPLICATE_KIND: &str = "Write the short comment that closes this issue as a duplicate. Greet \
-    the author, thank them for the report, name the open issue or pull request that already \
-    covers it and say why in one sentence, and say kelpie is closing the issue as a duplicate of \
-    it. It is a comment, not a review: no verdict, and nothing promised.";
+    the author, name the open issue or pull request that already covers it and say why in one \
+    sentence, say kelpie is closing the issue as a duplicate of it, and thank them in one plain \
+    line that names what they reported, never as the opener. It is a comment, not a review: no \
+    verdict, and nothing promised.";
 
 /// What the representative is told of a comment posted to an author who is not
 /// the maintainer

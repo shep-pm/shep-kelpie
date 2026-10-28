@@ -264,7 +264,12 @@ impl Runner {
             .unwrap_or_default();
         let place = match thread {
             Thread::PullRequest => "",
-            Thread::Issue => "The post goes on this issue.\n",
+            Thread::Issue => {
+                "The post goes on this issue. Greet the author by name and lead \
+                with what kelpie found. At most one plain thanks that names what they reported, \
+                never a stock \"thanks for opening this\" or \"thanks for the report\", and \
+                never the opener.\n"
+            }
         };
         let mut prompt = format!(
             "{today}{place}Kind of post: {}\n\nFacts:\n{}\n",

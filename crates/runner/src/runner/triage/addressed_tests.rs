@@ -55,6 +55,30 @@ fn an_issue_an_open_pull_request_resolves_is_closed_as_duplicate_with_a_comment_
 }
 
 #[test]
+fn the_duplicate_close_thanks_names_the_report_and_is_never_the_opener() {
+    let (rig, runner) = untouched();
+    rig.forge
+        .list_open_pull(41, "Fix the crash on start", &[30]);
+    rig.claude.script_for(
+        Role::Triager,
+        [covered(41, "pull_request", "It fixes the same crash.")],
+    );
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    // The thanks names what they reported and is told to come after the
+    // greeting and the finding, so it never opens the comment, and the stock
+    // "thank them for the report" is gone from the instruction.
+    let said = facts(&rig);
+    assert!(
+        said.contains("thank them in one plain line that names what they reported"),
+        "{said}"
+    );
+    assert!(said.contains("never as the opener"), "{said}");
+    assert!(!said.contains("thank them for the report"), "{said}");
+}
+
+#[test]
 fn an_issue_another_open_issue_covers_is_closed_as_duplicate() {
     let (rig, runner) = untouched();
     let mut other = issue(&rig, 12, "someone", 0);
