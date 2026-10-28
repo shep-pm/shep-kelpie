@@ -17,6 +17,17 @@ pub enum Tier {
     Heavy,
 }
 
+impl Tier {
+    /// The tier's name, as an agent file writes it
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Standard => "standard",
+            Self::Heavy => "heavy",
+        }
+    }
+}
+
 /// The kinds of work an agent takes: lowercase words, at least one, none twice
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "Vec<String>")]
