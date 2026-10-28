@@ -73,7 +73,7 @@ fn relative(path: &Path, root: Option<&Path>) -> String {
     let Some(root) = root else {
         return path.display().to_string();
     };
-    let canonical = root.canonicalize();
+    let canonical = crate::canonical(root);
     let under = |root: &Path| path.strip_prefix(root).ok();
     let inside = under(root).or_else(|| canonical.as_deref().ok().and_then(under));
     inside.unwrap_or(path).display().to_string()

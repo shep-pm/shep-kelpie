@@ -115,7 +115,7 @@ pub(crate) fn policy(
 ///
 /// [`AgentError::Setup`] when the working folder's name is past Claude Code's limit.
 pub(crate) fn transcripts(config: &Path, cwd: &Path) -> Result<PathBuf, AgentError> {
-    let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_owned());
+    let cwd = crate::canonical(cwd).unwrap_or_else(|_| cwd.to_owned());
     // One `-` per UTF-16 unit, as Claude Code's JavaScript replaces them.
     let name: String = cwd
         .to_string_lossy()
