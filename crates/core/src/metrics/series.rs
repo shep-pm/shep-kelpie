@@ -133,7 +133,7 @@ impl Feature {
 
 /// Whether the tests that failed a work item's CI are ones its worker could have
 /// run in its own sandbox, which decides whether the worker could have caught the
-/// failure. `crates/runner/src/runner/ci_failure.rs` reads it from the failed runs' logs.
+/// failure. `crates/runner/src/runner/ci_failure/mod.rs` reads it from the failed runs' logs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CiTests {
     /// Every failing test is one `docs/agents/sandbox-red-tests.md` lists as red in
@@ -143,6 +143,8 @@ pub enum CiTests {
     Runnable,
     /// No test failed: lint, docs, fmt, or a build that never ran one
     NoTests,
+    /// A job's `timeout-minutes` ended the run and no log names a failing test
+    TimedOut,
 }
 
 impl CiTests {
@@ -151,6 +153,7 @@ impl CiTests {
             Self::SandboxOnly => "sandbox-only",
             Self::Runnable => "runnable",
             Self::NoTests => "none",
+            Self::TimedOut => "timed-out",
         }
     }
 }

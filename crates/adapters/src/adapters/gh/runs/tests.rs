@@ -376,12 +376,10 @@ fn a_log_keeps_its_end_from_a_line_start_and_never_splits_a_character() {
     assert_eq!(tail("é".repeat(10).as_str(), 5), "éé");
 }
 
-// `gh run view 38275563600 --json jobs` and `gh run view 38275563600 --job
-// 114900834180 --log` on shep-pm/shep-kelpie with gh 2.96: a run whose
-// `test-macos` job (`timeout-minutes: 20`) its timeout stopped, in the step
-// `Run cargo test --locked`. Its `--log-failed` answer is empty. The log is its
-// first three lines and its last sixty, with the runner folder written
-// `/home/me`.
+// Run 38275563600 of shep-pm/shep-kelpie, read with gh 2.96: its `test-macos` job
+// (`timeout-minutes: 20`) was stopped in `Run cargo test --locked`, and its
+// `--log-failed` answer is empty. The log is the first 3 and last 60 lines, with
+// the runner folder written `/home/me`.
 const JOBS: &[u8] = include_bytes!("../../../../../../fixtures/gh-run-view-jobs-timed-out.json");
 const JOB_LOG: &str = include_str!("../../../../../../fixtures/gh-run-log-timed-out.txt");
 

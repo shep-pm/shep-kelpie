@@ -289,3 +289,44 @@ fn a_rerun_the_forge_refuses_leaves_the_ruling_waiting() {
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["work_item"]["phase"]["state"], "ruling");
 }
+
+// Run 38275563600's job-log tail as `failed_run_logs` hands it: a note that a job's
+// timeout cancelled it, and no file the branch changed
+const TIMED_OUT: &str = concat!(
+    "--- run 9\n",
+    "note: job `test-macos` was cancelled in step `Run cargo test --locked` after 20m27s: ",
+    "its `timeout-minutes` ended it, so this is a slow job and not a failing test\n",
+    "test-macos\tUNKNOWN STEP\ttest sheep::tests::reconnects ... ok\n",
+);
+
+fn timed_out(rig: &Rig, runner: &std::sync::Mutex<Runner>, head: &str) -> StepReport {
+    rig.forge.set_ci_log_timed_out(TIMED_OUT, 1);
+    rig.forge
+        .set_checks(head, Checks::Failed(vec!["test".to_owned()]));
+    rig.verdict(runner).expect("the gate read the red run")
+}
+
+#[test]
+fn a_head_whose_run_its_timeout_ended_is_not_rerun() {
+    let (rig, runner, head) = Rig::with_pull_request("koji");
+
+    let report = timed_out(&rig, &runner, &head);
+
+    assert!(matches!(report, StepReport::CiFailed { .. }), "{report:?}");
+    assert_eq!(rig.forge.reruns(), Vec::<String>::new());
+    let prompt = fix_prompt(&rig, &runner);
+    assert!(!prompt.contains("kelpie reran"), "{prompt}");
+}
+
+#[test]
+fn rerun_is_not_offered_for_a_run_its_timeout_ended() {
+    let (rig, runner, head) = Rig::with_pull_request_set("koji", |rig| rig.fix_attempts(0));
+    let (_, question) = ruling_report(Some(timed_out(&rig, &runner, &head)));
+    assert!(!question.contains("rerun"), "{question}");
+
+    let reply = rig.ask(&runner, "rule", Some("71 rerun"));
+
+    let error = reply["error"].as_str().expect("the rerun was refused");
+    assert!(error.contains("does not offer"), "{error}");
+    assert_eq!(rig.forge.reruns(), Vec::<String>::new());
+}

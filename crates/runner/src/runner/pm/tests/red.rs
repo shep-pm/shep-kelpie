@@ -71,6 +71,20 @@ fn a_red_item_wakes_it_with_the_failed_logs_tail_in_its_folder_and_the_board_nam
 }
 
 #[test]
+fn a_cancelled_runs_log_is_written_for_the_project_manager() {
+    let log = "--- run 9\nnote: job `test-macos` was cancelled in step `Run cargo test --locked` \
+               after 20m27s: its `timeout-minutes` ended it, so this is a slow job and not a \
+               failing test\ntest-macos\tUNKNOWN STEP\t##[error]The operation was canceled.\n";
+    let (rig, _runner, _) = parked_red("magnemite", |rig| rig.forge.set_ci_log_timed_out(log, 1));
+
+    let pm = rig.paths().pm;
+    assert_eq!(std::fs::read_to_string(pm.join("ci/7.log")).unwrap(), log);
+    let board = std::fs::read_to_string(pm.join("board.md")).unwrap();
+    assert!(board.contains(", CI log `ci/7.log`\n"), "{board}");
+    assert!(!board.contains("no CI log"), "{board}");
+}
+
+#[test]
 fn a_log_that_cannot_be_read_is_noted_and_the_wake_still_happens() {
     let (rig, runner, _) = parked_red("rotom", |rig| {
         rig.forge.set_ci_log_error("gh run list failed")

@@ -51,7 +51,7 @@ pub enum WorkflowState {
 
 /// What kelpie read of the CI runs that failed on one head
 ///
-/// Kelpie reads the logs of at most `RUNS` failed runs (`crates/adapters/src/adapters/gh/runs.rs`),
+/// Kelpie reads the logs of at most `RUNS` failed runs (`crates/adapters/src/adapters/gh/runs/mod.rs`),
 /// so a head with more failed runs than that has logs kelpie never saw. They are
 /// counted here rather than left out of the answer, since what they hold is what a
 /// caller cannot know is not there.

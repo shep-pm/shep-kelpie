@@ -30,7 +30,7 @@ impl Rig {
     }
 
     /// Makes the rig's project kelpie's own repo, which is the one the sandbox-red
-    /// list in `crates/runner/src/runner/ci_failure.rs` is of
+    /// list in `crates/runner/src/runner/ci_failure/mod.rs` is of
     pub fn remote_is_kelpie(&self) {
         self.edit_settings(|s| {
             let remote = format!("remote = \"{}\"", Self::REMOTE);
