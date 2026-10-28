@@ -40,7 +40,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | plugins.md | repo plugins: sources, copies, harness loading, MCP | `core/skills/repo/`, `adapters/{skills,claude/mcp,pi/skills,codex/skills,goose/skills}.rs` |
 | agent-files.md | agent file, `extends`, baselines | `core/agents/`, `src/flock/add/` |
 | agent-migration.md | `agents migrate` | `core/agents/legacy.rs` |
-| agent-allow.md | `agents.allow` | `core/settings/agents/`, `runner/add.rs` |
+| agent-allow.md | allow list | `core/settings/agents/`, `runner/add.rs` |
 | agents.md | harnesses, gateways | `adapters/`, `core/settings/agents/`, `process/spawn.rs` |
 | cli-adapter.md | a new CLI | `adapters/cli/` |
 | handover.md | in-flight turns handed to a new build, `upgrade` | `src/sheep/handover/`, `runner/flight/carry/`, `adapters/process/adopt/`, `src/upgrade/handover.rs` |
@@ -59,7 +59,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | contribution-pass.md | reviewers' pass, green head | `runner/contributions/pass.rs`, `process/worktree/` |
 | contribution-talk.md | contributors' words, answers, quiet clock | `runner/contributions/{heard,clock}.rs`, `runner/thread_replies/` |
 | contribution-push.md | a fork worker's push; red-CI comment | `runner/contributions/{push,after}.rs` |
-| contribution-release.md | asking for a release: yes, thumbs up, silence | `runner/contributions/{release,ruling}.rs` |
+| contribution-release.md | asking for a release: yes, thumbs up, silence, ruling | `runner/contributions/{release,ruling}.rs` |
 | contribution-merge.md | merge ruling: yes, thanks, no | `runner/contributions/{merge,ruling}.rs`, `core/settings/rulings.rs` |
 | representative.md | agent file, `agents.representative`, post wording | `runner/representative/`, `core/agents/front/`, `core/settings/agents/`, `agents/representative.md` |
 | dependencies.md | bot bumps: rebase, proof, merge, red | `core/settings/dependencies.rs`, `runner/{dependencies,dev_server/bump}/`, `runner/flight/proving.rs`, `core/state/bumps.rs`, `adapters/{e2e_runner,pages}.rs`, `adapters/bridge/client/` |
