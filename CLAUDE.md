@@ -9,7 +9,7 @@ Kelpie is a shep dog that runs Claude Code workers from a planned work item to a
 
 ## Docs
 
-- `docs/design/`: every current decision, its reason and where it lives. Read its README, then the area files for the code you touch.
+- `docs/design/`: every current decision, its reason and where it lives. Read its README, then the area index (`files-*.md`) and the files it names for the code you touch.
 - `docs/design-log.md`: the history and mechanics behind those decisions, and the test plan. Search it.
 - `docs/facts/`: measured facts, one file per topic.
 - `docs/specs/`: one spec per test series, with results. Experiment code and raw results live in shep-pm/kelpie-lab, cited as "the experiments repo".
