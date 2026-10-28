@@ -32,6 +32,7 @@ pub mod package_managers;
 pub mod pm_answer;
 pub mod ports;
 pub mod profile;
+pub mod random;
 pub mod review_bot;
 pub mod settings;
 pub mod shep_home;

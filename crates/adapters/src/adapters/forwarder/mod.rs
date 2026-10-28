@@ -21,6 +21,7 @@ use std::time::{Duration, Instant, SystemTime};
 use crate::confine::Verdict;
 use crate::forwarder::Upstream;
 use crate::ipc::blocking::{Listener, Stream};
+use crate::random;
 use http::{Head, Reply, Timed};
 
 pub(in crate::adapters) mod http;
@@ -488,11 +489,6 @@ fn request(upstream: &Upstream, head: &Head, length: usize) -> Result<Vec<u8>, R
     Ok(text.into_bytes())
 }
 
-// 128 random bits as hex, from the system's own source.
 pub(super) fn unguessable() -> Result<String, String> {
-    let mut bytes = [0u8; 16];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut bytes))
-        .map_err(|e| format!("cannot draw a socket name: {e}"))?;
-    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+    random::hex128().map_err(|e| format!("cannot draw a socket name: {e}"))
 }

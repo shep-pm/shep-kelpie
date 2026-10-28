@@ -17,6 +17,7 @@ use sha1::Sha1;
 
 use crate::owner_only;
 use crate::ports::Timestamp;
+use crate::random;
 
 /// Makes `folder` and any folder above it, the new ones usable by their
 /// owner alone
@@ -158,12 +159,8 @@ impl Secret {
     fn write(path: &Path, replace: bool) -> Result<Self, SecretError> {
         let io = |e: io::Error| SecretError::Io(path.to_owned(), e.kind());
         let mut bytes = [0u8; 20];
-        getrandom::fill(&mut bytes).map_err(|e| {
-            SecretError::Io(
-                PathBuf::from("the system's random source"),
-                io::Error::from(e).kind(),
-            )
-        })?;
+        random::fill(&mut bytes)
+            .map_err(|e| SecretError::Io(PathBuf::from("the system's random source"), e.kind()))?;
         let folder = path.parent().unwrap_or(Path::new("."));
         private_dir(folder).map_err(io)?;
         let fresh = folder.join(format!(".secret.{}", std::process::id()));

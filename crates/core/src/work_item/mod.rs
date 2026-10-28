@@ -1,14 +1,14 @@
 //! The work item in flight, as the state file keeps it, keyed by its ticket id
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::io::{self, Read};
+use std::io;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
 use crate::agents::Tier;
 use crate::ports::{Cost, Finding, Role, SessionId, Timestamp, Usage};
+use crate::random;
 use crate::review_bot::Bot;
 use crate::worktree::Remote;
 use crate::{settings::AgentName, ticket::TicketId};
@@ -619,7 +619,7 @@ impl WorkItem {
 /// A random version 4 UUID, which `claude --session-id` takes
 pub fn new_session_id() -> io::Result<SessionId> {
     let mut b = [0u8; 16];
-    fs::File::open("/dev/urandom")?.read_exact(&mut b)?;
+    random::fill(&mut b)?;
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
     let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
