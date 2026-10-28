@@ -6,7 +6,7 @@ How the engineering skills should consume this repo's domain documentation when 
 
 - **`GLOSSARY.md`** at the repo root: the vocabulary.
 - **`docs/adr/`**: read ADRs that touch the area you're about to work in.
-- **`docs/design/`**: every decision below ADR level, with its reason and where it lives. Read `README.md` whole, then each area file its table names for the code you touch.
+- **`docs/design/`**: every decision below ADR level, with its reason and where it lives. Read `README.md` whole, then the area index (`files-*.md`) for the code you touch and each file its table names.
 - **`docs/design-log.md`**: the full record behind those decisions, and the test plan. Search it for one decision's detail; it is too long to read whole.
 - **`docs/facts/`**: the measured facts, one file per topic.
 
