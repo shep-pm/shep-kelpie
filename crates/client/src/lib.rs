@@ -25,6 +25,13 @@ use shep_kelpie_core::ipc::{self, ClientStream};
 use shep_kelpie_protocol::frame::{self, Hello, LONGEST_FRAME, PROTOCOL, UnknownRequest};
 use shep_kelpie_protocol::{Reply, Request};
 
+/// The longest reply line the client reads
+///
+/// The bound on a line is for the side that serves, which a peer could make
+/// buffer without end. A runner's reply is its own and can be long, such as a
+/// board of a few hundred issues, so it has room.
+const LONGEST_REPLY: usize = 64 * 1024 * 1024;
+
 /// Why a runner cannot be asked at all, so nothing was sent
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unreachable {
@@ -46,6 +53,11 @@ pub enum Failure {
     /// The deadline passed. The runner may still take the request, so the
     /// caller does not send it again, and this connection is spent
     TimedOut,
+    /// The request is longer than a frame, so nothing was sent
+    TooLong {
+        /// The request line's length in bytes
+        length: usize,
+    },
     /// The connection broke or the runner said something that is not a reply,
     /// with what happened. The request may have been taken
     Broken(String),
@@ -57,6 +69,10 @@ impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::TimedOut => f.write_str("the runner did not answer in time"),
+            Self::TooLong { length } => write!(
+                f,
+                "the request is {length} bytes, and a frame is at most {LONGEST_FRAME}"
+            ),
             Self::Broken(why) => write!(f, "the runner's socket broke: {why}"),
             Self::Unknown(unknown) => unknown.fmt(f),
         }
@@ -88,7 +104,7 @@ pub async fn connect(socket: &Path, deadline: Duration) -> Result<Connection, Un
         let mut stream = BufReader::new(stream);
         let hello = frame::encode(&Hello { protocol: PROTOCOL }).map_err(io::Error::other)?;
         stream.write_all(hello.as_bytes()).await?;
-        let line = read_line(&mut stream).await?;
+        let line = read_line(&mut stream, LONGEST_FRAME).await?;
         Ok::<_, io::Error>((stream, line))
     };
     let (stream, line) = match timeout(deadline, opened).await {
@@ -119,6 +135,7 @@ impl Connection {
     ///
     /// [`Failure::TimedOut`] when the deadline passes, which spends the
     /// connection: every later ask gives [`Failure::Broken`] and sends nothing.
+    /// [`Failure::TooLong`] when the request is over a frame, sent not at all.
     /// [`Failure::Unknown`] when the runner has no such request, and
     /// [`Failure::Broken`] when the connection ends or the reply does not read.
     pub async fn ask(&mut self, request: &Request, deadline: Duration) -> Result<Reply, Failure> {
@@ -139,11 +156,16 @@ impl Connection {
     async fn exchange(&mut self, request: &Request) -> Result<Reply, Failure> {
         let broken = |e: io::Error| Failure::Broken(e.to_string());
         let line = frame::encode(request).map_err(|e| Failure::Broken(e.to_string()))?;
+        if line.len() > LONGEST_FRAME {
+            return Err(Failure::TooLong { length: line.len() });
+        }
         self.stream
             .write_all(line.as_bytes())
             .await
             .map_err(broken)?;
-        let line = read_line(&mut self.stream).await.map_err(broken)?;
+        let line = read_line(&mut self.stream, LONGEST_REPLY)
+            .await
+            .map_err(broken)?;
         let shown: Value = serde_json::from_str(&line)
             .map_err(|e| Failure::Broken(format!("answered {line:?} ({e})")))?;
         if let Some(unknown) = unknown_request(&shown) {
@@ -163,10 +185,10 @@ fn unknown_request(shown: &Value) -> Option<UnknownRequest> {
     serde_json::from_value(shown.clone()).ok()
 }
 
-// The next line without its end, within the frame bound.
-async fn read_line(stream: &mut BufReader<ClientStream>) -> io::Result<String> {
+// The next line without its end, within `most` bytes.
+async fn read_line(stream: &mut BufReader<ClientStream>, most: usize) -> io::Result<String> {
     let mut line = Vec::new();
-    let mut bounded = stream.take(LONGEST_FRAME as u64 + 1);
+    let mut bounded = stream.take(most as u64 + 1);
     bounded.read_until(b'\n', &mut line).await?;
     if line.pop() != Some(b'\n') {
         return Err(io::Error::new(

@@ -106,6 +106,9 @@ impl Reach {
                 self.fallback(client, &socket, &why, sheep, action, params)
                     .await
             }
+            Err(too_long @ Failure::TooLong { .. }) => {
+                Err(format!("cannot ask {sheep} `{action}`: {too_long}"))
+            }
             Err(Failure::Broken(why)) => Err(format!(
                 "cannot ask {sheep} `{action}` on {}: {why}",
                 socket.display()

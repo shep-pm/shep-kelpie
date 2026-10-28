@@ -16,7 +16,7 @@ const PATIENCE: Duration = Duration::from_secs(10);
 // What a fake runner does with each request line after the hello
 enum Script {
     // Answers every request with this line
-    Answers(&'static str),
+    Answers(String),
     // Reads requests and answers none
     Silent,
 }
@@ -103,7 +103,7 @@ async fn a_slow_runner_times_out_and_is_not_asked_again() {
 async fn a_refusal_comes_back_as_a_refusal() {
     let fake = runner(
         r#"{"protocol":1}"#,
-        Script::Answers(r#"{"error":"no work item for #7 is open"}"#),
+        Script::Answers(r#"{"error":"no work item for #7 is open"}"#.into()),
     );
     let mut connection = connect(&fake.socket, PATIENCE).await.unwrap();
     assert_eq!(
@@ -116,7 +116,7 @@ async fn a_refusal_comes_back_as_a_refusal() {
 async fn a_request_the_runner_does_not_have_is_named() {
     let fake = runner(
         r#"{"protocol":1}"#,
-        Script::Answers(r#"{"request":"status","version":"1.2.3"}"#),
+        Script::Answers(r#"{"request":"status","version":"1.2.3"}"#.into()),
     );
     let mut connection = connect(&fake.socket, PATIENCE).await.unwrap();
     assert_eq!(
@@ -126,4 +126,30 @@ async fn a_request_the_runner_does_not_have_is_named() {
             version: "1.2.3".into(),
         }))
     );
+}
+
+#[tokio::test]
+async fn a_reply_past_a_frame_is_read_whole() {
+    let long = "x".repeat(LONGEST_FRAME * 2);
+    let fake = runner(
+        r#"{"protocol":1}"#,
+        Script::Answers(format!(r#"{{"error":"{long}"}}"#)),
+    );
+    let mut connection = connect(&fake.socket, PATIENCE).await.unwrap();
+    assert_eq!(
+        connection.ask(&Request::Gate(None), PATIENCE).await,
+        Ok(Reply::Refused(long))
+    );
+}
+
+#[tokio::test]
+async fn a_request_past_a_frame_is_refused_before_it_is_sent() {
+    let mut fake = runner(r#"{"protocol":1}"#, Script::Silent);
+    let mut connection = connect(&fake.socket, PATIENCE).await.unwrap();
+    let long = Request::Tell("x".repeat(LONGEST_FRAME));
+    let asked = connection.ask(&long, PATIENCE).await;
+    assert!(matches!(asked, Err(Failure::TooLong { .. })), "{asked:?}");
+
+    drop(connection);
+    assert_eq!(fake.asked.recv().await, None, "nothing was sent");
 }

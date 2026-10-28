@@ -8,7 +8,7 @@ A runner answers the typed protocol on `run/<project>.sock` under kelpie's home,
 
 - The runner has no tokio. `ipc::blocking` accepts on one thread, and each connection is a thread of its own, up to `MOST_CONNECTIONS` (32); the next is closed.
 - A connection sends a hello (`{"protocol":1}`) and is answered with the runner's, then asks one request a line and gets one reply a line. A first line that is no hello closes it.
-- Everything is bounded: a hello within 10 s, 5 minutes of silence between requests, a line of at most `LONGEST_FRAME` (64 KiB), a write that takes over 10 s. Each closes the connection.
+- Everything is bounded: a hello within 10 s, 5 minutes of silence between requests, a line of at most `LONGEST_FRAME` (64 KiB), a write that takes over 10 s. Each closes the connection. The bounds guard the serving side: the client reads a reply of up to 64 MiB, and refuses to send a request over `LONGEST_FRAME` (`Failure::TooLong`, no fallback).
 - An unknown request gets `{"request": ..., "version": ...}` and the connection stays open. Params that do not read are a refusal (`{"error": ...}`), not unknown.
 - A reply is `trigger::answer_request`, the function `shep trigger` runs through `answer`, so the two cannot drift. It answers `status`, `timings` and the board listing from `Posted` while a pass holds the runner's lock. `request_of` is the one reader of `<action> [params]` text, exported for the client's callers.
 - A request wakes the loop as `on_trigger` does: `wakes(action)` or `Posted::needs_wake`, through `Handles::wake`.

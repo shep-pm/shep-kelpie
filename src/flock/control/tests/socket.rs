@@ -303,3 +303,28 @@ async fn a_timeout_on_the_socket_does_not_send_the_trigger_again() {
     );
     assert!(said.lock().unwrap().is_empty(), "a timeout is no fallback");
 }
+
+#[tokio::test]
+async fn a_note_longer_than_a_frame_is_named_so_and_nothing_is_sent() {
+    let home = short_tempdir();
+    let socket = scripted(home.path(), vec![]);
+    let mut shepherd = shepherd_for_koji();
+    let (reach, said) = reaching(home.path());
+    let client = client(&shepherd).await;
+    let note = "x".repeat(70 * 1024);
+
+    let ran = in_time(tell(
+        &reach,
+        &client,
+        &project("koji"),
+        &note,
+        Format::Plain,
+    ))
+    .await;
+    let why = ran.expect_err("a frame has a bound");
+    assert!(why.contains("a frame is at most"), "{why}");
+    assert!(!why.contains("socket broke"), "{why}");
+    assert!(socket.asked.lock().unwrap().is_empty());
+    assert_eq!(triggers(&mut shepherd), 0);
+    assert!(said.lock().unwrap().is_empty(), "no fallback");
+}
