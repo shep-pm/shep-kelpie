@@ -1,11 +1,12 @@
 //! What an agent file says the project manager and the board choose it by
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::settings::NonBlank;
 
 /// How much work an agent is trusted with: a work item names the least it needs
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+// wire format: changing this is a breaking change to the state file and the usage ledger
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Tier {
     /// Mechanical work

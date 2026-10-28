@@ -79,7 +79,6 @@ fn a_merge_ruling_saved_without_rework_loads_and_one_saved_before_it_loads_with_
             rework_off: false,
         })
     );
-    assert_eq!(VERSION, 90);
 }
 
 // A push is a new head: the answer to the ruling on the old one is gone

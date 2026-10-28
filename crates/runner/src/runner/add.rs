@@ -4,6 +4,7 @@ use std::fmt;
 
 use super::Runner;
 use super::trigger::issue_list;
+use crate::board::check::label_kind;
 use crate::board::{AGENT_LABEL, LabelError, agent_label, old_worker_label, pinned};
 use crate::ports::{ForgeError, Issue};
 use crate::settings::AgentName;
@@ -116,6 +117,7 @@ impl Runner {
         let (agent, moved) = self.opening_agent(ticket, &found.labels, labelled);
         let mut item = self.fresh(ticket, found.title, agent.clone(), session);
         item.pinned = pinned(&found.labels);
+        item.kind = label_kind(&found.labels).map(str::to_owned);
         next.work_items.push(item);
         if let Some(moved) = &moved {
             next.record_event(self.ports.clock.now(), moved.event.clone());

@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{RoleLine, is_zero};
+use crate::agents::Tier;
 use crate::ports::{Severity, Timestamp};
 use crate::ticket::TicketId;
 use crate::work_item::{CiFailures, QwenTally, WorkItem};
@@ -55,6 +56,12 @@ pub struct FinishedLine {
     /// That agent's model, the same way
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// The kind its issue's label named, as `fix`. None for an issue with none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// The least tier the project manager's pick said it needed
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<Tier>,
     /// Worker turns sent to fix a red CI run
     #[serde(default, skip_serializing_if = "is_zero")]
     pub ci_fix_turns: u32,
@@ -124,6 +131,8 @@ impl FinishedLine {
             agent: Some(item.agent.as_str().to_owned()),
             harness: None,
             model: None,
+            kind: item.kind.clone(),
+            tier: item.tier,
             ci_fix_turns: tally.counts.ci_fix_turns,
             ci_failures: tally.counts.ci_failures,
             held,
@@ -210,5 +219,46 @@ mod tests {
             (&line["disputed"], &line["deferred"]),
             (&json!(1), &json!(2))
         );
+    }
+
+    #[test]
+    fn a_finished_line_names_its_kind_and_tier_and_a_line_from_before_reads_without_them() {
+        let mut item = a_work_item();
+        let record = Finished {
+            issue: item.issue,
+            title: item.title.clone(),
+            pull_request: None,
+            merged: false,
+            closed: true,
+            at: Timestamp(9),
+            wall: 9,
+            seconds: Seconds::default(),
+            spend: None,
+        };
+        let line = serde_json::to_value(FinishedLine::of(&record, &item, item.issue)).unwrap();
+        assert_eq!((line.get("kind"), line.get("tier")), (None, None));
+
+        item.kind = Some("docs".into());
+        item.tier = Some(Tier::Light);
+        let line = serde_json::to_value(FinishedLine::of(&record, &item, item.issue)).unwrap();
+        assert_eq!(
+            (&line["kind"], &line["tier"]),
+            (&json!("docs"), &json!("light"))
+        );
+        let back: FinishedLine = serde_json::from_value(line).unwrap();
+        assert_eq!(
+            (back.kind.as_deref(), back.tier),
+            (Some("docs"), Some(Tier::Light))
+        );
+
+        let before: FinishedLine = serde_json::from_str(
+            r#"{"at":200,"issue":7,"title":"t","pull_request":71,"merged":true,"wall":90,
+            "units":30,"cost_usd":0.5,
+            "worker":{"calls":2,"tokens":{"input":30,"cache_write":0,"cache_read":0,"output":0},"units":30,"cost_usd":0.5},
+            "reviewer":{"calls":0,"tokens":{"input":0,"cache_write":0,"cache_read":0,"output":0},"units":0,"cost_usd":0.0},
+            "qwen":{"rounds":0,"seconds":0},"review_rounds":2,"fix_turns":1,"rulings":0}"#,
+        )
+        .unwrap();
+        assert_eq!((before.kind, before.tier), (None, None));
     }
 }
