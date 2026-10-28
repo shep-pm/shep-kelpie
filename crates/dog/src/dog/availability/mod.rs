@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -205,9 +205,9 @@ pub(super) fn begin(
 }
 
 fn codex_home(settings: &KelpieSettings) -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
+    let home = crate::home::user_home().ok_or(crate::home::HOME_UNSET)?;
     let kelpie_home = crate::home::kelpie_home()?;
-    (settings.codex_home(Path::new(&home), &kelpie_home)).map_err(|e| e.to_string())
+    (settings.codex_home(&home, &kelpie_home)).map_err(|e| e.to_string())
 }
 
 async fn keep(shown: Arc<Mutex<Availability>>, sources: Sources, readers: Readers) {
