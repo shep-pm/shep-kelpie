@@ -203,4 +203,44 @@ mod tests {
             assert_eq!(files["denyRead"], json!(policy.no_read), "{platform:?}");
         }
     }
+
+    // Only a Windows path parses into a drive and a root, so only Windows runs it.
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_a_worker_reads_the_cargo_and_rustup_homes_but_not_the_cargo_credentials() {
+        struct NoVars;
+        impl crate::dep_sources::Env for NoVars {
+            fn get(&self, _: &str) -> Option<String> {
+                None
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let (cargo, rustup) = (home.join(".cargo"), home.join(".rustup"));
+        std::fs::create_dir_all(cargo.join("bin")).unwrap();
+        std::fs::create_dir_all(rustup.join("toolchains")).unwrap();
+        for name in ["credentials", "credentials.toml"] {
+            std::fs::write(cargo.join(name), "token").unwrap();
+        }
+        let tools = crate::dep_sources::toolchain_homes(home, &NoVars);
+        let policy = Policy {
+            read: tools.clone(),
+            no_read: crate::dep_sources::cargo_credentials(&tools),
+            ..Policy::default()
+        };
+
+        let files = &files_under(&policy, Platform::Windows, home);
+
+        assert_eq!(
+            files["allowRead"],
+            json!([cargo.display().to_string(), rustup.display().to_string()])
+        );
+        assert_eq!(
+            files["denyRead"],
+            json!([
+                cargo.join("credentials").display().to_string(),
+                cargo.join("credentials.toml").display().to_string()
+            ])
+        );
+    }
 }

@@ -148,14 +148,16 @@ fn named(env: &dyn Env, name: &str) -> Option<PathBuf> {
 }
 
 // `path` with its `.` and `..` resolved and its trailing separator gone, by
-// spelling alone. Not `fs::canonicalize`, which needs the folder to exist and
-// follows links: a tool variable can name a folder that is not there, and a
-// link in a cache home is left where it stands.
+// spelling alone, its Windows prefix kept ahead of the root. Not
+// `fs::canonicalize`, which needs the folder to exist and follows links: a tool
+// variable can name a folder that is not there.
 fn normalize(path: &Path) -> PathBuf {
     let mut parts: Vec<OsString> = Vec::new();
+    let mut prefix = None;
     let mut root = false;
     for part in path.components() {
         match part {
+            Component::Prefix(found) => prefix = Some(found.as_os_str().to_os_string()),
             Component::RootDir => root = true,
             Component::CurDir => {}
             Component::ParentDir => match parts.last() {
@@ -165,10 +167,9 @@ fn normalize(path: &Path) -> PathBuf {
                 _ => parts.push(OsString::from("..")),
             },
             Component::Normal(name) => parts.push(name.to_os_string()),
-            Component::Prefix(prefix) => parts.push(prefix.as_os_str().to_os_string()),
         }
     }
-    let mut out = PathBuf::new();
+    let mut out = prefix.map(PathBuf::from).unwrap_or_default();
     if root {
         out.push(MAIN_SEPARATOR_STR);
     }
@@ -255,6 +256,21 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn normalize_keeps_a_windows_path_s_prefix_ahead_of_its_root() {
+        for (spelled, kept) in [
+            (r"C:\Users\R\.cargo", r"C:\Users\R\.cargo"),
+            (r"C:\Users\R\a\..\.cargo", r"C:\Users\R\.cargo"),
+            (r"C:\Users\R\.cargo\", r"C:\Users\R\.cargo"),
+            (r"C:\..\..\x", r"C:\..\..\x"),
+            (r"\\?\C:\Users\R\.cargo", r"\\?\C:\Users\R\.cargo"),
+            (r"\\?\C:\Users\R\a\..\.cargo", r"\\?\C:\Users\R\.cargo"),
+        ] {
+            assert_eq!(normalize(Path::new(spelled)), Path::new(kept), "{spelled}");
+        }
+    }
 
     /// The variables in `vars`, as an [`Env`]
     #[derive(Default)]
