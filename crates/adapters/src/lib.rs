@@ -22,7 +22,7 @@ use shep_kelpie_core::{coderabbit, codex, cubic, local_paths, work_item};
 // The leaf crates, each module kept under the name it had here
 use shep_kelpie_facts::tool_error;
 use shep_kelpie_owner_only::owner_only;
-use shep_kelpie_process::{spawn, worktree};
+use shep_kelpie_process::{canonical, spawn, worktree};
 // The live MCP tests start the code graph server kelpie's tools hold.
 #[cfg(all(test, unix))]
 use shep_kelpie_process::tools;

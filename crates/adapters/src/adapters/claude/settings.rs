@@ -251,7 +251,7 @@ fn reads_only(checkout: &Path, also: &[PathBuf]) -> Vec<String> {
     let mut allowed: Vec<PathBuf> = Vec::new();
     for path in std::iter::once(checkout).chain(also.iter().map(PathBuf::as_path)) {
         allowed.push(path.to_owned());
-        allowed.extend(path.canonicalize().ok().filter(|c| c != path));
+        allowed.extend(crate::canonical(path).ok().filter(|c| c != path));
     }
     let outside = around(Path::new("/"), &allowed);
     (SECRETS_NO_READ.iter().map(|p| (*p).to_owned()))
@@ -284,7 +284,7 @@ fn read_denials(no_read: &[String], read: &[PathBuf]) -> Vec<String> {
     let mut spelled: Vec<PathBuf> = Vec::new();
     for path in read {
         spelled.push(path.clone());
-        spelled.extend(path.canonicalize().ok().filter(|c| c != path));
+        spelled.extend(crate::canonical(path).ok().filter(|c| c != path));
     }
     let holds_one = |dir: &Path| spelled.iter().any(|r| r.starts_with(dir));
     no_read
@@ -299,7 +299,7 @@ fn read_denials(no_read: &[String], read: &[PathBuf]) -> Vec<String> {
 // `around` for `dir` as given and where its links lead, each entry given
 // first and then resolved where that differs.
 fn around_in_both(dir: &Path, read: &[PathBuf]) -> Vec<String> {
-    let Some(resolved) = dir.canonicalize().ok().filter(|c| c != dir) else {
+    let Some(resolved) = crate::canonical(dir).ok().filter(|c| c != dir) else {
         return around(dir, read);
     };
     // A read path spelled one way under the folder is also named the other.

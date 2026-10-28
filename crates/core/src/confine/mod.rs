@@ -134,7 +134,7 @@ fn strings<'a>(value: &'a serde_json::Value, out: &mut Vec<&'a str>) {
 fn judge_path(target: &Path, folders: &[PathBuf]) -> Verdict {
     let canonical: Vec<PathBuf> = folders
         .iter()
-        .map(|f| f.canonicalize().unwrap_or_else(|_| f.clone()))
+        .map(|f| crate::canonical(f).unwrap_or_else(|_| f.clone()))
         .collect();
     let within = |path: &Path| -> Vec<PathBuf> {
         folders
@@ -172,7 +172,7 @@ fn resolve(path: &Path) -> Option<PathBuf> {
     let mut existing = path;
     let mut rest = Vec::new();
     loop {
-        if let Ok(real) = existing.canonicalize() {
+        if let Ok(real) = crate::canonical(existing) {
             let mut resolved = real;
             for part in rest.iter().rev() {
                 resolved.push(part);

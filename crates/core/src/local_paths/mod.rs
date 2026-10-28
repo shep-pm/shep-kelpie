@@ -10,7 +10,6 @@
 //! address; a [`Surface::Code`] holds only to the given folders.
 
 use std::fmt;
-use std::fs;
 use std::path::Path;
 
 use crate::settings::ForgeSlug;
@@ -69,7 +68,7 @@ impl LocalPaths {
     pub fn new<'a>(folders: impl IntoIterator<Item = &'a Path>) -> Self {
         let mut found: Vec<String> = Vec::new();
         for folder in folders.into_iter().filter(|f| f.parent().is_some()) {
-            let canonical = fs::canonicalize(folder).ok();
+            let canonical = crate::canonical(folder).ok();
             for path in std::iter::once(folder).chain(canonical.as_deref()) {
                 let text = normalize(&path.to_string_lossy());
                 let text = text.trim_end_matches('/');

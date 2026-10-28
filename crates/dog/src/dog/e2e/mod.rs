@@ -246,17 +246,15 @@ pub(super) async fn visit(
 /// and one that only reaches a worktree through `..` or a link out of it
 /// name no project.
 fn locate(kelpie_home: &Path, worktree: &Path) -> Option<(ProjectName, PathBuf)> {
-    let worktree = worktree.canonicalize().ok()?;
+    let worktree = crate::canonical(worktree).ok()?;
     std::fs::read_dir(kelpie_home)
         .ok()?
         .flatten()
         .find_map(|entry| {
             let name = ProjectName::try_from(entry.file_name().to_str()?).ok()?;
             // Only the project's folder under kelpie's home is read here.
-            let worktrees = ProjectPaths::under(kelpie_home, kelpie_home, &name)
-                .worktrees()
-                .canonicalize()
-                .ok()?;
+            let worktrees = ProjectPaths::under(kelpie_home, kelpie_home, &name).worktrees();
+            let worktrees = crate::canonical(&worktrees).ok()?;
             let inside = worktree.strip_prefix(&worktrees).ok()?;
             let root = worktrees.join(inside.components().next()?);
             Some((name, root))
