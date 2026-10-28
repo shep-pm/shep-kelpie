@@ -1,4 +1,5 @@
 use super::*;
+use crate::agents::{Role, Tier};
 use crate::test::{EPOCH, ticket};
 
 fn files(names: &[&str]) -> Vec<String> {
@@ -81,6 +82,7 @@ fn a_board_with_an_idle_worker_a_review_call_and_a_ruling_reads_whole() {
             read: Timestamp(EPOCH - 90),
             issues: Vec::new(),
         }),
+        agents: Vec::new(),
         events: events.to_vec(),
         woken_before: true,
         dropped: true,
@@ -115,6 +117,10 @@ fn a_board_with_an_idle_worker_a_review_call_and_a_ruling_reads_whole() {
          ## Ready queue, read 1m ago (the board's order, first taken first; a new issue joins after the last of its priority)\n\
          \n\
          (empty)\n\
+         \n\
+         ## Agents\n\
+         \n\
+         (none)\n\
          \n\
          ## Since your last wake\n\
          \n\
@@ -192,6 +198,7 @@ fn briefing(items: Vec<Item>) -> Briefing<'static> {
         rulings: Vec::new(),
         red: Vec::new(),
         ready: None,
+        agents: Vec::new(),
         events: Vec::new(),
         woken_before: false,
         dropped: false,
@@ -324,6 +331,7 @@ fn quoting(body: &str) -> String {
                 excerpt: Some(excerpt(body)),
             }],
         }),
+        agents: Vec::new(),
         events: Vec::new(),
         woken_before: false,
         dropped: false,
@@ -375,4 +383,77 @@ fn ages_read_in_minutes_then_hours() {
     assert_eq!(age(now, Timestamp(10_000 - 3599)), "59m");
     assert_eq!(age(now, Timestamp(10_000 - 3600 - 300)), "1h05m");
     assert_eq!(age(now, Timestamp(10_001)), "0m");
+}
+
+fn agent(name: &str, role: Role, fit: (Tier, Option<&[&str]>, Option<&str>)) -> AgentLine {
+    let (tier, kinds, description) = fit;
+    AgentLine {
+        name: name.into(),
+        role,
+        default: false,
+        tier,
+        kinds: kinds.map(|k| k.iter().map(|&k| k.to_owned()).collect()),
+        description: description.map(str::to_owned),
+    }
+}
+
+#[test]
+fn the_agents_section_lists_the_implementers_default_first_then_the_reviewers_with_tier_kinds_and_description()
+ {
+    let mut sonnet = agent(
+        "sonnet-high",
+        Role::Implementer,
+        (Tier::Standard, None, Some("Ordinary feature and fix work.")),
+    );
+    sonnet.default = true;
+    let opus = agent(
+        "opus-high",
+        Role::Implementer,
+        (
+            Tier::Heavy,
+            Some(&["design", "migration"]),
+            Some("Work that needs the strongest agent."),
+        ),
+    );
+    let lite = agent(
+        "defect-hunter-lite",
+        Role::Reviewer,
+        (Tier::Light, None, Some("A quick read for defects.")),
+    );
+    let board = Briefing {
+        agents: vec![sonnet, opus, lite],
+        ..briefing(Vec::new())
+    };
+    let text = render(&board);
+    let section = text.split("## Agents\n").nth(1).unwrap();
+    let section = section.split("\n## ").next().unwrap();
+    assert_eq!(
+        section,
+        "\n\
+         Implementers, the default first, then reviewers in their order. An `agent:` label \
+         picks a work item's implementer: tier and kinds are shown, nothing picks by them.\n\
+         \n\
+         - sonnet-high (implementer, default): standard tier, every kind; \
+         Ordinary feature and fix work.\n\
+         - opus-high (implementer): heavy tier, kinds design, migration; \
+         Work that needs the strongest agent.\n\
+         - defect-hunter-lite (reviewer): light tier, every kind; A quick read for defects.\n"
+    );
+    let ready = text.find("## Ready queue").unwrap();
+    let agents = text.find("## Agents").unwrap();
+    let events = text.find("## Recent events").unwrap();
+    assert!(ready < agents && agents < events, "{text}");
+}
+
+#[test]
+fn an_agent_with_no_description_reads_no_description() {
+    let board = Briefing {
+        agents: vec![agent("qwen", Role::Reviewer, (Tier::Standard, None, None))],
+        ..briefing(Vec::new())
+    };
+    let text = render(&board);
+    assert!(
+        text.contains("- qwen (reviewer): standard tier, every kind; no description\n"),
+        "{text}"
+    );
 }

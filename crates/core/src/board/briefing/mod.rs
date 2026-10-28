@@ -3,8 +3,8 @@
 //! Code writes it from what the runner already holds, so the agent never
 //! runs git or gh. It has one entry per open work item with its session's
 //! activity, the rulings waiting, the ready queue in the board's order,
-//! the events since the agent's last wake, and an overlap table of the
-//! files open branches and ready issues share. Its shape follows what was
+//! the agents the project lists, the events since the agent's last wake,
+//! and an overlap table of the files open branches and ready issues share. Its shape follows what was
 //! measured: a PM briefed this way decided as well as one that looked for
 //! itself, at about half the cost.
 
@@ -13,6 +13,7 @@ use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agents::{Role, Tier};
 use crate::ports::{CallActivity, Cost, Timestamp, Wait};
 use crate::state::BoardEvent;
 use crate::ticket::TicketId;
@@ -69,6 +70,9 @@ pub struct Briefing<'a> {
     pub red: Vec<RedLine>,
     /// The ready queue as last read, `None` before the first read
     pub ready: Option<Ready>,
+    /// The agents the project lists: its implementers, the default first, then
+    /// its reviewers in their order
+    pub agents: Vec<AgentLine>,
     /// The board events the project manager has not read
     pub events: Vec<BoardEvent>,
     /// Whether the project manager has read the board before
@@ -227,6 +231,23 @@ pub struct ReadyLine {
     pub excerpt: Option<String>,
 }
 
+/// An agent the project lists, as the agents section shows it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentLine {
+    /// Its name
+    pub name: String,
+    /// An implementer or a reviewer
+    pub role: Role,
+    /// Whether it is the implementer an issue with no `agent:` label runs on
+    pub default: bool,
+    /// Its tier, `standard` when its file names none
+    pub tier: Tier,
+    /// The kinds of work it takes, `None` for every kind
+    pub kinds: Option<Vec<String>>,
+    /// What its file says it is for
+    pub description: Option<String>,
+}
+
 /// The board as `board.md` holds it
 pub fn render(board: &Briefing<'_>) -> String {
     let mut out = String::new();
@@ -260,6 +281,7 @@ pub fn render(board: &Briefing<'_>) -> String {
     rulings(&mut out, &board.rulings);
     red_on_main(&mut out, board);
     ready_queue(&mut out, board.ready.as_ref(), now);
+    agents(&mut out, &board.agents);
     events(&mut out, board);
     overlap(&mut out, board);
     files(&mut out, &board.items);
@@ -446,6 +468,34 @@ fn ready_queue(out: &mut String, ready: Option<&Ready>, now: Timestamp) {
             ticket_ref(issue.ticket),
             issue.priority.unwrap_or("no priority"),
             issue.title
+        );
+    }
+    out.push('\n');
+}
+
+fn agents(out: &mut String, agents: &[AgentLine]) {
+    out.push_str("## Agents\n\n");
+    if agents.is_empty() {
+        out.push_str("(none)\n\n");
+        return;
+    }
+    out.push_str(
+        "Implementers, the default first, then reviewers in their order. An `agent:` label \
+         picks a work item's implementer: tier and kinds are shown, nothing picks by them.\n\n",
+    );
+    for agent in agents {
+        let default = if agent.default { ", default" } else { "" };
+        let kinds = match &agent.kinds {
+            Some(kinds) => format!("kinds {}", kinds.join(", ")),
+            None => "every kind".to_owned(),
+        };
+        let _ = writeln!(
+            out,
+            "- {} ({}{default}): {} tier, {kinds}; {}",
+            agent.name,
+            agent.role.as_str(),
+            agent.tier.as_str(),
+            agent.description.as_deref().unwrap_or("no description")
         );
     }
     out.push('\n');
