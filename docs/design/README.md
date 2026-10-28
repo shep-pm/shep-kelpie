@@ -13,7 +13,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 - The shepherd is reached through the `Dial` port (`core/shepherd/connection.rs`): `Socket` is the real one; tests dial `FakeShepherd`. #587
 - Socket path over 103 bytes: no start. #1147
 - Home never moved from `~/.kelpie`: no start, names each old file, exit 78 (`stop_exit_codes`). #311, #345
-- State file version 89 (`VERSION` in `core/state/mod.rs`); each change one way: rollback = finish or drop open items. `core/state/removed/mod.rs`
+- State file version 90 (`VERSION` in `core/state/mod.rs`); each change one way: rollback = finish or drop open items. `core/state/removed/mod.rs`
 - Business code is Rust; Tauri GUI after MVP. #5
 - Crates under `crates/` use nothing above them; the root holds the binary, verbs (`src/{flock,upgrade,sheep,doctor,issues}/`, `src/schema.rs`). ADR 0015
 - No budget numbers in agent prompts; no worker merges/posts as the maintainer (fence.md, github-app.md).
@@ -75,7 +75,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | triage-check.md | the check on every issue | `runner/triage/checks.rs` |
 | log-lines.md | runner and dog log lines | `runner/drain/`, `runner/{skip_log,claim}.rs`, `runner/review_bot/lease_wait.rs`, `dog/desk.rs`, `dog/door/` |
 | metrics.md | kelpie's series, alerts, dashboard | `core/metrics/`, `core/ports/metrics.rs`, `assets/{prometheus,grafana}/` |
-| metrics-work-items.md | work-item series, `finished` line | `core/usage/finished.rs`, `runner/ci_failure.rs` |
+| metrics-work-items.md | work-item series, `finished` line | `core/usage/finished.rs`, `runner/ci_failure/` |
 | metrics-dog.md | leases, summons, forge | `core/metrics/{dog,forge,model_lease}.rs`, `dog/watch/` |
 | metrics-transcripts.md | a call's transcript: MCP, tools, `usage` | `crates/facts/`, `runner/transcript_count/`, `core/usage/` |
 | budget.md | pacing, dog + leases, time, usage, settings | `runner/pace.rs`, `dog/`, `core/usage/`, `core/settings/`, `src/sheep/mod.rs` |

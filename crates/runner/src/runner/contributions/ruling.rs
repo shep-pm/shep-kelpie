@@ -128,11 +128,13 @@ pub(super) fn raise_merge(
     next: &mut ProjectState,
     pull_request: u64,
     head: &str,
+    rework_off: bool,
     facts: &str,
     now: Timestamp,
 ) {
     let held = Held::Merge {
         head: head.to_owned(),
+        rework_off,
     };
     raise_with(next, pull_request, held, facts, now);
 }
@@ -169,7 +171,7 @@ pub(super) fn withdraw(next: &mut ProjectState) {
         RulingKind::Contribution(Held::Security { head, .. }) => {
             (followed.iter()).any(|c| r.pull_request == Some(c.pull_request) && c.head == *head)
         }
-        RulingKind::Contribution(Held::Merge { head }) => {
+        RulingKind::Contribution(Held::Merge { head, .. }) => {
             (followed.iter()).any(|c| r.pull_request == Some(c.pull_request) && c.head == *head)
         }
         RulingKind::Contribution(
@@ -242,7 +244,7 @@ pub(in crate::runner) fn keep_answer(next: &mut ProjectState, answer: &Answer, r
 /// A no with no note, or the note a reaction or a tick gives, posts nothing. A
 /// rework with no note, which the card's choice gives, sends the worker none.
 pub(in crate::runner) fn rule_merge(next: &mut ProjectState, answer: &Answer, ruling: &Ruling) {
-    let RulingKind::Contribution(Held::Merge { head }) = &ruling.kind else {
+    let RulingKind::Contribution(Held::Merge { head, .. }) = &ruling.kind else {
         return;
     };
     let verdict = match answer {

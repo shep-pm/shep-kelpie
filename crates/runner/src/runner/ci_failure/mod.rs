@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 use super::Runner;
 use super::ci_help::Logs;
 use crate::metrics::CiTests;
+use crate::ports::FailedLogs;
 use crate::state::StateError;
 
 /// The modules and test binaries `docs/agents/sandbox-red-tests.md` lists whole:
@@ -122,6 +123,16 @@ pub(super) fn failed_tests(logs: &str, omitted: usize, listed: &[&str]) -> CiTes
     }) {
         true => CiTests::SandboxOnly,
         false => CiTests::Runnable,
+    }
+}
+
+/// What `logs` count a red head as. A head whose runs a timeout ended and whose logs
+/// name no failing test is neither a test a worker could have run nor a run with
+/// no test: it is slow. Where some failed runs were left unread, they may have named one.
+pub(super) fn counted_as(logs: &FailedLogs, listed: &[&str]) -> CiTests {
+    match failed_tests(&logs.text, logs.omitted, listed) {
+        CiTests::NoTests if logs.timed_out > 0 => CiTests::TimedOut,
+        tests => tests,
     }
 }
 
@@ -265,7 +276,7 @@ fn step_and_text(line: &str) -> (Option<&str>, &str) {
 
 // `gh run view --log-failed` writes cargo's colour marks as the literal text
 // `^[[1m` rather than escape bytes, which is why `strip_colour` in
-// `crates/adapters/src/adapters/gh/runs.rs` leaves them in. They wrap the words kelpie matches on,
+// `crates/adapters/src/adapters/gh/runs/mod.rs` leaves them in. They wrap the words kelpie matches on,
 // so they come off before anything is read.
 fn plain(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -378,7 +389,7 @@ impl Runner {
             DESCRIBED_REPO => &SANDBOX_RED,
             _ => &[],
         };
-        let tests = failed_tests(&logs.text, logs.omitted, listed);
+        let tests = counted_as(logs, listed);
         self.metrics.ci_failure(tests);
         let counted = head.to_owned();
         self.update(|item| {
@@ -387,6 +398,7 @@ impl Runner {
                 CiTests::Runnable => &mut failures.runnable,
                 CiTests::SandboxOnly => &mut failures.sandbox_only,
                 CiTests::NoTests => &mut failures.no_tests,
+                CiTests::TimedOut => &mut failures.timed_out,
             };
             *class = class.saturating_add(1);
             item.counted_head = Some(counted);
@@ -409,32 +421,35 @@ mod tests {
     // Run 38854765050 failed on one test of `sheep::handover::tests::pi`, which the
     // doc lists whole, and on its private-names job, which runs no test. That job's
     // home folder path is written `/home/me`, as every fixture writes the home folder.
-    const SANDBOX_ONLY: &str = include_str!("../../../../fixtures/gh-run-log-handover.txt");
+    const SANDBOX_ONLY: &str = include_str!("../../../../../fixtures/gh-run-log-handover.txt");
 
     // Run 38807299334 failed on two tests of `runner::turn::tests::dev_server`, which
     // the doc lists in part: 5 of its tests. Kelpie cannot tell whether these two are
     // among those five, so it counts the run as one its worker could have caught.
-    const PARTIAL_MODULE: &str = include_str!("../../../../fixtures/gh-run-log-partial-module.txt");
+    const PARTIAL_MODULE: &str =
+        include_str!("../../../../../fixtures/gh-run-log-partial-module.txt");
 
     // Run 38967162070 failed on one test of `runner::pm::tests::lease`, which the doc
     // lists no reason for.
-    const UNLISTED_TEST: &str = include_str!("../../../../fixtures/gh-run-log-unlisted-test.txt");
+    const UNLISTED_TEST: &str =
+        include_str!("../../../../../fixtures/gh-run-log-unlisted-test.txt");
 
     // Run 38983239961 failed on one test of the `tests/settings_examples.rs` binary,
     // which the doc lists no reason for. Its tail is the recorded shape of a log that
     // holds several cargo runs: a `Running tests/<name>.rs` header and a `test result`
     // line for each binary, the failing one last.
-    const INTEGRATION: &str = include_str!("../../../../fixtures/gh-run-log-integration-test.txt");
+    const INTEGRATION: &str =
+        include_str!("../../../../../fixtures/gh-run-log-integration-test.txt");
 
     // Run 38950550504 failed in `cargo doc --no-deps --locked`, with no test run at all.
-    const NO_TEST: &str = include_str!("../../../../fixtures/gh-run-log-no-test.txt");
+    const NO_TEST: &str = include_str!("../../../../../fixtures/gh-run-log-no-test.txt");
 
     // Run 38567261082 failed while building its tests, and no test ran. Its
     // log holds rustc's `error[E0061]` and cargo's `error: could not
     // compile`. `failure_tail` keeps this job's part of the log when a test
     // build fails.
     const COMPILE_FAILURE: &str =
-        include_str!("../../../../fixtures/gh-run-log-compile-failure.txt");
+        include_str!("../../../../../fixtures/gh-run-log-compile-failure.txt");
 
     // What kelpie makes of a log on the repo its sandbox-red list is of, with every
     // failed run read
@@ -944,6 +959,8 @@ mod tests {
         rig.verdict(&runner);
         assert_eq!(counted(&rig, "runnable"), Some(2.0), "{head} then {fixed}");
     }
+
+    mod timed_out;
 
     #[test]
     fn a_red_run_whose_logs_kelpie_cannot_read_counts_nothing() {

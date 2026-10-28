@@ -122,7 +122,12 @@ impl Ecosystem {
     fn install(self, w: &World) {
         let home = w.path("home");
         match self {
-            Self::Rust => fs::create_dir_all(home.join(".cargo")).unwrap(),
+            Self::Rust => {
+                fs::create_dir_all(home.join(".cargo")).unwrap();
+                // Cargo reads git's global ignore when it lists the fixture's files.
+                fs::create_dir_all(home.join(".config/git")).unwrap();
+                fs::write(home.join(".config/git/ignore"), ".DS_Store\n").unwrap();
+            }
             Self::Go => {
                 fs::create_dir_all(home.join("go/pkg/mod")).unwrap();
                 copy_tool("golangci-lint", &home.join("go/bin"));
@@ -143,7 +148,7 @@ impl Ecosystem {
                     .map(PathBuf::from)
                     .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".rustup")))
                     .filter(|dir| dir.is_dir());
-                [var("CARGO_HOME", &home.join(".cargo"))]
+                [var("CARGO_HOME", &home.join(".cargo")), var("HOME", &home)]
                     .into_iter()
                     .chain(rustup.map(|dir| var("RUSTUP_HOME", &dir)))
                     .collect()

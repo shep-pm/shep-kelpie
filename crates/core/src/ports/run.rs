@@ -51,7 +51,7 @@ pub enum WorkflowState {
 
 /// What kelpie read of the CI runs that failed on one head
 ///
-/// Kelpie reads the logs of at most `RUNS` failed runs (`crates/adapters/src/adapters/gh/runs.rs`),
+/// Kelpie reads the logs of at most `RUNS` failed runs (`crates/adapters/src/adapters/gh/runs/mod.rs`),
 /// so a head with more failed runs than that has logs kelpie never saw. They are
 /// counted here rather than left out of the answer, since what they hold is what a
 /// caller cannot know is not there.
@@ -62,4 +62,7 @@ pub struct FailedLogs {
     pub text: String,
     /// How many failed runs kelpie did not read, because more failed than it reads
     pub omitted: usize,
+    /// How many of the runs kelpie read were cut short by a job's `timeout-minutes`,
+    /// whose text opens with a line saying so
+    pub timed_out: usize,
 }

@@ -180,7 +180,10 @@ fn pm_decide_is_refused_on_a_question_and_on_a_failure_it_already_answered() {
 fn pm_n_on_a_contribution_s_ruling_is_refused_since_no_only_clears_it() {
     let (_rig, runner) = super::with_pm("asked-take-contribution");
     let mut runner = runner.lock().unwrap();
-    let kind = RulingKind::Contribution(Held::Merge { head: "abc".into() });
+    let kind = RulingKind::Contribution(Held::Merge {
+        head: "abc".into(),
+        rework_off: false,
+    });
     runner.state.rulings.push(Ruling {
         approaches: vec!["Wait for the author".into()],
         ..Ruling::new(ticket(71), "Merge it?", kind)

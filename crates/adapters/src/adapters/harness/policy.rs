@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::dep_sources::{self, Env, ProcessEnv};
 use crate::forwarder::{Upstream, WORKER_HOST};
 use crate::ports::{AgentCall, Fence, Forward, Policy, Tools};
-use crate::profile::CREDENTIALS;
+use crate::profile::{CREDENTIALS, git_config};
 
 use super::hook_reads::fenced_policy;
 
@@ -90,10 +90,7 @@ fn unfenced_reads(call: &AgentCall, unfenced: &[String], env: &dyn Env) -> Carve
         .iter()
         .flat_map(|home| dep_sources::toolchain_homes(home, env))
         .collect();
-    let config = homes.iter().filter_map(|home| {
-        let own = home.join(".gitconfig");
-        own.is_file().then_some(own)
-    });
+    let config = homes.iter().flat_map(|home| git_config(home));
     Carve {
         read: (std::iter::once(call.cwd.clone()))
             .chain(common)
@@ -425,6 +422,10 @@ mod tests {
             std::fs::create_dir_all(dir.path().join(folder)).unwrap();
         }
         std::fs::write(dir.path().join(".gitconfig"), "[user]\n").unwrap();
+        let git = dir.path().join(".config/git");
+        std::fs::create_dir_all(&git).unwrap();
+        std::fs::write(git.join("ignore"), ".DS_Store\n").unwrap();
+        std::fs::write(git.join("credentials"), "https://x:token@github.com\n").unwrap();
         let env = Fixed(vec![
             (
                 "CARGO_HOME",
@@ -436,10 +437,11 @@ mod tests {
             ),
         ]);
         let carve = unfenced_reads(&unfenced_call(dir.path()), &[glob(dir.path())], &env);
-        for folder in tools.iter().chain(&[".gitconfig"]) {
+        for folder in tools.iter().chain(&[".gitconfig", ".config/git/ignore"]) {
             let own = dir.path().join(folder);
             assert!(carve.read.contains(&own), "{own:?} in {:?}", carve.read);
         }
+        assert!(!carve.read.contains(&git.join("credentials")));
         // Each is read back whole, so its own registry token stays denied by name.
         for name in ["credentials", "credentials.toml"] {
             let own = format!("{}/{}", dir.path().join(".cargo").display(), name);

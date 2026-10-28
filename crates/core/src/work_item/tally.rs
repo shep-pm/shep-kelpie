@@ -51,7 +51,7 @@ pub struct Counts {
 }
 
 /// A work item's red heads, by whether its worker could have run the tests
-/// that failed (`crates/runner/src/runner/ci_failure.rs`)
+/// that failed (`crates/runner/src/runner/ci_failure/mod.rs`)
 // wire format: changing this is a breaking change to the state file and the
 // usage ledger
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +66,9 @@ pub struct CiFailures {
     /// No test failed: lint, docs, fmt, or a build that never ran one
     #[serde(default, skip_serializing_if = "is_zero")]
     pub no_tests: u32,
+    /// A job's `timeout-minutes` ended the run, and no log names a failing test
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub timed_out: u32,
 }
 
 impl CiFailures {

@@ -18,6 +18,8 @@ pub struct FakePullRequest {
     // Where the fork is cloned from, and whether its owner lets the
     // maintainers edit it
     pub fork: Option<(String, bool)>,
+    // Whether an organization owns the fork
+    pub fork_owned_by_organization: bool,
     pub author: String,
     pub author_is_bot: bool,
 }
@@ -28,6 +30,8 @@ pub struct CiRuns {
     log: String,
     // How many failed runs the log leaves out, as `failed_run_logs` reports it
     log_omitted: usize,
+    // How many of the log's runs a job's timeout cut short, as `failed_run_logs` reports it
+    log_timed_out: usize,
     log_error: Option<String>,
     reruns: Vec<String>,
     rerun_error: Option<String>,
@@ -61,6 +65,7 @@ impl CiRuns {
             None => Ok(FailedLogs {
                 text: self.log.clone(),
                 omitted: self.log_omitted,
+                timed_out: self.log_timed_out,
             }),
         }
     }
@@ -118,14 +123,24 @@ impl FakeForge {
     /// Makes the failed CI runs' logs say `log`
     pub fn set_ci_log(&self, log: &str) {
         let mut ci = self.ci.lock().unwrap();
-        (ci.log, ci.log_error, ci.log_omitted) = (log.to_owned(), None, 0);
+        (ci.log, ci.log_error) = (log.to_owned(), None);
+        (ci.log_omitted, ci.log_timed_out) = (0, 0);
     }
 
     /// Makes the failed CI runs' logs say `log`, with `omitted` failed runs kelpie
     /// did not read
     pub fn set_ci_log_omitted(&self, log: &str, omitted: usize) {
         let mut ci = self.ci.lock().unwrap();
-        (ci.log, ci.log_error, ci.log_omitted) = (log.to_owned(), None, omitted);
+        (ci.log, ci.log_error) = (log.to_owned(), None);
+        (ci.log_omitted, ci.log_timed_out) = (omitted, 0);
+    }
+
+    /// Makes the failed CI runs' logs say `log`, `timed_out` of the runs having
+    /// been cut short by a job's timeout
+    pub fn set_ci_log_timed_out(&self, log: &str, timed_out: usize) {
+        let mut ci = self.ci.lock().unwrap();
+        (ci.log, ci.log_error) = (log.to_owned(), None);
+        (ci.log_omitted, ci.log_timed_out) = (0, timed_out);
     }
 
     /// Makes reading the failed CI runs' logs fail with `error`, verbatim
