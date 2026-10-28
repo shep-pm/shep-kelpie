@@ -74,6 +74,7 @@ mod tests {
         let profile = Profile {
             exclusions: &none,
             entries: &|_| None,
+            resolve: &|_| None,
         };
         settings_in(&policy(), platform, false, None, &|_| true, &profile).0["filesystem"].clone()
     }
@@ -145,6 +146,7 @@ mod tests {
         let profile = Profile {
             exclusions: &none,
             entries: &|_| None,
+            resolve: &|_| None,
         };
         let settings = settings_in(policy, platform, false, Some(home), &Path::exists, &profile);
         settings.0["filesystem"].clone()

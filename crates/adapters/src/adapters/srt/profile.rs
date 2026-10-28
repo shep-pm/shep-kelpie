@@ -16,8 +16,11 @@ use crate::adapters::host::ProfileExclusions;
 /// What the Windows profile read grant keeps out of a session, and how to list a folder
 pub(super) struct Profile<'a> {
     pub exclusions: &'a ProfileExclusions,
-    /// The names in the folder at a path, None when it cannot be listed
+    /// The names in the folder at a path: none for a file or a path that is not
+    /// there, None when it is there and cannot be listed
     pub entries: &'a dyn Fn(&str) -> Option<Vec<String>>,
+    /// The real target of a path, None when it cannot be resolved
+    pub resolve: &'a dyn Fn(&str) -> Option<String>,
 }
 
 // One exclusion, its path in lower case components
@@ -74,6 +77,7 @@ impl Profile<'_> {
         granted: &mut Vec<String>,
         notes: &mut Vec<String>,
     ) {
+        let path = self.target(rules, path);
         let key = parts(&path);
         let mut holds = None;
         for rule in rules {
@@ -105,8 +109,29 @@ impl Profile<'_> {
         }
     }
 
+    // crabpot compares a grant's real target, so a link into a protected folder
+    // is cut as its target. A target clear of every exclusion leaves the grant
+    // as spelled.
+    fn target(&self, rules: &[Rule<'_>], path: String) -> String {
+        match (self.resolve)(&path) {
+            Some(real) if parts(&real) != parts(&path) && self.clashes(rules, &real) => real,
+            _ => path,
+        }
+    }
+
+    fn clashes(&self, rules: &[Rule<'_>], path: &str) -> bool {
+        let key = parts(path);
+        rules.iter().any(|rule| match standing(&key, &rule.parts) {
+            Some(Standing::Above) => self.reaches(rule, path, &key),
+            Some(Standing::Inside) => !rule.ungranted_only,
+            Some(Standing::Equal) => true,
+            None => false,
+        })
+    }
+
     // Whether `rule` lies beneath the folder at `path`: always for a plain
-    // exclusion, and for a wildcard one when something there matches.
+    // exclusion, and for a wildcard one when something there matches. A folder
+    // that cannot be listed may hold a match, as it does for crabpot.
     fn reaches(&self, rule: &Rule<'_>, path: &str, key: &[String]) -> bool {
         !rule.exclusion.contains('*') || self.matches_beneath(path, &rule.parts[key.len()..])
     }
@@ -115,7 +140,9 @@ impl Profile<'_> {
         let Some((next, after)) = rest.split_first() else {
             return true;
         };
-        let names = (self.entries)(folder).unwrap_or_default();
+        let Some(names) = (self.entries)(folder) else {
+            return true;
+        };
         (names.iter())
             .filter(|name| component_matches(next, &name.to_lowercase()))
             .any(|name| {
@@ -171,14 +198,34 @@ fn standing(path: &[String], rule: &[String]) -> Option<Standing> {
     })
 }
 
-/// The names in the folder at `path`, sorted, None when it cannot be read
+/// The names in the folder at `path`, sorted. A file or a path that is not
+/// there holds none, as in crabpot; None when it is a folder that cannot be read.
 pub(super) fn list(path: &str) -> Option<Vec<String>> {
-    let mut names: Vec<String> = std::fs::read_dir(path)
-        .ok()?
+    let Ok(dir) = std::fs::read_dir(path) else {
+        let holds_nothing = match std::fs::symlink_metadata(path) {
+            Ok(meta) => !meta.is_dir(),
+            Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+        };
+        return holds_nothing.then(Vec::new);
+    };
+    let mut names: Vec<String> = dir
         .filter_map(|entry| Some(entry.ok()?.file_name().to_string_lossy().into_owned()))
         .collect();
     names.sort_by_key(|name| name.to_lowercase());
     Some(names)
+}
+
+/// The real target of `path`, without the `\\?\` prefix, None when it cannot be resolved
+pub(super) fn real(path: &str) -> Option<String> {
+    let real = std::fs::canonicalize(path)
+        .ok()?
+        .to_string_lossy()
+        .into_owned();
+    match real.strip_prefix(r"\\?\") {
+        Some(rest) if rest.starts_with(r"UNC\") => None,
+        Some(rest) => Some(rest.to_owned()),
+        None => Some(real),
+    }
 }
 
 #[cfg(test)]
@@ -196,6 +243,10 @@ mod tests {
     // `settings_in` asked to list
     struct Disk {
         folders: Vec<(&'static str, Vec<&'static str>)>,
+        // Folders that are there and cannot be listed
+        denied: Vec<&'static str>,
+        // Links, as `(link, target)`
+        links: Vec<(&'static str, &'static str)>,
         listed: RefCell<Vec<String>>,
     }
 
@@ -206,16 +257,38 @@ mod tests {
                     .iter()
                     .map(|(f, names)| (*f, names.to_vec()))
                     .collect(),
+                denied: Vec::new(),
+                links: Vec::new(),
                 listed: RefCell::default(),
             }
         }
 
+        fn denying(mut self, path: &'static str) -> Self {
+            self.denied.push(path);
+            self
+        }
+
+        fn linking(mut self, link: &'static str, target: &'static str) -> Self {
+            self.links.push((link, target));
+            self
+        }
+
+        fn resolve(&self, path: &str) -> Option<String> {
+            let (_, target) = (self.links.iter()).find(|(l, _)| l.eq_ignore_ascii_case(path))?;
+            Some((*target).to_owned())
+        }
+
+        // A path outside the tree is a file or not there, which holds nothing.
         fn list(&self, path: &str) -> Option<Vec<String>> {
             self.listed.borrow_mut().push(path.to_owned());
-            let (_, names) = self
-                .folders
-                .iter()
-                .find(|(f, _)| f.eq_ignore_ascii_case(path))?;
+            if self.denied.iter().any(|f| f.eq_ignore_ascii_case(path)) {
+                return None;
+            }
+            let Some((_, names)) =
+                (self.folders.iter()).find(|(f, _)| f.eq_ignore_ascii_case(path))
+            else {
+                return Some(Vec::new());
+            };
             let mut names: Vec<String> = names.iter().map(|n| (*n).to_owned()).collect();
             names.sort_by_key(|name| name.to_lowercase());
             Some(names)
@@ -246,6 +319,7 @@ mod tests {
         let profile = Profile {
             exclusions: excluding,
             entries: &|path| disk.list(path),
+            resolve: &|path| disk.resolve(path),
         };
         let (settings, notes) = settings_in(
             &policy,
@@ -423,10 +497,54 @@ mod tests {
     #[test]
     fn a_folder_that_cannot_be_listed_is_left_out_with_a_note() {
         let kept_out = exclusions(&[r"C:\Users\R\.cargo\credentials"], &[]);
-        let (files, notes) = windows(&[CARGO], &[], &kept_out, &Disk::new(&[]));
+        let disk = Disk::new(&[]).denying(CARGO);
+        let (files, notes) = windows(&[CARGO], &[], &kept_out, &disk);
         assert_eq!(files["allowRead"], json!([]));
         assert_eq!(notes.len(), 1, "{notes:?}");
         assert!(notes[0].contains("cannot be listed"), "{notes:?}");
+    }
+
+    #[test]
+    fn a_folder_that_cannot_be_listed_is_taken_to_hold_a_wildcard_exclusion() {
+        let kept_out = exclusions(&[r"C:\Users\R\apps\*\EBWebView"], &[]);
+        // The grant itself cannot be listed.
+        let disk = Disk::new(&[]).denying(r"C:\Users\R\apps");
+        let (files, notes) = windows(&[r"C:\Users\R\apps"], &[], &kept_out, &disk);
+        assert_eq!(files["allowRead"], json!([]));
+        assert!(notes[0].contains("cannot be listed"), "{notes:?}");
+
+        // So does a folder under it that the `*` reaches.
+        let disk = Disk::new(&[(r"C:\Users\R\apps", &["one", "two", "plain.txt"])])
+            .denying(r"C:\Users\R\apps\one");
+        let (files, notes) = windows(&[r"C:\Users\R\apps"], &[], &kept_out, &disk);
+        assert_eq!(
+            files["allowRead"],
+            json!([r"C:\Users\R\apps\plain.txt", r"C:\Users\R\apps\two"])
+        );
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains(r"apps\one is left out"), "{notes:?}");
+    }
+
+    #[test]
+    fn a_link_to_a_folder_above_an_exclusion_is_granted_as_its_targets_entries() {
+        let kept_out = exclusions(&[r"C:\Users\R\.cargo\credentials"], &[]);
+        let disk = cargo_disk().linking(r"C:\hooks\cargo", CARGO);
+        let (files, notes) = windows(
+            &[r"C:\hooks\cargo", r"C:\hooks\other"],
+            &[],
+            &kept_out,
+            &disk,
+        );
+        let allowed = files["allowRead"].as_array().unwrap();
+        assert!(
+            allowed.contains(&json!(r"C:\Users\R\.cargo\bin")),
+            "{allowed:?}"
+        );
+        assert!(!allowed.contains(&json!(r"C:\hooks\cargo")), "{allowed:?}");
+        assert!(!allowed.contains(&json!(CARGO)), "{allowed:?}");
+        // A link to a clear target stays as spelled.
+        assert!(allowed.contains(&json!(r"C:\hooks\other")), "{allowed:?}");
+        assert!(notes.is_empty(), "{notes:?}");
     }
 
     #[test]
@@ -441,6 +559,7 @@ mod tests {
         let profile = Profile {
             exclusions: &kept_out,
             entries: &|path| disk.list(path),
+            resolve: &|path| disk.resolve(path),
         };
         for platform in [Platform::Macos, Platform::Linux] {
             let (settings, notes) =
@@ -463,7 +582,7 @@ mod tests {
 
     // The wrapped command's settings are written from the install's list, so a
     // list that drifted from crabpot's is the install's to correct. A Unix test
-    // cannot list `C:\...`, so the folder above the exclusion is left out.
+    // find `C:\...`, so the folder above the exclusion holds nothing and adds no grant.
     #[test]
     fn the_installs_exclusions_are_what_the_written_settings_are_cut_around() {
         use super::super::SandboxRuntime;

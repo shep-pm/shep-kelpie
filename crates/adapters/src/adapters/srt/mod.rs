@@ -255,6 +255,7 @@ fn settings_for(
     let profile = Profile {
         exclusions,
         entries: &profile::list,
+        resolve: &profile::real,
     };
     settings_in(
         policy,
