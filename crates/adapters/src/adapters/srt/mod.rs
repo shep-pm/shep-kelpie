@@ -17,6 +17,8 @@ use serde_json::{Value, json};
 use crate::adapters::host::WindowsInstall;
 use crate::ports::{Policy, Sandbox, SandboxError};
 
+mod windows;
+
 // The Mach services a command asks the keychain through, which a covered call may not look up
 const KEYCHAIN_SERVICES: [&str; 2] = ["com.apple.securityd.xpc", "com.apple.SecurityServer"];
 
@@ -223,15 +225,18 @@ fn settings_on(policy: &Policy, platform: Platform, loopback_open: bool) -> Valu
         platform,
         loopback_open,
         crate::home::user_home().as_deref(),
+        &Path::exists,
     )
 }
 
-// The same, with `home` as what a `~/` path in a deny list is under
+// The same, with `home` as what a `~/` path in a deny list is under and
+// `present` as whether a path is there
 fn settings_in(
     policy: &Policy,
     platform: Platform,
     loopback_open: bool,
     home: Option<&Path>,
+    present: &dyn Fn(&Path) -> bool,
 ) -> Value {
     // Without `strictAllowlist`, a host off the list is asked about rather than refused.
     let mut network = json!({
@@ -279,8 +284,20 @@ fn settings_in(
         .read
         .iter()
         .filter(|folder| platform != Platform::Windows || below_a_drive(folder));
-    let mut read = json!(read_list.collect::<Vec<_>>());
-    let mut write = json!(policy.write);
+    let (mut read, mut write, deny_read, deny_write) = match platform {
+        Platform::Windows => (
+            json!(windows::paths(read_list)),
+            json!(windows::paths(&policy.write)),
+            json!(windows::paths(existing(&policy.no_read, home, present))),
+            json!(windows::paths(existing(&policy.no_write, home, present))),
+        ),
+        _ => (
+            json!(read_list.collect::<Vec<_>>()),
+            json!(policy.write),
+            json!(policy.no_read),
+            json!(policy.no_write),
+        ),
+    };
     if platform.macos() {
         let (read, write) = (array(&mut read), array(&mut write));
         read.extend(policy.open.iter().map(|folder| alone(folder).into()));
@@ -288,42 +305,39 @@ fn settings_in(
             write.extend([json!(glob), json!(format!("{glob}/*"))]);
         }
     }
-    // srt-win makes an empty placeholder for a deny target that is missing, and
-    // never deletes it. A path the worker cannot make needs no deny, and one it
-    // makes in the worktree is caught by `fence::differ` after the call.
-    let (no_read, no_write) = match platform {
-        Platform::Windows => (
-            json!(existing(&policy.no_read, home)),
-            json!(existing(&policy.no_write, home)),
-        ),
-        _ => (json!(policy.no_read), json!(policy.no_write)),
-    };
     json!({
         "network": network,
         "filesystem": {
-            "denyRead": no_read,
+            "denyRead": deny_read,
             "allowRead": read,
             "allowWrite": write,
-            "denyWrite": no_write,
+            "denyWrite": deny_write,
         },
         "enableWeakerNetworkIsolation": policy.verify_tls,
     })
 }
 
-// What `paths` holds that is there, or may be: a glob is kept, since srt
-// expands it to what exists. A leading `~/` is under `home`.
-fn existing<'a, T: AsRef<Path>>(paths: &'a [T], home: Option<&Path>) -> Vec<&'a T> {
+// What `paths` holds that is there. srt-win makes an empty placeholder for a
+// deny target that is missing and never deletes it, and a path the worker
+// cannot make needs no deny: one it makes in the worktree is caught by
+// `fence::differ` after the call. A `<folder>/**` is there when the folder is,
+// a leading `~/` is under `home`, and any other glob is kept for the list to drop.
+fn existing<'a, T: AsRef<Path>>(
+    paths: &'a [T],
+    home: Option<&Path>,
+    present: &dyn Fn(&Path) -> bool,
+) -> Vec<&'a T> {
     paths
         .iter()
         .filter(|path| {
-            let path = path.as_ref();
-            let text = path.to_string_lossy();
-            if text.contains(['*', '?', '[']) {
+            let text = path.as_ref().to_string_lossy();
+            let text = text.trim_end_matches("/**").trim_end_matches(r"\**");
+            if text.contains(['*', '?']) {
                 return true;
             }
-            match (text.strip_prefix("~/"), home) {
-                (Some(rest), Some(home)) => home.join(rest).exists(),
-                _ => path.exists(),
+            match (text.strip_prefix("~/").or(text.strip_prefix(r"~\")), home) {
+                (Some(rest), Some(home)) => present(&home.join(rest.replace('\\', "/"))),
+                _ => present(Path::new(text)),
             }
         })
         .collect()
@@ -593,6 +607,7 @@ mod tests {
                 "~/.netrc".into(),
                 "~/.git-credentials".into(),
                 "~/.ssh/**".into(),
+                "~/.aws/**".into(),
                 "~/.kelpie/settings.toml".into(),
                 home.join(".cargo")
                     .join("credentials")
@@ -609,16 +624,10 @@ mod tests {
         let home = dir.path();
         let policy = denying(home);
         let wt = home.join("wt");
-        let files = &settings_in(&policy, Platform::Windows, false, Some(home))["filesystem"];
-        assert_eq!(
-            files["denyWrite"],
-            json!([
-                wt.join(".codex"),
-                wt.join("**").join(".codex"),
-                wt.join(".mcp.json")
-            ])
-        );
-        assert_eq!(files["denyRead"], json!(["~/.netrc", "~/.ssh/**"]));
+        let files = &settings_in(&policy, Platform::Windows, false, Some(home), &Path::exists)["filesystem"];
+        let kept = [wt.join(".codex"), wt.join(".mcp.json")];
+        assert_eq!(files["denyWrite"], json!(windows::paths(kept)));
+        assert_eq!(files["denyRead"], json!([r"~\.netrc", r"~\.ssh"]));
     }
 
     #[test]
@@ -626,7 +635,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let policy = denying(dir.path());
         for platform in [Platform::Macos, Platform::Linux] {
-            let files = &settings_in(&policy, platform, false, Some(dir.path()))["filesystem"];
+            let files = &settings_in(&policy, platform, false, Some(dir.path()), &Path::exists)["filesystem"];
             assert_eq!(files["denyWrite"], json!(policy.no_write), "{platform:?}");
             assert_eq!(files["denyRead"], json!(policy.no_read), "{platform:?}");
         }
