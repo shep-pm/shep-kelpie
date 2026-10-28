@@ -7,8 +7,9 @@
 //! keeps the book on its [`desk`], and grants with a `grant` trigger on the
 //! runner. The book is saved to `<kelpie home>/dog/book.json` after every
 //! change and loaded on start, with a review window for each review bot as
-//! its agent file in kelpie's home defines it.
+//! its agent file in kelpie's home defines it. It keeps each agent's [`availability`].
 
+pub mod availability;
 mod bus;
 pub mod desk;
 mod door;
@@ -58,12 +59,17 @@ const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 const WINDOW_TICK: Duration = Duration::from_secs(10);
 
 /// Runs the dog until the shepherd stops it, as the adopted kelpie's start
-pub fn run() -> ExitCode {
+pub fn run(ports: availability::Ports) -> ExitCode {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build();
     let served = match runtime {
-        Ok(runtime) => runtime.block_on(serve()),
+        Ok(runtime) => {
+            let served = runtime.block_on(serve(ports));
+            // A plan meter's read can take half a minute, and the dog does not wait for it.
+            runtime.shutdown_background();
+            served
+        }
         Err(e) => Err(format!("cannot start the async runtime: {e}")),
     };
     match served {
@@ -157,15 +163,13 @@ fn open(
     }
 }
 
-// Each review bot's window, from its agent file in kelpie's home. Files
-// that cannot be read, or a bot's that cannot be used, leave kelpie's own
-// windows, and a runner that names them refuses them anyway.
-fn windows() -> Reviewers {
+// The agent files in kelpie's home, or kelpie's own when they cannot be read.
+fn agents() -> Agents {
     match home::kelpie_home() {
-        Ok(home) => windows_in(&home.join(agents::FOLDER)),
+        Ok(home) => agents_in(&home.join(agents::FOLDER)),
         Err(e) => {
             println!("{e}: booking each review bot's window as kelpie's own file has it");
-            Reviewers::from_agents(&Agents::embedded())
+            Agents::embedded()
         }
     }
 }
@@ -227,14 +231,20 @@ fn link_issue_skill() {
     }
 }
 
-fn windows_in(folder: &std::path::Path) -> Reviewers {
-    let agents = Agents::load(folder).unwrap_or_else(|e| {
+fn agents_in(folder: &std::path::Path) -> Agents {
+    Agents::load(folder).unwrap_or_else(|e| {
         println!("{e}: booking each review bot's window as kelpie's own file has it");
         Agents::embedded()
-    });
+    })
+}
+
+// Each review bot's window, from its agent file. Files that cannot be read,
+// or a bot's that cannot be used, leave kelpie's own windows, and a runner
+// that names them refuses them anyway.
+fn windows_of(agents: &Agents) -> Reviewers {
     let own = Reviewers::from_agents(&Agents::embedded());
     let broken = |bot: &Bot| agents.broken(&AgentName::kelpies(bot.as_str()));
-    (Bot::ALL.iter()).fold(Reviewers::from_agents(&agents), |windows, bot| {
+    (Bot::ALL.iter()).fold(Reviewers::from_agents(agents), |windows, bot| {
         match (broken(bot), own.window(*bot)) {
             (Some(e), Some(window)) => {
                 println!("{e}: booking {bot}'s window as kelpie's own file has it");
@@ -307,7 +317,7 @@ fn salvage(text: &str) -> KelpieSettings {
     settings
 }
 
-async fn serve() -> Result<(), String> {
+async fn serve(ports: availability::Ports) -> Result<(), String> {
     let shepherd = shep_channel::serve();
     if !shepherd.is_active() {
         return Err(crate::shepherd::no_channel());
@@ -336,10 +346,12 @@ async fn serve() -> Result<(), String> {
     refresh_baselines();
     migrate_agents();
     link_issue_skill();
-    let mut kept = open(file, Box::new(SystemClock), windows(), metrics);
+    let agents = agents();
+    let mut kept = open(file, Box::new(SystemClock), windows_of(&agents), metrics);
     let capacity = settings.leases.cargo_test_capacity();
     kept.desk.set_test_capacity(capacity);
     let desk = Arc::new(Mutex::new(kept));
+    let shown = availability::begin(&agents, &settings, ports);
     // The other leases do not need the door, so the dog runs on without it.
     // It is bound before any handler can start a process that inherits it.
     // The runner hands its workers the same door, or the default with this message.
@@ -370,9 +382,10 @@ async fn serve() -> Result<(), String> {
     }
     let (answered, mut to_deliver) = mpsc::unbounded_channel::<Vec<Delivery>>();
     for action in ACTIONS {
-        let (desk, answered) = (Arc::clone(&desk), answered.clone());
+        let (desk, answered, shown) = (Arc::clone(&desk), answered.clone(), Arc::clone(&shown));
         shepherd.on_action(action, move |params, name| {
-            let (body, grants) = lock_desk(&desk).change(|d| d.answer(name, params));
+            let shown = availability::lock(&shown).clone();
+            let (body, grants) = lock_desk(&desk).change(|d| d.answer_with(name, params, &shown));
             let _ = answered.send(grants);
             body
         });
@@ -779,7 +792,7 @@ mod tests {
     #[test]
     fn each_bots_window_is_its_agent_file_s() {
         let dir = tempfile::tempdir().unwrap();
-        let none = windows_in(&dir.path().join("agents"));
+        let none = windows_of(&agents_in(&dir.path().join("agents")));
         assert_eq!(
             none.window(Bot::Cubic),
             Some(month(20)),
@@ -788,7 +801,10 @@ mod tests {
         assert_eq!(none.window(Bot::Coderabbit), Some(ReviewWindow::HOURLY));
         let cubic = "---\nrole: reviewer\nharness: bot\nbot: cubic\nreviews: 5\nhours: 720\n---\n";
         crate::test::write_in(dir.path(), "cubic.md", cubic);
-        assert_eq!(windows_in(dir.path()).window(Bot::Cubic), Some(month(5)));
+        assert_eq!(
+            windows_of(&agents_in(dir.path())).window(Bot::Cubic),
+            Some(month(5))
+        );
     }
 
     // Its summons stand, and each window's span is its bot's file's.
@@ -814,7 +830,7 @@ mod tests {
         let mut kept = open(
             file,
             Box::new(FakeClock::at(EPOCH)),
-            windows_in(&dir.path().join("agents")),
+            windows_of(&agents_in(&dir.path().join("agents"))),
             RecordedSink::default().recorder(),
         );
         assert_eq!(
@@ -843,7 +859,7 @@ mod tests {
             "cubic.md",
             "---\nrole: reviewer\nharness: bot\n---\n",
         );
-        let windows = windows_in(dir.path());
+        let windows = windows_of(&agents_in(dir.path()));
         assert_eq!(windows, Reviewers::from_agents(&Agents::embedded()));
         assert_eq!(windows.window(Bot::Cubic), Some(month(20)));
     }

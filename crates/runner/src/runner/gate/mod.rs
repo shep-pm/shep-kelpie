@@ -26,6 +26,7 @@ use crate::worktree::{self, Base};
 // seconds, one at a time. Kelpie trusts a rollup once two minutes have passed.
 pub(crate) const CHECKS_SETTLE: u64 = 120;
 
+mod borrowed;
 mod catch_up;
 #[cfg(test)]
 mod fix_attempts;
@@ -154,10 +155,9 @@ impl Runner {
         }
     }
 
-    // Green CI: `auto` merges by the path a yes takes. `ask` raises the merge
-    // ruling with the pull request back `ready-for-human`. A head no reviewer
-    // read gets the ruling under `auto` too, naming why. The same when a
-    // listed bot's threads are unaddressed. Open nits hold nothing.
+    // Green CI: `auto` merges by the path a yes takes. `ask` raises the merge ruling with the
+    // pull request back `ready-for-human`. `auto` raises it too for a head no reviewer read,
+    // unaddressed bot threads or another open pull request's commits. Open nits hold nothing.
     fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
         if self.bots_before_merge(&head)? {
             return self.review_step();
@@ -174,12 +174,20 @@ impl Runner {
             Ok(open) => open,
             Err(begin) => return Ok(*begin),
         };
-        let disputes = match self.post_disputes(number)? {
-            Ok(disputes) => disputes,
+        let open_pull_requests = match self.open_now() {
+            Ok(open) => open,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
-        let rivals = match self.rivals() {
+        let rivals = match self.rivals(&open_pull_requests) {
             Ok(rivals) => rivals,
+            Err(reason) => return Ok(self.gate_failed(reason)),
+        };
+        let borrowed = match self.borrowed(&open_pull_requests, &head) {
+            Ok(borrowed) => borrowed,
+            Err(begin) => return Ok(*begin),
+        };
+        let disputes = match self.post_disputes(number)? {
+            Ok(disputes) => disputes,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
         let unreviewed = self.current().and_then(|item| item.unreviewed.clone());
@@ -202,7 +210,8 @@ impl Runner {
             && !unread_head
             && !note_fix
             && !late_fix
-            && rivals.is_empty();
+            && rivals.is_empty()
+            && borrowed.is_none();
         if self.settings.git.merging == Merging::Auto && vouched {
             self.update(|item| {
                 item.phase = Phase::Merge {
@@ -233,7 +242,10 @@ impl Runner {
             rivals,
         };
         self.late_read_now();
-        self.raise(number, kind)
+        match borrowed {
+            Some(notice) => self.raise_noticed(number, kind, &notice),
+            None => self.raise(number, kind),
+        }
     }
 
     // A worker that pushed nothing after a red run would get the same run

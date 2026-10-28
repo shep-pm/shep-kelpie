@@ -10,14 +10,16 @@ pub mod dog;
 
 // The modules of `shep-kelpie-core` the dog uses, each kept under the name it had here
 use shep_kelpie_core::{
-    agents, home, ipc, lease, metrics, ports, review_bot, settings, shep_home, shepherd, skills,
-    spawn, status, webhook,
+    agents, forwarder, home, ipc, lease, metrics, pacer, ports, review_bot, settings, shep_home,
+    shepherd, skills, spawn, status, webhook,
 };
 
 // The stand-ins the dog's tests use, from core and `test_support`, kept under the
 // name the rig had here
 #[cfg(test)]
 mod test {
-    pub use shep_kelpie_core::test::{EPOCH, FakeClock, FakeShepherd, RecordedSink};
+    pub use shep_kelpie_core::test::{
+        EPOCH, FakeClock, FakeMeter, FakeShepherd, LeaseReads, RecordedSink, utilization,
+    };
     pub use shep_kelpie_test_support::{CALL_PATIENCE, write_in, write_script};
 }

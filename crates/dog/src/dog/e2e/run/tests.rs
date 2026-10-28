@@ -366,3 +366,23 @@ async fn a_copy_that_cannot_start_is_an_error_and_nothing_runs() {
     assert!(why.contains("cannot start"), "{why}");
     assert!(stand.started().is_empty());
 }
+
+// Cargo sets it for every test binary it runs, and no run reads it.
+const SET: &str = "CARGO_PKG_DESCRIPTION";
+
+#[tokio::test]
+async fn ssh_and_rsync_never_see_a_hidden_variable() {
+    assert!(std::env::var_os(SET).is_some(), "{SET} is set under cargo");
+    crate::spawn::hide([SET.to_owned()]);
+    let stand = StandIn::new();
+    let worktree = stand.project("koji", TABLE, 7, "mkdir -p test-results");
+
+    let (result, _) = go(&stand, &worktree).await;
+
+    assert_eq!(result, Ok(0));
+    for program in ["ssh", "rsync"] {
+        let seen = stand.env_of(program);
+        assert!(seen.contains("PATH="), "{program}: {seen}");
+        assert!(!seen.contains(SET), "{program} saw it");
+    }
+}

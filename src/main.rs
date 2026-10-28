@@ -14,6 +14,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use shep_kelpie::confine::{APPEND, Verdict, judge_append, judge_with};
 use shep_kelpie::guard::{self, Checkout};
@@ -200,7 +201,7 @@ fn main() -> ExitCode {
             .iter()
             .all(|key| std::env::var_os(key).is_some()) =>
         {
-            shep_kelpie::dog::run()
+            shep_kelpie::dog::run(dog_ports())
         }
         _ => {
             if let Some(gone) = shep_kelpie::settings::removed_command(&args) {
@@ -215,6 +216,16 @@ fn main() -> ExitCode {
             );
             ExitCode::from(2)
         }
+    }
+}
+
+// The real ports the dog reads availability through
+fn dog_ports() -> shep_kelpie::dog::availability::Ports {
+    use shep_kelpie::adapters::{Base, LocalReviewer};
+    shep_kelpie::dog::availability::Ports {
+        local_leases: Arc::new(LocalReviewer::default()),
+        meter: Arc::new(Base::default().meter()),
+        codex_meter: |codex_home| Arc::new(Base::default().codex_meter(codex_home)),
     }
 }
 
