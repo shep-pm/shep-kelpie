@@ -323,10 +323,9 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
         return Err(crate::shepherd::no_channel());
     }
     let shep_home = shep_home::required(shep_home::DOG_FIX)?;
-    let socket = home::shepherd_address(&shep_home);
     let identity = link::identity();
-    let listener = link::connect(&socket, &identity, "for events").await?;
-    let client = Arc::new(link::connect(&socket, &identity, "for requests").await?);
+    let listener = link::connect_home(&shep_home, &identity, "for events").await?;
+    let client = Arc::new(link::connect_home(&shep_home, &identity, "for requests").await?);
     let mut events = link::subscribe(&listener, link::BUDGET).await?;
 
     let file = BookFile::new(book_path()?);

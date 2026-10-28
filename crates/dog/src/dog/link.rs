@@ -13,6 +13,8 @@ use shep_client::dogs::DogIdentity;
 use shep_client::{EventStream, LinkLost, ReconnectingClient, RequestError};
 use tokio::time::Instant;
 
+use crate::home;
+
 /// How long the dog waits for a restarted shepherd before it gives up and exits
 pub const BUDGET: Duration = Duration::from_secs(30);
 
@@ -49,6 +51,19 @@ pub async fn connect(
                 socket.display()
             )
         })
+}
+
+/// Connects as the dog to the shepherd of the shep home `shep_home`
+///
+/// # Errors
+///
+/// As [`connect`].
+pub async fn connect_home(
+    shep_home: &Path,
+    identity: &DogIdentity,
+    what: &str,
+) -> Result<ReconnectingClient, String> {
+    connect(&home::shepherd_address(shep_home), identity, what).await
 }
 
 /// This process's dog identity, read from the environment
@@ -114,6 +129,7 @@ fn up(link: Result<(), LinkLost>) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use shep_client::shep_core::paths::ShepPaths;
     use shep_client::testing::{
         Handshake, control_address, fake_daemon_across_handovers, sample_ack,
     };
@@ -123,6 +139,20 @@ mod tests {
 
     fn named() -> DogIdentity {
         DogIdentity::named("kelpie")
+    }
+
+    // The shepherd listens where shep-core puts it, not where kelpie guesses.
+    #[tokio::test]
+    async fn the_dog_dials_the_address_shep_core_gives_a_shep_home() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = ShepPaths::at(home.path().to_path_buf());
+        std::fs::create_dir_all(&paths.run).unwrap();
+        let shepherd =
+            fake_daemon_across_handovers(&paths.socket, vec![Handshake::Accept(sample_ack())]);
+        connect_home(home.path(), &named(), "for events")
+            .await
+            .unwrap();
+        assert_eq!(shepherd.hellos().len(), 1);
     }
 
     // The handshake names `kelpie`, which is what shep lists online.
