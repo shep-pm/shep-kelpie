@@ -669,6 +669,7 @@ pub(super) fn passed_over(skip: &Skip, shown: &dyn Fn(String) -> String) -> (Str
             true,
         ),
         Skip::Paced { hold, .. } => (format!("held by the pacer: {hold}"), true),
+        Skip::Unpicked { why, .. } => (why.clone(), true),
         Skip::PmWaits { .. } => ("the project manager's pick waits".into(), true),
         Skip::Rework { error, .. } | Skip::Adopt { error, .. } => {
             (shown(events::quote(error)), true)

@@ -439,10 +439,10 @@ fn listing_opus(project: &str) -> (Rig, Mutex<Runner>) {
 }
 
 #[test]
-fn an_agent_label_runs_that_items_worker_on_the_agent_it_names() {
+fn a_pinned_agent_label_runs_that_items_worker_on_the_agent_it_names() {
     let (rig, runner) = listing_opus("golbat");
     rig.forge.list_ready(6, false);
-    rig.forge.label(6, "agent:opus-high");
+    rig.forge.label(6, "agent:opus-high!");
     step(&runner).unwrap();
     rig.claude
         .script([Scripted::Reply(Usage::default(), Cost(1))]);
@@ -463,9 +463,9 @@ fn an_agent_label_runs_that_items_worker_on_the_agent_it_names() {
 fn an_agent_label_added_after_dispatch_changes_nothing() {
     let (rig, runner) = listing_opus("chelone");
     rig.forge.list_ready(6, false);
-    rig.forge.label(6, "agent:sonnet-high");
+    rig.forge.label(6, "agent:sonnet-high!");
     step(&runner).unwrap();
-    rig.forge.label(6, "agent:opus-high");
+    rig.forge.label(6, "agent:opus-high!");
     rig.claude
         .script([Scripted::Reply(Usage::default(), Cost(1))]);
     step(&runner).unwrap();

@@ -165,15 +165,15 @@ _Avoid_: proxy, router
 
 **Implementer**:
 An agent kelpie can run a work item on, from a file whose role is
-`implementer`. A project lists the ones an issue runs on, and the chain its
-first turn **falls back** along. An issue's `agent:<name>` label picks one,
-listed or not. An issue without one runs on the **default implementer**,
-the first listed, which may be a local model. A work item keeps the
+`implementer`. The **agent board** picks the one a new work item opens on,
+listed or not, and an issue's `agent:<name>!` label **pins** it to one. A
+rework or adopted item opens on its `agent:` label or the **default
+implementer**, the first listed, which may be a local model. A project lists
+the chain a first turn **falls back** along. A work item keeps the
 implementer it opened on, unless its first turn **falls back**: with
 `agents.fallback_after` set, a first turn that waited that long for its
-model moves to the next implementer listed. A label ending in `!` **pins**
-the work item, which never falls back, and an unlisted implementer never
-falls back either.
+model moves to the next implementer listed. A pinned work item never falls
+back, and an unlisted implementer never falls back either.
 _Avoid_: worker model, local worker
 
 **Waiting for model**:

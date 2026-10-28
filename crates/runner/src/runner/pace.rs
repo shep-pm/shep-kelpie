@@ -73,6 +73,14 @@ impl Pace {
         }
     }
 
+    /// When the pacer's hold lapses, or `None` when nothing holds
+    pub(super) fn until(&self) -> Option<Timestamp> {
+        match self {
+            Self::Clear | Self::Reads(_) => None,
+            Self::Held(hold) | Self::StillHeld(hold) => Some(hold.until),
+        }
+    }
+
     /// What the runner does instead of starting, or `None` to start
     pub(super) fn holds(self) -> Option<Begin> {
         match self {
@@ -196,8 +204,8 @@ impl Runner {
     /// list, when no listed role spends it and so [`Runner::pace_dispatch`] has
     /// not read it
     ///
-    /// The account is paced for this pick alone, so an issue labelled for it
-    /// holds no pick that is not.
+    /// The account is paced for this pick alone, so a hold on it holds back
+    /// no pick on another agent.
     pub(super) fn pace_agent(&mut self, agent: &AgentName) -> Result<Pace, StateError> {
         let session = (self.book.get(agent)).and_then(|agent| agent.runs.session());
         let Some((_, limit)) = session.map(|(model, limit)| (model, limit.clone())) else {

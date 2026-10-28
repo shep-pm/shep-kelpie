@@ -13,11 +13,12 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use super::Runner;
+use super::add::{AddError, Unpicked};
 use super::pm::Choice;
 use super::report::{Begin, StepReport};
 use super::trigger::lock;
 use crate::board::{self, ReadyIssue, Skip};
-use crate::ports::{Issue, Tickets};
+use crate::ports::{Issue, Tickets, Timestamp};
 use crate::settings::ForgeSlug;
 use crate::state::StateError;
 use crate::ticket::TicketId;
@@ -170,9 +171,9 @@ impl Runner {
         let held = self.pm_holds(&all, &ready);
         ready.retain(|issue| !held.contains(&issue.ticket));
         let mut paced = false;
-        // Issues whose labelled agent's account holds, and the first such hold, which
-        // is what the step reports if no other issue can start.
-        let mut account_held: Vec<Skip> = Vec::new();
+        // Issues the agent board or the pacer could not start, and the first pacer hold,
+        // which is what the step reports if no other issue can start.
+        let mut unstarted: Vec<Skip> = Vec::new();
         let mut first_hold = adopt_hold.or(rework_hold);
         loop {
             let implementers = self.implementer_files();
@@ -182,7 +183,7 @@ impl Runner {
             let mut skipped = pick.skipped;
             skipped.extend(failed.iter().cloned());
             skipped.extend(overlaps.iter().cloned());
-            skipped.extend(account_held.iter().cloned());
+            skipped.extend(unstarted.iter().cloned());
             skipped.sort_by_key(Skip::issue);
             let takeable = takeable(&ready, &open, &finished, &dropped, &implementers);
             let Some(picked) = pick.issue else {
@@ -244,28 +245,74 @@ impl Runner {
                     return Ok(Begin::Idle);
                 }
             };
-            // The agent its pick or label names may be one the project does not list, whose
-            // account `pace_dispatch` has not read. A label that fails is `add`'s to refuse.
-            let pinned = chosen.as_ref().and_then(|c| self.pinned_agent(c));
-            let labelled = pinned.or_else(|| {
-                let found = ready.iter().find(|i| i.ticket == ticket)?;
-                Some(self.labelled_agent(ticket, &found.labels).ok()?.0)
-            });
-            if let Some(agent) = labelled {
-                let pace = self.pace_agent(&agent)?;
-                if let Some(hold) = pace.reason() {
-                    account_held.push(Skip::Paced {
-                        issue: ticket,
-                        hold: hold.to_owned(),
-                    });
+            let labels = (ready.iter().find(|i| i.ticket == ticket))
+                .map(|i| i.labels.clone())
+                .unwrap_or_default();
+            let ranked = match self.ranked(ticket, &labels, chosen.as_ref()) {
+                Ok(ranked) => ranked,
+                // A dog out of reach answers no issue, so this poll asks for none.
+                Err(AddError::Unpicked(why @ Unpicked::Unreachable)) => {
+                    let why = why.to_string();
+                    skipped.push(Skip::Unpicked { issue: ticket, why });
+                    skipped.sort_by_key(Skip::issue);
+                    self.set_skipped(skipped);
+                    return Ok(Begin::Idle);
                 }
-                if let Some(held) = pace.holds() {
-                    first_hold.get_or_insert(held);
+                Err(AddError::Unpicked(why)) => {
+                    let why = why.to_string();
+                    self.pm_unstartable(ticket, why.clone(), None);
+                    unstarted.push(Skip::Unpicked { issue: ticket, why });
                     ready.retain(|i| i.ticket != ticket);
                     continue;
                 }
+                Err(e) => {
+                    failed.push(Skip::Failed {
+                        issue: ticket,
+                        error: e.to_string(),
+                    });
+                    ready.retain(|i| i.ticket != ticket);
+                    continue;
+                }
+            };
+            // The dog reads no day allowance, so the runner's own pacer has the last word.
+            let (mut opening, mut hold, mut lapses) = (None, None, None);
+            for agent in ranked.agents() {
+                let pace = self.pace_agent(agent)?;
+                if let Some(reason) = pace.reason() {
+                    hold.get_or_insert(reason.to_owned());
+                }
+                // The item could start once the soonest hold on its agents lapses.
+                if let Some(until) = pace.until() {
+                    lapses = Some(lapses.map_or(until, |soonest: Timestamp| soonest.min(until)));
+                }
+                match pace.holds() {
+                    None => {
+                        opening = Some(agent.clone());
+                        break;
+                    }
+                    // Its usage is read first, and the step made again.
+                    Some(reads @ Begin::Reads(_)) => {
+                        self.set_skipped(skipped);
+                        return Ok(reads);
+                    }
+                    Some(held) => {
+                        first_hold.get_or_insert(held);
+                    }
+                }
             }
-            match self.add_picked(ticket, chosen.as_ref()) {
+            let Some(agent) = opening else {
+                if let Some(hold) = hold {
+                    let why = format!("held by the pacer: {hold}");
+                    self.pm_unstartable(ticket, why, lapses);
+                    unstarted.push(Skip::Paced {
+                        issue: ticket,
+                        hold,
+                    });
+                }
+                ready.retain(|i| i.ticket != ticket);
+                continue;
+            };
+            match self.add_picked(ticket, chosen.as_ref(), Some(ranked.opening(agent))) {
                 Ok(agent) => {
                     self.pm_started(ticket);
                     self.set_skipped(skipped.clone());
@@ -275,14 +322,14 @@ impl Runner {
                         skipped,
                     }));
                 }
-                Err(e @ (super::AddError::Forge(_) | super::AddError::Label(_))) => {
+                Err(e @ (AddError::Forge(_) | AddError::Label(_))) => {
                     failed.push(Skip::Failed {
                         issue: ticket,
                         error: e.to_string(),
                     });
                     ready.retain(|i| i.ticket != ticket);
                 }
-                Err(super::AddError::State(e)) => return Err(e),
+                Err(AddError::State(e)) => return Err(e),
                 Err(e) => {
                     self.set_skipped(skipped);
                     return Ok(Begin::Report(StepReport::BoardFailed {

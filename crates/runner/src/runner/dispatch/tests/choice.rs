@@ -1,5 +1,5 @@
-// An issue with no `agent:` label opens on the first implementer listed, and
-// an `agent:` label may name one the project does not list
+// The agent board picks the implementer a new work item opens on. An unpinned
+// `agent:` label does not choose; a pinned one is the only agent tried.
 
 use serde_json::json;
 use std::sync::Mutex;
@@ -28,14 +28,18 @@ fn dispatched_on(report: Option<StepReport>, issue: u64, agent: &str) -> bool {
         if got == ticket(issue) && picked.as_str() == agent)
 }
 
+fn agent(name: &str) -> AgentName {
+    AgentName::try_from(name.to_owned()).unwrap()
+}
+
 #[test]
-fn an_unlabelled_issue_opens_on_the_first_listed_with_no_call() {
+fn the_boards_first_pick_opens_the_item_with_no_call_and_no_label() {
     let (rig, runner) = in_order("acme", &["coder", "coder2"]);
+    rig.agent_board.ranks(&["coder2", "coder"]);
     rig.forge.list_ready(6, false);
-    assert!(
-        dispatched_on(step(&runner).unwrap(), 6, "coder"),
-        "the first listed implementer takes it"
-    );
+
+    assert!(dispatched_on(step(&runner).unwrap(), 6, "coder2"));
+
     assert_eq!(rig.claude.calls(), [], "no call before the turn");
     assert!(
         !(rig.forge.issue_labels(6))
@@ -44,31 +48,120 @@ fn an_unlabelled_issue_opens_on_the_first_listed_with_no_call() {
         "no label is written onto the issue: {:?}",
         rig.forge.issue_labels(6)
     );
-
     rig.claude.script([Scripted::Say("done")]);
     step(&runner).unwrap();
     let call = &rig.claude.calls()[0];
     assert_eq!(
         (call.role, call.model.as_str()),
-        (Role::Worker, "qwen3-coder")
+        (Role::Worker, "qwen3-coder2")
     );
 }
 
 #[test]
-fn an_issues_own_label_stays_in_charge() {
-    let (rig, runner) = in_order("acme", &["coder", "coder2"]);
+fn the_ask_carries_every_allowed_implementer_the_listed_ones_first() {
+    let (rig, runner) = in_order("acme", &["coder2", "coder"]);
     rig.forge.list_ready(6, false);
-    rig.forge.label(6, "agent:coder2");
-    assert!(dispatched_on(step(&runner).unwrap(), 6, "coder2"));
-    assert_eq!(rig.claude.calls(), [], "no call before the turn");
 
-    rig.claude.script([Scripted::Say("done")]);
-    step(&runner).unwrap();
-    assert_eq!(rig.claude.calls()[0].model, "qwen3-coder2");
+    assert!(dispatched_on(step(&runner).unwrap(), 6, "coder2"));
+
+    let asks = rig.agent_board.asks();
+    let agents: Vec<&str> = asks[0].agents.iter().map(AgentName::as_str).collect();
+    assert_eq!(agents, ["coder2", "coder", "opus-high", "sonnet-high"]);
+    assert_eq!(
+        (asks[0].pin.clone(), asks[0].kind.as_deref()),
+        (None, Some("fix"))
+    );
 }
 
 #[test]
-fn add_takes_a_label_naming_an_unlisted_implementer_and_refuses_one_naming_none() {
+fn an_unpinned_agent_label_does_not_choose() {
+    let (rig, runner) = in_order("acme", &["coder", "coder2"]);
+    rig.forge.list_ready(6, false);
+    rig.forge.label(6, "agent:coder2");
+
+    assert!(dispatched_on(step(&runner).unwrap(), 6, "coder"));
+
+    assert_eq!(rig.agent_board.asks()[0].pin, None);
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["agent"], "coder");
+}
+
+#[test]
+fn a_pinned_agent_label_pins_the_item_and_the_ask_carries_the_pin_and_kind() {
+    let (rig, runner) = in_order("acme", &["coder", "coder2"]);
+    rig.forge.list_ready(6, false);
+    rig.forge.label(6, "agent:coder2!");
+    rig.forge.label(6, "kind:docs");
+
+    assert!(dispatched_on(step(&runner).unwrap(), 6, "coder2"));
+
+    let asks = rig.agent_board.asks();
+    assert_eq!(
+        (asks[0].pin.clone(), asks[0].kind.as_deref()),
+        (Some(agent("coder2")), Some("docs"))
+    );
+    let held = runner.lock().unwrap();
+    assert!(held.state.item(ticket(6)).unwrap().pinned);
+}
+
+#[test]
+fn an_unreachable_board_starts_nothing_says_why_once_and_the_next_poll_that_reaches_it_starts() {
+    let (rig, runner) = in_order("acme", &["coder", "coder2"]);
+    rig.agent_board.unreachable();
+    rig.forge.list_ready(6, false);
+    runner.lock().unwrap().take_notes();
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let why = "the agent board, which the dog keeps, cannot be reached";
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["skipped"],
+        json!([{ "reason": "unpicked", "issue": "6", "why": why }])
+    );
+    let notes = runner.lock().unwrap().take_notes();
+    assert_eq!(notes, [format!("#6 skipped reason={why}")]);
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(runner.lock().unwrap().take_notes(), Vec::<String>::new());
+
+    rig.agent_board.ranks_listed();
+    rig.next_look();
+    assert!(dispatched_on(step(&runner).unwrap(), 6, "coder"));
+}
+
+#[test]
+fn an_empty_ranking_starts_nothing_and_names_the_kind_and_tier() {
+    let (rig, runner) = in_order("acme", &["coder", "coder2"]);
+    rig.agent_board.ranks(&[]);
+    rig.forge.list_ready(6, false);
+    rig.forge.label(6, "kind:docs");
+    rig.forge.list_ready(7, false);
+    rig.forge.label(7, "agent:coder2!");
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["skipped"],
+        json!([
+            {
+                "reason": "unpicked",
+                "issue": "6",
+                "why": "the agent board ranks no allowed implementer for a `docs` item at any tier"
+            },
+            {
+                "reason": "unpicked",
+                "issue": "7",
+                "why": "the agent board ranks no allowed implementer for a `fix` item at any \
+                        tier, pinned to coder2"
+            }
+        ])
+    );
+}
+
+#[test]
+fn add_refuses_a_label_naming_no_implementer_and_opens_on_the_boards_pick_otherwise() {
     let rig = Rig::new("xilriws");
     rig.write_agent("coder", CODER);
     rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 2"));
@@ -87,7 +180,7 @@ fn add_takes_a_label_naming_an_unlisted_implementer_and_refuses_one_naming_none(
         );
     };
     refused(9, "agent:defect-hunter");
-    refused(10, "agent:haiku-low");
+    refused(10, "agent:haiku-low!");
 
     let agent_of = |issue: u64| {
         let status = rig.ask(&runner, "status", None);
@@ -99,20 +192,43 @@ fn add_takes_a_label_naming_an_unlisted_implementer_and_refuses_one_naming_none(
             .expect("open");
         found["agent"].clone()
     };
-    rig.forge.label(8, "agent:coder");
+    rig.forge.label(8, "agent:coder!");
     rig.ask(&runner, "add", Some("8"));
-    assert_eq!(agent_of(8), json!("coder"), "the label was the choice");
+    assert_eq!(agent_of(8), json!("coder"), "the pin was the choice");
 
-    rig.forge.label(11, "worker:haiku-low");
+    rig.agent_board.ranks(&["opus-high"]);
+    rig.forge.label(11, "agent:coder");
     rig.ask(&runner, "add", Some("11"));
-    assert_eq!(agent_of(11), json!("sonnet-high"));
-    let notes = runner.lock().unwrap().take_notes();
+    assert_eq!(agent_of(11), json!("opus-high"), "the board's pick");
+}
+
+#[test]
+fn add_on_an_unreachable_board_is_refused_saying_so() {
+    let (rig, runner) = in_order("acme", &["coder"]);
+    rig.agent_board.unreachable();
+
     assert_eq!(
-        notes,
-        [
-            "issue #11 is labelled `worker:haiku-low`, which kelpie no longer reads, so it \
-          runs on the default implementer, sonnet-high: an `agent:<name>` label picks \
-          another implementer"
-        ]
+        rig.ask(&runner, "add", Some("12")),
+        json!({ "error": "the agent board, which the dog keeps, cannot be reached" })
     );
+    assert_eq!(rig.ask(&runner, "status", None)["work_items"], json!([]));
+}
+
+#[test]
+fn an_adopted_pull_request_opens_on_the_default_implementer_whatever_the_board_ranks() {
+    let rig = Rig::new("shep");
+    rig.push_by_hand("fix/timeline", "work.txt");
+    rig.forge.open_pull_request(80, "fix/timeline", &[5]);
+    let runner = rig.open().unwrap();
+    rig.agent_board.ranks(&["opus-high"]);
+    rig.ask(&runner, "adopt", Some("80"));
+
+    let report = step(&runner).unwrap();
+
+    assert!(
+        matches!(&report, Some(StepReport::Adopted { pull_request: 80, agent, .. })
+            if agent.as_str() == "sonnet-high"),
+        "{report:?}"
+    );
+    assert!(rig.agent_board.asks().is_empty(), "the board is not asked");
 }

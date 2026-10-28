@@ -41,6 +41,7 @@ mod unreachable;
 mod usage;
 
 pub use crate::lease::door_pace::DoorPace;
+pub use crate::lease::door_pick::DoorBoard;
 pub use crate::metrics::ShepherdSink;
 pub use bridge::PlaywrightBridges;
 pub use classifier::GatewayClassifier;

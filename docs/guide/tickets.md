@@ -32,7 +32,7 @@ A ticket is a markdown file, `<kelpie home>/<project>/tickets/k1.md`. Its title,
 - `ready-for-agent`, `priority:` and `agent:` labels, blocked-by and parents work as they do on GitHub. A ticket blocked by an open ticket waits until the blocker closes, and a blocker the store does not hold counts as open.
 - The worker's branch is `kelpie/k1`, and its prompt carries the ticket's text rather than telling it to fetch one.
 - Its pull request has no `Resolves` line. Kelpie closes the ticket when the pull request merges, with a note on the ticket and nothing on GitHub.
-- A ticket with no `agent:` label goes to the project's default implementer.
+- A ticket with no `agent:<name>!` label goes to the implementer the agent board picks.
 - `shep kelpie ticket new` files a local ticket in the store, and a finding a merged work item deferred becomes a local ticket labelled `needs-triage`, or a comment on an open ticket that already holds it. Label one `ready-for-agent` with `ticket edit` to put it on the board.
 - `doctor` prints a `tickets` line: the source, and for `local` how many tickets the store holds, then a `repo writes` line listing what kelpie still writes to the repo: the branch, the pull request and its comments.
 

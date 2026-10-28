@@ -19,6 +19,7 @@ use crate::ticket::TicketId;
 use crate::webhook::Webhook;
 
 mod agent;
+mod agent_board;
 mod attachment;
 mod bridge;
 mod classifier;
@@ -61,6 +62,7 @@ pub use agent::{
     Cost, Ending, Fence, Flying, Guard, Kept, KeptServer, NotAdopted, PM_NOTES, Reach, Role,
     Session, SessionId, Tools, Transcript, Usage, Wait, written_at,
 };
+pub use agent_board::AgentBoard;
 pub use attachment::is_github_attachment;
 pub use bridge::{Bridges, OpenBridge, Playwright};
 pub use classifier::{Classifier, ClassifierError, Probability, SpamState};
@@ -928,6 +930,8 @@ pub struct Ports {
     pub clock: Arc<dyn Clock>,
     /// The login's forge hold and pace, kept by the dog where it is reached
     pub pace: Arc<dyn Pace>,
+    /// The agent board the dog keeps, which picks the agent a new work item opens on
+    pub agent_board: Arc<dyn AgentBoard>,
     /// The repo of every project in the flock, whose names a post to a public
     /// repo leaves out when GitHub marks them private
     pub flock: Vec<ForgeSlug>,

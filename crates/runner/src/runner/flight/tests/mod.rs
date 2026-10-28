@@ -82,10 +82,11 @@ fn seven_queued(project: &str, then: Scripted) -> (Rig, Mutex<Runner>, Hold) {
     let rig = Rig::new(project);
     rig.write_agent("coder", CODER);
     rig.implementers(&["sonnet-high", "coder"]);
-    rig.forge.label(7, "agent:coder");
     let (rig, runner) = {
         let runner = rig.open().unwrap();
+        rig.agent_board.ranks(&["coder"]);
         rig.ask(&runner, "add", Some("7"));
+        rig.agent_board.ranks_listed();
         (rig, runner)
     };
     let queue = Hold::default();

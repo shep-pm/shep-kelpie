@@ -12,6 +12,7 @@ use crate::ports::{
 use crate::work_item::{CallRecord, Known, Phase, Seconds, TimingPhase, Timings, Turn, WorkItem};
 use forge::{At, Gate};
 
+mod agent_board;
 mod alerts;
 mod bridge;
 mod classifier;
@@ -34,6 +35,7 @@ mod sandbox;
 mod shepherd;
 mod test_runner;
 
+pub use agent_board::FakeAgentBoard;
 pub use alerts::FakeAlerts;
 pub use bridge::FakeBridges;
 pub use classifier::{FakeClassifier, SeenAsk};

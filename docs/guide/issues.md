@@ -13,4 +13,4 @@ shep kelpie issue check 7
 
 The check reads structure, not quality: each part is there and well formed. It prints each part an issue lacks or holds malformed and exits 1, or exits 0 when it passes. An issue that passes is ready for an implementer. [Commands](commands.md) lists every part it reads.
 
-Label an issue `agent:<name>` to have it built by that implementer, listed or not, and `agent:<name>!` to pin it there with no fallback. An issue with no `agent:` label runs on the first implementer the project lists in `agents.implementers`. `shep kelpie issue "<request>"` and `issue --interactive` are gone, with the issue writer that ran them: the command says so and names the skill.
+The agent board picks the implementer an issue is built by ([Agents](agents.md)). Label it `agent:<name>!` to pin it to that implementer, listed or not, with no fallback: the board tries no other. A plain `agent:<name>` label does not choose. `shep kelpie issue "<request>"` and `issue --interactive` are gone, with the issue writer that ran them: the command says so and names the skill.

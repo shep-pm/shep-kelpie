@@ -235,7 +235,7 @@ fn a_reread_is_refused_while_an_open_work_item_runs_on_a_file_that_cannot_be_use
     let rig = Rig::new("shep");
     rig.write_agent("coder", HAIKU);
     let runner = rig.open().unwrap();
-    rig.forge.label(8, "agent:coder");
+    rig.forge.label(8, "agent:coder!");
     rig.ask(&runner, "add", Some("8"));
 
     rig.write_agent("coder", "role: implementer\n");
@@ -324,7 +324,7 @@ fn an_agent_label_naming_an_implementer_allow_leaves_out_is_skipped_listing_the_
         })
     );
 
-    rig.forge.label(8, "agent:coder");
+    rig.forge.label(8, "agent:coder!");
     rig.ask(&runner, "add", Some("8"));
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["work_item"]["agent"], serde_json::json!("coder"));
@@ -344,7 +344,7 @@ fn agent_labels_are_made_only_for_allowed_implementers() {
 fn an_open_work_item_whose_agent_allow_now_leaves_out_fails_its_turn_saying_so() {
     let rig = allowing_coder();
     let runner = rig.open().unwrap();
-    rig.forge.label(8, "agent:coder");
+    rig.forge.label(8, "agent:coder!");
     rig.ask(&runner, "add", Some("8"));
     drop(runner);
 

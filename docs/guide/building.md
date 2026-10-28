@@ -1,6 +1,6 @@
 # Building
 
-A worker builds its work item inline, in a worktree of its own cut from `origin/main`, on the agent its issue's `agent:` label names or the project's default implementer. It commits, pushes, opens a draft pull request that ends `Resolves #<issue>`, and ends its turn. When the repo has a pull request template, or its owner's public `.github` repository has one for repos that have none, it fills that. A project's `worker.instructions_file` adds rules the repo's own docs don't carry.
+A worker builds its work item inline, in a worktree of its own cut from `origin/main`, on the implementer the agent board picked, or the one its issue's `agent:<name>!` label pins. It commits, pushes, opens a draft pull request that ends `Resolves #<issue>`, and ends its turn. When the repo has a pull request template, or its owner's public `.github` repository has one for repos that have none, it fills that. A project's `worker.instructions_file` adds rules the repo's own docs don't carry.
 
 A worker's first prompt is the issue's title and body, followed by the comments the maintainer wrote on the issue, oldest first. Comments from anyone else, bots, kelpie's App and kelpie's own comments under your login are left out. The comments are capped at 16 KiB: past that the oldest are left out and the prompt says how many. Comments posted after the first turn started are not sent.
 
