@@ -39,6 +39,7 @@ pub(in crate::runner) fn question(
             late_fix,
             nits,
             disputes,
+            rivals,
             ..
         } => {
             let mut unread = unreviewed.as_ref().map_or_else(String::new, |why| {
@@ -67,6 +68,15 @@ pub(in crate::runner) fn question(
             }
             if let Some(disputes) = disputes {
                 open.push_str(&format!(" {disputes}"));
+            }
+            if !rivals.is_empty() {
+                let named: Vec<_> = rivals.iter().map(|n| format!("#{n}")).collect();
+                open.push_str(&format!(
+                    " Pull request {} also closes this issue, so a yes goes ahead with this one \
+                     and leaves {} for you to close.",
+                    named.join(", "),
+                    if rivals.len() == 1 { "it" } else { "them" }
+                ));
             }
             let rework = trigger("rework <note>");
             if needs_pass(kind) {

@@ -69,6 +69,7 @@ fn a_merge_ruling_takes_a_rework_and_another_ruling_refuses_one() {
             late_fix: false,
             nits: None,
             disputes: None,
+            rivals: Vec::new(),
         },
         ..yes_or_no(ticket(16))
     };

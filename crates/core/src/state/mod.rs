@@ -486,6 +486,10 @@ pub enum RulingKind {
         /// Where the disputes no reviewer read are, when the worker made any
         #[serde(default, skip_serializing_if = "Option::is_none")]
         disputes: Option<String>,
+        /// The other open pull requests that close the same issue, when any do, so the
+        /// maintainer chooses which goes ahead
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        rivals: Vec<u64>,
     },
     /// The worker ended its turn on a question. The answer is its next turn.
     Question {

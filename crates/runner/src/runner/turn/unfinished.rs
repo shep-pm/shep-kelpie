@@ -11,8 +11,9 @@
 use std::time::{Duration, UNIX_EPOCH};
 
 use super::handover::{Handover, Refused};
+use crate::board::closes;
 use crate::ports::Timestamp;
-use crate::runner::closed::end_closed;
+use crate::runner::closed::{end_closed, end_covered};
 use crate::runner::pull_request_file;
 use crate::runner::report::{Begin, StepReport};
 use crate::runner::ruling::park;
@@ -182,12 +183,21 @@ impl Runner {
         // is tried again.
         let retry = item.known.head.is_some() && item.pull_request_refused.is_none();
         let handed_over = self.app_covers();
+        // A contributor's pull request that closes the issue covers the work item, which
+        // ends here rather than go back to a worker whose work is done elsewhere.
+        let covered = match found {
+            None if !known => self.covered_by(&open, issue, &branch),
+            _ => None,
+        };
+        if let Some(number) = covered {
+            let mut next = self.state.clone();
+            end_covered(&mut next, issue);
+            self.save(next)?;
+            self.say_covered(issue, number, None);
+            return self.begin_item(false);
+        }
         // A pull request on another branch that closes the issue is work too.
-        let claimed = (open.iter()).any(|pr| {
-            pr.closes
-                .iter()
-                .any(|n| TicketId::from_issue(*n) == Some(issue))
-        });
+        let claimed = (open.iter()).any(|pr| closes(pr, issue));
         let closed = match found {
             None if !known && !claimed => self.closed_with_no_change(issue),
             _ => Ok(false),

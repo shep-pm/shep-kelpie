@@ -72,6 +72,7 @@ fn a_saved_state_loads_back_whole() {
                 late_fix: false,
                 nits: None,
                 disputes: None,
+                rivals: Vec::new(),
             },
         )
     });
@@ -199,6 +200,7 @@ fn the_file_format_is_pinned() {
                 late_fix: true,
                 nits: Some("2 nits left open (cubic)".into()),
                 disputes: None,
+                rivals: Vec::new(),
             },
         ),
         ruling(

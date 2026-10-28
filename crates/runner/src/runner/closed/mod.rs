@@ -104,13 +104,19 @@ impl Runner {
     /// Posts it once to the webhook, where one is set: nothing is left to
     /// retry it for.
     pub(super) fn say_closed(&mut self, ticket: TicketId, id: Option<TicketId>) {
-        let project = self.project.as_str().to_owned();
         let withdrawn = id.map_or_else(String::new, |id| format!(" Ruling {id} is withdrawn."));
         let text = format!(
             "{} was closed with no change, so its work item ends with no pull \
              request.{withdrawn} Nothing to answer.",
             ticket.named()
         );
+        self.announce(ticket, text, "closed with no change");
+    }
+
+    // Logs `text`, which says why the work item for `ticket` ends, notices it on the
+    // ticket's thread and posts it once to the webhook, where one is set
+    fn announce(&mut self, ticket: TicketId, text: String, outcome: &str) {
+        let project = self.project.as_str().to_owned();
         self.notes.push(text.clone());
         // A local ticket has no forge thread to post the notice on.
         if let Some(number) = ticket.github() {
@@ -120,15 +126,12 @@ impl Runner {
             return;
         };
         let alert = Alert {
-            title: format!("kelpie: {project} {} closed with no change", ticket.shown()),
+            title: format!("kelpie: {project} {} {outcome}", ticket.shown()),
             text,
             reply: None,
         };
         if let Err(e) = self.ports.alerts.post(&webhook, &alert) {
-            let failed = format!(
-                "cannot post that {} was closed with no change: {e}",
-                ticket.shown()
-            );
+            let failed = format!("cannot post that {} was {outcome}: {e}", ticket.shown());
             self.notes.push(failed);
         }
     }
@@ -138,31 +141,44 @@ impl Runner {
 /// drops its rulings. Returns the ruling it was parked on, if any, or `None`
 /// where the work item is not open.
 fn end_merged(next: &mut ProjectState, ticket: TicketId) -> Option<Option<TicketId>> {
-    end(next, ticket, true)
+    end(
+        next,
+        ticket,
+        Phase::Done {
+            merged: true,
+            closed: false,
+        },
+    )
 }
 
 /// Marks `ticket`'s work item in `next` to end, closed with no change, and
 /// drops its rulings. Returns the ruling it was parked on, if any, or `None`
 /// where the work item is not open.
 pub(super) fn end_closed(next: &mut ProjectState, ticket: TicketId) -> Option<Option<TicketId>> {
-    end(next, ticket, false)
+    end(
+        next,
+        ticket,
+        Phase::Done {
+            merged: false,
+            closed: true,
+        },
+    )
 }
 
-fn end(next: &mut ProjectState, ticket: TicketId, merged: bool) -> Option<Option<TicketId>> {
+fn end(next: &mut ProjectState, ticket: TicketId, done: Phase) -> Option<Option<TicketId>> {
     let item = next.item_mut(ticket)?;
     let id = match item.phase {
         Phase::Ruling { id } => Some(id),
         _ => None,
     };
-    item.phase = Phase::Done {
-        merged,
-        closed: !merged,
-    };
+    item.phase = done;
     next.rulings.retain(|r| r.issue != Some(ticket));
     Some(id)
 }
 
 pub(super) use read::read_parked;
+mod covered;
+pub(super) use covered::{covering, end_covered};
 mod read;
 #[cfg(test)]
 mod tests;

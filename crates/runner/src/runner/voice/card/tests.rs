@@ -34,6 +34,7 @@ fn merge() -> RulingKind {
         late_fix: false,
         nits: None,
         disputes: None,
+        rivals: Vec::new(),
     }
 }
 
@@ -72,6 +73,7 @@ fn a_merge_ruling_that_warns_says_what_it_warns_of_and_offers_no_separate_rework
         late_fix: false,
         nits: None,
         disputes: None,
+        rivals: Vec::new(),
     };
 
     assert_eq!(
@@ -100,6 +102,7 @@ fn an_unmentioned_ruling_names_only_the_terminal_answers_its_options_allow() {
         late_fix: false,
         nits: None,
         disputes: None,
+        rivals: Vec::new(),
     };
     let no_rework = ruling_comment(None, &ruling(ticket(1), kind));
     let stuck = RulingKind::Stuck(Stuck::AdoptFailed {

@@ -280,6 +280,15 @@ impl Runner {
                     }
                 }
             }
+            // A pull request that covers the work item ends it at the next step, with no
+            // ruling raised and no turn resumed.
+            Err(AgentError::TimedOut(_))
+                if item.pull_request.is_none() && self.covered_now(issue, &item.branch) =>
+            {
+                item.turn = Turn::Ended { at: now };
+                self.save(next)?;
+                return Ok(None);
+            }
             Err(AgentError::TimedOut(_)) if self.resumes_past_ceiling(item, now) => {
                 self.save(next)?;
                 return Ok(None);

@@ -133,6 +133,7 @@ mod tests {
             late_fix: false,
             nits: None,
             disputes: None,
+            rivals: Vec::new(),
         };
         assert_eq!(Wants::of(&merge), Wants::Merge);
         assert_eq!(Wants::of(&Stuck::Closed.into()), Wants::YesOrNo);

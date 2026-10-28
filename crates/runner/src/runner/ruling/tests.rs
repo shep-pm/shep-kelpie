@@ -86,6 +86,7 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
         late_fix: false,
         nits: None,
         disputes: None,
+        rivals: Vec::new(),
     };
     assert_eq!(comment(&merge), None);
 }

@@ -178,6 +178,10 @@ impl Runner {
             Ok(disputes) => disputes,
             Err(reason) => return Ok(self.gate_failed(reason)),
         };
+        let rivals = match self.rivals() {
+            Ok(rivals) => rivals,
+            Err(reason) => return Ok(self.gate_failed(reason)),
+        };
         let unreviewed = self.current().and_then(|item| item.unreviewed.clone());
         let unread_head = self.current().is_some_and(|item| !item.vouches_for(&head));
         // A merge ruling's `no`, or a bot's late round, sent its fix here
@@ -197,7 +201,8 @@ impl Runner {
             && open.holding.is_none()
             && !unread_head
             && !note_fix
-            && !late_fix;
+            && !late_fix
+            && rivals.is_empty();
         if self.settings.git.merging == Merging::Auto && vouched {
             self.update(|item| {
                 item.phase = Phase::Merge {
@@ -225,6 +230,7 @@ impl Runner {
             late_fix,
             nits: open.nits,
             disputes,
+            rivals,
         };
         self.late_read_now();
         self.raise(number, kind)

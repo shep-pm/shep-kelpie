@@ -10,21 +10,21 @@ use crate::runner::{Runner, step};
 use crate::test::ticket;
 use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, git, write_in};
 
-const ASKS: &str = "<kelpie-question>\nThis is already fixed on main. Shall I close it?\n\
+pub(in crate::runner::closed) const ASKS: &str = "<kelpie-question>\nThis is already fixed on main. Shall I close it?\n\
                     </kelpie-question>\n";
 
-const SENT_BACK: &str = "Your last turn ended with no pull request for this work item \
+pub(in crate::runner::closed) const SENT_BACK: &str = "Your last turn ended with no pull request for this work item \
                          and no question. If a tool failed, try it again or find another \
                          way, and open the draft pull request once the work is done. If \
                          only the maintainer can unblock you, end your reply with a \
                          <kelpie-question> block.";
 
-fn reply() -> Scripted {
+pub(in crate::runner::closed) fn reply() -> Scripted {
     Scripted::Reply(Usage::default(), Cost(1))
 }
 
 // A running project whose worker on issue 7 asked ruling 7 and was alerted
-fn asked(project: &str) -> (Rig, Mutex<Runner>) {
+pub(in crate::runner::closed) fn asked(project: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
@@ -50,7 +50,7 @@ fn closed_with_no_change(report: Option<StepReport>) -> bool {
      if issue == ticket(7))
 }
 
-fn alert_texts(rig: &Rig) -> Vec<String> {
+pub(in crate::runner::closed) fn alert_texts(rig: &Rig) -> Vec<String> {
     rig.alerts
         .posts()
         .into_iter()
@@ -401,7 +401,7 @@ fn seven_is_gone(status: &serde_json::Value) -> bool {
 
 // A running project whose worker on issue 7 pushed pull request 71 and then
 // asked ruling 71
-fn asked_with_a_pull_request(project: &str) -> (Rig, Mutex<Runner>) {
+pub(in crate::runner::closed) fn asked_with_a_pull_request(project: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));

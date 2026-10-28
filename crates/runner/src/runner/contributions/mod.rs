@@ -108,13 +108,20 @@ impl Job {
 }
 
 /// The two logins whose pull requests are not contributions
+#[derive(Clone)]
 pub(super) struct Logins {
     maintainer: String,
     viewer: String,
 }
 
 impl Logins {
-    fn own(&self, author: &str) -> bool {
+    /// Whether `author` is the account kelpie acts as, whose pull request on another branch is
+    /// the work item's own
+    pub(super) fn acting(&self, author: &str) -> bool {
+        author.eq_ignore_ascii_case(&self.viewer)
+    }
+
+    pub(super) fn own(&self, author: &str) -> bool {
         author.eq_ignore_ascii_case(&self.maintainer) || author.eq_ignore_ascii_case(&self.viewer)
     }
 }

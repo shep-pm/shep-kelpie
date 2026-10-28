@@ -363,10 +363,11 @@ pub fn pick(
     }
 }
 
-// Whether `pr` closes ticket `ticket`. A pull request names the GitHub issues
-// its body resolves, which is how the forge lists it, and only a GitHub ticket
-// has an issue number.
-fn closes(pr: &OpenPullRequest, ticket: TicketId) -> bool {
+/// Whether `pr` closes ticket `ticket`
+///
+/// A pull request names the GitHub issues its body resolves, which is how the forge lists it,
+/// and only a GitHub ticket has an issue number.
+pub fn closes(pr: &OpenPullRequest, ticket: TicketId) -> bool {
     ticket
         .github()
         .is_some_and(|issue| pr.closes.contains(&issue))

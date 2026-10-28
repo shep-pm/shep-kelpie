@@ -137,3 +137,40 @@ fn a_resumed_turn_gets_a_fresh_ceiling() {
     );
     resumed_prompt(&rig);
 }
+
+#[test]
+fn a_turn_past_its_ceiling_is_not_resumed_when_another_pull_request_closes_its_issue() {
+    let rig = Rig::new("shep");
+    rig.with_app();
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.list_open_pull(80, "Fix seven", &[7]);
+    rig.forge.set_author(80, "newcomer");
+    rig.claude.script([Scripted::TimeOutPlanting(
+        "half.rs",
+        "fn half() {}\n",
+        FIVE_MINUTES_AGO,
+    )]);
+
+    step(&runner).unwrap();
+    let ended = step(&runner).unwrap();
+
+    assert!(
+        matches!(
+            ended,
+            Some(StepReport::Finished {
+                merged: false,
+                closed: false,
+                ..
+            })
+        ),
+        "{ended:?}"
+    );
+    assert_eq!(rig.claude.calls().len(), 1, "the turn was resumed");
+    assert_eq!(
+        rig.github.comments().len(),
+        1,
+        "{:?}",
+        rig.github.comments()
+    );
+}

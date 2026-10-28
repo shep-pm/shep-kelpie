@@ -7,10 +7,11 @@
 
 use std::sync::{Arc, Mutex};
 
-use super::{PARKED_READ, end_closed, end_merged};
+use super::{PARKED_READ, covering, end_closed, end_covered, end_merged};
 use crate::board::OpenPullRequest;
 use crate::ports::{Forge, ForgeError, PullRequestState, Tickets};
 use crate::runner::Runner;
+use crate::runner::contributions::Logins;
 use crate::runner::off_lock::{ItemKey, with_item};
 use crate::runner::ruling::park;
 use crate::runner::trigger::lock;
@@ -32,8 +33,10 @@ pub(in crate::runner) fn read_parked(runner: &Mutex<Runner>) -> Result<(), State
         return Ok(());
     }
     let mut seen = reads.run();
+    let open = reads.list_open();
+    reads.mark_covered(open.as_ref(), &mut seen);
     settle_issue_reads(runner, &mut seen);
-    if let Some(note) = reads.drop_claimed(&mut seen) {
+    if let Some(note) = reads.drop_claimed(open.as_ref(), &mut seen) {
         lock(runner).notes.push(note);
     }
     for (item, seen) in seen {
@@ -74,6 +77,8 @@ struct Reads {
     tickets: Arc<dyn Tickets>,
     repo: ForgeSlug,
     items: Vec<Parked>,
+    // The logins whose pull requests do not cover a work item, where they could be read
+    own: Option<Logins>,
 }
 
 /// A parked work item as it stood when its read began
@@ -81,6 +86,7 @@ struct Reads {
 struct Parked {
     key: ItemKey,
     ticket: TicketId,
+    branch: String,
     /// Its pull request, which is read in place of its issue
     number: Option<u64>,
 }
@@ -95,6 +101,8 @@ enum Seen {
     IssueClosed,
     /// Its issue is closed with no work on its branch: it ends
     Ended,
+    /// An open pull request, by number, that a contributor opened closes its issue: it ends
+    Covered(u64),
     /// The forge could not be read, with what is noted
     Failed(String),
     /// The open pull requests could not be listed, which was noted once
@@ -119,16 +127,46 @@ impl Reads {
         items.map(|item| (item.clone(), read(item))).collect()
     }
 
+    // The open pull requests, listed once for the parked items that have no pull request of their
+    // own, or none when every item has one
+    fn list_open(&self) -> Option<Result<Vec<OpenPullRequest>, ForgeError>> {
+        let wanted = self.items.iter().any(|item| item.number.is_none());
+        wanted.then(|| self.forge.open_pull_requests(&self.repo))
+    }
+
+    // Marks each item with no pull request of its own that a contributor's open pull request
+    // closes the issue of. A list or a login that could not be read marks none.
+    fn mark_covered(
+        &self,
+        open: Option<&Result<Vec<OpenPullRequest>, ForgeError>>,
+        seen: &mut [(Parked, Seen)],
+    ) {
+        let (Some(Ok(open)), Some(own)) = (open, &self.own) else {
+            return;
+        };
+        for (item, seen) in seen {
+            if item.number.is_some() {
+                continue;
+            }
+            if let Some(number) = covering(open, item.ticket, &item.branch, own).next() {
+                *seen = Seen::Covered(number);
+            }
+        }
+    }
+
     // Keeps open an ended item that an open pull request on another branch closes the issue of:
     // that is work too. The open pull requests are listed once, and only when one ended. A list
     // that cannot be read keeps every ended item open, and its note is returned.
-    fn drop_claimed(&self, seen: &mut [(Parked, Seen)]) -> Option<String> {
+    fn drop_claimed(
+        &self,
+        open: Option<&Result<Vec<OpenPullRequest>, ForgeError>>,
+        seen: &mut [(Parked, Seen)],
+    ) -> Option<String> {
         if !seen.iter().any(|(_, seen)| matches!(seen, Seen::Ended)) {
             return None;
         }
-        let open: Result<Vec<OpenPullRequest>, ForgeError> =
-            self.forge.open_pull_requests(&self.repo);
-        let claimed = |ticket: TicketId| match (&open, ticket.github()) {
+        let open = open.expect("an ended item has no pull request, so the open ones were listed");
+        let claimed = |ticket: TicketId| match (open, ticket.github()) {
             (Ok(open), Some(number)) => open.iter().any(|pr| pr.closes.contains(&number)),
             // A local ticket is closed by no GitHub pull request.
             (Ok(_), None) => false,
@@ -161,13 +199,13 @@ impl Runner {
     /// Each such item is read at most once every [`PARKED_READ`] seconds, counted in memory, so a
     /// restart reads it at once. An attached item is left alone, and so is one parked on its
     /// follow-up ruling, whose merge kelpie made.
-    fn parked_reads_due(&self) -> Reads {
+    fn parked_reads_due(&mut self) -> Reads {
         let now = self.ports.clock.now();
         let due = |ticket: TicketId| {
             (self.parked_reads.get(&ticket))
                 .is_none_or(|at| now.0.saturating_sub(at.0) >= PARKED_READ)
         };
-        let items = (self.state.work_items.iter())
+        let items: Vec<Parked> = (self.state.work_items.iter())
             .filter(|i| {
                 i.parked()
                     && i.attached.is_none()
@@ -177,14 +215,21 @@ impl Runner {
             .map(|item| Parked {
                 key: ItemKey::of(item),
                 ticket: item.issue,
+                branch: item.branch.clone(),
                 number: item.pull_request,
             })
             .collect();
+        // Asked only when an item might be covered; a login that cannot be read is noted.
+        let own = match items.iter().any(|item| item.number.is_none()) {
+            true => self.own_logins_noted(),
+            false => None,
+        };
         Reads {
             forge: Arc::clone(&self.ports.forge),
             tickets: Arc::clone(&self.ports.tickets),
             repo: self.remote.clone(),
             items,
+            own,
         }
     }
 
@@ -205,6 +250,12 @@ impl Runner {
                 let withdrawn = end_closed(&mut next, ticket).flatten();
                 self.save(next)?;
                 self.say_closed(ticket, withdrawn);
+            }
+            Seen::Covered(number) => {
+                let mut next = self.state.clone();
+                let withdrawn = end_covered(&mut next, ticket).flatten();
+                self.save(next)?;
+                self.say_covered(ticket, number, withdrawn);
             }
             Seen::Pull(_, PullRequestState::Open) => {}
             Seen::Pull(number, PullRequestState::Merged) => {
