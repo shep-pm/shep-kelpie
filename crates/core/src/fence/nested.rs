@@ -53,6 +53,7 @@ pub(super) fn existing(worktree: &Path) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::deny_write_on;
     use super::*;
 
     fn found(worktree: &Path) -> Vec<String> {
@@ -89,5 +90,32 @@ mod tests {
         fs::create_dir_all(wt.join(".claude/.config/goose")).unwrap();
         fs::create_dir_all(wt.join("pkg/.config/other/.pi")).unwrap();
         assert_eq!(found(wt), [".claude", "pkg/.config/other/.pi"]);
+    }
+
+    // srt-win expands a glob to every file that exists, which is more than the
+    // sandbox can grant, so Windows is given the folders as paths.
+    #[test]
+    fn on_windows_a_nested_harness_folder_is_denied_by_path_and_no_glob_is_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let wt = dir.path();
+        for folder in ["src/.claude/skills", "app/.config/goose", "src/plain"] {
+            fs::create_dir_all(wt.join(folder)).unwrap();
+        }
+        let listed = deny_write_on(wt, "windows");
+        for folder in ["src/.claude", "app/.config/goose", ".claude", ".mcp.json"] {
+            assert!(listed.contains(&wt.join(folder)), "{folder}: {listed:?}");
+        }
+        assert!(!listed.contains(&wt.join("src/plain")));
+        assert!(
+            listed.iter().all(|p| !p.to_string_lossy().contains('*')),
+            "{listed:?}"
+        );
+        // macOS and Linux keep the globs srt reads there.
+        for os in ["macos", "linux"] {
+            assert!(
+                deny_write_on(wt, os).contains(&wt.join("**").join(".claude")),
+                "{os}"
+            );
+        }
     }
 }
