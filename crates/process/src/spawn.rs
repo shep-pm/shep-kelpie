@@ -288,13 +288,12 @@ mod tests {
 
     #[test]
     fn a_missing_path_extension_variable_falls_back_to_the_usual_four() {
-        let (dir, path) = npm_shims();
-        // The fallback is upper case, which a case-insensitive disk also matches.
-        let resolved = resolve("npm".as_ref(), &path, None, &Path::is_file).unwrap();
-        let expected = dir.path().join("nodejs").join("npm.cmd");
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("npm.CMD"), "@echo off\n").unwrap();
+        let path = std::env::join_paths([dir.path()]).unwrap();
         assert_eq!(
-            resolved.to_string_lossy().to_lowercase(),
-            expected.to_string_lossy().to_lowercase()
+            resolve("npm".as_ref(), &path, None, &Path::is_file),
+            Some(dir.path().join("npm.CMD"))
         );
     }
 

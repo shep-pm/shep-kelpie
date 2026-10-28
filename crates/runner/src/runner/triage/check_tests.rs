@@ -479,3 +479,95 @@ fn a_ready_issue_the_check_has_not_read_is_checked_where_the_board_picks() {
     assert_eq!(skipped[0]["reason"], "check", "{skipped}");
     assert_eq!(checks(&rig), Value::Null, "no result was kept for it");
 }
+
+// The maintainer's issue 30 titled `title`, with `labels`, passing the check but
+// for what its labels and title give it; the repo holds `REPO_LABELS`
+fn titled(title: &str, labels: &[&str]) -> (Rig, Mutex<Runner>) {
+    let rig = rig_with("pick = \"off\"");
+    rig.forge.set_repo_labels(&REPO_LABELS);
+    let mut filed = filed(&rig, MAINTAINER, PASSING, labels);
+    filed.title = title.to_owned();
+    list(&rig, filed);
+    let runner = rig.open().unwrap();
+    (rig, runner)
+}
+
+const NO_KIND: [&str; 1] = ["priority: P2"];
+
+#[test]
+fn a_typed_title_with_no_kind_label_gains_it_and_passes() {
+    for (title, kind) in [
+        ("fix(board): crash", "fix"),
+        ("feat!: a thing", "feat"),
+        ("feat(scope)!: a thing", "feat"),
+    ] {
+        let (rig, runner) = titled(title, &NO_KIND);
+
+        assert_eq!(step(&runner).unwrap(), None, "{title}");
+
+        let mut want = vec![
+            format!("label kind:{kind}"),
+            "label ready-for-agent".to_owned(),
+        ];
+        if kind == "feat" {
+            want.insert(0, "make kind:feat".to_owned());
+        }
+        assert_eq!(moves(&rig), want, "{title}");
+        assert!(checks(&rig)[0].get("failures").is_none(), "{title}");
+
+        // The next listing carries the label, and is the same edit.
+        let mut relisted = filed(&rig, MAINTAINER, PASSING, &NO_KIND);
+        relisted.title = title.to_owned();
+        relisted.labels.push(format!("kind:{kind}"));
+        list(&rig, relisted);
+        rig.next_look();
+        assert_eq!(step(&runner).unwrap(), None, "{title}");
+        assert_eq!(moves(&rig), want, "{title}");
+    }
+}
+
+#[test]
+fn a_title_that_names_no_kind_gains_no_label() {
+    for title in [
+        "Crash on start",
+        "build: bump a thing",
+        "revert: a thing",
+        "feat: ",
+    ] {
+        let (rig, runner) = titled(title, &NO_KIND);
+
+        assert_eq!(step(&runner).unwrap(), None, "{title}");
+
+        let labelled: Vec<String> = moves(&rig);
+        assert!(
+            labelled.iter().all(|m| !m.starts_with("label kind:")),
+            "{title}: {labelled:?}"
+        );
+    }
+}
+
+#[test]
+fn an_existing_kind_label_is_kept_even_if_the_title_disagrees() {
+    let (rig, runner) = titled("feat: a thing", &["kind:fix", "priority: P2"]);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(moves(&rig), ["label ready-for-agent"]);
+}
+
+#[test]
+fn a_label_that_cannot_be_added_is_noted_once_and_the_issue_is_checked_as_it_stands() {
+    let (rig, runner) = titled("fix: crash", &NO_KIND);
+    rig.github.fail_next(ApiError::Refused(422));
+
+    assert_eq!(step(&runner).unwrap(), None);
+    let mut notes = runner.lock().unwrap().take_notes();
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+    notes.extend(runner.lock().unwrap().take_notes());
+
+    let said = notes.iter().filter(|n| n.contains("`kind:fix`")).count();
+    assert_eq!(said, 1, "{notes:?}");
+    // The title carries the kind, so the issue passes as it did before.
+    assert_eq!(moves(&rig).last().unwrap(), "label ready-for-agent");
+}
