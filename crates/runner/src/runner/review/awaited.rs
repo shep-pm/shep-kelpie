@@ -89,6 +89,9 @@ impl Runner {
             _ => Vec::new(),
         };
         let unreported = pr.checks == Checks::None;
+        // A bot's own check, skipped, is all a draft that ran no workflow shows,
+        // as one that conflicts with `main` does.
+        let unrun_draft = pr.draft && pr.checks == Checks::Skipped;
         let mut verdict = match pr.checks {
             _ if !settled(since, now) => None,
             Checks::None | Checks::Pending(_) => None,
@@ -110,12 +113,13 @@ impl Runner {
         if let Some(begin) = self.check_queued(number, &head, since, &queued, Some(&back))? {
             return Ok(Some(begin));
         }
-        if unreported && settled(since, now) {
+        if (unreported || unrun_draft) && settled(since, now) {
             // Only a head with no run at all is caught up here: one that does
             // get CI is not rebased mid-review.
             match self.base_standing(&head) {
                 Ok(Base::Behind) => return self.rebase(number, &head, Some(back)).map(Some),
                 Ok(Base::Lagging) => {}
+                Ok(Base::Current) if unrun_draft => {}
                 Ok(Base::Current) => {
                     match self.without_checks(number, &head, since, Some(&back))? {
                         Some(begin) => return Ok(Some(begin)),
