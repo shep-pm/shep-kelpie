@@ -15,7 +15,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 - Home never moved from `~/.kelpie`: no start, names each old file, exit 78 (`stop_exit_codes`). #311, #345
 - State file version 90 (`VERSION` in `core/state/mod.rs`); each change one way: rollback = finish or drop open items. `core/state/removed/mod.rs`
 - Business code is Rust; Tauri GUI after MVP. #5
-- A runner answers the typed protocol on `run/<project>.sock`; the verbs ask it first and fall back to `shep trigger` for one release, and a timeout never falls back. ADR 0017. runner-socket.md
+- A runner serves the typed protocol on `run/<project>.sock`; verbs fall back to `shep trigger`. ADR 0017. runner-socket.md
 - Crates under `crates/` use nothing above them; the root holds the binary, verbs (`src/{flock,upgrade,sheep,doctor,issues}/`, `src/schema.rs`). ADR 0015
 - No budget numbers in agent prompts; no worker merges/posts as the maintainer (fence.md, github-app.md).
 
@@ -26,38 +26,38 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | work.md | projects, slots, issues | `src/issues/check.rs`, `runner/slots.rs`, `src/flock/verbs.rs`, `core/board/check.rs` |
 | board.md | board, items, adoption | `core/board/`, `runner/{dispatch,adopt}/` |
 | pm.md | the project manager | `runner/pm/` |
-| pm-board.md | its board, `board.md` | `core/board/briefing/`, `runner/briefing/` |
+| pm-board.md | its board | `core/board/briefing/`, `runner/briefing/` |
 | workers.md | runner loop, turns | `runner/{turn,flight}/` |
 | runner-lock.md | lock, hold metric | `runner/{lock_hold,off_lock}.rs` |
-| runner-lock-passes.md | queued verbs, board, threads | `runner/{queued,board_read,trigger}` |
-| runner-socket.md | the runner's socket, the client, the verbs' fallback | `runner/socket/`, `crates/client/`, `core/ipc/`, `src/flock/control/socket.rs` |
+| runner-lock-passes.md | queued verbs, threads | `runner/{queued,board_read,trigger}` |
+| runner-socket.md | socket, client, fallback | `runner/socket/`, `crates/client/`, `src/flock/control/socket.rs` |
 | runner-lock-worktrees.md | worktree jobs | `runner/worktree_jobs.rs` |
 | fence.md | sandbox, guard, hooks | `core/{profile,guard,hooks}/` |
 | fence-reads.md | reads | `core/dep_sources.rs`, `adapters/harness/`, `runner/turn/` |
 | fence-reach.md | hosts | `core/package_managers/` |
-| browser.md | a worker's browser: bridge, filter, tools | `core/{bridge,browse}.rs`, `adapters/bridge/`, `runner/browser.rs`, `core/settings/browser.rs`, `process/tools/` |
-| browser-proxy.md | the browser's proxy: origins, addresses, limits | `adapters/bridge/proxy/`, `adapters/forwarder/http.rs` |
-| browser-dev-server.md | a worker's dev server: launch, port, readiness | `runner/dev_server/`, `core/ports/dev_server.rs`, `adapters/dev_server/` |
-| compaction.md | when a session compacts, `compact_window`, `COMPACT` | `runner/compact/`, `adapters/{pi/compact,goose/compact,codex/context}.rs` |
-| skills.md | step skills, the skill copy, the wording skill | `core/skills/*.rs` |
-| plugins.md | repo plugins: sources, copies, harness loading, MCP | `core/skills/repo/`, `adapters/{skills,claude/mcp,pi/skills,codex/skills,goose/skills}.rs` |
+| browser.md | a worker's browser: bridge, filter, tools | `core/{bridge,browse,settings/browser}.rs`, `adapters/bridge/`, `runner/browser.rs`, `process/tools/` |
+| browser-proxy.md | the browser's proxy | `adapters/bridge/proxy/`, `adapters/forwarder/http.rs` |
+| browser-dev-server.md | a worker's dev server | `runner/dev_server/`, `core/ports/dev_server.rs`, `adapters/dev_server/` |
+| compaction.md | when a session compacts, `COMPACT` | `runner/compact/`, `adapters/{pi/compact,goose/compact,codex/context}.rs` |
+| skills.md | step skills, copies, wording skill | `core/skills/*.rs` |
+| plugins.md | repo plugins: sources, copies, loading, MCP | `core/skills/repo/`, `adapters/{skills,claude/mcp,pi/skills,codex/skills,goose/skills}.rs` |
 | agent-files.md | agent file, `extends`, baselines | `core/agents/`, `src/flock/add/` |
 | agent-migration.md | `agents migrate` | `core/agents/legacy.rs` |
 | agent-allow.md | allow list | `core/settings/agents/`, `runner/add.rs` |
 | agents.md | harnesses, gateways | `adapters/`, `core/settings/agents/`, `process/spawn.rs` |
 | cli-adapter.md | a new CLI | `adapters/cli/` |
-| handover.md | in-flight turns handed to a new build | `src/sheep/handover/`, `runner/flight/carry/`, `adapters/process/adopt/`, `src/upgrade/handover.rs` |
-| windows.md | `sh`, `env`, test fakes on Windows | `process/spawn.rs`, `test_support/` |
-| waits-and-spend.md | waits, held-up turns, failing steps, spend | `runner/{turn/unreachable,looks}/`, `adapters/{unreachable,codex}/`, `core/usage/`, `core/settings/agents/` |
+| handover.md | in-flight turns handed on | `src/sheep/handover/`, `runner/flight/carry/`, `adapters/process/adopt/`, `src/upgrade/handover.rs` |
+| windows.md | `sh`, `env`, test fakes | `process/spawn.rs`, `test_support/` |
+| waits-and-spend.md | waits, held-up turns, failing steps, spend | `runner/{turn/unreachable,looks}/`, `adapters/{unreachable,codex}/`, `core/usage/` |
 | review.md | review, bots, rulings | `runner/{review,ruling}/`, `core/webhook.rs` |
-| review-outcomes.md | fix turn findings' outcomes | `runner/review/outcomes/` |
-| local-review.md | local reviewers, lock, kept rounds | `runner/review/keep.rs`, `core/settings/{local_rounds,local}.rs`, `adapters/local/` |
+| review-outcomes.md | fix turn outcomes | `runner/review/outcomes/` |
+| local-review.md | local reviewers, kept rounds | `runner/review/keep.rs`, `core/settings/{local_rounds,local}.rs`, `adapters/local/` |
 | merge.md | CI, catching up, merge, after it | `runner/{gate,merge}/`, `runner/{close_merged,main_ci}.rs` |
-| stuck-checks.md | checks stuck on a finished run | `runner/gate/queued/` |
-| local-tickets.md | the local ticket store, `ticket` verbs, closing on merge | `core/local_tickets/`, `src/flock/ticket.rs`, `runner/close_merged.rs` |
+| stuck-checks.md | stuck checks | `runner/gate/queued/` |
+| local-tickets.md | local ticket store, `ticket` verbs | `core/local_tickets/`, `src/flock/ticket.rs`, `runner/close_merged.rs` |
 | github-app.md | App tokens, posting, answers | `runner/voice/`, `core/guard/gh.rs`, `worker_folder/` |
 | who-answers.md | who answers | `runner/pm/rulings.rs` |
-| contributions.md | others' pull requests: settings, detection | `core/settings/{contributions.rs,reviewers/}`, `runner/contributions/`, `core/state/contributions.rs` |
+| contributions.md | others' pull requests | `core/settings/{contributions.rs,reviewers/}`, `runner/contributions/`, `core/state/contributions.rs` |
 | contribution-security.md | its security review | `runner/contributions/`, `runner/flight/security.rs`, `process/worktree/` |
 | contribution-pass.md | reviewers' pass, green head | `runner/contributions/pass.rs`, `process/worktree/` |
 | contribution-talk.md | contributors' words, quiet clock | `runner/contributions/{heard,clock}.rs`, `runner/thread_replies/` |
