@@ -39,7 +39,7 @@ struct Sample<'a> {
     tier: Option<Tier>,
     kind: Option<&'a str>,
     wall: u64,
-    cost_usd: f64,
+    cost_usd: Option<f64>,
     turn: Option<u64>,
 }
 
@@ -61,7 +61,9 @@ impl<'a> History<'a> {
                     tier: agent.and_then(&tier_of),
                     kind: line.kind.as_deref(),
                     wall: line.wall,
-                    cost_usd: line.cost_usd,
+                    cost_usd: (line.worker.unpriced_calls == 0
+                        && line.reviewer.unpriced_calls == 0)
+                        .then_some(line.cost_usd),
                     turn: (line.worker.calls > 0).then(|| line.wall / u64::from(line.worker.calls)),
                 }
             })
@@ -71,21 +73,20 @@ impl<'a> History<'a> {
 
     /// What `agent`, of `tier`, typically takes for an item of `kind`
     ///
-    /// The median of its own items of that kind, else of its tier's items of
-    /// that kind, else of its tier's items of any kind, the first that holds
-    /// [`SAMPLES`]; else [`Typical::default`]. An item with no kind counts
-    /// only toward the last.
+    /// The medians of the first level with [`SAMPLES`] items: its own of the
+    /// kind, its tier's of the kind, its tier's of any kind. Else
+    /// [`Typical::default`]. The cost is the priced items' median.
     pub fn item(&self, agent: &str, tier: Tier, kind: Option<&str>) -> Typical {
         let Some(samples) = self.level(agent, tier, kind, |_| true) else {
             return Typical::default();
         };
         let mut walls: Vec<u64> = samples.iter().map(|s| s.wall).collect();
         walls.sort_unstable();
-        let mut costs: Vec<f64> = samples.iter().map(|s| s.cost_usd).collect();
+        let mut costs: Vec<f64> = samples.iter().filter_map(|s| s.cost_usd).collect();
         costs.sort_by(f64::total_cmp);
         Typical {
             secs: middle(&walls, u64::midpoint),
-            cost_usd: Some(middle(&costs, f64::midpoint)),
+            cost_usd: (!costs.is_empty()).then(|| middle(&costs, f64::midpoint)),
         }
     }
 
@@ -139,7 +140,10 @@ fn middle<T: Copy>(sorted: &[T], mean: impl Fn(T, T) -> T) -> T {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_board::{Candidate, Item, pick};
+    use crate::agents::Fit;
     use crate::ports::{Timestamp, Usage};
+    use crate::settings::AgentName;
     use crate::test::ticket;
     use crate::usage::{HeldFindings, RoleLine};
     use crate::work_item::{CiFailures, QwenTally};
@@ -303,6 +307,72 @@ mod tests {
             history.item("opus", Tier::Standard, Some("fix")),
             typical(1000, 2.0)
         );
+    }
+
+    #[test]
+    fn the_cost_is_the_median_of_the_priced_items_alone() {
+        let mut lines = items("opus", Some("fix"), 5);
+        lines[0].worker.unpriced_calls = 1;
+        lines[1].reviewer.unpriced_calls = 2;
+        let history = History::new(&lines, tier_of);
+        // the priced items cost 2, 3 and 4
+        assert_eq!(
+            history.item("opus", Tier::Standard, Some("fix")),
+            typical(300, 3.0)
+        );
+    }
+
+    #[test]
+    fn an_unpriced_agent_loses_the_pick_to_a_priced_one() {
+        let mut lines = items("local", Some("fix"), 5);
+        for line in &mut lines {
+            line.worker.unpriced_calls = 1;
+            line.cost_usd = 0.0;
+        }
+        lines.extend(items("opus", Some("fix"), 5));
+        let history = History::new(&lines, tier_of);
+        let unpriced = history.item("local", Tier::Light, Some("fix"));
+        assert_eq!(unpriced.cost_usd, None);
+        let (local, opus) = (
+            AgentName::try_from("local".to_owned()).unwrap(),
+            AgentName::try_from("opus".to_owned()).unwrap(),
+        );
+        let any = Fit::default();
+        let candidates = [
+            Candidate {
+                agent: &local,
+                fit: &any,
+                wait: Some(0),
+                typical: unpriced,
+            },
+            Candidate {
+                agent: &opus,
+                fit: &any,
+                wait: Some(0),
+                typical: history.item("opus", Tier::Standard, Some("fix")),
+            },
+        ];
+        let order: Vec<&str> = pick(&Item::default(), &candidates)
+            .iter()
+            .map(|c| c.agent.as_str())
+            .collect();
+        assert_eq!(order, ["opus", "local"]);
+    }
+
+    #[test]
+    fn a_turn_falls_back_to_its_tiers_kind_and_then_its_tiers_every_kind() {
+        let mut lines = items("local", Some("fix"), 2);
+        lines.extend(items("small", Some("fix"), 3));
+        lines.extend(items("small", Some("docs"), 5).into_iter().map(|mut l| {
+            l.wall *= 10;
+            l
+        }));
+        let history = History::new(&lines, tier_of);
+        // light fix: 100, 200, 100, 200, 300 over four calls each
+        assert_eq!(history.turn_secs("local", Tier::Light, Some("fix")), 50);
+        // light any kind adds 1000..5000: the middle two turns are 75 and 250
+        assert_eq!(history.turn_secs("local", Tier::Light, Some("test")), 162);
+        assert_eq!(history.turn_secs("local", Tier::Light, None), 162);
     }
 
     #[test]

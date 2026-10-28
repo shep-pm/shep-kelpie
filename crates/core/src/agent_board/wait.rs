@@ -23,7 +23,11 @@ pub fn wait(availability: Availability<'_>, turn_secs: u64, now: Timestamp) -> O
         Availability::Gateway(None) => None,
         Availability::Gateway(Some(load)) if load.slots == 0 => Some(0),
         Availability::Gateway(Some(load)) => {
-            let ahead = (load.held + load.waiting + 1).saturating_sub(load.slots);
+            let ahead = load
+                .held
+                .saturating_add(load.waiting)
+                .saturating_add(1)
+                .saturating_sub(load.slots);
             Some(ahead.div_ceil(load.slots).saturating_mul(turn_secs))
         }
         Availability::Plan(hold) => Some(hold.map_or(0, |h| h.until.0.saturating_sub(now.0))),
@@ -61,6 +65,14 @@ mod tests {
         assert_eq!(wait(load(2, 2, 0), 600, Timestamp(0)), Some(600));
         assert_eq!(wait(load(2, 2, 1), 600, Timestamp(0)), Some(600));
         assert_eq!(wait(load(2, 2, 2), 600, Timestamp(0)), Some(1200));
+    }
+
+    #[test]
+    fn a_load_past_counting_saturates_rather_than_wrapping() {
+        assert_eq!(
+            wait(load(1, u64::MAX, 1), 600, Timestamp(0)),
+            Some(u64::MAX)
+        );
     }
 
     #[test]

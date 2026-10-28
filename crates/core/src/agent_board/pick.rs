@@ -52,9 +52,8 @@ pub struct Choice<'a> {
 
 /// The candidates that fit `item`, in the order the board tries them
 ///
-/// Those that finish within the item's slack of the soonest come first,
-/// cheapest first and then soonest, an unknown cost last. The rest follow,
-/// soonest first. Empty when none fits.
+/// Those within the slack of the soonest finish come first, cheapest first.
+/// The rest follow, soonest first.
 pub fn pick<'a>(item: &Item<'_>, candidates: &[Candidate<'a>]) -> Vec<Choice<'a>> {
     let mut fits: Vec<Choice<'a>> = candidates
         .iter()
@@ -83,11 +82,12 @@ pub fn pick<'a>(item: &Item<'_>, candidates: &[Candidate<'a>]) -> Vec<Choice<'a>
     eligible
 }
 
-// An agent whose file names no kinds takes every kind, and an item with no kind takes any agent
+// An item with no kind goes only to an agent whose file names no kinds
 fn takes(fit: &Fit, kind: Option<&str>) -> bool {
     match (&fit.kinds, kind) {
+        (None, _) => true,
         (Some(kinds), Some(kind)) => kinds.iter().any(|k| k == kind),
-        _ => true,
+        (Some(_), None) => false,
     }
 }
 
@@ -245,8 +245,8 @@ mod tests {
         assert_eq!(order(&pick(&item, &candidates)), ["fixer", "all"]);
         assert_eq!(
             order(&pick(&Item::default(), &candidates)),
-            ["docs", "fixer", "all"],
-            "an item with no kind takes any agent"
+            ["all"],
+            "an item with no kind goes only to an agent that takes every kind"
         );
     }
 
