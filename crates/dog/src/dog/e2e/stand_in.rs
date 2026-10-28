@@ -6,7 +6,8 @@
 //! The rsync one honours only the flags the dog's safety rests on,
 //! `--exclude=.git` and `--no-links`, so a run that leaves one out copies
 //! what the flag would have kept back. Both log every start with their
-//! parent's process, which is the dog's when it starts them directly.
+//! parent's process, which is the dog's when it starts them directly, and
+//! keep the environment of their latest start.
 
 use std::path::{Path, PathBuf};
 
@@ -17,6 +18,7 @@ use crate::test::write_script;
 // `@PID@` is the process the tests ask about, and `@RUN@` runs the command.
 const SSH: &str = r#"#!/bin/sh
 echo "ssh $PPID $*" >> '@DIR@/started.log'
+env > '@DIR@/ssh.env'
 echo @PID@ > '@DIR@/ssh.pid'
 mkdir -p '@DIR@/hosts/'"$2"
 cd '@DIR@/hosts/'"$2" || exit 97
@@ -36,6 +38,7 @@ wait $run"#;
 
 const RSYNC: &str = r#"#!/bin/sh
 echo "rsync $PPID $*" >> '@DIR@/started.log'
+env > '@DIR@/rsync.env'
 git=keep
 links=copy
 from=
@@ -147,6 +150,11 @@ impl StandIn {
     pub fn started(&self) -> Vec<String> {
         let log = std::fs::read_to_string(self.base().join("started.log")).unwrap_or_default();
         log.lines().map(str::to_owned).collect()
+    }
+
+    /// The environment the latest `program` started with, `ssh` or `rsync`
+    pub fn env_of(&self, program: &str) -> String {
+        std::fs::read_to_string(self.base().join(format!("{program}.env"))).unwrap_or_default()
     }
 
     /// The process of the latest `ssh`, once there is one
