@@ -169,3 +169,23 @@ async fn a_failed_load_is_unknown_and_a_failed_meter_keeps_its_last_reading() {
         })
     );
 }
+
+// Cargo sets it for every test binary it runs, and nothing the dog starts reads it.
+const SET: &str = "CARGO_PKG_DESCRIPTION";
+
+#[tokio::test(start_paused = true)]
+async fn a_meter_read_never_sees_a_gateway_key() {
+    assert!(std::env::var_os(SET).is_some(), "{SET} is set under cargo");
+    let section = format!("[gateways.paddock]\nurl = \"http://gpu:8700\"\nkey_env = \"{SET}\"\n");
+    let settings = crate::webhook::KelpieSettings::from_section(&section).unwrap();
+    let ports = super::Ports {
+        local_leases: Arc::new(LeaseReads::default()),
+        meter: Arc::new(FakeMeter::idle()),
+        codex_meter: |_| Arc::new(FakeMeter::idle()),
+    };
+    super::begin(&Agents::embedded(), &settings, ports);
+    let shown = crate::spawn::command(crate::spawn::env()).output().unwrap();
+    let shown = String::from_utf8_lossy(&shown.stdout).into_owned();
+    assert!(shown.contains("PATH="), "{shown}");
+    assert!(!shown.contains(SET), "a meter's command saw it");
+}

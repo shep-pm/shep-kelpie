@@ -26,6 +26,9 @@ use crate::webhook::KelpieSettings;
 /// local server, read in one request each.
 pub const LOAD_TICK: Duration = Duration::from_secs(30);
 
+// The runner's Claude login, as the adapters' `LOGIN_VAR` names it.
+const LOGIN_VAR: &str = "CLAUDE_CODE_OAUTH_TOKEN";
+
 /// What the dog reads availability through, which the binary builds from the adapters
 pub struct Ports {
     /// Reads a gateway model's load
@@ -174,13 +177,18 @@ pub(super) struct Readers {
 
 /// Reads what `agents` name through `ports` from now on, into what this returns
 ///
-/// A Codex home `settings` cannot give leaves the Codex account unknown.
+/// A Codex home `settings` cannot give leaves the Codex account unknown. No
+/// process the dog starts from then on sees a gateway key or the Claude login.
 pub(super) fn begin(
     agents: &Agents,
     settings: &KelpieSettings,
     ports: Ports,
 ) -> Arc<Mutex<Availability>> {
-    let sources = Sources::of(agents, &settings.gateways());
+    let gateways = settings.gateways();
+    let mut hidden = gateways.key_vars();
+    hidden.push(LOGIN_VAR.to_owned());
+    crate::spawn::hide(hidden);
+    let sources = Sources::of(agents, &gateways);
     let shown = Arc::new(Mutex::new(Availability::new(&sources)));
     let mut meters = BTreeMap::from([(Account::Claude, ports.meter)]);
     match codex_home(settings) {
