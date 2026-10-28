@@ -22,6 +22,7 @@ use crate::settings::{BuildDir, EnvName, GuardHook, NonBlank};
 
 pub mod housekeeping;
 mod login;
+mod safe_directory;
 
 pub use login::{config_dir as login_dir, write as write_login};
 
@@ -413,6 +414,11 @@ impl WorkerProfile<'_> {
     }
 
     fn env(&self) -> BTreeMap<String, String> {
+        self.env_for(cfg!(windows))
+    }
+
+    // On Windows the clone is not the worker's own, so its git trusts the clone's folders.
+    fn env_for(&self, windows: bool) -> BTreeMap<String, String> {
         let path = |p: &Path| p.to_string_lossy().into_owned();
         let cargo = ("CARGO_TARGET_DIR".to_owned(), path(self.build));
         // A project's `build_env` comes after, so it may move one.
@@ -431,8 +437,11 @@ impl WorkerProfile<'_> {
         let maintainer = (self.login_token.filter(|_| self.token.is_none()))
             .map(|token| (GH_TOKEN_VAR.to_owned(), token.expose().to_owned()));
         // One variable, so a covered worker's value carries both lists.
+        let trusted =
+            windows.then(|| safe_directory::parameters([self.git_common_dir, self.worktree]));
         let git_config = [housekeeping::PARAMETERS]
             .into_iter()
+            .chain(trusted.as_deref())
             .chain(self.token.map(|_| login::GIT_CONFIG))
             .collect::<Vec<_>>()
             .join(" ");
