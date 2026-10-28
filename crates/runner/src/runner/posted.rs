@@ -8,18 +8,22 @@
 //! changed what `status` shows and asked the forge nothing, and those two
 //! triggers read the copy whenever the lock is held. A `drain` or `undrain`
 //! that lands while a pass holds the lock is answered from the copy too.
+//!
+//! A `watch` on the runner's socket reads the status from here as well: while
+//! a client watches, each post also keeps the owned [`Status`] it was built as.
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use serde_json::Value;
 
+use super::trigger::Status as RunnerStatus;
 use super::{Answer, Runner};
 use crate::ports::PaddockHolder;
 use crate::state::Finished;
+use crate::status::Status;
 use crate::ticket::TicketId;
 
 /// What the loop last posted, and what a trigger asked while a pass held the lock
@@ -36,6 +40,21 @@ pub struct Posted {
     wake: AtomicBool,
     // The verbs that read the forge and landed while a pass held the lock, oldest first
     queued: Mutex<Line>,
+    // What the clients that watch wait on. Taken before `body`, never after.
+    watching: Mutex<Watching>,
+    changed: Condvar,
+}
+
+// The snapshot the watchers read, and how many there are
+#[derive(Debug, Default)]
+struct Watching {
+    watchers: usize,
+    // Moves with each snapshot posted and with each change of the drain flag
+    seq: u64,
+    // The newest, kept only while a client watches. Its `draining` holds the
+    // calls in flight whether or not the runner drains, since the flag is read
+    // when a watcher takes it.
+    latest: Option<Status>,
 }
 
 // The queued verbs, and whether the queue still takes more
@@ -84,6 +103,8 @@ pub(crate) struct Body {
     /// The project, and the work items it finished, which `timings` totals
     pub(crate) project: String,
     pub(crate) history: Vec<Finished>,
+    /// The status as the protocol's owned type, built only while a client watches
+    pub(crate) snapshot: Option<Box<Status>>,
 }
 
 /// What a `drain` or `undrain` asked of a runner whose lock a pass held
@@ -97,12 +118,63 @@ pub(crate) enum Pending {
 }
 
 impl Posted {
-    /// Posts `body`, replacing what was posted
-    pub(crate) fn post(&self, body: Body) {
+    /// Posts `body`, replacing what was posted, and hands its snapshot to the watchers
+    pub(crate) fn post(&self, mut body: Body) {
+        let snapshot = body.snapshot.take();
+        let mut watching = self.watching();
+        if watching.watchers > 0 {
+            // A client that began watching after the runner saw none left no
+            // snapshot to take, so it is read back from the post.
+            if let Some(snapshot) = snapshot.map(|s| *s).or_else(|| read_back(&body)) {
+                watching.latest = Some(snapshot);
+                watching.seq += 1;
+                self.changed.notify_all();
+            }
+        }
         *self
             .body
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(body);
+    }
+
+    fn watching(&self) -> MutexGuard<'_, Watching> {
+        self.watching
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Whether a client watches, so a post is worth building a snapshot for
+    pub(crate) fn watched(&self) -> bool {
+        self.watching().watchers > 0
+    }
+
+    /// Starts a watcher, whose first snapshot is the status as posted now
+    pub(crate) fn watch(self: &Arc<Self>) -> Watcher {
+        let mut watching = self.watching();
+        watching.watchers += 1;
+        if watching.latest.is_none() {
+            watching.latest = self.body().as_ref().and_then(read_back);
+        }
+        Watcher {
+            posted: Arc::clone(self),
+            seen: None,
+            last: None,
+        }
+    }
+
+    /// Wakes every watcher to look at whether it should end
+    pub(crate) fn wake_watchers(&self) {
+        let _watching = self.watching();
+        self.changed.notify_all();
+    }
+
+    // The drain flag changed what `status` shows, with no post.
+    fn publish(&self) {
+        let mut watching = self.watching();
+        if watching.watchers > 0 {
+            watching.seq += 1;
+            self.changed.notify_all();
+        }
     }
 
     /// What was last posted, or `None` before the runner posted anything
@@ -137,6 +209,7 @@ impl Posted {
     /// Holds back every new call, or starts them again
     pub(crate) fn set_draining(&self, on: bool) {
         self.draining.store(on, Ordering::SeqCst);
+        self.publish();
     }
 
     /// Records a `drain` for the runner to take up at its next lock
@@ -147,6 +220,7 @@ impl Posted {
     /// Returns whether this is the first one since the runner took the last up.
     pub(crate) fn ask_drain(&self, at_tool: bool) -> bool {
         self.draining.store(true, Ordering::SeqCst);
+        self.publish();
         let mut pending = self
             .pending
             .lock()
@@ -179,6 +253,7 @@ impl Posted {
     /// starting calls again from now
     pub(crate) fn ask_undrain(&self, keep: bool) {
         self.draining.store(false, Ordering::SeqCst);
+        self.publish();
         let first = self
             .pending
             .lock()
@@ -268,6 +343,66 @@ impl Posted {
     }
 }
 
+// The posted status as the protocol's owned one, with the calls in flight where
+// the builder puts them. `None` for a post this crate cannot read.
+fn read_back(body: &Body) -> Option<Status> {
+    let mut status: Status = serde_json::from_value(body.status.clone()).ok()?;
+    status.draining = serde_json::from_value(body.drain.clone()).ok();
+    Some(status)
+}
+
+/// A client that watches: each call gives the newest status it has not been given
+#[derive(Debug)]
+pub(crate) struct Watcher {
+    posted: Arc<Posted>,
+    seen: Option<u64>,
+    last: Option<Status>,
+}
+
+impl Watcher {
+    /// The status as it stands, once it differs from the last one given, waiting
+    /// for it if need be; `None` once `quit` says so
+    ///
+    /// Snapshots posted while the caller was away are skipped, and a snapshot
+    /// equal to the last one given is not given again. `quit` is read with the
+    /// posts locked, so whatever makes it true calls
+    /// [`Posted::wake_watchers`] after.
+    pub(crate) fn next(&mut self, quit: impl Fn() -> bool) -> Option<Status> {
+        let mut watching = self.posted.watching();
+        loop {
+            if quit() {
+                return None;
+            }
+            if self.seen != Some(watching.seq)
+                && let Some(latest) = &watching.latest
+            {
+                self.seen = Some(watching.seq);
+                let mut status = latest.clone();
+                if !self.posted.draining() {
+                    status.draining = None;
+                }
+                if self.last.as_ref() != Some(&status) {
+                    self.last = Some(status.clone());
+                    return Some(status);
+                }
+            }
+            watching = (self.posted.changed)
+                .wait(watching)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+}
+
+impl Drop for Watcher {
+    fn drop(&mut self) {
+        let mut watching = self.posted.watching();
+        watching.watchers -= 1;
+        if watching.watchers == 0 {
+            watching.latest = None;
+        }
+    }
+}
+
 impl Runner {
     /// The copy of its status that `status` and `drain` read while a pass holds
     /// the runner's lock, and the drain flag they set
@@ -291,6 +426,7 @@ impl Runner {
     /// up behind a call that waits its turn behind the login's pace.
     pub(super) fn post(&self) {
         let posted = self.status_of(self.posted_local_leases());
+        let snapshot = self.snapshot_if_watched(&posted);
         let mut status = serde_json::to_value(posted).expect("status serializes to JSON");
         let drain = serde_json::to_value(self.drain_state()).expect("the drain serializes to JSON");
         // `draining` goes in when a trigger reads the post, from the flag the
@@ -302,7 +438,19 @@ impl Runner {
             board: serde_json::to_value(self.board()).expect("the list serializes to JSON"),
             project: self.project.as_str().to_owned(),
             history: self.state.history.clone(),
+            snapshot,
         });
+    }
+
+    /// `posted` as the protocol's owned status, for a post to hand the watchers,
+    /// or `None` while nobody watches
+    pub(super) fn snapshot_if_watched(&self, posted: &RunnerStatus<'_>) -> Option<Box<Status>> {
+        if !self.postings.watched() {
+            return None;
+        }
+        let mut snapshot = Status::from(posted);
+        snapshot.draining = Some((&self.drain_state()).into());
+        Some(Box::new(snapshot))
     }
 }
 
@@ -339,6 +487,25 @@ mod tests {
 
         advance(&runner).unwrap();
         assert_eq!(reads.count(), opened + 1, "a pass asked the gateway again");
+    }
+
+    #[test]
+    fn a_post_builds_no_snapshot_while_nobody_watches() {
+        let rig = Rig::new("koji");
+        let runner = rig.open().unwrap();
+        let runner = runner.lock().unwrap();
+        let postings = runner.postings();
+        let snapshot = || runner.snapshot_if_watched(&runner.status());
+
+        assert!(snapshot().is_none(), "nobody watches yet");
+        let watcher = postings.watch();
+        assert_eq!(
+            snapshot().map(|s| s.project),
+            Some("koji".to_owned()),
+            "a watcher wants one"
+        );
+        drop(watcher);
+        assert!(snapshot().is_none(), "the last watcher left");
     }
 
     #[test]
