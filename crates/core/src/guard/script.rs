@@ -124,14 +124,15 @@ pub(super) fn interpreted(
 }
 
 // How a program the system runs itself starts: ELF, then Mach-O's thin and
-// fat headers, each byte order.
-const BINARIES: [&[u8]; 6] = [
+// fat headers, each byte order, then a Windows executable's `MZ`.
+const BINARIES: [&[u8]; 7] = [
     b"\x7fELF",
     b"\xfe\xed\xfa\xce",
     b"\xfe\xed\xfa\xcf",
     b"\xce\xfa\xed\xfe",
     b"\xcf\xfa\xed\xfe",
     b"\xca\xfe\xba\xbe",
+    b"MZ",
 ];
 
 #[cfg(test)]
