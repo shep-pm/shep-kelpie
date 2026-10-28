@@ -1,0 +1,13 @@
+{
+  "name": "ecosystem-npm",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.js",
+    "test": "node --test",
+    "lint": "node scripts/lint.js"
+  },
+  "dependencies": {
+    "ms": "2.1.3"
+  }
+}

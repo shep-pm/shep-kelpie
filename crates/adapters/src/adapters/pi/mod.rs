@@ -77,6 +77,9 @@ mod tests;
 #[cfg(test)]
 mod escapes;
 
+#[cfg(all(test, unix))]
+mod ecosystems;
+
 #[cfg(test)]
 mod guard_tests;
 
