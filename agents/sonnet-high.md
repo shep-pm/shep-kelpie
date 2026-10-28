@@ -6,4 +6,6 @@ role: implementer
 harness: claude-code
 model: claude-sonnet-5-5
 effort: high
+description: Builds everyday features and anything with state, such as a store, a queue or a migration.
+tier: standard
 ---

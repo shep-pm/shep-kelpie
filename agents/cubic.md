@@ -10,4 +10,6 @@ harness: bot
 bot: cubic
 reviews: 20
 hours: 720
+description: Reviews the pull request on GitHub as the cubic bot.
+tier: standard
 ---

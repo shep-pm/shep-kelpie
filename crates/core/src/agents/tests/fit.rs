@@ -166,3 +166,82 @@ fn a_file_with_a_role_and_a_description_but_no_harness_still_binds_nothing() {
     assert_eq!(agents.unbound().len(), 1);
     assert!(agents.get(&name("qwen")).is_some());
 }
+
+// Every shipped agent a project can list, the bare baselines bound as a
+// test binds them, but not `security-reviewer`, which the board never picks.
+fn shipped() -> Vec<(String, Agent)> {
+    let embedded = Agents::embedded();
+    let mut listed: Vec<_> = embedded
+        .iter()
+        .map(|(name, agent)| (name.to_string(), agent.clone()))
+        .collect();
+    let bare: Vec<_> = embedded.bare_baselines().iter().map(|b| b.name).collect();
+    let bound = bare
+        .iter()
+        .fold(embedded, |agents, name| agents.bind(name, OPUS_HIGH));
+    listed.extend(bare.iter().map(|name| {
+        let agent = bound
+            .get(&self::name(name))
+            .expect("the bound baseline loads");
+        ((*name).to_owned(), agent.clone())
+    }));
+    listed.retain(|(name, agent)| {
+        name != "security-reviewer" && matches!(agent.role, Role::Implementer | Role::Reviewer)
+    });
+    listed
+}
+
+#[test]
+fn every_shipped_implementer_and_reviewer_but_security_reviewer_has_a_description() {
+    let shipped = shipped();
+
+    let names: Vec<_> = shipped.iter().map(|(name, _)| name.as_str()).collect();
+    for expected in ["defect-hunter", "standards", "spec", "sonnet-high", "codex"] {
+        assert!(
+            names.contains(&expected),
+            "{expected} is not listed: {names:?}"
+        );
+    }
+    for (name, agent) in &shipped {
+        assert!(description(agent).is_some(), "{name} has no description");
+        assert_eq!(agent.fit.kinds, None, "{name} names kinds");
+    }
+}
+
+#[test]
+fn no_shipped_description_uses_a_cost_word() {
+    for (name, agent) in shipped() {
+        let text = description(&agent)
+            .expect("it has a description")
+            .to_lowercase();
+        for word in ["cost", "price", "cheap", "expensive", "budget", "$"] {
+            assert!(!text.contains(word), "{name}: {text}");
+        }
+        assert!(!text.chars().any(|c| c.is_ascii_digit()), "{name}: {text}");
+    }
+}
+
+#[test]
+fn the_shipped_whole_agents_hold_the_tiers_listed_above() {
+    let agents = Agents::embedded();
+    let expected = [
+        ("sonnet-high", Tier::Standard),
+        ("opus-high", Tier::Heavy),
+        ("defect-hunter-lite", Tier::Standard),
+        ("iq3-xxs-review", Tier::Light),
+        ("qwen", Tier::Light),
+        ("coderabbit", Tier::Standard),
+        ("cubic", Tier::Standard),
+        ("codex", Tier::Standard),
+    ];
+
+    for (file, tier) in expected {
+        let agent = agents.get(&name(file)).expect("it is shipped whole");
+        assert_eq!(agent.fit.tier, Some(tier), "{file} sets its tier");
+    }
+    for baseline in ["defect-hunter", "standards", "spec"] {
+        let bound = Agents::embedded().bind(baseline, OPUS_HIGH);
+        let agent = bound.get(&name(baseline)).unwrap();
+        assert_eq!(agent.fit.tier, None, "{baseline} names no tier");
+    }
+}
