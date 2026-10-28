@@ -15,6 +15,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 - Home never moved from `~/.kelpie`: no start, names each old file, exit 78 (`stop_exit_codes`). #311, #345
 - State file version 90 (`VERSION` in `core/state/mod.rs`); each change one way: rollback = finish or drop open items. `core/state/removed/mod.rs`
 - Business code is Rust; Tauri GUI after MVP. #5
+- A runner answers the typed protocol on `run/<project>.sock`; the verbs ask it first and fall back to `shep trigger` for one release, and a timeout never falls back. ADR 0017. runner-socket.md
 - Crates under `crates/` use nothing above them; the root holds the binary, verbs (`src/{flock,upgrade,sheep,doctor,issues}/`, `src/schema.rs`). ADR 0015
 - No budget numbers in agent prompts; no worker merges/posts as the maintainer (fence.md, github-app.md).
 
@@ -28,6 +29,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | workers.md | runner loop, turns | `runner/{turn,flight}/` |
 | runner-lock.md | lock, hold metric | `runner/{lock_hold,off_lock}.rs` |
 | runner-lock-passes.md | queued verbs, board, threads | `runner/{queued,board_read,trigger}` |
+| runner-socket.md | the runner's socket, the client, the verbs' fallback | `runner/socket/`, `crates/client/`, `core/ipc/`, `src/flock/control/socket.rs` |
 | runner-lock-worktrees.md | worktree jobs | `runner/worktree_jobs.rs` |
 | fence.md | sandbox, guard, hooks | `core/{profile,guard,hooks}/` |
 | fence-reads.md | reads | `core/dep_sources.rs`, `adapters/harness/`, `runner/turn/` |
