@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn a_command_crosses_to_the_terminal_whole() {
-        let mut command = Command::new("node");
+        let mut command = crate::spawn::command("node");
         command
             .args(["srt.js", "--", "claude", "--resume", "s 1"])
             .current_dir("/k/worktrees/7")

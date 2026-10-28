@@ -343,7 +343,11 @@ mod tests {
             });
         let settings = dir.path().join("call.srt.json");
         let err = srt
-            .wrap(&Policy::default(), &settings, &Command::new("claude"))
+            .wrap(
+                &Policy::default(),
+                &settings,
+                &crate::spawn::command("claude"),
+            )
             .unwrap_err();
         assert!(matches!(err, SandboxError::Install(_)), "{err:?}");
         assert!(err.to_string().contains("crabpot windows-install"), "{err}");
@@ -524,7 +528,7 @@ mod tests {
 
     // The call every wrap test makes, and the settings file it writes
     fn inner() -> Command {
-        let mut inner = Command::new("claude");
+        let mut inner = crate::spawn::command("claude");
         inner
             .args(["-p", "it's"])
             .current_dir("/k/wt/7")

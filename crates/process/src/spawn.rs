@@ -4,13 +4,11 @@
 //! child would inherit. The crate cannot unset a variable of its own, so each
 //! process it starts is built here, with every hidden variable removed.
 
+#[cfg(any(windows, test))]
+use std::borrow::Cow;
 use std::collections::BTreeSet;
-use std::ffi::OsStr;
-#[cfg(any(windows, test))]
-use std::ffi::OsString;
-#[cfg(any(windows, test))]
-use std::path::Path;
-use std::path::PathBuf;
+use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, PoisonError};
 
@@ -24,13 +22,94 @@ pub fn hide(vars: impl IntoIterator<Item = String>) {
 }
 
 /// `program`, as [`Command::new`] makes it, with every hidden variable unset
+///
+/// On Windows a bare name is looked for in the `PATH` by each extension of
+/// `PATHEXT`, since [`Command::new`] adds only `.exe`: npm's `npm.cmd` and
+/// `claude.cmd` shims are found, and the command is built on the path found.
+/// A name with a folder, or one not found, goes through as given.
 pub fn command(program: impl AsRef<OsStr>) -> Command {
-    let mut command = Command::new(program);
+    let program = program.as_ref();
+    let mut command = Command::new(found(program).as_deref().map_or(program, Path::as_os_str));
     let hidden = HIDDEN.lock().unwrap_or_else(PoisonError::into_inner);
     for var in hidden.iter() {
         command.env_remove(var);
     }
     command
+}
+
+#[cfg(unix)]
+fn found(_program: &OsStr) -> Option<PathBuf> {
+    None
+}
+
+#[cfg(windows)]
+fn found(program: &OsStr) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    resolve(
+        program,
+        &path,
+        std::env::var_os("PATHEXT").as_deref(),
+        &Path::is_file,
+    )
+}
+
+/// The names a folder of the `PATH` is tried for `program` by
+///
+/// Where Windows runs a program by its name alone, that is the name with each
+/// extension of `PATHEXT`. Elsewhere it is the name.
+#[cfg(unix)]
+pub fn program_names(program: &str) -> Vec<OsString> {
+    vec![program.into()]
+}
+
+/// The names a folder of the `PATH` is tried for `program` by
+///
+/// The name with each extension of `PATHEXT`, and the name itself when it
+/// already ends in one. An extensionless file such as npm's shell script is no
+/// program Windows can start, so it is never a name.
+#[cfg(windows)]
+pub fn program_names(program: &str) -> Vec<OsString> {
+    names_with(program, std::env::var_os("PATHEXT").as_deref())
+}
+
+#[cfg(any(windows, test))]
+fn names_with(program: &str, pathext: Option<&OsStr>) -> Vec<OsString> {
+    let pathext = pathext.map_or(Cow::Borrowed(".COM;.EXE;.BAT;.CMD"), OsStr::to_string_lossy);
+    let extensions: Vec<&str> = pathext.split(';').filter(|e| !e.is_empty()).collect();
+    let own = extensions.iter().any(|extension| {
+        let from = program.len().saturating_sub(extension.len());
+        program
+            .get(from..)
+            .is_some_and(|tail| tail.eq_ignore_ascii_case(extension))
+    });
+    own.then(|| program.into())
+        .into_iter()
+        .chain(
+            extensions
+                .iter()
+                .map(|extension| format!("{program}{extension}").into()),
+        )
+        .collect()
+}
+
+// The first file a folder of `path` holds under one of `program`'s names, none
+// for a name with a folder in it.
+#[cfg(any(windows, test))]
+fn resolve(
+    program: &OsStr,
+    path: &OsStr,
+    pathext: Option<&OsStr>,
+    is_file: &dyn Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    let program = program.to_str()?;
+    if program.contains(['/', '\\', ':']) {
+        return None;
+    }
+    let names = names_with(program, pathext);
+    std::env::split_paths(path)
+        .filter(|folder| !folder.as_os_str().is_empty())
+        .flat_map(|folder| names.iter().map(move |name| folder.join(name)))
+        .find(|candidate| is_file(candidate))
 }
 
 /// The POSIX shell that runs a command string, as `sh -c`
@@ -101,7 +180,6 @@ pub fn shell_quote(s: &str) -> String {
 mod tests {
     use super::*;
     use shep_kelpie_test_support::{linked_worktree, write_script};
-    use std::ffi::OsString;
 
     // An environment of `vars`, and a disk of `files`.
     fn machine<'a>(
@@ -149,6 +227,75 @@ mod tests {
     fn no_git_for_windows_is_none() {
         let (var, exists) = machine(&[("ProgramFiles", "C:/Program Files")], &[]);
         assert_eq!(git_for_windows_tool("sh", &var, &exists), None);
+    }
+
+    const PATHEXT: &str = ".com;.exe;.bat;.cmd";
+
+    // A folder holding npm's shims, and a `PATH` that reaches it past an empty folder.
+    fn npm_shims() -> (tempfile::TempDir, std::ffi::OsString) {
+        let dir = tempfile::tempdir().unwrap();
+        let empty = dir.path().join("empty");
+        let nodejs = dir.path().join("nodejs");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::fs::create_dir_all(&nodejs).unwrap();
+        std::fs::write(nodejs.join("npm"), "#!/bin/sh\n").unwrap();
+        std::fs::write(nodejs.join("npm.cmd"), "@echo off\n").unwrap();
+        let path = std::env::join_paths([empty, nodejs]).unwrap();
+        (dir, path)
+    }
+
+    fn found(program: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
+        resolve(
+            program.as_ref(),
+            path,
+            Some(PATHEXT.as_ref()),
+            &Path::is_file,
+        )
+    }
+
+    #[test]
+    fn a_bare_name_resolves_to_the_shim_a_path_extension_names() {
+        let (dir, path) = npm_shims();
+        assert_eq!(
+            found("npm", &path),
+            Some(dir.path().join("nodejs").join("npm.cmd"))
+        );
+    }
+
+    #[test]
+    fn a_name_with_its_own_extension_resolves_as_it_is() {
+        let (dir, path) = npm_shims();
+        assert_eq!(
+            found("npm.cmd", &path),
+            Some(dir.path().join("nodejs").join("npm.cmd"))
+        );
+    }
+
+    #[test]
+    fn a_name_with_a_folder_is_left_as_given() {
+        let (dir, path) = npm_shims();
+        let nodejs = dir.path().join("nodejs");
+        assert_eq!(found("./npm", &path), None);
+        assert_eq!(found(r"nodejs\npm", &path), None);
+        assert_eq!(found(nodejs.join("npm").to_str().unwrap(), &path), None);
+    }
+
+    #[test]
+    fn a_name_on_no_folder_of_the_path_is_left_as_given() {
+        let (_dir, path) = npm_shims();
+        assert_eq!(found("claude", &path), None);
+    }
+
+    #[test]
+    fn a_missing_path_extension_variable_falls_back_to_the_usual_four() {
+        let (dir, path) = npm_shims();
+        // The fallback is upper case, which a case-insensitive disk also matches.
+        let resolved = resolve("npm".as_ref(), &path, None, &Path::is_file).unwrap();
+        let expected = dir.path().join("nodejs").join("npm.cmd");
+        assert_eq!(
+            resolved.to_string_lossy().to_lowercase(),
+            expected.to_string_lossy().to_lowercase()
+        );
     }
 
     #[test]

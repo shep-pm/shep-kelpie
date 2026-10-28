@@ -36,7 +36,7 @@ What the person starting the shepherd needs on a Windows machine (#1271). Measur
 - The adapters crate gives Windows these answers (#1298):
   - the App store's folders and key use the `owner_only` crate on both platforms (#1264): `private`, `put` and the owner and mode checks of `save` call it, in place of `rustix` and `PermissionsExt`. On Windows the key and its folders are the user's alone, and a link, another owner or any other ACE is `StoreError::Exposed`.
   - `StatDisk` uses `disk` (#1300). `GetDiskFreeSpaceExW` reads caller-available bytes. One file handle supplies volume serial, index and link count (`GetFileInformationByHandle`), and `AllocationSize` (`GetFileInformationByHandleEx(FileStandardInfo)`). Hard links count once. Missing, inaccessible and delete-pending files are skipped at open.
-  - `adapters::files::is_executable` is the mode bits on Unix and a regular file on Windows, and `on_path` also tries each `PATHEXT` extension there.
+  - `adapters::files::is_executable` is the mode bits on Unix and a regular file on Windows, and `on_path` also tries each `PATHEXT` extension there. `spawn::command` resolves a bare name through `PATH` and `PATHEXT` there (std adds only `.exe`, so npm's `.cmd` shims were "program not found"), and `spawn::program_names` is the one copy of the lookup.
   - `adapters::files::link` is `symlink` on Unix, and `symlink_file` or `symlink_dir` by the target on Windows. The Codex login and both skill folders use it.
   - `adapters::mcp::live`, which binds a Unix socket named by a uid, is built on Unix only.
 - The runner crate gives Windows these answers (#1299):
