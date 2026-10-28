@@ -4,8 +4,8 @@
 //! each kind of ruling the map lacks is written at its default; a key there is
 //! never changed. The keys of the panel, the issue writer and the implementer
 //! list the agent board replaced ([`GONE_KEYS`]) are deleted and named with
-//! the value each held, with the gone
-//! roles in `repo_setup.roles` ([`GONE_ROLES`]) and the `unlabelled` kind.
+//! the value each held, with the gone roles in `repo_setup.roles`
+//! ([`GONE_ROLES`]) and the `unlabelled` kind.
 //! Each table is checked as `set` checks it, and one the runner would refuse
 //! is not written.
 

@@ -9,6 +9,8 @@ use crate::ports::{CLEAN, Checks, PullRequestState, Session};
 use crate::runner::{StepReport, step};
 use crate::test::{Hold, Rig, Scripted, git, ticket};
 
+mod board;
+
 // Pull request 80 on `fix/timeline`, opened by kelpie's account from another
 // session: two commits pushed by hand, closing issue 5. Returns its head.
 fn opened_80(rig: &Rig) -> String {
@@ -906,5 +908,3 @@ fn a_pass_that_adopts_after_failures_clears_the_ruling_and_the_status_line() {
     assert_eq!(status["skipped"], json!([]));
     assert_eq!(status["work_item"]["pull_request"], 80);
 }
-
-mod board;

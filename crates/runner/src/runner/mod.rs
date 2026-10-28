@@ -695,7 +695,7 @@ impl Runner {
         runner.settle_labels();
         runner.make_agent_labels();
         runner.make_priority_labels();
-        runner.notes.extend(runner.left_out_notes());
+        runner.notes.extend(runner.left_out_notes(&[]));
         runner.brief_now();
         // A trigger asked before the loop's first pass is answered from this.
         runner.post();

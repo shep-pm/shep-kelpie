@@ -257,6 +257,20 @@ fn an_implementer_new_guard_hooks_fence_out_is_left_off_the_boards_ask() {
     let left = "implementer local is left out of the agent board's ask: implementer local runs \
                 on pi, which cannot run `worker.guard_hooks`";
     assert!(notes.iter().any(|n| n.starts_with(left)), "{notes:?}");
+    rig.edit_settings(|s| {
+        s.replace(
+            "[app.dogs.kelpie.agents]\n",
+            "[app.dogs.kelpie.agents]\nslack = 20\n",
+        )
+    });
+    (runner.lock().unwrap())
+        .reread(rig.settings(), rig.kelpie_settings())
+        .unwrap();
+    let notes = runner.lock().unwrap().take_notes();
+    assert!(
+        !notes.iter().any(|n| n.starts_with(left)),
+        "told once: {notes:?}"
+    );
     rig.ask(&runner, "add", Some("7"));
     let asks = rig.agent_board.asks();
     let agents: Vec<_> = asks[0].agents.iter().map(|a| a.as_str()).collect();

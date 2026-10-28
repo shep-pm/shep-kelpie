@@ -323,12 +323,21 @@ impl Runner {
         (self.settings).refused_implementers(&self.book, &self.gateways, GatewayKeys::Held)
     }
 
-    // A log line for each implementer `left_out`, told once per start or reread.
-    pub(super) fn left_out_notes(&self) -> Vec<String> {
+    // The names `left_out` holds now
+    pub(super) fn left_out_names(&self) -> Vec<AgentName> {
+        self.left_out().into_iter().map(|(name, _)| name).collect()
+    }
+
+    // A log line for each implementer `left_out` that `before` does not name, so
+    // a reread tells only the ones it newly leaves out.
+    pub(super) fn left_out_notes(&self, before: &[AgentName]) -> Vec<String> {
         let line = |(name, why): (AgentName, String)| {
             format!("implementer {name} is left out of the agent board's ask: {why}")
         };
-        self.left_out().into_iter().map(line).collect()
+        (self.left_out().into_iter())
+            .filter(|(name, _)| !before.contains(name))
+            .map(line)
+            .collect()
     }
 
     // Every agent an `agent:` label may name for this project, by name: each

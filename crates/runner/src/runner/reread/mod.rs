@@ -167,6 +167,7 @@ impl Runner {
         let skills = (settings.skills != self.settings.skills)
             .then(|| Skills::load(&settings.skills, &self.paths.skills));
         let had_labels = self.implementer_files();
+        let was_left_out = self.left_out_names();
         // A local start made no `agent:` label on the repo, so a board now on GitHub needs them.
         let to_github = settings.tickets.source != self.settings.tickets.source
             && settings.tickets.source == TicketSource::Github;
@@ -224,7 +225,7 @@ impl Runner {
             self.make_agent_labels();
             self.make_priority_labels();
         }
-        self.notes.extend(self.left_out_notes());
+        self.notes.extend(self.left_out_notes(&was_left_out));
         self.gpu.point_at(gpu_metrics_url);
         self.extra_instructions = extra_instructions;
         self.webhook = webhook;

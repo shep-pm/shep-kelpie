@@ -70,3 +70,21 @@ async fn an_implementer_on_a_gateway_whose_key_only_the_runner_holds_is_one_the_
         "the agent board picks among local, opus-high, sonnet-high"
     );
 }
+
+#[tokio::test]
+async fn implementers_all_left_out_of_the_boards_ask_are_missing() {
+    let scene = Scene::new().await;
+    crate::test::write_in(&scene.kelpie_home.join("agents"), "local.md", ON_PADDOCK);
+    scene.runs("golbat", |t| {
+        t["agents"]["allow"] = json!(["local", "standards"]);
+    });
+    let report = scene.report().await;
+    let Verdict::Missing { what, fix } = verdict(&report, "golbat: implementers") else {
+        panic!("{:#?}", report.render());
+    };
+    assert_eq!(
+        what,
+        "every implementer `agents.allow` holds is left out of the agent board's ask"
+    );
+    assert_eq!(fix, "correct what each `implementer` line names");
+}
