@@ -788,6 +788,11 @@ pub enum Held {
     Merge {
         /// The head a yes merges
         head: String,
+        /// Whether the ruling offers no rework, because the pull request's
+        /// fork cannot be pushed to. Saved only when set, and read as unset
+        /// from a file saved before it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        rework_off: bool,
     },
 }
 

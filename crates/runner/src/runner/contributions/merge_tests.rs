@@ -54,6 +54,21 @@ fn ruled_on() -> (Rig, Mutex<Runner>, String) {
     (rig, runner, head)
 }
 
+// `ruled_on`, where the pull request's branch is on a fork an organization
+// owns, though its author allows edits
+fn ruled_on_an_organizations_fork() -> (Rig, Mutex<Runner>, String) {
+    let (rig, runner, head) = reviewed();
+    rig.forge
+        .set_fork(30, "https://example.test/fork.git", true);
+    rig.forge.set_fork_owned_by_organization(30);
+    poll(&rig, &runner);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Alerted { id: ticket(30) })
+    );
+    (rig, runner, head)
+}
+
 fn rulings(rig: &Rig, runner: &Mutex<Runner>) -> Vec<Value> {
     let status = rig.ask(runner, "status", None);
     status["rulings"].as_array().cloned().unwrap_or_default()
@@ -155,6 +170,48 @@ fn it_is_raised_under_git_merging_auto_too_and_sends_no_notice() {
         "{:?}",
         alerted[0].1
     );
+}
+
+#[test]
+fn a_merge_ruling_on_a_fork_an_organization_owns_offers_no_rework() {
+    let (rig, runner, head) = ruled_on_an_organizations_fork();
+
+    let waiting = rulings(&rig, &runner);
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0]["kind"]["reason"], "merge");
+    assert_eq!(waiting[0]["kind"]["head"], head);
+    assert_eq!(waiting[0]["kind"]["rework_off"], true);
+    let question = waiting[0]["question"].as_str().unwrap();
+    for named in [
+        "shep kelpie rule 30 yes",
+        "shep kelpie rule 30 no <note>",
+        "an organization owns it",
+        "merge `main` into their branch",
+        "push the change themselves",
+    ] {
+        assert!(question.contains(named), "{named}: {question}");
+    }
+    assert!(!question.contains("rework <note>"), "{question}");
+    assert_eq!(comments(&rig), [passed()], "nothing more is posted");
+}
+
+#[test]
+fn a_rework_answer_to_a_merge_ruling_on_a_fork_kelpie_cannot_push_to_is_refused() {
+    let (rig, runner, _) = ruled_on_an_organizations_fork();
+
+    let ruled = rule(&rig, &runner, "30 rework Add the test.");
+    poll_or_adopt(&rig, &runner);
+    poll_or_adopt(&rig, &runner);
+
+    let error = ruled["error"].as_str().unwrap_or_default();
+    assert!(error.contains("cannot be pushed to"), "{ruled}");
+    assert_eq!(rulings(&rig, &runner).len(), 1, "the ruling stays");
+    assert_eq!(rig.forge.merges(), [], "nothing was merged");
+    let record = contribution(&rig, &runner);
+    assert_eq!(record.get("released"), None, "{record}");
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"], Value::Null, "nothing was queued");
+    assert_eq!(rig.github.issues_created(), 0);
 }
 
 #[test]
