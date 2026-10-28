@@ -8,7 +8,6 @@
 //! `unlabelled` kind. Each table is checked as `set` checks it, and one the
 //! runner would refuse is not written.
 
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 use serde_json::{Map, Value};
@@ -43,9 +42,7 @@ const WRITER_KIND: &str = "unlabelled";
 /// Runs `shep kelpie settings migrate`, printing a line for each project it changed
 pub fn main() -> ExitCode {
     let ran = crate::shep_home::required(crate::shep_home::FLOCK_FIX).and_then(|shep_home| {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .ok_or("HOME is not set")?;
+        let home = crate::home::user_home().ok_or(crate::home::HOME_UNSET)?;
         let kelpie_home = crate::home::kelpie_home_of(&shep_home);
         let homes = Homes {
             home: &home,

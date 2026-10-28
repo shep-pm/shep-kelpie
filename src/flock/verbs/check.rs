@@ -5,7 +5,7 @@
 //! no `SHEP_HOME`, settings or network, so a worker can run it in its sandbox.
 
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use super::{Here, USAGE, load, split_project};
@@ -36,7 +36,7 @@ pub(super) fn main(env: &dyn Fn(&str) -> Option<OsString>, args: &[String]) -> u
             let ticket = ticket.map_err(|_| format!("{text:?} is not a ticket id"))?;
             let shep_home = env("SHEP_HOME");
             let shep_home = crate::shep_home::from(shep_home, crate::shep_home::FLOCK_FIX)?;
-            let home = env("HOME").map(PathBuf::from).ok_or("HOME is not set")?;
+            let home = crate::home::user_home_from(env).ok_or(crate::home::HOME_UNSET)?;
             let (named, _) = Named::split(named, "issue")?;
             let at = Place {
                 shep_home: &shep_home,

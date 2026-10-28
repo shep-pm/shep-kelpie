@@ -146,7 +146,7 @@ impl Ecosystem {
                 // rustup finds its toolchains under the real home, which the fence leaves.
                 let rustup = std::env::var_os("RUSTUP_HOME")
                     .map(PathBuf::from)
-                    .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".rustup")))
+                    .or_else(|| crate::home::user_home().map(|h| h.join(".rustup")))
                     .filter(|dir| dir.is_dir());
                 [var("CARGO_HOME", &home.join(".cargo")), var("HOME", &home)]
                     .into_iter()
