@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use super::agents::find;
+use super::agents::{Allow, find, left_out};
 use super::{AgentName, Gateways, NonBlank, Settings, SettingsError};
 use crate::agents::{Agent, Agents, DEFECT_HUNTER_LITE, IQ3_XXS_REVIEW, Role, Runs};
 use crate::review_bot::BotReviewer;
@@ -65,7 +65,7 @@ impl Settings {
     /// # Errors
     ///
     /// [`SettingsError::Invalid`] naming a reviewer that has no agent file,
-    /// whose file is an implementer's, or a bot that reviews on ready listed
+    /// whose file is an implementer's, that `agents.allow` leaves out, or a bot that reviews on ready listed
     /// after another bot.
     pub fn lineup(
         &self,
@@ -73,11 +73,22 @@ impl Settings {
         gateways: &Gateways,
         home: &Path,
     ) -> Result<Vec<ListedReviewer>, SettingsError> {
-        let names = match &self.agents.reviewers {
-            Some(names) => names.clone(),
-            None => default_reviewers(gateways),
-        };
-        listed(names, agents, home, SETTING)
+        let allow = self.agents.allow.as_ref();
+        match &self.agents.reviewers {
+            Some(names) => listed(names.clone(), agents, home, SETTING, allow),
+            None => {
+                let names = default_reviewers(gateways);
+                let fix = "list other reviewers in `agents.reviewers`";
+                if let Some(refusal) = (names.iter()).find_map(|n| left_out(allow, n, SETTING, fix))
+                {
+                    return Err(SettingsError::Invalid {
+                        setting: "agents",
+                        reason: refusal,
+                    });
+                }
+                listed(names, agents, home, SETTING, allow)
+            }
+        }
     }
 
     /// The reviewers a contribution gets, in order, each once
@@ -96,7 +107,13 @@ impl Settings {
         home: &Path,
     ) -> Result<Vec<ListedReviewer>, SettingsError> {
         match &self.contributions.reviewers {
-            Some(names) => listed(names.clone(), agents, home, CONTRIBUTION_SETTING),
+            Some(names) => listed(
+                names.clone(),
+                agents,
+                home,
+                CONTRIBUTION_SETTING,
+                self.agents.allow.as_ref(),
+            ),
             None => self.lineup(agents, gateways, home),
         }
     }
@@ -117,6 +134,7 @@ impl Settings {
             SECURITY_SETTING,
             SECURITY_SETTING,
             Role::Reviewer,
+            self.agents.allow.as_ref(),
         )?;
         match agent.runs.session() {
             Some(_) => Ok(agent),
@@ -137,13 +155,14 @@ fn listed(
     agents: &Agents,
     home: &Path,
     setting: &'static str,
+    allow: Option<&Allow>,
 ) -> Result<Vec<ListedReviewer>, SettingsError> {
     let mut lineup: Vec<ListedReviewer> = Vec::new();
     for name in names {
         if lineup.iter().any(|r| r.name == name) {
             continue;
         }
-        let agent = find(agents, &name, setting, "agents", Role::Reviewer)?;
+        let agent = find(agents, &name, setting, "agents", Role::Reviewer, allow)?;
         let mut runs = agent.runs.clone();
         if let Runs::Command(command) = &mut runs
             && let Ok(rest) = command.command.strip_prefix("~")

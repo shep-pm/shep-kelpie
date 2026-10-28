@@ -2,7 +2,7 @@ use std::path::Path;
 
 use super::*;
 use crate::agents::baseline::Baseline;
-use crate::settings::{AgentName, Effort, GuardHook, HookEvent};
+use crate::settings::{AgentName, Effort, Gateways, GuardHook, HookEvent};
 use crate::test::{project_table, with_tables};
 
 const EXAMPLE: &str = include_str!("../../../../../settings.example.toml");
@@ -514,4 +514,152 @@ fn naming_a_baseline_that_binds_nothing_and_has_no_file_is_refused_with_the_comm
 fn a_baseline_a_book_binds_is_named_with_no_file() {
     let book = bound(Agents::load(tempfile::tempdir().unwrap().path()).unwrap());
     project("").role_agents(&book).unwrap();
+}
+
+// The example's project with `names` as its `[agents]` table and `contributions` as its
+// `[contributions]` table, where it is given.
+fn allowing(names: &str, contributions: &str) -> Settings {
+    let entry = EXAMPLE.replace(LISTED, &format!("[app.dogs.kelpie.agents]\n{names}"));
+    let entry = match contributions {
+        "" => entry,
+        lines => format!("{entry}\n[app.dogs.kelpie.contributions]\n{lines}"),
+    };
+    let table = project_table(&entry);
+    Settings::from_table(&table, "shep", Path::new("/h"), Path::new("/p")).unwrap()
+}
+
+fn lineup(settings: &Settings) -> Result<Vec<String>, String> {
+    let lineup = settings.lineup(&book(), &Gateways::default(), Path::new("/h"));
+    let lineup = lineup.map_err(|e| e.to_string())?;
+    Ok(lineup.iter().map(|r| r.name.to_string()).collect())
+}
+
+#[test]
+fn an_absent_allow_lets_every_agent_through_as_before() {
+    let settings = project("implementers = [\"opus-high\", \"qwen\"]\npm = \"pm\"\n");
+    assert_eq!(settings.agents.allow, None);
+    let agents = settings.role_agents(&book()).unwrap();
+    assert_eq!(names(&agents), ["opus-high", "qwen"]);
+    assert!(agents.pm.is_some());
+    settings.representative(&book()).unwrap();
+    settings.triager(&book()).unwrap();
+    settings.security_reviewer(&book()).unwrap();
+    assert_eq!(lineup(&settings).unwrap(), ["defect-hunter-lite"]);
+}
+
+#[test]
+fn an_empty_allow_is_refused_naming_the_key() {
+    let err = try_project("allow = []\n").unwrap_err().to_string();
+    assert!(err.contains("agents.allow"), "{err}");
+    assert!(err.contains("leave it out to allow every agent"), "{err}");
+}
+
+#[test]
+fn an_implementer_allow_leaves_out_is_refused_naming_both_settings() {
+    let settings =
+        project("allow = [\"sonnet-high\"]\nimplementers = [\"sonnet-high\", \"opus-high\"]\n");
+    let err = settings.role_agents(&book()).unwrap_err().to_string();
+    assert_eq!(
+        err,
+        "setting `agents`: `agents.implementers` names opus-high, which `agents.allow` leaves \
+         out: add it to `agents.allow`, or name another"
+    );
+
+    let held =
+        project("allow = [\"sonnet-high\", \"opus-high\"]\nimplementers = [\"opus-high\"]\n");
+    assert_eq!(names(&held.role_agents(&book()).unwrap()), ["opus-high"]);
+}
+
+#[test]
+fn a_listed_or_default_reviewer_allow_leaves_out_is_refused() {
+    let listed = project("allow = [\"sonnet-high\"]\nreviewers = [\"defect-hunter\"]\n");
+    assert_eq!(
+        lineup(&listed).unwrap_err(),
+        "setting `agents`: `agents.reviewers` names defect-hunter, which `agents.allow` leaves \
+         out: add it to `agents.allow`, or name another"
+    );
+
+    let default = project("allow = [\"sonnet-high\"]\n");
+    assert_eq!(
+        lineup(&default).unwrap_err(),
+        "setting `agents`: `agents.reviewers` names defect-hunter-lite, which `agents.allow` \
+         leaves out: add it to `agents.allow`, or list other reviewers in `agents.reviewers`"
+    );
+
+    let own = allowing(
+        "allow = [\"sonnet-high\", \"defect-hunter-lite\"]\n",
+        "reviewers = [\"defect-hunter\"]\n",
+    );
+    assert_eq!(
+        lineup(&own).unwrap(),
+        ["defect-hunter-lite"],
+        "the default is allowed"
+    );
+    let err = own
+        .contribution_lineup(&book(), &Gateways::default(), Path::new("/h"))
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "setting `agents`: `contributions.reviewers` names defect-hunter, which `agents.allow` \
+         leaves out: add it to `agents.allow`, or name another"
+    );
+}
+
+#[test]
+fn the_project_manager_representative_triager_and_security_reviewer_are_held_to_allow() {
+    let holds = |allow: &str| {
+        project(&format!(
+            "allow = [{allow}]\nimplementers = [\"sonnet-high\"]\npm = \"pm\"\n"
+        ))
+    };
+    let only = holds("\"sonnet-high\"");
+    let left_out = |at: &str, name: &str, err: String| {
+        let said = format!("`{at}` names {name}, which `agents.allow` leaves out");
+        assert!(err.contains(&said), "{err}");
+    };
+    left_out(
+        "agents.pm",
+        "pm",
+        only.role_agents(&book()).unwrap_err().to_string(),
+    );
+    left_out(
+        "agents.representative",
+        "representative",
+        only.representative(&book()).unwrap_err().to_string(),
+    );
+    left_out(
+        "triage.agent",
+        "triager",
+        only.triager(&book()).unwrap_err().to_string(),
+    );
+    left_out(
+        "contributions.security_reviewer",
+        "security-reviewer",
+        only.security_reviewer(&book()).unwrap_err().to_string(),
+    );
+
+    let all =
+        holds("\"sonnet-high\", \"pm\", \"representative\", \"triager\", \"security-reviewer\"");
+    assert!(all.role_agents(&book()).unwrap().pm.is_some());
+    all.representative(&book()).unwrap();
+    all.triager(&book()).unwrap();
+    all.security_reviewer(&book()).unwrap();
+}
+
+#[test]
+fn a_name_in_allow_with_no_file_loads_and_is_refused_where_used() {
+    let settings =
+        project("allow = [\"sonnet-high\", \"fable\"]\nimplementers = [\"sonnet-high\"]\n");
+    assert_eq!(
+        names(&settings.role_agents(&book()).unwrap()),
+        ["sonnet-high"]
+    );
+
+    let used = project("allow = [\"sonnet-high\", \"fable\"]\nimplementers = [\"fable\"]\n");
+    let err = used.role_agents(&book()).unwrap_err().to_string();
+    assert_eq!(
+        err,
+        "setting `agents`: `agents.implementers` names fable, which has no agent file: write \
+         `agents/fable.md` in kelpie's home"
+    );
 }

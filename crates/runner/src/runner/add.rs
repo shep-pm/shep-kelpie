@@ -213,9 +213,15 @@ impl Runner {
 
     // Every agent an `agent:` label may name for this project: each agent
     // file whose role is `implementer`, listed in `agents.implementers` or
-    // not. A listed one always has such a file, so this holds them all.
+    // not, that `agents.allow` holds. A listed one always has such a file and
+    // passed that check at load, so this holds them all.
     pub(super) fn implementer_files(&self) -> Vec<AgentName> {
-        self.book.implementer_files()
+        let allow = self.settings.agents.allow.as_ref();
+        let files = self.book.implementer_files();
+        let allowed = files
+            .into_iter()
+            .filter(|n| allow.is_none_or(|a| a.holds(n)));
+        allowed.collect()
     }
 }
 
