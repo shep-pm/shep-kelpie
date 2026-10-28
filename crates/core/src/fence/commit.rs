@@ -9,7 +9,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use super::{folds_to, root_names};
+use super::{folds_to, nested_names, root_names};
 use crate::worktree::{self, WorktreeError, git};
 
 /// A fenced file's mode and blob, by its path
@@ -137,7 +137,28 @@ fn in_commit(repo: &Path, commit: &str) -> Result<Files, WorktreeError> {
     };
     let mut found = BTreeMap::new();
     for (root, ..) in entries(git(repo, ["ls-tree", "-z", commit])?) {
-        let Some(name) = root_names().find(|name| folds_to(OsStr::new(&root), name)) else {
+        let nested = nested_names().find(|[parent, _]| folds_to(OsStr::new(&root), parent));
+        let name = root_names().find(|name| folds_to(OsStr::new(&root), name));
+        if let Some([parent, folder]) = nested {
+            let args = [
+                "--literal-pathspecs",
+                "ls-tree",
+                "-r",
+                "-z",
+                commit,
+                "--",
+                &root,
+            ];
+            for (path, mode, blob) in entries(git(repo, args)?) {
+                let below = path[root.len()..].strip_prefix('/').unwrap_or_default();
+                let (inside, rest) = below.split_once('/').unwrap_or((below, ""));
+                if folds_to(OsStr::new(inside), folder) {
+                    let key = format!("{parent}/{folder}/{rest}");
+                    found.insert(key.trim_end_matches('/').to_owned(), (mode, blob));
+                }
+            }
+        }
+        let Some(name) = name else {
             continue;
         };
         let args = [
