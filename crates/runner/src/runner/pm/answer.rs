@@ -6,6 +6,7 @@
 
 use serde_json::{Map, Value};
 
+use super::picked::{PICK, Picked, picked};
 use crate::board::{READY, TRIAGE};
 use crate::ticket::TicketId;
 
@@ -37,7 +38,7 @@ const UNSTICK: &str = "`item`, an `action` of retry, re-scope, ask or none, and 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct Answer {
     /// The ready issues to start, in order, or none to start nothing now
-    pub(super) picks: Vec<TicketId>,
+    pub(super) picks: Vec<Picked>,
     /// The ready issues to hold, each until the open work item it names closes
     /// or, naming none, until any closes. None leaves the holds as they stand,
     /// and an empty list clears them.
@@ -196,19 +197,17 @@ pub(super) fn read(text: &str) -> Option<Answer> {
                 // One issue is a ticket; several, a list of them in the order to start.
                 Value::Array(items) => {
                     for item in items {
-                        match ticket(item) {
-                            Some(t) if answer.picks.contains(&t) => {
-                                answer.unread.push(format!("`pick`: {} twice", t.shown()))
-                            }
-                            Some(t) => answer.picks.push(t),
-                            None => answer
+                        match picked(item) {
+                            Some(p) if answer.picks.iter().any(|q| q.issue == p.issue) => answer
                                 .unread
-                                .push(format!("`pick`: a ticket id, not {item}")),
+                                .push(format!("`pick`: {} twice", p.issue.shown())),
+                            Some(p) => answer.picks.push(p),
+                            None => answer.unread.push(format!("`pick`: {PICK}, not {item}")),
                         }
                     }
                 }
-                value => match ticket(value) {
-                    Some(t) => answer.picks.push(t),
+                value => match picked(value) {
+                    Some(p) => answer.picks.push(p),
                     None => answer
                         .unread
                         .push(unread("a ticket id, a list of them or null")),
@@ -365,7 +364,7 @@ fn plain(text: &str) -> String {
 }
 
 // A ticket id, as a JSON number or as text: `9`, `#9` or `k12`.
-fn ticket(value: &Value) -> Option<TicketId> {
+pub(super) fn ticket(value: &Value) -> Option<TicketId> {
     match value {
         Value::Number(n) => TicketId::from_issue(n.as_u64()?),
         Value::String(text) => text.trim().trim_start_matches('#').parse::<TicketId>().ok(),
@@ -510,7 +509,7 @@ mod tests {
         assert_eq!(
             answer,
             Answer {
-                picks: vec![ticket(12)],
+                picks: vec![Picked::of(ticket(12))],
                 hold: Some(vec![
                     HoldCall {
                         issue: ticket(4),
@@ -648,25 +647,35 @@ mod tests {
     #[test]
     fn braces_inside_the_answers_text_are_not_an_answer_of_their_own() {
         let text = "{\"pick\": 12, \"why\": \"not {\\\"pick\\\": 3} as before\"} {unfinished";
-        assert_eq!(read(text).unwrap().picks, [ticket(12)]);
+        assert_eq!(read(text).unwrap().picks, [Picked::of(ticket(12))]);
         let inner = "{\"reply\": \"{\\\"pick\\\": 3}\", \"pick\": null}";
         assert_eq!(read(inner).unwrap().picks, Vec::new());
     }
 
     #[test]
     fn a_pick_is_one_ticket_or_a_list_of_them_in_order() {
+        let issues = |answer: Answer| {
+            answer
+                .picks
+                .into_iter()
+                .map(|p| p.issue)
+                .collect::<Vec<_>>()
+        };
         let list = read("{\"pick\": [14, \"#12\", 9]}").unwrap();
-        assert_eq!(list.picks, [ticket(14), ticket(12), ticket(9)]);
+        assert_eq!(issues(list), [ticket(14), ticket(12), ticket(9)]);
         let one = read("{\"pick\": [12]}").unwrap();
-        assert_eq!(one.picks, [ticket(12)]);
+        assert_eq!(issues(one), [ticket(12)]);
         assert_eq!(read("{\"pick\": []}").unwrap().picks, Vec::new());
 
         let bad = read("{\"pick\": [12, true, 12]}").unwrap();
-        assert_eq!(bad.picks, [ticket(12)]);
         assert_eq!(
             bad.unread,
-            ["`pick`: a ticket id, not true", "`pick`: #12 twice"]
+            [
+                format!("`pick`: {PICK}, not true"),
+                "`pick`: #12 twice".into()
+            ]
         );
+        assert_eq!(issues(bad), [ticket(12)]);
     }
 
     #[test]
@@ -861,7 +870,10 @@ mod tests {
         );
 
         let bad = read("{\"pick\": 3, \"standing\": 4, \"merge_order\": [1]}").unwrap();
-        assert_eq!((bad.picks, bad.standing), (vec![ticket(3)], None));
+        assert_eq!(
+            (bad.picks, bad.standing),
+            (vec![Picked::of(ticket(3))], None)
+        );
         assert_eq!(
             bad.unread,
             [

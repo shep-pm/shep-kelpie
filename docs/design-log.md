@@ -1240,6 +1240,7 @@ What was built and later changed or removed, one line each. Where a section abov
 - 2026-10-27: a work item ends with no change when a contributor's open pull request closes its issue, at a turn's end or in the parked read (#1415)
 - 2026-10-27: a fork an organization owns is not pushable whatever `maintainerCanModify` says (#1241 was refused with a 403), so `Reviewed::pushable` is false for it, `no-edits` names it as a third cause, and a contribution's merge ruling raised on one carries `rework_off` and offers no `rework`; state version 90 (#1375)
 - 2026-10-28: a work item keeps its `kind` (its issue's one `kind:` label at `add`), and the `tier` and `slack` (minutes) a project manager's pick gives it, and its `finished` line names its kind and tier; state version 91 (ADR 0018)
+- 2026-10-28: a project manager's `pick` entry may be an object `{ issue, tier, agent, slack }`; its `agent`, an implementer `agents.allow` holds, pins the work item over the issue's `agent:` label, and its tier and slack are kept on the work item (ADR 0018)
 
 ## Lift list
 

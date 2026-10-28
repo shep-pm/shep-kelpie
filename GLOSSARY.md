@@ -110,7 +110,8 @@ reviewer)
 **Tier**:
 How much work an implementer or reviewer is trusted with: `light`,
 `standard` or `heavy`, in that order, set by its file's `tier`. An agent
-whose file names none is `standard`.
+whose file names none is `standard`. A work item's tier is the least the
+project manager's pick said it needs.
 _Avoid_: size, level
 
 **Baseline**:

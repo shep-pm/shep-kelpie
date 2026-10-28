@@ -127,8 +127,9 @@ pub struct WorkItem {
     /// The implementer its worker runs on, chosen when it opened and kept
     /// until it ends. Each turn runs that agent's file as it then stands.
     pub agent: AgentName,
-    /// Whether its issue's `agent:` label ends in `!`, which keeps it on
-    /// `agent`: its first turn never falls back to another implementer
+    /// Whether its issue's `agent:` label ends in `!`, or the project
+    /// manager's pick named `agent`, which keeps it on `agent`: its first
+    /// turn never falls back to another implementer
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pinned: bool,
     /// The kind its issue's one `kind:` label named when it opened, as `fix`

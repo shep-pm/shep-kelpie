@@ -176,6 +176,12 @@ const ANSWER: &str = concat!(
  \"why\": \"<two sentences at most>\"}
 ```
 
+A `pick` entry may be `{\"issue\": <a ready issue>, \"tier\": \"light\" | \"standard\" | \"heavy\", \
+\"agent\": \"<an implementer from the Agents section>\", \"slack\": <minutes>}`, each key but `issue` \
+optional: `tier` is the least the work needs, `slack` the minutes past its quickest finish it \
+may take, and `agent` pins it to that implementer over its `agent:` label. An entry with any \
+other key, or naming no implementer, is dropped.
+
 `hold` names, for each ready issue, the open work item it waits on as `until`. The \
 hold ends when that work item closes or the issue's text changes, and no other \
 close ends it, so you need not hold it again on each wake. An `until` that is no open \
