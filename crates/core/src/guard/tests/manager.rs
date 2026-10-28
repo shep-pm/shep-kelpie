@@ -219,6 +219,35 @@ fn a_script_a_worker_runs_goes_through() {
 }
 
 #[test]
+fn a_windows_executable_named_by_its_path_is_a_program_not_a_script() {
+    // Read as a script, the second line would be a merge.
+    let dir = Scripts::with("tool.exe", "MZ\0\0\ngh pr merge 1\n");
+    assert_eq!(dir.bash("./tool.exe"), Verdict::Allow);
+    // Judged as any other program: what it is given is still read.
+    refused_with(
+        dir.bash("./tool.exe && git push origin HEAD:main"),
+        TO_BASE,
+        "a program's own call",
+    );
+}
+
+#[test]
+fn a_file_with_no_shebang_and_no_known_header_is_still_a_script() {
+    let dir = Scripts::with("merge", "MX\ngh pr merge 1\n");
+    refused_with(dir.bash("./merge"), MANAGER, "a headerless script");
+}
+
+#[test]
+fn text_that_starts_mz_is_still_a_script() {
+    // A Unix system will not run `MZ` and a shell runs the file itself, as
+    // bash does for a first line with no NUL in it.
+    let dir = Scripts::with("merge", "MZ\ngh pr merge 1\n");
+    refused_with(dir.bash("./merge"), MANAGER, "a script starting MZ");
+    dir.write("late", "MZ\ngh pr merge 1\n\0\n");
+    refused_with(dir.bash("./late"), MANAGER, "a NUL after the first line");
+}
+
+#[test]
 #[cfg_attr(windows, ignore = "a script runs by its Unix executable bit")]
 fn a_script_the_guard_cannot_read_is_refused() {
     let dir = Scripts::with("push.sh", "git push origin HEAD:main\n");

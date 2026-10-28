@@ -83,8 +83,7 @@ pub(super) fn interpreted(
     let Ok(file) = File::open(&path) else {
         return Ok(false);
     };
-    if file.take(4).read_to_end(&mut head).is_err() || BINARIES.iter().any(|b| head.starts_with(b))
-    {
+    if file.take(HEAD).read_to_end(&mut head).is_err() || binary(&head) {
         return Ok(false);
     }
     // A file with no `#!` that the system will not run, a shell runs itself.
@@ -123,8 +122,23 @@ pub(super) fn interpreted(
     }
 }
 
+// How many bytes decide whether a file is a program, as bash's own check does.
+const HEAD: u64 = 80;
+
+// Whether a file starting `head` is a program, not text a shell runs itself.
+fn binary(head: &[u8]) -> bool {
+    // A Unix system will not run `MZ`, and bash runs the file as a script
+    // unless the first line holds a NUL, which a Windows executable's does.
+    let windows = head.starts_with(b"MZ")
+        && head
+            .split(|b| *b == b'\n')
+            .next()
+            .is_some_and(|l| l.contains(&0));
+    windows || BINARIES.iter().any(|b| head.starts_with(b))
+}
+
 // How a program the system runs itself starts: ELF, then Mach-O's thin and
-// fat headers, each byte order.
+// fat headers, each byte order. A Windows executable's `MZ` is told in `binary`.
 const BINARIES: [&[u8]; 6] = [
     b"\x7fELF",
     b"\xfe\xed\xfa\xce",
