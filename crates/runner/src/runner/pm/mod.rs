@@ -78,10 +78,6 @@ pub(super) const CEILING: u64 = 10 * 60;
 /// How long the project manager is passed over after a call fails, in seconds
 const DOWN_FOR: u64 = 10 * 60;
 
-/// How long a pick of none holds the board with no work item open, in
-/// seconds, before the board rule picks
-pub(super) const NOTHING_FOR: u64 = 30 * 60;
-
 /// How long a wake reason nobody waits on is held before it goes, in seconds
 ///
 /// Measured on the maintainer's day of 134 wakes: 71 of them began less than 5
@@ -203,11 +199,9 @@ impl Wake {
 pub(super) enum Pick {
     /// These ready issues, in the order dispatch starts them, one a step
     Issues(Vec<Picked>),
-    /// Nothing, decided at this time, until its next wake, or for
-    /// [`NOTHING_FOR`] while no work item is open
-    Nothing(Timestamp),
-    /// Whatever the board rule picks, since it gave no answer
-    Rule,
+    /// Whatever the board rule picks for this many more of the issues and
+    /// free slots its wake offered, since it named none or gave no answer
+    Rule(usize),
 }
 
 /// What dispatch does about a pick
@@ -217,7 +211,7 @@ pub(super) enum Choice {
     Take(Picked),
     /// Starts what the board rule picked
     Rule,
-    /// Starts nothing now: the project manager is deciding, or said so
+    /// Starts nothing now: a pick wake is out and its call has not ended
     Wait,
 }
 
@@ -407,8 +401,10 @@ impl Runner {
     }
 
     /// What dispatch starts out of `takeable`, the ready issues the board
-    /// could take now: the project manager's pick, or nothing while it said
-    /// so, or it is asked where two or more could start; else the board rule's.
+    /// could take now: the project manager's pick, or nothing while its pick
+    /// wake is out, asked where two or more could start; else the board rule's.
+    /// A wake is out until its call answers, fails or is ended at [`CEILING`],
+    /// and one queued behind another call waits for that call too.
     pub(super) fn pm_pick(&mut self, takeable: &[TicketId]) -> Choice {
         if self.agents.pm.is_none() {
             return Choice::Rule;
@@ -429,20 +425,11 @@ impl Runner {
                 }
                 Choice::Rule
             }
-            Some(Pick::Rule) => Choice::Rule,
-            Some(Pick::Nothing(at)) => {
-                let now = self.ports.clock.now();
-                let lapsed = now.0 >= at.0.saturating_add(NOTHING_FOR);
-                if lapsed && self.state.work_items.is_empty() {
-                    self.notes.push(
-                        "the project manager started nothing for 30 minutes with no work item \
-                         open, so the board rule picks"
-                            .to_owned(),
-                    );
-                    return Choice::Rule;
-                }
-                self.pm.pick = Some(Pick::Nothing(at));
-                Choice::Wait
+            Some(Pick::Rule(slots)) => {
+                // A slot taken since the wake is gone from its count.
+                let left = slots.min(self.free_slots());
+                self.pm.pick = (left > 0).then_some(Pick::Rule(left));
+                Choice::Rule
             }
             None if self.pm_choices(takeable) < 2 || !self.pm_available() => Choice::Rule,
             None if self.pm.asked_pick => Choice::Wait,
@@ -458,11 +445,20 @@ impl Runner {
     /// opened
     pub(super) fn pm_started(&mut self, ticket: TicketId) {
         self.pm.unstartable.remove(&ticket);
-        if let Some(Pick::Issues(named)) = &mut self.pm.pick {
-            named.retain(|p| p.issue != ticket);
-            if named.is_empty() {
-                self.pm.pick = None;
+        match &mut self.pm.pick {
+            Some(Pick::Issues(named)) => {
+                named.retain(|p| p.issue != ticket);
+                if named.is_empty() {
+                    self.pm.pick = None;
+                }
             }
+            Some(Pick::Rule(slots)) => {
+                *slots -= 1;
+                if *slots == 0 {
+                    self.pm.pick = None;
+                }
+            }
+            None => {}
         }
     }
 
@@ -598,8 +594,8 @@ impl Runner {
         self.pm.holding_since = None;
         for wake in std::mem::take(&mut self.pm.due) {
             match wake {
-                Wake::Pick(..) => {
-                    self.pm.pick = Some(Pick::Rule);
+                Wake::Pick(_, free) => {
+                    self.pm.pick = Some(Pick::Rule(free.max(1)));
                     self.pm.asked_pick = false;
                 }
                 Wake::Told => self.pm_due(Wake::Told),
@@ -838,7 +834,7 @@ impl Runner {
         self.save(next)?;
         let woke_for: Vec<String> = flying.wakes.iter().map(prompt::reason).collect();
         let picking = flying.wakes.iter().find_map(|w| match w {
-            Wake::Pick(_, free) => Some((*free).max(1)),
+            Wake::Pick(ready, free) => Some((*ready, (*free).max(1))),
             _ => None,
         });
         // The standing notes and each tell this wake carried are written before

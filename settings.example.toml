@@ -156,7 +156,8 @@ implementers = ["sonnet-high"]
 # ready issues, two open branches conflict, a work item is stuck, or you
 # `shep kelpie tell` it something. It reads `board.md` and its own notes,
 # never runs git or gh, and answers with a pick, holds, an unstick or a
-# reply, which kelpie checks against the board before acting. One session
+# reply, which kelpie checks against the board before acting. A pick of
+# null leaves the free slot to the board's rule. One session
 # is kept across its wakes and compacted past 100k tokens of context.
 # Absent, the board's rule picks (priority, then age) and a stuck item
 # waits on its ruling, as it does whenever the project manager is down.

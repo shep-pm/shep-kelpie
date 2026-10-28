@@ -94,7 +94,7 @@ macro_rules! red_key {
 /// How a red `main` is cleared, shown with the `red` key
 macro_rules! reds {
     () => {
-        "A workflow red on main is yours to clear, and no reason to start nothing. \
+        "A workflow red on main is yours to clear. \
          `## Red on main` in the board says what is being done about each one, and \
          `## Code` names the end of each one's failed log, `ci/main-<run>.log`: read it \
          before you answer. Kelpie reruns a red head's failed jobs once itself, so a \
@@ -107,10 +107,8 @@ macro_rules! reds {
          read in `log` to the maintainer, so they need not read the log themself. Kelpie \
          drops a `red` call for a head whose rerun has not come back red, or that one \
          already settled. While main is red you may still pick an issue that does not \
-         touch the failing area, and your `why` says why each is safe. A pick of null \
-         while a head is red after its rerun with no fix or question is dropped, and the \
-         board rule picks instead. Cite the failed job and the log lines you read in your \
-         `why` or the fix's `body`."
+         touch the failing area, and your `why` says why each is safe. Cite the failed \
+         job and the log lines you read in your `why` or the fix's `body`."
     };
 }
 
@@ -159,7 +157,7 @@ macro_rules! standing_how {
 const ANSWER: &str = concat!(
     "\
 ```
-{\"pick\": <the ready issue to start next, or null to start nothing now; when the wake says several slots are free, a list of ready issues in the order to start them>,
+{\"pick\": <the ready issue to start next, or null to leave the pick to the board rule; when the wake says several slots are free, a list of ready issues in the order to start them>,
  \"hold\": [{\"issue\": <a ready issue that should wait>, \"until\": <the open work item whose closing ends the hold>}, ...] (one entry for every ready issue that should wait; [] holds none),
  \"unstick\": null or {\"item\": <a stuck work item's issue>, \"action\": \"retry\" | \"re-scope\" | \"ask\" | \"none\", \"why\": \"<one sentence>\"} or [{\"item\": <a stuck work item's issue>, \"action\": \"retry\" | \"re-scope\" | \"ask\" | \"none\", \"why\": \"<one sentence>\"}, ...],
  ",
@@ -425,13 +423,12 @@ const RED: &str = "\nWhere a stuck item's line under `## Code` in `board.md` nam
 /// One reason for a wake, in words
 pub(super) fn reason(wake: &Wake) -> String {
     match wake {
-        Wake::Pick(ready, 0 | 1) => format!(
-            "a slot is free and {ready} ready issues could fill it: pick one, or none to \
-             start nothing now"
-        ),
+        Wake::Pick(ready, 0 | 1) => {
+            format!("a slot is free and {ready} ready issues could fill it: pick one")
+        }
         Wake::Pick(ready, free) => format!(
             "{free} slots are free and {ready} ready issues could fill them: pick up to \
-             {most} as a list, in the order to start them, or none to start nothing now",
+             {most} as a list, in the order to start them",
             most = free.min(ready)
         ),
         Wake::Conflict(a, b, files) => format!(
@@ -576,8 +573,7 @@ mod tests {
         );
         assert!(text.starts_with(
             "You are the project manager for koji. Kelpie woke you because:\n\n\
-             - a slot is free and 3 ready issues could fill it: pick one, or none to start \
-             nothing now\n\
+             - a slot is free and 3 ready issues could fill it: pick one\n\
              - the branches of #7 and #9 conflict in src/a.rs, src/b.rs\n\
              - the maintainer told you:\n\n  > Hold #12 until\n  > the release.\n\n"
         ));

@@ -25,7 +25,7 @@ impl Runner {
         }
         named.remove(0);
         if named.is_empty() {
-            self.pm.pick = Some(Pick::Rule);
+            self.pm.pick = Some(Pick::Rule(self.free_slots().max(1)));
         }
         self.pick_dropped(ticket, why);
     }

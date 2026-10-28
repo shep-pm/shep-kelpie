@@ -37,7 +37,7 @@ const UNSTICK: &str = "`item`, an `action` of retry, re-scope, ask or none, and 
 /// What the project manager answered, field by field
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct Answer {
-    /// The ready issues to start, in order, or none to start nothing now
+    /// The ready issues to start, in order, or none to leave it to the board rule
     pub(super) picks: Vec<Picked>,
     /// The ready issues to hold, each until the open work item it names closes
     /// or, naming none, until any closes. None leaves the holds as they stand,

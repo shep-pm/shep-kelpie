@@ -130,7 +130,7 @@ fn one_wake_tells_the_free_slots_and_its_list_of_picks_fills_them_in_order() {
         woke_for,
         [
             "3 slots are free and 3 ready issues could fill them: pick up to 3 as a list, in \
-             the order to start them, or none to start nothing now"
+             the order to start them"
         ]
     );
     assert_eq!(
@@ -266,7 +266,7 @@ fn a_pick_wake_counts_only_the_issues_an_agent_could_start() {
 
     assert_eq!(
         woke_for,
-        ["a slot is free and 2 ready issues could fill it: pick one, or none to start nothing now"]
+        ["a slot is free and 2 ready issues could fill it: pick one"]
     );
 }
 
@@ -283,7 +283,7 @@ fn an_issue_whose_pacer_hold_lapsed_counts_toward_a_pick_wake_again() {
 
     assert_eq!(
         woke_for,
-        ["a slot is free and 2 ready issues could fill it: pick one, or none to start nothing now"]
+        ["a slot is free and 2 ready issues could fill it: pick one"]
     );
 }
 

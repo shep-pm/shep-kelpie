@@ -88,31 +88,31 @@ fn a_wake_while_main_is_red_carries_the_failed_log_and_how_to_clear_it() {
         "{}",
         wake.call.prompt
     );
+    assert!(
+        !wake.call.prompt.contains("A pick of null"),
+        "{}",
+        wake.call.prompt
+    );
 }
 
 #[test]
-fn starting_nothing_while_the_rerun_is_out_is_allowed() {
+fn a_pick_of_null_while_the_rerun_is_out_acts_on_nothing_and_drops_nothing() {
     let (rig, runner) = rerun();
 
     let (_, acted, dropped) = answered(Some(answers(&rig, &runner, "{\"pick\": null}")));
 
-    assert_eq!(acted, ["starts nothing now"]);
+    assert_eq!(acted, [] as [String; 0]);
     assert_eq!(dropped, [] as [String; 0]);
 }
 
 #[test]
-fn starting_nothing_on_a_head_red_after_its_rerun_is_dropped_and_the_rule_picks() {
+fn a_pick_of_null_on_a_head_red_after_its_rerun_is_no_preference_and_the_rule_picks() {
     let (rig, runner) = red_again();
 
     let (_, acted, dropped) = answered(Some(answers(&rig, &runner, "{\"pick\": null}")));
 
     assert_eq!(acted, [] as [String; 0]);
-    assert_eq!(
-        dropped,
-        [
-            "starts nothing: test is red on main after a rerun and has no fix work item or question yet"
-        ]
-    );
+    assert_eq!(dropped, [] as [String; 0]);
     assert_eq!(dispatched(step(&runner).unwrap()), ticket(9));
 }
 
@@ -203,13 +203,7 @@ fn an_ask_carries_the_log_lines_it_read_and_settles_the_head() {
     let StepReport::PmAnswered { acted, reply, .. } = report else {
         panic!("not an answer: {report:?}");
     };
-    assert_eq!(
-        acted,
-        [
-            "asked the maintainer about test red on main",
-            "starts nothing now"
-        ]
-    );
+    assert_eq!(acted, ["asked the maintainer about test red on main"]);
     let reply = reply.expect("the question went to the maintainer");
     assert!(
         reply.contains("The log lines I read:\nFAIL e2e::checkout times out after 3 tries"),

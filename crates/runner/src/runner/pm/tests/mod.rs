@@ -22,6 +22,7 @@ mod attach;
 mod code;
 mod conflicts;
 mod follow_up;
+mod free_slot;
 mod hold;
 mod inert;
 mod lease;
@@ -234,7 +235,7 @@ fn a_free_slot_with_two_ready_issues_wakes_it_and_its_pick_goes_first() {
     let (woke_for, acted, dropped) = answered(step(&runner).unwrap());
     assert_eq!(
         woke_for,
-        ["a slot is free and 2 ready issues could fill it: pick one, or none to start nothing now"]
+        ["a slot is free and 2 ready issues could fill it: pick one"]
     );
     assert_eq!((acted, dropped), (vec!["picked #12".to_owned()], vec![]));
     assert_eq!(
@@ -391,50 +392,6 @@ fn with_no_project_manager_the_rule_picks_and_nothing_wakes() {
     assert_eq!(
         rig.ask(&runner, "tell", Some("hold #12")),
         json!({ "error": "the project has no project manager: name one in `agents.pm`, such as `pm`" })
-    );
-}
-
-#[test]
-fn a_pick_of_none_with_nothing_open_waits_half_an_hour_and_never_stalls() {
-    let (rig, runner) = with_pm("ditto");
-    rig.forge.list_ready(9, false);
-    rig.forge.list_ready(12, false);
-    rig.claude.script([Scripted::Say(
-        "{\"pick\": null, \"hold\": [12], \"why\": \"#3 lands first.\"}",
-    )]);
-    let (_, acted, _) = answered(step(&runner).unwrap());
-    assert_eq!(acted, ["starts nothing now", "holds #12"]);
-    assert_eq!(step(&runner).unwrap(), None);
-    assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
-    let board = std::fs::read_to_string(rig.paths().board).unwrap();
-    assert!(
-        board.contains("held by you until an open work item closes"),
-        "{board}"
-    );
-
-    rig.clock.advance(31 * 60);
-    assert_eq!(dispatched(step(&runner).unwrap()), ticket(9));
-    assert_eq!(pm_seen(&rig).len(), 1);
-}
-
-#[test]
-fn a_pick_held_while_the_project_manager_decides_shows_why_in_skipped_and_on_the_board() {
-    let (rig, runner) = with_pm("ditto");
-    rig.forge.list_ready(9, false);
-    rig.forge.list_ready(12, false);
-    rig.claude.script([Scripted::Say(
-        "{\"pick\": null, \"why\": \"#3 lands first.\"}",
-    )]);
-    answered(step(&runner).unwrap());
-
-    assert_eq!(step(&runner).unwrap(), None);
-
-    let skipped = rig.ask(&runner, "status", None)["skipped"].clone();
-    assert_eq!(skipped, json!([{ "reason": "pm-waits", "issue": "9" }]));
-    let board = std::fs::read_to_string(rig.paths().board).unwrap();
-    assert!(
-        board.contains("the project manager's pick waits"),
-        "{board}"
     );
 }
 

@@ -19,8 +19,7 @@ const ASKS: &str = "I added the flag.\n\n<kelpie-question>\nShould it be `--dry-
                     `--check`?\n\nBoth appear in the docs.\n</kelpie-question>\n";
 
 /// What a wake for a free slot says
-const PICK_REASON: &str = "a slot is free and 2 ready issues could fill it: pick one, or none \
-                           to start nothing now";
+const PICK_REASON: &str = "a slot is free and 2 ready issues could fill it: pick one";
 
 /// What a wake says of `issue`, parked on ruling `ruling` for its failed turn
 fn stuck_reason(issue: u64, ruling: u64) -> String {

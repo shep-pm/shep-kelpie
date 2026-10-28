@@ -160,14 +160,14 @@ fn an_answered_wake_adds_one_line_with_its_reason_its_action_and_its_why() {
     rig.forge.list_ready(12, false);
     let long = "x".repeat(400);
     let home = rig.paths().pm.display().to_string();
-    let picked = format!("{{\"pick\": null, \"why\": \"{long}\"}}");
+    let picked = format!("{{\"pick\": null, \"hold\": [12], \"why\": \"{long}\"}}");
     let told = format!("{{\"pick\": null, \"hold\": [12], \"why\": \"{home}\"}}");
     let (picked, told): (&'static str, &'static str) = (
         Box::leak(picked.into_boxed_str()),
         Box::leak(told.into_boxed_str()),
     );
     rig.claude
-        .script([Scripted::Say(picked), Scripted::Say(told)]);
+        .script_for(Role::Pm, [Scripted::Say(picked), Scripted::Say(told)]);
     answered(step(&runner).unwrap());
     rig.ask(&runner, "tell", Some("Release is out"));
     answered(Some(step_until(&runner, |r| {
@@ -184,7 +184,7 @@ fn an_answered_wake_adds_one_line_with_its_reason_its_action_and_its_why() {
         pick.contains("woke for: a slot is free and 2 ready issues could fill it"),
         "{pick}"
     );
-    assert!(pick.contains("starts nothing now"), "{pick}");
+    assert!(!pick.contains("starts nothing"), "{pick}");
     let (_, why) = pick.split_once("; why: ").expect("{pick}");
     assert_eq!(
         why.chars().count(),
