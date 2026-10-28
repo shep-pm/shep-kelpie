@@ -163,7 +163,7 @@ jobs:
     # Pinned: on ubuntu-26.04 the sysctl below is not enough, and crabpot's
     # unshare of the PID and mount namespaces fails with EPERM.
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup toolchain install stable --profile minimal
@@ -176,6 +176,23 @@ jobs:
       # bubblewrap needs to build the sandbox.
       - name: Allow unprivileged user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # The toolchains of `fixtures/ecosystems`, which the ecosystem tests
+      # copy into a fake home the fence denies. Each version is pinned, so a
+      # new release cannot change what a worker's fence is tried against.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.26.5
+          cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.12.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+      - name: Install golangci-lint
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       # crabpot is in kelpie's own binary, so the sandbox needs no installed
       # runtime here.
       - run: cargo test --locked --no-run
@@ -190,6 +207,8 @@ jobs:
           set -o pipefail
           cargo test --locked -- --ignored \
             adapters::claude::escapes \
+            adapters::claude::ecosystems \
+            adapters::pi::ecosystems \
             a_worker_reaches_the_model_only_through_a_forwarder_that_passes_chat \
             --skip a_live_worker_turn_runs_inside_the_sandbox_and_resumes \
             --skip pi_answers_through_the_forwarder_with_no_model_host_in_its_sandbox \
@@ -205,6 +224,18 @@ jobs:
             a_worker_reaches_the_model_only_through_a_forwarder_that_passes_chat; do
             grep -Eq "^test .*::${name} \.\.\. ok$" sandbox.log \
               || { echo "::error::$name did not run and pass"; exit 1; }
+          done
+          # Both harnesses run each of these, so each is named by its module.
+          for harness in claude pi; do
+            for name in \
+              a_rust_project_builds_tests_lints_and_pushes_inside_the_fence \
+              a_go_project_builds_tests_lints_and_pushes_inside_the_fence \
+              a_bun_project_installs_tests_and_pushes_inside_the_fence \
+              an_npm_project_installs_tests_and_pushes_inside_the_fence \
+              a_hook_script_loads_its_neighbours_inside_the_fence; do
+              grep -Eq "^test adapters::${harness}::ecosystems::${name} \.\.\. ok$" sandbox.log \
+                || { echo "::error::$harness $name did not run and pass"; exit 1; }
+            done
           done
 
   msrv:
