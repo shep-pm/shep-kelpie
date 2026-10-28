@@ -955,6 +955,15 @@ fn a_runner_killed_mid_write_leaves_the_previous_state_readable() {
     );
 }
 
+#[test]
+fn a_second_atomic_write_over_a_file_replaces_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("saved");
+    write_atomically(&path, b"first").unwrap();
+    write_atomically(&path, b"second").unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"second");
+}
+
 mod answer;
 mod base;
 mod budget;

@@ -45,6 +45,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | cli-adapter.md | a new CLI | `adapters/cli/` |
 | handover.md | in-flight turns handed to a new build, `upgrade` | `src/sheep/handover/`, `runner/flight/carry/`, `adapters/process/adopt/`, `src/upgrade/handover.rs` |
 | windows.md | `sh`, `env`, test fakes on Windows | `process/spawn.rs`, `test_support/` |
+| windows-start.md | what a Windows machine needs to start a shepherd | `adapters/files.rs`, `src/doctor/` |
 | waits-and-spend.md | waits, held-up turns, failing steps, spend | `runner/{turn/unreachable,looks}/`, `adapters/{unreachable,codex}/`, `core/usage/`, `core/settings/agents/` |
 | review.md | review, bots, rulings | `runner/{review,ruling}/`, `core/webhook.rs` |
 | review-outcomes.md | fix turn findings' outcomes | `runner/review/outcomes/` |
