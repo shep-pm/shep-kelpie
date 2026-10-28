@@ -116,10 +116,6 @@ impl LocalLeases for LocalReviewer {
         paddock::holder(gateway, model).ok().flatten()
     }
 
-    fn paddock_queued(&self, gateway: &Upstream, model: &str) -> bool {
-        paddock::queued(gateway, model)
-    }
-
     fn paddock_load(&self, gateway: &Upstream, model: &str) -> Option<ModelLoad> {
         paddock::load(gateway, model).ok()
     }

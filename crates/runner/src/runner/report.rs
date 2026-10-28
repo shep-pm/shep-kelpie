@@ -44,17 +44,20 @@ pub enum StepReport {
         /// Older ready issues the board passed over, and why
         skipped: Vec<Skip>,
     },
-    /// A work item's first turn waited for its model past
-    /// `agents.fallback_after`, and moved to the next implementer listed
-    FellBack {
+    /// A work item's own implementer would finish past its slack, so it was
+    /// handed off to the agent board's next pick before its due turn
+    HandedOff {
         /// The work item's ticket
         issue: TicketId,
-        /// The implementer its first turn waited on
+        /// The implementer it left
         from: AgentName,
-        /// The implementer its next turn runs on
+        /// The implementer its next turn runs on, on a session of its own
         to: AgentName,
-        /// How long it waited, in seconds
-        waited: u64,
+        /// Seconds to the finish the board gave `from`, None when it ranked it not
+        #[serde(skip_serializing_if = "Option::is_none")]
+        from_finish: Option<u64>,
+        /// Seconds to the finish the board gave `to`
+        to_finish: u64,
     },
     /// A pull request kelpie opened asked for a rework, which opened a work
     /// item

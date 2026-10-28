@@ -76,6 +76,12 @@ fn item_changes(
     found: &mut Vec<String>,
 ) {
     let n = now.issue;
+    if was.agent != now.agent {
+        found.push(format!(
+            "#{n}: handed off from {} to {}",
+            was.agent, now.agent
+        ));
+    }
     if std::mem::discriminant(&was.turn) != std::mem::discriminant(&now.turn) {
         match &now.turn {
             Turn::Running { .. } => found.push(format!("#{n}: worker turn started")),

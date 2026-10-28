@@ -73,13 +73,19 @@ pub fn pick<'a>(item: &Item<'_>, candidates: &[Candidate<'a>]) -> Vec<Choice<'a>
     let Some(soonest) = fits.iter().map(|c| c.finish).min() else {
         return fits;
     };
-    let slack = u64::from(item.slack.unwrap_or(DEFAULT_SLACK_MINUTES)) * 60;
-    let within = soonest.saturating_add(slack);
     fits.sort_by_key(|c| c.finish);
-    let (mut eligible, rest): (Vec<_>, Vec<_>) = fits.into_iter().partition(|c| c.finish <= within);
+    let (mut eligible, rest): (Vec<_>, Vec<_>) =
+        (fits.into_iter()).partition(|c| within_slack(c.finish, soonest, item.slack));
     eligible.sort_by(|a, b| cheaper(a.cost_usd, b.cost_usd));
     eligible.extend(rest);
     eligible
+}
+
+/// Whether `finish` is within `slack` minutes of `soonest`, both seconds
+/// from now, with [`DEFAULT_SLACK_MINUTES`] when `slack` is None
+pub fn within_slack(finish: u64, soonest: u64, slack: Option<u32>) -> bool {
+    let slack = u64::from(slack.unwrap_or(DEFAULT_SLACK_MINUTES)) * 60;
+    finish <= soonest.saturating_add(slack)
 }
 
 // An item with no kind goes only to an agent whose file names no kinds

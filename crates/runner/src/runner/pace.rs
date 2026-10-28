@@ -60,6 +60,21 @@ pub(super) enum Started<T> {
     Held(Box<Begin>),
 }
 
+/// What a walk down the agent board's ranking found
+pub(super) enum Walked {
+    /// The first agent the pacer lets start
+    Opens(AgentName),
+    /// The step reads an agent's usage first, and is made again
+    Reads(Begin),
+    /// The pacer held every agent: the first hold's reason, when the soonest
+    /// hold lapses, and what the first hold does instead of starting
+    Held {
+        reason: Option<String>,
+        lapses: Option<Timestamp>,
+        first: Option<Begin>,
+    },
+}
+
 /// What a pass over the pull requests that ask to start found: the step it
 /// begins, each that could not start, and the first the pacer held
 pub(super) type Passed = (Option<Begin>, Vec<Skip>, Option<Begin>);
@@ -178,6 +193,15 @@ impl Runner {
         last.hold(scope).filter(|hold| trusted && now < hold.until)
     }
 
+    /// Whether a trusted hold still keeps `agent` from starting a turn
+    pub(super) fn turn_still_held(&self, agent: &AgentName) -> bool {
+        let Some(Limit::Account(account)) = self.agent_limit(agent) else {
+            return false;
+        };
+        let now = self.ports.clock.now();
+        self.still_held(account, Scope::Turn, now).is_some()
+    }
+
     /// The meters a new work item is paced on, less those a trusted hold answers for
     pub(super) fn dispatch_meters(&self, now: Timestamp) -> Vec<(Account, Arc<dyn Meter>)> {
         (self.spent_accounts().into_iter())
@@ -200,6 +224,51 @@ impl Runner {
         Ok(Pace::Clear)
     }
 
+    /// The first of `agents`, in their order, that the pacer lets start on `scope`
+    ///
+    /// A new work item paces each agent as [`Runner::pace_agent`] does, a
+    /// turn on each agent's own limit.
+    pub(super) fn first_unpaced<'a>(
+        &mut self,
+        agents: impl IntoIterator<Item = &'a AgentName>,
+        scope: Scope,
+    ) -> Result<Walked, StateError> {
+        let (mut reason, mut lapses, mut first) = (None, None, None);
+        for agent in agents {
+            let pace = match scope {
+                Scope::Dispatch => self.pace_agent(agent)?,
+                Scope::Turn => match self.agent_limit(agent) {
+                    Some(limit) => self.pace(Scope::Turn, &limit)?,
+                    None => Pace::Clear,
+                },
+            };
+            if let Some(why) = pace.reason() {
+                reason.get_or_insert(why.to_owned());
+            }
+            if let Some(until) = pace.until() {
+                lapses = Some(lapses.map_or(until, |soonest: Timestamp| soonest.min(until)));
+            }
+            match pace.holds() {
+                None => return Ok(Walked::Opens(agent.clone())),
+                Some(reads @ Begin::Reads(_)) => return Ok(Walked::Reads(reads)),
+                Some(held) => {
+                    first.get_or_insert(held);
+                }
+            }
+        }
+        Ok(Walked::Held {
+            reason,
+            lapses,
+            first,
+        })
+    }
+
+    // The limit `agent`'s sessions run under, None when it runs none.
+    fn agent_limit(&self, agent: &AgentName) -> Option<Limit> {
+        let session = (self.book.get(agent)).and_then(|agent| agent.runs.session());
+        session.map(|(_, limit)| limit.clone())
+    }
+
     /// Paces a new work item on `agent`'s own account, one the project may not
     /// list, when no listed role spends it and so [`Runner::pace_dispatch`] has
     /// not read it
@@ -207,8 +276,7 @@ impl Runner {
     /// The account is paced for this pick alone, so a hold on it holds back
     /// no pick on another agent.
     pub(super) fn pace_agent(&mut self, agent: &AgentName) -> Result<Pace, StateError> {
-        let session = (self.book.get(agent)).and_then(|agent| agent.runs.session());
-        let Some((_, limit)) = session.map(|(model, limit)| (model, limit.clone())) else {
+        let Some(limit) = self.agent_limit(agent) else {
             return Ok(Pace::Clear);
         };
         if let Limit::Account(account) = limit

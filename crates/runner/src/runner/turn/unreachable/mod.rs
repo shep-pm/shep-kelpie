@@ -24,8 +24,6 @@ use crate::ticket::TicketId;
 use super::ticket_name;
 
 /// Seconds the wait lasts from the first failure before the turn parks
-///
-/// A constant: `agents.fallback_after` does not move an item for this wait.
 const LIMIT: u64 = 30 * 60;
 
 /// Seconds before the first retry

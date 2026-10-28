@@ -14,11 +14,13 @@ use std::sync::{Arc, Mutex};
 
 use super::Runner;
 use super::add::{AddError, Unpicked};
+use super::pace::Walked;
 use super::pm::Choice;
 use super::report::{Begin, StepReport};
 use super::trigger::lock;
 use crate::board::{self, ReadyIssue, Skip};
-use crate::ports::{Issue, Tickets, Timestamp};
+use crate::pacer::Scope;
+use crate::ports::{Issue, Tickets};
 use crate::settings::ForgeSlug;
 use crate::state::StateError;
 use crate::ticket::TicketId;
@@ -275,42 +277,33 @@ impl Runner {
                 }
             };
             // The dog reads no day allowance, so the runner's own pacer has the last word.
-            let (mut opening, mut hold, mut lapses) = (None, None, None);
-            for agent in ranked.agents() {
-                let pace = self.pace_agent(agent)?;
-                if let Some(reason) = pace.reason() {
-                    hold.get_or_insert(reason.to_owned());
+            let agent = match self.first_unpaced(ranked.agents(), Scope::Dispatch)? {
+                Walked::Opens(agent) => agent,
+                // Its usage is read first, and the step made again.
+                Walked::Reads(reads) => {
+                    self.set_skipped(skipped);
+                    return Ok(reads);
                 }
-                // The item could start once the soonest hold on its agents lapses.
-                if let Some(until) = pace.until() {
-                    lapses = Some(lapses.map_or(until, |soonest: Timestamp| soonest.min(until)));
-                }
-                match pace.holds() {
-                    None => {
-                        opening = Some(agent.clone());
-                        break;
-                    }
-                    // Its usage is read first, and the step made again.
-                    Some(reads @ Begin::Reads(_)) => {
-                        self.set_skipped(skipped);
-                        return Ok(reads);
-                    }
-                    Some(held) => {
+                Walked::Held {
+                    reason,
+                    lapses,
+                    first,
+                } => {
+                    if let Some(held) = first {
                         first_hold.get_or_insert(held);
                     }
+                    // The item could start once the soonest hold on its agents lapses.
+                    if let Some(hold) = reason {
+                        let why = format!("held by the pacer: {hold}");
+                        self.pm_unstartable(ticket, why, lapses);
+                        unstarted.push(Skip::Paced {
+                            issue: ticket,
+                            hold,
+                        });
+                    }
+                    ready.retain(|i| i.ticket != ticket);
+                    continue;
                 }
-            }
-            let Some(agent) = opening else {
-                if let Some(hold) = hold {
-                    let why = format!("held by the pacer: {hold}");
-                    self.pm_unstartable(ticket, why, lapses);
-                    unstarted.push(Skip::Paced {
-                        issue: ticket,
-                        hold,
-                    });
-                }
-                ready.retain(|i| i.ticket != ticket);
-                continue;
             };
             match self.add_picked(ticket, chosen.as_ref(), Some(ranked.opening(agent))) {
                 Ok(agent) => {

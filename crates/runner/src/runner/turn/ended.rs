@@ -52,6 +52,8 @@ impl Runner {
             return Ok(None);
         };
         let issue = item.issue;
+        // The session it began has the note, and a session that died unborn never reaches here.
+        item.handoff = None;
         // A rework or adoption turn that moved nothing on `origin` pushed no fix.
         let before = item.known.head.clone();
         let no_push = pushed.as_ref().is_none_or(|p| Some(p) == before.as_ref());

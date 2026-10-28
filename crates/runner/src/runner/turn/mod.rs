@@ -51,6 +51,7 @@ mod budget;
 mod dep_reads;
 mod end_reads;
 mod ended;
+mod handoff;
 mod handover;
 pub(super) mod held_up;
 mod issue_comments;
@@ -346,6 +347,9 @@ impl Runner {
         // A step made again over the start's reads or the worktree was paced clear by the step
         // before it, and asking again would read the account's usage twice for one turn.
         if due && !started && !self.reads.git.is_prepared() {
+            if let Some(handed) = self.hand_off()? {
+                return Ok(handed);
+            }
             let pace = self.pace_worker(Scope::Turn)?;
             if let Pace::StillHeld(hold) | Pace::Held(hold) = &pace {
                 self.held_up.because(Reason::Paced(hold.reason.clone()));
@@ -634,9 +638,9 @@ impl Runner {
                     .invoke(Step::Implement, &format!("{first}{moved}"))
             }
         };
-        let prompt = match lost.filter(|_| briefed) {
-            Some(lost) => started_over(&prompt, lost),
-            None => prompt,
+        let prompt = match briefed {
+            true => handoff::carried(prompt, lost, item),
+            false => prompt,
         };
         let prompt = match self.reads.git.installed().and_then(|i| i.failed.as_deref()) {
             Some(why) if prompt != COMPACT => format!("{prompt}\n\n{}", install_failed(why)),
@@ -858,17 +862,6 @@ impl Runner {
         let open = self.ports.forge.open_pull_requests(&self.remote).ok()?;
         end_reads::from_branch(Some(&open), branch)
     }
-}
-
-// A started-over session's brief, then what the session its harness lost was sent, past any
-// command, since the brief leads with its own
-fn started_over(brief: &str, lost: &str) -> String {
-    let (_, lost) = split_command(lost);
-    format!(
-        "{brief}\n\nKelpie could not resume your earlier session on this work item, so this one \
-         starts from the brief above. Your worktree is as that session left it. This is what \
-         kelpie was sending it:\n\n{lost}"
-    )
 }
 
 // What the worker is told when kelpie's install of its worktree's packages failed

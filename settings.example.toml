@@ -127,8 +127,7 @@ implementers = ["sonnet-high"]
 # allow = ["sonnet-high", "iq3-xxs-review", "defect-hunter-lite", "pm", "representative", "security-reviewer", "triager"]
 # How an issue with no `agent:` label gets its implementer: `order`, where
 # it runs on the first implementer listed and no call runs, the only choice
-# and the default. `fallback_after` below still moves a first turn that
-# waited past it.
+# and the default.
 # implementer_choice = "order"
 # The agents that review each pull request, from the same files, whose
 # role is `reviewer`: each reads it once, in this order. After each one that
@@ -168,11 +167,8 @@ implementers = ["sonnet-high"]
 # `representative` when absent. Only a project whose `contributions.pick` is
 # not `off` needs the file, and a missing or mis-roled one stops the runner.
 # representative = "representative"
-# Minutes a work item's first turn may wait for its model with no output
-# before it stops and moves to the next implementer listed that no other
-# item waits on. A later turn never moves, nor does an item labelled with a
-# `!` at the end, as `agent:opus-high!`, nor one whose agent
-# `agents.implementers` does not list. Off when absent.
+# Read by nothing: the agent board's handoff moves a work item now, and a
+# later release removes this.
 # fallback_after = 15
 
 # Turn `enabled` off for a stretch when usage limits do not matter: neither

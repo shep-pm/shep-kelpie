@@ -169,18 +169,15 @@ An agent kelpie can run a work item on, from a file whose role is
 `implementer`. The **agent board** picks the one a new work item opens on,
 listed or not, and an issue's `agent:<name>!` label **pins** it to one. A
 rework or adopted item opens on its `agent:` label or the **default
-implementer**, the first listed, which may be a local model. A project lists
-the chain a first turn **falls back** along. A work item keeps the
-implementer it opened on, unless its first turn **falls back**: with
-`agents.fallback_after` set, a first turn that waited that long for its
-model moves to the next implementer listed. A pinned work item never falls
-back, and an unlisted implementer never falls back either.
+implementer**, the first listed, which may be a local model. A work item
+keeps the implementer it opened on until a **handoff** moves it to the
+board's next pick. A pinned work item is never handed off.
 _Avoid_: worker model, local worker
 
 **Waiting for model**:
 A worker's turn that has not yet heard from its model: asking for a lease on
-it, told its gateway is busy, or silent past `agents.fallback_after` (ten
-minutes with that off). `status` and the board show since when, and why.
+it, told its gateway is busy, or silent past ten minutes. `status` and the
+board show since when, and why.
 Its first output clears it.
 _Avoid_: stalled, hung
 
@@ -315,7 +312,10 @@ drives it yet.
 
 **Handoff**:
 The document a session writes so the next session can continue: the
-`reset` step's skill.
+`reset` step's skill. Also a work item moved to another implementer before a
+due turn, because the **agent board** ranks its own past the item's slack of
+the soonest finish. The new implementer starts a session of its own on the
+same branch, with a note kelpie writes of the commits and the last turn.
 _Avoid_: summary (Claude's compaction output)
 
 **Attach**:

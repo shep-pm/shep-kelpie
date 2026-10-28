@@ -7,7 +7,7 @@ use super::pm::Picked;
 use super::trigger::issue_list;
 use crate::board::check::label_kind;
 use crate::board::{LabelError, agent_label, old_worker_label, pinned};
-use crate::lease::door::PickAsk;
+use crate::lease::door::{Pick, PickAsk};
 use crate::ports::{ForgeError, Issue};
 use crate::settings::AgentName;
 use crate::state::StateError;
@@ -227,13 +227,8 @@ impl Runner {
             agents: self.board_agents(),
             leave_out: Vec::new(),
         };
-        let picks =
-            (self.ports.agent_board.pick(&ask)).ok_or(AddError::Unpicked(Unpicked::Unreachable))?;
-        // The project's allow list holds whatever the dog answers.
-        let mut agents = (picks.into_iter())
-            .map(|pick| pick.agent)
-            .filter(|agent| ask.agents.contains(agent))
-            .filter(|agent| pin.as_ref().is_none_or(|pin| pin == agent));
+        let picks = self.board_picks(&ask).map_err(AddError::Unpicked)?;
+        let mut agents = picks.into_iter().map(|pick| pick.agent);
         let Some(first) = agents.next() else {
             return Err(AddError::Unpicked(Unpicked::Nobody(wanted(&ask))));
         };
@@ -243,6 +238,17 @@ impl Runner {
             pinned: pin.is_some(),
             note,
         })
+    }
+
+    // What the agent board ranks for `ask`, best first, of the agents `ask`
+    // allows and pins. Empty when it ranks none of them.
+    pub(super) fn board_picks(&self, ask: &PickAsk) -> Result<Vec<Pick>, Unpicked> {
+        let picks = (self.ports.agent_board.pick(ask)).ok_or(Unpicked::Unreachable)?;
+        // The project's allow list holds whatever the dog answers.
+        let allowed = (picks.into_iter())
+            .filter(|pick| ask.agents.contains(&pick.agent))
+            .filter(|pick| ask.pin.as_ref().is_none_or(|pin| *pin == pick.agent));
+        Ok(allowed.collect())
     }
 
     // The agent `picked` pins its work item to, while it is an implementer
@@ -301,7 +307,7 @@ impl Runner {
 
     // The implementers the agent board may rank: `implementer_files`, those
     // the project lists first, in its order.
-    fn board_agents(&self) -> Vec<AgentName> {
+    pub(super) fn board_agents(&self) -> Vec<AgentName> {
         let listed = self.agents.implementer_names();
         let mut files = self.implementer_files();
         files.sort_by_key(|n| listed.iter().position(|l| l == n).unwrap_or(listed.len()));

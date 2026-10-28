@@ -184,8 +184,6 @@ struct Flight {
     first: bool,
     // Whether it is a `/compact` of the worker's session, sent before a turn
     compact: bool,
-    // Where a first turn that waited too long moves
-    fallback: waiting::Fallback,
     // The browser the turn drives, which lasts as long as the turn does
     browser: Option<Box<dyn OpenBridge>>,
     // Where the turn's transcript stood as it began, for a handover to carry
@@ -232,8 +230,7 @@ impl Runner {
         let now = self.ports.clock.now();
         let turns = (self.flights.flying.values())
             .filter(|flight| !flight.ending.asked())
-            .filter_map(|flight| flight.deadline)
-            .chain(self.fallback_due());
+            .filter_map(|flight| flight.deadline);
         let pm = (self.flights.pm.iter())
             .filter(|(_, ending)| !ending.asked())
             .map(|(deadline, _)| *deadline);
@@ -502,7 +499,6 @@ impl Runner {
             watched,
             first,
             compact,
-            fallback: waiting::Fallback::Stays,
             browser: match &launch {
                 Launch::Turn { .. } => self.opened.take(ticket),
                 Launch::Review(_) => None,
@@ -601,10 +597,6 @@ impl Runner {
             self.flights.flying.remove(&ticket);
             saved?;
             return Ok(Ended::StartOver(ticket));
-        }
-        if let Some(moved) = self.fell_back(ticket, &result) {
-            self.flights.flying.remove(&ticket);
-            return moved.map(Ended::Recorded);
         }
         let ended = self.on(Some(ticket)).end_turn(result);
         self.flights.flying.remove(&ticket);
@@ -706,7 +698,6 @@ fn one_pass(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
     }
     lock(runner).end_overdue();
     super::builds::watch(runner);
-    lock(runner).fall_back();
     let alerts = Arc::clone(&lock(runner).ports.alerts);
     if let Some(posted) = post_due(runner, alerts.as_ref()) {
         return posted.map(Pass::Report);
