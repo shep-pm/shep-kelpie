@@ -41,6 +41,12 @@ pub fn kinds() -> impl Iterator<Item = &'static str> {
         .filter(|t| !NOT_KINDS.contains(t))
 }
 
+/// The kind `title` starts with, as `feat` for `feat(scope)!: ...`
+pub fn title_kind(title: &str) -> Option<&'static str> {
+    let typed = conventional_type(title)?;
+    kinds().find(|k| *k == typed)
+}
+
 /// The harnesses whose adapters are named for them, as in `adapters/pi/`
 pub const HARNESSES: [&str; 4] = ["claude", "pi", "codex", "goose"];
 
@@ -167,7 +173,7 @@ pub fn check(title: &str, body: &str, labels: &[String]) -> Vec<Failure> {
         .cloned()
         .collect();
     match kind_labels.as_slice() {
-        [] if !conventional_type(title).is_some_and(|t| kinds().any(|k| k == t)) => {
+        [] if title_kind(title).is_none() => {
             failures.push(Failure::NoKind);
         }
         [] => {}
