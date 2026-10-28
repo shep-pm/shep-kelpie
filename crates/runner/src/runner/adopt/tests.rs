@@ -161,6 +161,22 @@ fn a_waiting_pull_request_pinned_to_an_implementer_is_held_by_its_account() {
 }
 
 #[test]
+fn an_adoption_whose_top_pick_has_spent_its_day_opens_on_the_next_the_pacer_lets_start() {
+    let rig = Rig::new("shep");
+    rig.ci_on();
+    opened_80(&rig);
+    rig.write_codex_implementer();
+    rig.agent_board.ranks(&["codex", "sonnet-high"]);
+    rig.codex_day_began(0);
+    // 15% of Codex's week since the day began, past its allowance of 100 / 7.
+    rig.codex_meter.set(Rig::utilization(15, 0));
+    let runner = running(&rig);
+    rig.ask(&runner, "adopt", Some("80"));
+
+    assert_eq!(step(&runner).unwrap(), Some(adopted_80()));
+}
+
+#[test]
 fn a_pull_request_held_by_its_labelled_account_leaves_the_ones_behind_it_to_start() {
     let rig = Rig::new("shep");
     rig.ci_on();

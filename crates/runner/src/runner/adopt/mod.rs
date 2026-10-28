@@ -539,14 +539,15 @@ impl Runner {
             .tickets
             .issue(&repo, ticket)
             .map_err(|e| AdoptError::Issue(issue, e))?;
-        let opening = self
-            .board_opening(ticket, &found.labels)
+        let ranked = self
+            .board_ranked(ticket, &found.labels)
             .map_err(AdoptError::Agent)?;
+        // The first agent the board ranks that the pacer lets start, as dispatch walks it.
+        let opening = match self.paced_opening(ranked).map_err(AdoptError::State)? {
+            Started::Opened(opening) => opening,
+            Started::Held(held) => return Ok(Started::Held(held)),
+        };
         let (agent, note) = (opening.agent, opening.note);
-        // The account of the agent the board picked has not been paced yet.
-        if let Some(held) = self.pace_agent(&agent).map_err(AdoptError::State)?.holds() {
-            return Ok(Started::Held(Box::new(held)));
-        }
         let session = new_session_id().map_err(|e| AdoptError::Session(e.to_string()))?;
         let mut fresh = self.fresh(ticket, found.title.clone(), agent.clone(), session);
         fresh.pinned = opening.pinned;

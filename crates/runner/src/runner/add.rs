@@ -3,11 +3,13 @@
 use std::fmt;
 
 use super::Runner;
+use super::pace::{Started, Walked};
 use super::pm::Picked;
 use super::trigger::issue_list;
 use crate::board::check::label_kind;
 use crate::board::{LabelError, agent_label, old_worker_label, pinned};
 use crate::lease::door::{Pick, PickAsk};
+use crate::pacer::Scope;
 use crate::ports::{ForgeError, Issue};
 use crate::settings::AgentName;
 use crate::state::StateError;
@@ -288,26 +290,40 @@ impl Runner {
         (pin, note)
     }
 
-    // The implementer a work item no project manager picked, a rework or an
-    // adoption, opens on: the agent board's first pick for `ticket`, whose issue
-    // has `labels`. Its note is the log line an old `worker:` label gets once the
-    // work item opens, since it no longer picks anything.
-    pub(super) fn board_opening(
+    // What the agent board ranks for a work item no project manager picked, a
+    // rework or an adoption, for `ticket`, whose issue has `labels`. Its note is
+    // the log line an old `worker:` label gets once the work item opens, since it
+    // no longer picks anything.
+    pub(super) fn board_ranked(
         &self,
         ticket: TicketId,
         labels: &[String],
-    ) -> Result<Opening, AddError> {
-        let mut opening = self.ranked(ticket, labels, None)?.first();
-        let agent = &opening.agent;
-        opening.note = old_worker_label(labels).map(|old| {
+    ) -> Result<Ranked, AddError> {
+        let mut ranked = self.ranked(ticket, labels, None)?;
+        ranked.note = old_worker_label(labels).map(|old| {
             format!(
-                "{} is labelled `{old}`, which kelpie no longer reads, so it runs on the \
-                 agent board's pick, {agent}: an `agent:<name>!` label pins another \
-                 implementer",
+                "{} is labelled `{old}`, which kelpie no longer reads, so the agent board \
+                 picks its implementer: an `agent:<name>!` label pins one",
                 ticket.named().to_lowercase()
             )
         });
-        Ok(opening)
+        Ok(ranked)
+    }
+
+    // The opening on the first agent of `ranked` the pacer lets start, walked as
+    // dispatch walks it, or what the runner does instead: read a usage first, or
+    // the first hold's step.
+    pub(super) fn paced_opening(&mut self, ranked: Ranked) -> Result<Started<Opening>, StateError> {
+        let walked = self.first_unpaced(ranked.agents(), Scope::Dispatch)?;
+        Ok(match walked {
+            Walked::Opens(agent) => Started::Opened(ranked.opening(agent)),
+            Walked::Reads(reads) => Started::Held(Box::new(reads)),
+            Walked::Held {
+                first: Some(held), ..
+            } => Started::Held(Box::new(held)),
+            // A ranking holds an agent, so a walk that opened none held one.
+            Walked::Held { first: None, .. } => Started::Opened(ranked.first()),
+        })
     }
 
     // Why a work item whose issue has `labels` has no agent to run on, where it
