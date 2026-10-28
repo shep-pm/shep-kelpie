@@ -301,7 +301,6 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::home::SHEP_SOCKET;
 
     #[test]
     fn a_worker_never_gets_shep_s_socket_or_a_relative_one() {
@@ -312,7 +311,7 @@ mod tests {
         for fine in [base.join("k/door.sock"), shep.join("kelpie/dog/other.sock")] {
             assert_eq!(checked(Some(fine.clone()), &shep), (fine, None));
         }
-        let shep_socket = shep.join(SHEP_SOCKET).display().to_string();
+        let shep_socket = shep.join("run/other.sock").display().to_string();
         for bad in [shep_socket.as_str(), "door.sock"] {
             let (door, why) = checked(Some(PathBuf::from(bad)), &shep);
             assert_eq!(door, default, "{bad}");
@@ -333,13 +332,15 @@ mod tests {
         std::fs::create_dir_all(&outside).unwrap();
         std::os::unix::fs::symlink(shep.join("run"), outside.join("link")).unwrap();
         let default = default(&shep);
+        let socket = home::shepherd_address(&shep);
+        let inside = socket.strip_prefix(&shep).unwrap().to_owned();
 
         let mut bad = vec![
             PathBuf::from("door.sock"),
-            shep.join(SHEP_SOCKET),
-            shep.join(format!("kelpie/../{SHEP_SOCKET}")),
+            socket.clone(),
+            shep.join("kelpie/..").join(&inside),
             outside.join("link/shep.sock"),
-            outside.join(format!("link/../shep/{SHEP_SOCKET}")),
+            outside.join("link/../shep").join(&inside),
         ];
         // Only a case-insensitive volume finds the folder spelled this way.
         let shouting = shep.join("RUN/shep.sock");

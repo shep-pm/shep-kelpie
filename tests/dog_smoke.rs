@@ -239,7 +239,7 @@ impl Shepherd {
     }
 
     async fn client(&self) -> Client {
-        let socket = self.home.path().join("run/shep.sock");
+        let socket = shep_kelpie::home::shepherd_address(self.home.path());
         Client::connect(&socket).await.unwrap()
     }
 }
