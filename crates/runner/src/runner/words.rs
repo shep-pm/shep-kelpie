@@ -35,6 +35,11 @@ impl Wants {
             | RulingKind::Contribution(
                 Held::Question { .. } | Held::Waiting | Held::NoEdits | Held::CannotAdopt { .. },
             ) => Self::Answer,
+            // A contribution's merge ruling whose fork cannot be pushed to
+            // offers no rework.
+            RulingKind::Contribution(Held::Merge {
+                rework_off: true, ..
+            }) => Self::YesOrNo,
             // Kelpie's own merge ruling and a contribution's take the same
             // three answers.
             RulingKind::Merge { .. } | RulingKind::Contribution(Held::Merge { .. }) => Self::Merge,
@@ -167,6 +172,24 @@ mod tests {
             read_answer(Wants::YesOrNo, "rework split it"),
             Err("it takes `yes`, or `no <note>`".into())
         );
+    }
+
+    #[test]
+    fn a_contribution_merge_ruling_that_offers_no_rework_refuses_one() {
+        let merge = |rework_off| {
+            RulingKind::Contribution(Held::Merge {
+                head: "abc".into(),
+                rework_off,
+            })
+        };
+        assert_eq!(Wants::of(&merge(false)), Wants::Merge);
+        let wants = Wants::of(&merge(true));
+        assert_eq!(wants, Wants::YesOrNo);
+        assert_eq!(
+            read_answer(wants, "rework split it"),
+            Err("it takes `yes`, or `no <note>`".into())
+        );
+        assert_eq!(read_answer(wants, "yes"), Ok(Answer::Yes));
     }
 
     #[test]

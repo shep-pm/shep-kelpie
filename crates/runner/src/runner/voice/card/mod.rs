@@ -363,7 +363,7 @@ impl Card {
                 facts: Some(asked.clone()),
                 choices: Vec::new(),
             },
-            RulingKind::Contribution(Held::Merge { head }) => Self {
+            RulingKind::Contribution(Held::Merge { head, rework_off }) => Self {
                 problem: None,
                 board: None,
                 title: format!("Merge this contribution at {} into main?", short(head)),
@@ -375,11 +375,14 @@ impl Card {
                             "The representative posts your note for the contributor, if you gave one",
                         ),
                     );
-                    choices.push(choice(
-                        "Rework",
-                        "Takes the pull request over: a worker changes it, then the project's reviewers read what it pushed",
-                        Answer::Rework(NO_NOTE.to_owned()),
-                    ));
+                    // Kelpie cannot push to the fork, so no worker can change it.
+                    if !rework_off {
+                        choices.push(choice(
+                            "Rework",
+                            "Takes the pull request over: a worker changes it, then the project's reviewers read what it pushed",
+                            Answer::Rework(NO_NOTE.to_owned()),
+                        ));
+                    }
                     choices
                 },
             },
@@ -416,7 +419,9 @@ impl Card {
                 title: "A contributor has gone quiet and their fork cannot be edited".to_owned(),
                 facts: Some(
                     "Kelpie can only finish a pull request by pushing to its branch, and \
-                     the fork does not allow edits by maintainers or has been deleted."
+                     the fork does not allow edits by maintainers, has been deleted, or \
+                     belongs to an organization, whose forks GitHub does not let the \
+                     upstream's maintainers push to."
                         .to_owned(),
                 ),
                 choices: vec![

@@ -329,7 +329,25 @@ pub(in crate::runner) fn question(
                  merge ruling does."
             );
         }
-        RulingKind::Contribution(Held::Merge { head }) => {
+        RulingKind::Contribution(Held::Merge {
+            head,
+            rework_off: true,
+        }) => {
+            return format!(
+                "The reviewers' pass over {about} has ended and CI is green on {}, and nobody \
+                 merges someone else's work but you, whatever `git.merging` says. {yes} merges \
+                 this head and the representative thanks the contributor. {no} merges nothing: \
+                 the representative words your note for the contributor and posts it, and a no \
+                 with no note posts nothing. There is no `rework`, because kelpie cannot push \
+                 to the fork this pull request comes from: an organization owns it, which \
+                 GitHub does not let the upstream's maintainers push to, or it does not allow \
+                 edits by maintainers, or it was deleted. To have it changed, answer {no} and \
+                 word the note for the contributor: ask them to merge `main` into their branch, \
+                 or to push the change themselves.",
+                short(head)
+            );
+        }
+        RulingKind::Contribution(Held::Merge { head, .. }) => {
             let rework = trigger("rework <note>");
             return format!(
                 "The reviewers' pass over {about} has ended and CI is green on {}, and nobody \
@@ -357,7 +375,8 @@ pub(in crate::runner) fn question(
             return format!(
                 "The contributor of {about} has been quiet for the whole wait, and kelpie \
                  cannot push to the fork it comes from: the fork does not let maintainers \
-                 edit it, or it has been deleted. Nothing is posted on the pull request until \
+                 edit it, it has been deleted, or it belongs to an organization, which \
+                 GitHub does not let the upstream's maintainers push to. Nothing is posted on the pull request until \
                  you answer: {} leaves it open and kelpie follows it no further, and {} has \
                  the representative thank the contributor and closes it.",
                 trigger("answer leave it open"),

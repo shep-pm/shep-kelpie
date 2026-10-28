@@ -90,6 +90,26 @@ fn a_fork_without_maintainer_edits_raises_the_leave_open_or_close_ruling_at_quie
 }
 
 #[test]
+fn a_fork_an_organization_owns_raises_the_no_edits_ruling_at_quiet_days() {
+    let (rig, runner) = nearly_quiet(true);
+    rig.forge.set_fork_owned_by_organization(30);
+    assert_eq!(rulings(&rig, &runner), Vec::<Value>::new(), "not yet quiet");
+
+    later(&rig, &runner, 1);
+
+    let waiting = rulings(&rig, &runner);
+    assert_eq!(waiting.len(), 1, "{waiting:?}");
+    assert_eq!(waiting[0]["kind"]["reason"], "no-edits");
+    let question = waiting[0]["question"].as_str().unwrap();
+    assert!(
+        question.contains("belongs to an organization"),
+        "{question}"
+    );
+    assert_eq!(comments(&rig), [ASKS], "nothing is posted for it");
+    assert_eq!(followed(&runner), [30], "still followed until it is ruled");
+}
+
+#[test]
 fn a_fork_with_maintainer_edits_is_released_at_quiet_days_as_before() {
     let (rig, runner) = nearly_quiet(true);
     later(&rig, &runner, 1);
