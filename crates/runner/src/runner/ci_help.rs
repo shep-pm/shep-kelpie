@@ -140,6 +140,31 @@ mod tests {
         assert_eq!(prompt.matches("error[E0599]").count(), 1, "{prompt}");
     }
 
+    #[test]
+    fn a_fix_prompt_carries_a_timed_out_runs_tail_once() {
+        let (rig, runner, head) = Rig::with_pull_request_set("koji", Rig::with_app);
+        rig.forge.set_ci_log_timed_out(
+            "--- run 9\nnote: job `test-macos` was cancelled in step `Run cargo test --locked` \
+             after 20m27s: its `timeout-minutes` ended it, so this is a slow job and not a \
+             failing test\ntest-macos\tUNKNOWN STEP\t##[error]The operation was canceled.",
+            1,
+        );
+
+        let prompt = red_prompt(&rig, &runner, &head);
+
+        assert_eq!(
+            prompt.matches("its `timeout-minutes` ended it").count(),
+            1,
+            "{prompt}"
+        );
+        assert_eq!(
+            prompt.matches("The operation was canceled.").count(),
+            1,
+            "{prompt}"
+        );
+        assert!(!prompt.contains("found no failed run"), "{prompt}");
+    }
+
     const E2E: &str = "`/opt/kelpie/bin/kelpie lease e2e` runs the project's end-to-end tests";
 
     #[test]

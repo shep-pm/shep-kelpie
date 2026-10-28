@@ -1,0 +1,63 @@
+test-macos	UNKNOWN STEP	﻿2026-10-12T16:12:56.6766500Z Current runner version: '2.337.0'
+test-macos	UNKNOWN STEP	2026-10-12T16:12:56.6807790Z ##[group]Runner Image Provisioner
+test-macos	UNKNOWN STEP	2026-10-12T16:12:56.6808470Z Hosted Compute Agent
+test-macos	UNKNOWN STEP	2026-10-12T16:33:08.5367760Z test sheep::tests::a_worker_waiting_for_its_next_look_lets_go_as_soon_as_it_is_asked ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:08.5960780Z test sheep::tests::finish_with_no_work_item_open_stops_the_sheep_at_once ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.0418250Z test sheep::tests::finish_stops_the_sheep_only_once_the_last_work_item_ends ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.0520000Z test shep_home::tests::a_set_value_is_the_shepherds_home ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.0622790Z test shep_home::tests::a_tilde_or_relative_path_is_refused_by_name ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.0736120Z test shep_home::tests::an_unset_or_empty_value_names_the_fix ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.0846970Z test shepherd::tests::a_later_patch_is_taken_but_not_a_pre_release_of_the_floor_or_an_unnumbered_one ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.0950740Z test shepherd::tests::a_runner_reads_its_own_sheep_s_table_and_kelpie_s_section ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.1075130Z test shepherd::tests::a_sheep_with_no_table_reads_none ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.1181280Z test shepherd::tests::a_shepherd_from_before_the_lamb_sweep_is_refused_naming_the_one_needed ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.1283550Z test shepherd::tests::a_shepherd_on_another_minor_is_refused_by_name ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.1385000Z test shepherd::tests::a_shepherd_that_names_no_version_is_still_refused ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.1415100Z test shepherd::tests::debug_does_not_leak_either_table ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.1415970Z test shepherd::tests::no_shepherd_is_named_by_its_home ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.1416540Z test shepherd::tests::the_checked_version_is_the_one_the_manifest_pins ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.1417610Z test sheep::tests::start_is_refused_while_the_stop_is_under_way_and_taken_once_it_fails ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.1418540Z test sheep::tests::status_and_drain_during_a_drain_wake_nothing_and_ask_the_forge_nothing_but_undrain_wakes ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.8400300Z test skills::repo::tests::a_directory_only_the_working_tree_holds_is_not_read ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:09.8604860Z test skills::repo::tests::a_directory_that_is_not_inside_the_checkout_is_refused ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:10.5217470Z test skills::repo::tests::a_failed_fetch_with_no_copy_skips_the_plugin ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:10.5456710Z test skills::repo::tests::a_git_marketplace_is_fetched_at_its_ref ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:10.5986120Z test skills::repo::tests::a_failed_fetch_keeps_the_last_copy ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:11.7648370Z test skills::repo::tests::a_github_marketplace_is_fetched_into_kelpies_home_through_git ... ok
+test-macos	UNKNOWN STEP	2026-10-12T16:33:12.2270900Z ##[error]The operation was canceled.
+test-macos	UNKNOWN STEP	2026-10-12T16:33:12.2642630Z Post job cleanup.
+test-macos	UNKNOWN STEP	2026-10-12T16:33:13.5166210Z [command]/opt/homebrew/bin/git version
+test-macos	UNKNOWN STEP	2026-10-12T16:33:13.5269510Z git version 2.55.0
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4893000Z Copying '/home/me/.gitconfig' to '/home/me/work/_temp/085eb0b3-2d1d-4b4d-a855-0ede31300dec/.gitconfig'
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4895160Z Temporarily overriding HOME='/home/me/work/_temp/085eb0b3-2d1d-4b4d-a855-0ede31300dec' before making global git config changes
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4896010Z Adding repository directory to the temporary git global config as a safe directory
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4896840Z [command]/opt/homebrew/bin/git config --global --add safe.directory /home/me/work/shep-kelpie/shep-kelpie
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4898150Z Removing SSH command configuration
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4900940Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp core\.sshCommand
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4919590Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4923310Z Removing HTTP extra header
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4924250Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4926280Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4931200Z Removing includeIf entries pointing to credentials config files
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4932710Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4934290Z includeif.gitdir:/home/me/work/shep-kelpie/shep-kelpie/.git.path
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4935810Z includeif.gitdir:/home/me/work/shep-kelpie/shep-kelpie/.git/worktrees/*.path
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4937080Z includeif.gitdir:/github/workspace/.git.path
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4938200Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4941020Z [command]/opt/homebrew/bin/git config --local --get-all includeif.gitdir:/home/me/work/shep-kelpie/shep-kelpie/.git.path
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4942930Z /home/me/work/_temp/git-credentials-e371f76b-083c-463d-8f23-03549aeef66c.config
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4946570Z [command]/opt/homebrew/bin/git config --local --unset includeif.gitdir:/home/me/work/shep-kelpie/shep-kelpie/.git.path \/home\/me\/work\/_temp\/git\-credentials\-e371f76b\-083c\-463d\-8f23\-03549aeef66c\.config
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4961120Z [command]/opt/homebrew/bin/git config --local --get-all includeif.gitdir:/home/me/work/shep-kelpie/shep-kelpie/.git/worktrees/*.path
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.4965150Z /home/me/work/_temp/git-credentials-e371f76b-083c-463d-8f23-03549aeef66c.config
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.5000100Z [command]/opt/homebrew/bin/git config --local --unset includeif.gitdir:/home/me/work/shep-kelpie/shep-kelpie/.git/worktrees/*.path \/home\/me\/work\/_temp\/git\-credentials\-e371f76b\-083c\-463d\-8f23\-03549aeef66c\.config
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.5050970Z [command]/opt/homebrew/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.5052650Z /github/runner_temp/git-credentials-e371f76b-083c-463d-8f23-03549aeef66c.config
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.5057410Z [command]/opt/homebrew/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-e371f76b\-083c\-463d\-8f23\-03549aeef66c\.config
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.5064460Z [command]/opt/homebrew/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.5066340Z /github/runner_temp/git-credentials-e371f76b-083c-463d-8f23-03549aeef66c.config
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.5114780Z [command]/opt/homebrew/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-e371f76b\-083c\-463d\-8f23\-03549aeef66c\.config
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.5151470Z [command]/opt/homebrew/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.5279160Z Removing credentials config '/home/me/work/_temp/git-credentials-e371f76b-083c-463d-8f23-03549aeef66c.config'
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.5737580Z Cleaning up orphan processes
+test-macos	UNKNOWN STEP	2026-10-12T16:33:14.6608540Z Terminate orphan process: pid (41003) (bash)
+test-macos	UNKNOWN STEP	2026-10-12T16:33:18.5977310Z Terminate orphan process: pid (5615) (shep_kelpie-95f)

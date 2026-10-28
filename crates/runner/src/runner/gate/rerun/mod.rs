@@ -18,10 +18,11 @@ use crate::worktree;
 
 impl Runner {
     /// Whether a still-red ruling at `head` offers to rerun its failed jobs
-    /// once more: their logs name no file the branch changed
+    /// once more: their logs name no file the branch changed, and no run was
+    /// ended by its timeout, which a rerun would end again
     pub(super) fn rerun_offered(&self, head: &str, logs: &Logs) -> bool {
         match logs {
-            Logs::Read(logs) => self.unrelated(head, &logs.text),
+            Logs::Read(logs) => logs.timed_out == 0 && self.unrelated(head, &logs.text),
             Logs::Refused(_) => false,
         }
     }
@@ -55,7 +56,7 @@ impl Runner {
         let Logs::Read(logs) = read else {
             return Ok(None);
         };
-        if !self.unrelated(head, &logs.text) {
+        if !self.rerun_offered(head, read) {
             return Ok(None);
         }
         self.journal_outside_diff(issue, &logs.text);
