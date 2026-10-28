@@ -214,11 +214,12 @@ pub fn build_ref(
             .current_dir(&clone),
         limits.cargo,
     )?;
-    let binary = target.join("release/shep-kelpie");
+    let name = format!("shep-kelpie{}", std::env::consts::EXE_SUFFIX);
+    let binary = target.join("release").join(&name);
     binary
         .is_file()
         .then_some(binary)
-        .ok_or_else(|| format!("the build of {reference} made no target/release/shep-kelpie"))
+        .ok_or_else(|| format!("the build of {reference} made no target/release/{name}"))
 }
 
 /// The release asset that holds a build for this machine
@@ -273,6 +274,7 @@ pub fn download_release(work: &Path, version: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::test::{Fake, write_fake};
 
     #[test]

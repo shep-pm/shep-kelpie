@@ -286,8 +286,8 @@ jobs:
             choco install llvm -y --no-progress
           }
           'C:\Program Files\LLVM\bin' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      # `dog`, `core` and the crates below them compile for Windows, tests included: keep them so.
-      - run: cargo check --all-targets --locked -p shep-kelpie-core -p shep-kelpie-dog -p shep-kelpie-process -p shep-kelpie-test-support -p shep-kelpie-facts -p shep-kelpie-owner-only -p shep-kelpie-worker-folder -p shep-kelpie-trim
+      # `dog`, `core`, `adapters`, `runner`, the root package and the crates below them compile for Windows, tests included: keep them so.
+      - run: cargo check --all-targets --locked -p shep-kelpie-core -p shep-kelpie-dog -p shep-kelpie-process -p shep-kelpie-test-support -p shep-kelpie-facts -p shep-kelpie-owner-only -p shep-kelpie-worker-folder -p shep-kelpie-trim -p shep-kelpie-adapters -p shep-kelpie-runner -p shep-kelpie-tree -p shep-kelpie-disk -p shep-kelpie
       - id: check
         continue-on-error: true
         run: cargo check --workspace --all-targets --locked --keep-going

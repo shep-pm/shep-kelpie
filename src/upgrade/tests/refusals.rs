@@ -1,5 +1,6 @@
 //! What an upgrade refuses, and that it refuses before it changes anything
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 use super::*;
@@ -129,6 +130,7 @@ async fn a_binary_that_exits_non_zero_is_refused_and_not_installed() {
     assert_eq!(rig.installed_says(), "0.1.0 for shep 0.17.0");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn a_binary_without_its_executable_bits_is_refused_naming_chmod() {
     let mut rig = Rig::new().await;
@@ -140,6 +142,19 @@ async fn a_binary_without_its_executable_bits_is_refused_naming_chmod() {
         err.contains(&format!("chmod +x {}", flat.display())),
         "{err}"
     );
+    assert_eq!(rig.restarts(), Vec::<String>::new());
+    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.17.0");
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn a_release_is_refused_on_windows() {
+    let mut rig = Rig::new().await;
+    let ran = rig
+        .upgrade(Action::Install(Source::Release("0.3.0".into())))
+        .await;
+    let err = ran.0.unwrap_err();
+    assert!(err.contains("no Windows release asset"), "{err}");
     assert_eq!(rig.restarts(), Vec::<String>::new());
     assert_eq!(rig.installed_says(), "0.1.0 for shep 0.17.0");
 }

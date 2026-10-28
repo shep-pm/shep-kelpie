@@ -1,5 +1,6 @@
 //! The files an upgrade moves: the installed kelpie and the build kept beside it
 
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 
 use super::*;
@@ -7,11 +8,13 @@ use super::*;
 #[tokio::test]
 async fn an_upgrade_swaps_the_build_in_at_the_path_the_dog_runs() {
     let mut rig = Rig::new().await;
+    #[cfg(unix)]
     let inode = std::fs::metadata(&rig.installed).unwrap().ino();
     let new = rig.build("new", "0.3.0", "0.17.0");
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
     assert_eq!(rig.installed_says(), "0.3.0 for shep 0.17.0");
+    #[cfg(unix)]
     assert_ne!(
         std::fs::metadata(&rig.installed).unwrap().ino(),
         inode,
@@ -61,6 +64,7 @@ async fn installing_the_same_build_again_leaves_a_rollback_going_back_to_the_fir
     assert_eq!(rig.installed_says(), "0.1.0 for shep 0.17.0");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn an_installed_symlink_stays_a_link_and_the_copy_kept_is_its_target() {
     let rig = Rig::on(crate::shepherd::SHEP_VERSION, true).await;
@@ -96,6 +100,7 @@ async fn a_rollback_restores_the_previous_build_and_restarts_onto_it() {
     assert_eq!(rig.installed_says(), "0.3.0 for shep 0.17.0");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn a_rollback_through_a_symlink_puts_the_build_back_in_the_target() {
     let rig = Rig::on(crate::shepherd::SHEP_VERSION, true).await;
