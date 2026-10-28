@@ -71,6 +71,8 @@ pub enum Failure {
     NoCriteriaItems,
     /// A `Blocked by:` line names no issue
     BlockedByNoIssue,
+    /// This acceptance criterion asks a worker to change another issue
+    ChangesIssue(String),
     /// No priority label
     NoPriority,
     /// More than one priority label, these
@@ -103,6 +105,12 @@ impl fmt::Display for Failure {
             Self::NoCriteria => write!(f, "no `## {CRITERIA}` section"),
             Self::NoCriteriaItems => write!(f, "the `## {CRITERIA}` section has no `- [ ]` item"),
             Self::BlockedByNoIssue => write!(f, "the `{BLOCKED_BY}` line names no issue as `#<n>`"),
+            Self::ChangesIssue(item) => write!(
+                f,
+                "the criterion `{item}` asks a worker to change another issue, and a worker's \
+                 credential cannot change issues: put it to the maintainer as a note, or take \
+                 it out of the issue"
+            ),
             Self::NoPriority => f.write_str("no priority label, `priority: P0` to `priority: P4`"),
             Self::Priorities(labels) => {
                 write!(f, "priority labels {}: keep one", ticked(labels, " and "))
@@ -154,7 +162,11 @@ pub fn check(title: &str, body: &str, labels: &[String]) -> Vec<Failure> {
         Some(lines) if !lines.iter().any(|l| is_item(l)) => {
             failures.push(Failure::NoCriteriaItems);
         }
-        Some(_) => {}
+        Some(lines) => {
+            let asked = criteria(&lines).into_iter();
+            let asked = asked.filter(|(_, whole)| changes_an_issue(whole));
+            failures.extend(asked.map(|(first, _)| Failure::ChangesIssue(first.to_owned())));
+        }
     }
     if labelled_line(body, BLOCKED_BY).is_some_and(|line| !names_an_issue(line)) {
         failures.push(Failure::BlockedByNoIssue);
@@ -303,6 +315,81 @@ fn names_an_issue(line: &str) -> bool {
     line.split('#').skip(1).any(number)
         || (line.split(|c: char| !c.is_alphanumeric()))
             .any(|w| w.strip_prefix('k').is_some_and(digits))
+}
+
+// The checklist items among `lines`, each as its first line without the box
+// and its whole text with the lines that wrap under it.
+fn criteria<'a>(lines: &[&'a str]) -> Vec<(&'a str, String)> {
+    let mut items: Vec<(&str, String)> = Vec::new();
+    for line in lines {
+        if is_item(line) {
+            let first = line.trim_start()[2..].trim_start()[3..].trim();
+            items.push((first, first.to_owned()));
+        } else if let Some((_, whole)) = items.last_mut() {
+            whole.push('\n');
+            whole.push_str(line);
+        }
+    }
+    items
+}
+
+// The words that change an issue, each with its endings.
+const CHANGES: [&str; 26] = [
+    "edit",
+    "edits",
+    "edited",
+    "editing",
+    "update",
+    "updates",
+    "updated",
+    "updating",
+    "comment",
+    "comments",
+    "commented",
+    "commenting",
+    "label",
+    "labels",
+    "labeled",
+    "labelled",
+    "labeling",
+    "labelling",
+    "close",
+    "closes",
+    "closed",
+    "closing",
+    "reopen",
+    "reopens",
+    "reopened",
+    "reopening",
+];
+
+// Whether a criterion names an issue, as `#12` or `owner/repo#12`, and asks
+// for it to be edited, updated, commented on, labelled, closed or reopened.
+// Words in backticks are code, and a criterion about the pull request's own
+// body is no change to an issue.
+fn changes_an_issue(text: &str) -> bool {
+    let names = text
+        .match_indices('#')
+        .any(|(at, _)| text[at + 1..].starts_with(|c: char| c.is_ascii_digit()));
+    let prose = text.split('`').step_by(2).collect::<Vec<_>>().join(" ");
+    let words = words(&prose);
+    let own_body = words.iter().enumerate().any(|(i, w)| {
+        let after = match w.as_str() {
+            "request" if i > 0 && words[i - 1] == "pull" => 3,
+            "pr" => 2,
+            _ => return false,
+        };
+        (words.iter().skip(i + 1).take(after)).any(|w| w == "body" || w == "description")
+    });
+    names && !own_body && words.iter().any(|w| CHANGES.contains(&w.as_str()))
+}
+
+// The words of `text` in lower case, an underscore inside a word.
+fn words(text: &str) -> Vec<String> {
+    let parts = text.split(|c: char| !(c.is_alphanumeric() || c == '_'));
+    (parts.filter(|w| !w.is_empty()))
+        .map(str::to_lowercase)
+        .collect()
 }
 
 // Whether `line` is a checklist item, `- [ ]` or `- [x]`.

@@ -293,6 +293,83 @@ fn a_blocked_by_line_names_an_issue_or_a_local_ticket() {
     }
 }
 
+// BODY with `criterion` as its one acceptance criterion.
+fn criterion(criterion: &str) -> Vec<Failure> {
+    let item = format!("- [ ] {criterion}\n");
+    of(&BODY.replace("- [ ] `board::tests::a_thing` passes\n", &item))
+}
+
+#[test]
+fn a_criterion_that_edits_another_issue_fails_with_why() {
+    let text = "Edit #1075's step 7 row";
+    let failures = criterion(text);
+    assert_eq!(failures, [Failure::ChangesIssue(text.to_owned())]);
+    let said = failures[0].to_string();
+    assert!(said.contains("credential cannot change issues"), "{said}");
+    assert!(said.contains("to the maintainer as a note"), "{said}");
+    assert!(said.contains(text), "{said}");
+}
+
+#[test]
+fn every_way_to_change_an_issue_is_caught() {
+    for verb in [
+        "Update",
+        "Comment on",
+        "Label",
+        "Close",
+        "Reopen",
+        "Closes",
+        "Edited",
+    ] {
+        let text = format!("{verb} #12 when it is done");
+        assert_eq!(criterion(&text), [Failure::ChangesIssue(text)]);
+    }
+}
+
+#[test]
+fn a_criterion_that_only_names_an_issue_passes() {
+    for text in [
+        "Resolves #12",
+        "The result matches #12's shape",
+        "The same shape as shep-pm/shep#12",
+        "Edit the check in `crates/core/src/board/check.rs`",
+        "`board::update_label` fixes the bug in #12",
+    ] {
+        assert_eq!(criterion(text), [], "{text}");
+    }
+}
+
+#[test]
+fn a_criterion_naming_an_issue_in_another_repo_is_caught() {
+    let text = "Add a row to `shep-pm/shep#1075`, then update it";
+    assert_eq!(criterion(text), [Failure::ChangesIssue(text.to_owned())]);
+    let text = "Comment on shep-pm/shep#1075";
+    assert_eq!(criterion(text), [Failure::ChangesIssue(text.to_owned())]);
+}
+
+#[test]
+fn a_criterion_about_the_pull_requests_own_body_passes() {
+    for text in [
+        "Update the pull request body to say `Resolves #12`",
+        "The pull request's description is edited to name #12",
+        "Edit the PR body: it ends `Resolves #12`",
+    ] {
+        assert_eq!(criterion(text), [], "{text}");
+    }
+}
+
+#[test]
+fn a_criterions_wrapped_line_counts_with_it_and_only_its_first_line_is_named() {
+    let body = BODY.replace(
+        "- [ ] `board::tests::a_thing` passes\n",
+        "- [ ] Tracker row added:\n  update #1075 with it\n- [ ] It works\n",
+    );
+    assert_eq!(
+        of(&body),
+        [Failure::ChangesIssue("Tracker row added:".to_owned())]
+    );
+}
+
 #[test]
 fn an_issue_carries_one_priority_label() {
     let check = |names: &[&str]| check("fix: a thing", BODY, &labels(names));
@@ -367,6 +444,10 @@ fn each_failure_names_the_part_it_is_about() {
             "`Harness reach:`",
         ),
         (Failure::BlockedByNoIssue, "`Blocked by:`"),
+        (
+            Failure::ChangesIssue("Edit #1075's step 7 row".into()),
+            "credential cannot change issues",
+        ),
         (Failure::NoKind, "`kind:<type>`"),
         (Failure::UnknownKind("kind:bug".into()), "`kind:bug`"),
         (Failure::Priorities(labels(&["P1", "P2"])), "`P1` and `P2`"),
