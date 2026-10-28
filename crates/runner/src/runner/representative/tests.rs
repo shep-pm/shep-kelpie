@@ -420,6 +420,55 @@ fn an_issue_post_says_issue_and_records_the_issue_on_its_ledger_line() {
     assert_eq!(mine[0].pull_request, None);
 }
 
+#[test]
+fn an_issue_post_prompt_greets_by_name_leads_with_findings_and_bars_the_stock_thanks() {
+    let (rig, runner) = running();
+    rig.claude
+        .script_for(Role::Representative, [Scripted::Say("Ok.")]);
+    let post = IssuePost {
+        kind: "Write the triage comment",
+        facts: "It is a bug.",
+        earlier: &[],
+        author: CONTRIBUTOR,
+        said: "It crashes",
+    };
+
+    runner.lock().unwrap().represent_issue(9, &post).unwrap();
+
+    // The one line the issue thread adds, so every issue kind gets the whole
+    // rule wherever it is worded from: greet by name, lead with the findings,
+    // at most one plain thanks naming what they reported, never a stock
+    // opener, and never the opener.
+    let prompt = calls(&rig).remove(0).call.prompt;
+    assert!(prompt.contains("The post goes on this issue."), "{prompt}");
+    assert!(
+        prompt.contains("Greet the author by name and lead with what kelpie found."),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("At most one plain thanks that names what they reported"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("never a stock \"thanks for opening this\" or \"thanks for the report\""),
+        "{prompt}"
+    );
+    assert!(prompt.contains("never the opener"), "{prompt}");
+}
+
+#[test]
+fn a_pull_request_post_prompt_carries_no_issue_thanks_rule() {
+    let (rig, runner) = running();
+    rig.claude
+        .script_for(Role::Representative, [Scripted::Say("Ok.")]);
+
+    represent(&runner, &post(&[], "Hello")).unwrap();
+
+    let prompt = calls(&rig).remove(0).call.prompt;
+    assert!(!prompt.contains("Greet the author by name"), "{prompt}");
+    assert!(!prompt.contains("plain thanks"), "{prompt}");
+}
+
 // Wednesday 14 October 2026, midday in UTC
 const NOW: &str = "2026-10-14T12:00:00Z";
 
