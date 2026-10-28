@@ -25,6 +25,8 @@ use crate::ports::PaddockHolder;
 use crate::state::Finished;
 use crate::status::Status;
 use crate::ticket::TicketId;
+use shep_kelpie_protocol::Event;
+use shep_kelpie_protocol::frame;
 
 /// What the loop last posted, and what a trigger asked while a pass held the lock
 #[derive(Debug, Default)]
@@ -351,23 +353,24 @@ fn read_back(body: &Body) -> Option<Status> {
     Some(status)
 }
 
-/// A client that watches: each call gives the newest status it has not been given
+/// A client that watches: each call gives the newest event it has not been given
 #[derive(Debug)]
 pub(crate) struct Watcher {
     posted: Arc<Posted>,
     seen: Option<u64>,
-    last: Option<Status>,
+    last: Option<String>,
 }
 
 impl Watcher {
-    /// The status as it stands, once it differs from the last one given, waiting
-    /// for it if need be; `None` once `quit` says so
+    /// The line of the status event to write next, once it differs from the last
+    /// one given, waiting for it if need be; `None` once `quit` says so
     ///
-    /// Snapshots posted while the caller was away are skipped, and a snapshot
-    /// equal to the last one given is not given again. `quit` is read with the
-    /// posts locked, so whatever makes it true calls
+    /// Snapshots posted while the caller was away are skipped. Lines are
+    /// compared whole, so what a client could not tell apart is one event, and a
+    /// field that moves with the clock makes a line of its own. `quit` is read
+    /// with the posts locked, so whatever makes it true calls
     /// [`Posted::wake_watchers`] after.
-    pub(crate) fn next(&mut self, quit: impl Fn() -> bool) -> Option<Status> {
+    pub(crate) fn next(&mut self, quit: impl Fn() -> bool) -> Option<String> {
         let mut watching = self.posted.watching();
         loop {
             if quit() {
@@ -381,9 +384,11 @@ impl Watcher {
                 if !self.posted.draining() {
                     status.draining = None;
                 }
-                if self.last.as_ref() != Some(&status) {
-                    self.last = Some(status.clone());
-                    return Some(status);
+                if let Ok(line) = frame::encode(&Event::Status(Box::new(status)))
+                    && self.last.as_ref() != Some(&line)
+                {
+                    self.last = Some(line.clone());
+                    return Some(line);
                 }
             }
             watching = (self.posted.changed)

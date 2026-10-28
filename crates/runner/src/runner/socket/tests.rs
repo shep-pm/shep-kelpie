@@ -131,6 +131,44 @@ impl Peer {
         self.send(line);
         self.line()
     }
+
+    // Connected, past the hello, and watching
+    fn watching(socket: &Path) -> Self {
+        let mut peer = Self::hello(socket);
+        let watch = shep_kelpie_protocol::frame::encode(&Request::Watch).unwrap();
+        peer.send(watch.trim_end());
+        peer
+    }
+
+    // The status of the next event
+    #[track_caller]
+    fn status(&mut self) -> Value {
+        let event = self.line().expect("an event");
+        assert_eq!(event["event"], "status", "{event}");
+        event["status"].clone()
+    }
+
+    // Whether the runner closed the connection, and did not just fall silent
+    fn closed(&mut self) -> bool {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match self.read.read_line(&mut line) {
+                Ok(0) => return true,
+                Ok(_) => {}
+                Err(_) => return false,
+            }
+        }
+    }
+}
+
+// Waits for `done`, which a thread of the runner's makes true
+fn until(what: &str, done: impl Fn() -> bool) {
+    let start = std::time::Instant::now();
+    while !done() {
+        assert!(start.elapsed() < PATIENCE, "{what}");
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 #[cfg(unix)]
@@ -397,4 +435,158 @@ fn an_oversized_line_and_a_silent_connection_are_closed() {
         busy.ask(r#"{"action":"status"}"#).unwrap()["project"],
         "koji"
     );
+}
+
+#[test]
+fn a_watcher_gets_the_current_status_first() {
+    let rig = Rig::new("koji");
+    let served = served(&rig);
+    served.postings.needs_wake();
+    let mut watcher = Peer::watching(&served.socket);
+
+    let status = watcher.status();
+    assert_eq!(status["project"], "koji");
+    assert_eq!(status["work_items"], json!([]));
+    assert!(
+        served.woken.try_recv().is_err(),
+        "a watch asks nothing of the loop"
+    );
+    assert!(
+        request_of("watch", None).is_err(),
+        "`shep trigger` cannot send it"
+    );
+}
+
+#[test]
+fn a_watcher_sees_a_change_without_polling() {
+    let rig = Rig::new("koji");
+    let served = served(&rig);
+    let mut watcher = Peer::watching(&served.socket);
+    assert_eq!(watcher.status()["work_items"], json!([]));
+
+    rig.ask(&served.runner, "add", Some("7"));
+
+    let status = watcher.status();
+    assert_eq!(status["work_items"][0]["issue"], "7", "{status}");
+}
+
+#[test]
+fn two_posts_with_nothing_changed_give_one_event() {
+    let rig = Rig::new("koji");
+    let served = served(&rig);
+    // The answer that `served` asked posted before its lock hold was timed, so post again
+    served.runner.lock().unwrap().post();
+    let mut watcher = Peer::watching(&served.socket);
+    let first = watcher.status();
+
+    // The rig's clock stands still, so a post with no change builds the same status
+    {
+        let runner = served.runner.lock().unwrap();
+        runner.post();
+        runner.post();
+    }
+
+    // The next event is the change that follows, not a repeat
+    served.postings.set_draining(true);
+    let next = watcher.status();
+    assert_eq!(first["draining"], Value::Null);
+    assert!(next["draining"].is_object(), "{next}");
+}
+
+#[test]
+fn drain_and_undrain_reach_a_watcher_while_a_pass_holds_the_lock() {
+    let rig = Rig::new("koji");
+    let served = served(&rig);
+    let mut watcher = Peer::watching(&served.socket);
+    assert_eq!(watcher.status()["draining"], Value::Null);
+
+    let _pass = served.runner.lock().unwrap();
+    let mut asker = Peer::hello(&served.socket);
+    asker.ask(&frame("drain", None)).expect("a drain answers");
+    assert!(watcher.status()["draining"].is_object());
+
+    asker
+        .ask(&frame("undrain", None))
+        .expect("an undrain answers");
+    assert_eq!(watcher.status()["draining"], Value::Null);
+}
+
+#[test]
+fn a_slow_watcher_skips_snapshots_and_does_not_hold_up_a_post() {
+    let rig = Rig::new("koji");
+    // A title far past what a socket buffers, so a write to a client that
+    // reads nothing blocks and the snapshots after it have to be skipped
+    rig.forge
+        .open_issue(7, &"x".repeat(4 * 1024 * 1024), "Body.\n");
+    let served = served_with(rig.open().unwrap(), Limits::default());
+    rig.ask(&served.runner, "add", Some("7"));
+    let mut slow = Peer::watching(&served.socket);
+    until("the watcher registered", || served.postings.watched());
+
+    const TOGGLES: usize = 6;
+    for i in 0..TOGGLES {
+        let action = if i % 2 == 0 { "drain" } else { "undrain" };
+        rig.ask(&served.runner, action, None);
+    }
+    rig.ask(&served.runner, "drain", None);
+
+    // It reads now: whatever it was written first, and then where things ended
+    let mut last = slow.status();
+    let mut events = 1;
+    slow.read
+        .get_ref()
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
+    while let Some(event) = slow.line() {
+        last = event["status"].clone();
+        events += 1;
+    }
+    assert!(last["draining"].is_object(), "it ended up draining");
+    assert!(
+        events < TOGGLES + 2,
+        "{events} events for {} changes",
+        TOGGLES + 1
+    );
+}
+
+#[test]
+fn a_watcher_that_goes_away_frees_its_thread() {
+    let rig = Rig::new("koji");
+    let limits = Limits {
+        most_connections: 1,
+        ..Limits::default()
+    };
+    let served = served_with(rig.open().unwrap(), limits);
+    rig.ask(&served.runner, "status", None);
+    let mut watcher = Peer::watching(&served.socket);
+    watcher.status();
+    assert!(served.postings.watched());
+
+    drop(watcher);
+    until("the watcher ended", || !served.postings.watched());
+    until("its connection was freed", || {
+        Peer::connect(&served.socket)
+            .ask(r#"{"protocol":1}"#)
+            .is_some()
+    });
+}
+
+#[test]
+fn shutdown_ends_every_watcher() {
+    let rig = Rig::new("koji");
+    let mut served = served(&rig);
+    let mut watchers = [
+        Peer::watching(&served.socket),
+        Peer::watching(&served.socket),
+    ];
+    for watcher in &mut watchers {
+        watcher.status();
+    }
+
+    served.serving.take().expect("serving").end();
+
+    for watcher in &mut watchers {
+        assert!(watcher.closed(), "the runner left a watcher open");
+    }
+    until("the watchers ended", || !served.postings.watched());
 }

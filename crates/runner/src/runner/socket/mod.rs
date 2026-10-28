@@ -5,7 +5,8 @@
 //! answered with the runner's, then asks a request a line and gets the body
 //! `shep trigger` returns for it. The runner has no tokio, so each connection
 //! is a thread of its own on `ipc::blocking`. Everything is bounded: a line
-//! past [`LONGEST_FRAME`], silence, and too many connections close it.
+//! past [`LONGEST_FRAME`], silence, and too many connections close it. A
+//! `watch` turns the connection into a stream of the status ([`watch`]).
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ use super::trigger::{answer_request, wakes};
 use crate::home::Build;
 use crate::ipc::blocking::{Listener, Stream};
 use crate::reply::Reply;
+use shep_kelpie_protocol::Request;
 use shep_kelpie_protocol::frame::{FrameError, Hello, LONGEST_FRAME, PROTOCOL, UnknownRequest};
 
 /// How long a connection has to send its hello
@@ -35,6 +37,8 @@ const WRITE_WITHIN: Duration = Duration::from_secs(10);
 
 /// How many connections the runner serves at once
 const MOST_CONNECTIONS: usize = 32;
+
+mod watch;
 
 /// How long the accept loop rests after a failed accept, such as out of files
 const ACCEPT_REST: Duration = Duration::from_millis(500);
@@ -76,15 +80,17 @@ pub struct Handles {
 pub struct Serving {
     socket: PathBuf,
     ending: Arc<AtomicBool>,
+    postings: Arc<Posted>,
 }
 
 impl Serving {
     /// Stops accepting and removes the socket, best effort
     ///
     /// A connection in flight finishes its request, and the process ending
-    /// takes the rest.
+    /// takes the rest. A watcher is closed.
     pub fn end(self) {
         self.ending.store(true, Ordering::SeqCst);
+        self.postings.wake_watchers();
         // The accept loop is blocked in `accept`: a connection of our own wakes it.
         let _ = Stream::connect(&self.socket);
         let _ = std::fs::remove_file(&self.socket);
@@ -118,6 +124,7 @@ pub fn start(socket: &Path, handles: Handles) -> Option<Serving> {
 pub fn serve(socket: &Path, handles: Handles, limits: Limits) -> Result<Serving, String> {
     let listener = open(socket)?;
     let ending = Arc::new(AtomicBool::new(false));
+    let postings = Arc::clone(&handles.postings);
     let accepting = Accepting {
         handles,
         limits,
@@ -134,6 +141,7 @@ pub fn serve(socket: &Path, handles: Handles, limits: Limits) -> Result<Serving,
     Ok(Serving {
         socket: socket.to_owned(),
         ending,
+        postings,
     })
 }
 
@@ -180,11 +188,11 @@ impl Accepting {
                 continue;
             }
             let (handles, limits) = (self.handles.clone(), self.limits);
-            let open = Arc::clone(&self.open);
+            let (open, ending) = (Arc::clone(&self.open), Arc::clone(&self.ending));
             let visit = std::thread::Builder::new()
                 .name("socket-visit".into())
                 .spawn(move || {
-                    visit(&stream, &handles, limits);
+                    visit(&stream, &handles, limits, &ending);
                     open.fetch_sub(1, Ordering::SeqCst);
                 });
             if visit.is_err() {
@@ -195,7 +203,7 @@ impl Accepting {
 }
 
 // One connection, until it ends or breaks a bound.
-fn visit(stream: &Stream, handles: &Handles, limits: Limits) {
+fn visit(stream: &Stream, handles: &Handles, limits: Limits, ending: &AtomicBool) {
     if stream.set_write_timeout(Some(WRITE_WITHIN)).is_err()
         || stream.set_read_timeout(Some(limits.hello_within)).is_err()
     {
@@ -216,6 +224,7 @@ fn visit(stream: &Stream, handles: &Handles, limits: Limits) {
         let said = match answered(handles, &line) {
             Answer::Reply(reply) => say(&mut write, &reply),
             Answer::Unknown(unknown) => say(&mut write, &unknown),
+            Answer::Watch => return watch::serve(stream, handles, ending),
             Answer::Close => return,
         };
         if said.is_err() {
@@ -228,6 +237,7 @@ fn visit(stream: &Stream, handles: &Handles, limits: Limits) {
 enum Answer {
     Reply(Reply),
     Unknown(UnknownRequest),
+    Watch,
     Close,
 }
 
@@ -243,6 +253,9 @@ fn answered(handles: &Handles, line: &str) -> Answer {
         Err(FrameError::TooLong { .. }) => return Answer::Close,
         Err(e @ FrameError::Unreadable(_)) => return Answer::Reply(Reply::Refused(e.to_string())),
     };
+    if request == Request::Watch {
+        return Answer::Watch;
+    }
     let reply = answer_request(&handles.runner, &handles.postings, &request);
     if wakes(request.action()) || handles.postings.needs_wake() {
         let _ = handles.wake.send(());
