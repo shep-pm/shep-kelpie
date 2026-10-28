@@ -43,3 +43,30 @@ async fn an_implementer_no_turn_can_run_on_is_named_unsure_and_left_out_of_the_p
         "the agent board picks among opus-high, sonnet-high"
     );
 }
+
+// A gateway in kelpie's settings whose key this shell does not hold, which the runner reads
+// from its sheep's `env`
+const PADDOCK: &str = "[gateways.paddock]\nurl = \"http://127.0.0.1:1\"\n\
+                       key_env = \"KELPIE_TEST_KEY_NEVER_SET\"\n";
+
+const ON_PADDOCK: &str = "---\nrole: implementer\nharness: pi\nmodel: m\neffort: low\n\
+                          gateway: paddock\ncontext: 65536\ndescription: Builds on a local model.\n---\n";
+
+#[tokio::test]
+async fn an_implementer_on_a_gateway_whose_key_only_the_runner_holds_is_one_the_board_picks_among()
+{
+    let scene = Scene::new().await;
+    scene.shepherd.holds_section(&format!("{WEBHOOK}{PADDOCK}"));
+    crate::test::write_in(&scene.kelpie_home.join("agents"), "local.md", ON_PADDOCK);
+    scene.runs("golbat", |_| {});
+    let report = scene.report().await;
+    assert!(
+        !subjects(&report).contains(&"golbat: implementer local"),
+        "{:#?}",
+        report.render()
+    );
+    assert_eq!(
+        ok(&report, "golbat: implementers"),
+        "the agent board picks among local, opus-high, sonnet-high"
+    );
+}

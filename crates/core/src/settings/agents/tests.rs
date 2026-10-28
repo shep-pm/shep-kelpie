@@ -605,7 +605,7 @@ const ON_PADDOCK: &str = "---\nrole: implementer\nharness: pi\nmodel: m\neffort:
 fn an_implementer_no_turn_can_run_on_is_refused_with_why_and_the_rest_are_not() {
     let book = book().with("local", ON_PADDOCK);
     let settings = project("");
-    let refused = settings.refused_implementers(&book, &Gateways::default());
+    let refused = settings.refused_implementers(&book, &Gateways::default(), GatewayKeys::Held);
     let [(name, why)] = refused.as_slice() else {
         panic!("{refused:?}");
     };
@@ -616,7 +616,7 @@ fn an_implementer_no_turn_can_run_on_is_refused_with_why_and_the_rest_are_not() 
     );
 
     let hooked = hooked(project(""));
-    let refused = hooked.refused_implementers(&book, &Gateways::default());
+    let refused = hooked.refused_implementers(&book, &Gateways::default(), GatewayKeys::Held);
     let names: Vec<&str> = refused.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(names, ["gpt", "local", "qwen"]);
     let (_, why) = &refused[1];

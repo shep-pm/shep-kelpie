@@ -229,6 +229,15 @@ pub enum Limit {
     Gateway,
 }
 
+/// Whether this process holds the gateways' keys, for [`Settings::refused_implementers`]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GatewayKeys {
+    /// It does, as the runner does from its sheep's `env`, so a key it lacks refuses
+    Held,
+    /// It may not, as `doctor` in a shell may not, so the key is left to the runner
+    Unheld,
+}
+
 impl Limit {
     /// Whether it is an account's windows, which the pacer reads: an agent on
     /// any other runs on a local model
@@ -449,16 +458,20 @@ impl Settings {
 
     /// The implementers [`Settings::allowed_implementers`] holds that no turn can
     /// run on, by name, each with why: the worker's fence would not hold on it, or
-    /// kelpie's `gateways` cannot route to it. The agent board is never asked
-    /// about them.
+    /// kelpie's `gateways` cannot route to it, the gateway's key counting as `keys`
+    /// says. The agent board is never asked about them.
     pub fn refused_implementers(
         &self,
         agents: &Agents,
         gateways: &Gateways,
+        keys: GatewayKeys,
     ) -> Vec<(AgentName, String)> {
         let why = |i: &Implementer| {
             let fenced = self.under_worker_fence(&i.name, &i.model);
-            let routed = || gateways.check_listed(agents, [&i.name]);
+            let routed = || match keys {
+                GatewayKeys::Held => gateways.check_listed(agents, [&i.name]),
+                GatewayKeys::Unheld => gateways.check_listed_without_keys(agents, [&i.name]),
+            };
             let refused = fenced.and_then(|()| routed()).err()?;
             Some(match refused {
                 SettingsError::Invalid { reason, .. } => {

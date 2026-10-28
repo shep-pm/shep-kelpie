@@ -17,8 +17,8 @@ use crate::ports::{Forge, NewLabel, Timestamp, Visibility};
 use crate::review_bot::{Bot, Login, Profile};
 use crate::runner::{NO_ORIGIN, check_checkout, check_instructions, source_of};
 use crate::settings::{
-    Account, AgentName, DoctorProbe, ForgeSlug, Gateways, Harness, Limit, PM_DECIDES, Pick,
-    RoleModel, Settings, SettingsError, TicketSource,
+    Account, AgentName, DoctorProbe, ForgeSlug, GatewayKeys, Gateways, Harness, Limit, PM_DECIDES,
+    Pick, RoleModel, Settings, SettingsError, TicketSource,
 };
 use crate::webhook::KelpieSettings;
 
@@ -413,7 +413,7 @@ fn implementers(
     };
     let skipped: Vec<String> = book.skipped().collect();
     let allowed = settings.allowed_implementers(&book);
-    let refused = settings.refused_implementers(&book, gateways);
+    let refused = settings.refused_implementers(&book, gateways, GatewayKeys::Unheld);
     let usable: Vec<&AgentName> = (allowed.iter())
         .map(|i| &i.name)
         .filter(|name| !refused.iter().any(|(r, _)| r == *name))
@@ -490,7 +490,7 @@ fn left_out(
             "correct what it names, or leave it out of `agents.allow`",
         )
     };
-    let refused = settings.refused_implementers(book, gateways);
+    let refused = settings.refused_implementers(book, gateways, GatewayKeys::Unheld);
     refused.into_iter().map(line).collect()
 }
 

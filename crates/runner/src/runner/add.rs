@@ -11,7 +11,7 @@ use crate::board::{LabelError, agent_label, old_worker_label, pinned};
 use crate::lease::door::{Pick, PickAsk};
 use crate::pacer::Scope;
 use crate::ports::{ForgeError, Issue};
-use crate::settings::AgentName;
+use crate::settings::{AgentName, GatewayKeys};
 use crate::state::StateError;
 use crate::ticket::TicketId;
 use crate::work_item::new_session_id;
@@ -320,7 +320,7 @@ impl Runner {
     // The implementers the agent board is never asked about, each with why: the
     // worker's fence would not hold on it, or the gateways cannot route to it.
     fn left_out(&self) -> Vec<(AgentName, String)> {
-        (self.settings).refused_implementers(&self.book, &self.gateways)
+        (self.settings).refused_implementers(&self.book, &self.gateways, GatewayKeys::Held)
     }
 
     // A log line for each implementer `left_out`, told once per start or reread.

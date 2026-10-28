@@ -44,9 +44,9 @@ mod tickets;
 mod triage;
 
 pub use agents::{
-    Account, AgentHarness, AgentName, Allow, DEFAULT_SLACK_MINUTES, DoctorProbe, ExpertAgent, Gone,
-    Harness, HarnessFacts, Implementer, Limit, ModelServer, PmAgent, RoleAgentNames, RoleAgents,
-    SessionIds, UsageReader,
+    Account, AgentHarness, AgentName, Allow, DEFAULT_SLACK_MINUTES, DoctorProbe, ExpertAgent,
+    GatewayKeys, Gone, Harness, HarnessFacts, Implementer, Limit, ModelServer, PmAgent,
+    RoleAgentNames, RoleAgents, SessionIds, UsageReader,
 };
 pub use browser::Browser;
 pub use budget::{Budget, PerItemUsd};
