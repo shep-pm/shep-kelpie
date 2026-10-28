@@ -23,6 +23,8 @@ const CLAUDE: Harness = Harness::ClaudeCode;
 
 #[cfg(test)]
 mod calls;
+#[cfg(all(test, unix))]
+pub(super) mod ecosystems;
 #[cfg(test)]
 mod escapes;
 mod graph;
