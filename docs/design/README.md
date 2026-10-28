@@ -48,7 +48,8 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | cli-adapter.md | a new CLI | `adapters/cli/` |
 | handover.md | in-flight turns handed on | `src/sheep/handover/`, `runner/flight/carry/`, `adapters/process/adopt/`, `src/upgrade/handover.rs` |
 | windows.md | `sh`, `env`, test fakes | `process/spawn.rs`, `test_support/` |
-| waits-and-spend.md | waits, held-up turns, failing steps, spend | `runner/{turn/unreachable,looks}/`, `adapters/{unreachable,codex}/`, `core/usage/` |
+| windows-crates.md | crates on Windows | `owner_only/` |
+| waits-and-spend.md | waits, held-up turns, failing steps | `runner/{turn/unreachable,looks}/`, `adapters/{unreachable,codex}/`, `core/usage/` |
 | review.md | review, bots, rulings | `runner/{review,ruling}/`, `core/webhook.rs` |
 | review-outcomes.md | fix turn outcomes | `runner/review/outcomes/` |
 | local-review.md | local reviewers, kept rounds | `runner/review/keep.rs`, `core/settings/{local_rounds,local}.rs`, `adapters/local/` |
@@ -57,16 +58,16 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | local-tickets.md | local ticket store, `ticket` verbs | `core/local_tickets/`, `src/flock/ticket.rs`, `runner/close_merged.rs` |
 | github-app.md | App tokens, posting, answers | `runner/voice/`, `core/guard/gh.rs`, `worker_folder/` |
 | who-answers.md | who answers | `runner/pm/rulings.rs` |
-| contributions.md | others' pull requests | `core/settings/{contributions.rs,reviewers/}`, `runner/contributions/`, `core/state/contributions.rs` |
+| contributions.md | others' pull requests | `core/{settings/{contributions.rs,reviewers/},state/contributions.rs}`, `runner/contributions/` |
 | contribution-security.md | its security review | `runner/contributions/`, `runner/flight/security.rs`, `process/worktree/` |
 | contribution-pass.md | reviewers' pass, green head | `runner/contributions/pass.rs`, `process/worktree/` |
 | contribution-talk.md | contributors' words, quiet clock | `runner/contributions/{heard,clock}.rs`, `runner/thread_replies/` |
 | contribution-push.md | a fork worker's push; red-CI comment | `runner/contributions/{push,after}.rs` |
 | contribution-release.md | asking for a release: its answers | `runner/contributions/{release,ruling}.rs` |
 | contribution-merge.md | merge ruling: yes, thanks, no | `runner/contributions/{merge,ruling}.rs`, `core/settings/rulings.rs` |
-| representative.md | agent file, `agents.representative`, post wording | `runner/representative/`, `core/agents/front/`, `core/settings/agents/`, `agents/representative.md` |
-| dependencies.md | bot bumps: rebase, proof, merge, red | `core/settings/dependencies.rs`, `runner/{dependencies,dev_server/bump}/`, `runner/flight/proving.rs`, `core/state/bumps.rs`, `adapters/{e2e_runner,pages}.rs`, `adapters/bridge/client/` |
-| triage.md | settings, triager, pick rule, `since`, the verb, `status` | `core/settings/triage.rs`, `runner/triage/`, `runner/open_checks.rs`, `core/ports/issue.rs` |
+| representative.md | agent file, `agents.representative`, post wording | `runner/representative/`, `core/{agents/front,settings/agents}/`, `agents/representative.md` |
+| dependencies.md | bot bumps: rebase, proof, merge, red | `core/settings/dependencies.rs`, `core/state/bumps.rs`, `runner/{dependencies,dev_server/bump}/`, `runner/flight/proving.rs`, `adapters/{e2e_runner,pages}.rs`, `adapters/bridge/client/` |
+| triage.md | settings, triager, pick rule, `since`, the verb, `status` | `core/settings/triage.rs`, `runner/{triage,open_checks.rs}`, `core/ports/issue.rs` |
 | triage-limits.md | limits | `runner/triage/limits.rs` |
 | triage-pass.md | a pass: post, labels, duplicate, agent-ready | `runner/{triage,flight}/`, `core/ports/voice.rs` |
 | triage-images.md | an issue's images | `runner/triage/images.rs`, `adapters/gh/attachment.rs` |
@@ -76,7 +77,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 | triage-reader.md | who a comment is for | `runner/triage/facts.rs` |
 | triage-hand.md | `hand_ready` take-back | `runner/triage/hand.rs` |
 | triage-check.md | the check on every issue | `runner/triage/checks.rs` |
-| log-lines.md | log lines | `runner/drain/`, `runner/{skip_log,claim}.rs`, `runner/review_bot/lease_wait.rs`, `dog/desk.rs`, `dog/door/` |
+| log-lines.md | log lines | `runner/{drain,skip_log,claim}`, `runner/review_bot/lease_wait.rs`, `dog/{desk.rs,door/}` |
 | metrics.md | kelpie's series, alerts, dashboard | `core/metrics/`, `core/ports/metrics.rs`, `assets/{prometheus,grafana}/` |
 | metrics-work-items.md | work-item series, `finished` line | `core/usage/finished.rs`, `runner/ci_failure/` |
 | metrics-dog.md | leases, summons, forge | `core/metrics/{dog,forge,model_lease}.rs`, `dog/watch/` |
