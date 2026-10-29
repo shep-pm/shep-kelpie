@@ -220,11 +220,11 @@ fn a_pull_request_that_closes_an_issue_is_adopted_against_that_one() {
     );
 }
 
-// A released contribution is kelpie's own work item now: the project's full
-// `agents.reviewers` lineup reads it, where an adopted pull request of
+// A released contribution is kelpie's own work item now: the project's whole
+// review pass reads it, where an adopted pull request of
 // kelpie's own owes only the review bots the read they are owed.
 #[test]
-fn the_adopted_work_item_runs_the_full_agents_reviewers_pass() {
+fn the_adopted_work_item_runs_the_projects_whole_review_pass() {
     let (rig, runner) = contributed();
     let head = rig.forge.head_of("topic/80").unwrap();
     rig.forge.set_checks(&head, Checks::Passed);

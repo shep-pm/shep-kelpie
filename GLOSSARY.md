@@ -152,10 +152,11 @@ The operator's file carries them, so kelpie's files need not choose the
 operator's model.
 
 **Lineup**:
-The agents a project lists for a role, such as `agents.reviewers` or
-`contributions.reviewers`, in order. A review pass's lineup is its
-candidates: the board picks each round's reviewer from them, so their
-order does not matter.
+The candidates a review pass may pick from: every reviewer file
+`agents.allow` holds but `contributions.security_reviewer`. A contribution's
+lineup is `contributions.reviewers`, or kelpie's default pass when it names
+none. A lineup is in order only where a project named it; a pass's candidates
+are picked by the board each round, so their order does not matter.
 _Avoid_: roster, pool
 
 **Harness**:
@@ -205,7 +206,8 @@ _Avoid_: lint, validation, triage
 An agent file whose role is `reviewer`. Each round of a pass goes to the
 agent board's pick among the candidates the pass has not run, and
 `reviews.need` of them read the pull request once, against the issue's
-acceptance criteria. `agents.reviewers`, when set, narrows the candidates. It runs a fresh session on a harness, whose file's body is its
+acceptance criteria. Every reviewer file `agents.allow` holds is a candidate.
+It runs a fresh session on a harness, whose file's body is its
 prompt, or a command, or kelpie's own endpoint reviewer. One with a
 **second look** reads twice, the second time shown what it found the first
 and asked only for what it missed, before its one fix turn. Kelpie ships

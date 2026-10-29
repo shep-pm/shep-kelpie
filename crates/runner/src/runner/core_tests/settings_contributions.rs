@@ -96,24 +96,24 @@ fn nudge_days_at_or_past_quiet_days_is_refused() {
 }
 
 #[test]
-fn absent_reviewers_are_the_projects_agents_reviewers() {
+fn absent_contributions_reviewers_are_kelpies_default_pass() {
     let binding = "harness: claude-code\nmodel: claude-opus-5-5\neffort: high\n";
     let book = Agents::embedded()
         .bind("defect-hunter", binding)
         .with("opus", REVIEWER);
     let home = tempfile::tempdir().unwrap();
-    let mut settings = parse(EXAMPLE).unwrap();
-    settings.agents.reviewers = Some(vec![
-        crate::settings::AgentName::try_from("opus".to_owned()).unwrap(),
-    ]);
+    let settings = parse(EXAMPLE).unwrap();
     let lineup = settings
         .contribution_lineup(&book, &Gateways::default(), home.path())
         .unwrap();
     let names: Vec<&str> = lineup.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(names, ["opus"]);
+    assert_eq!(
+        names,
+        ["defect-hunter-lite"],
+        "no paddock gateway, no local round"
+    );
 
-    let mut own = parse(&with("reviewers = [\"defect-hunter\", \"opus\"]\n")).unwrap();
-    own.agents.reviewers = settings.agents.reviewers.clone();
+    let own = parse(&with("reviewers = [\"defect-hunter\", \"opus\"]\n")).unwrap();
     let lineup = own
         .contribution_lineup(&book, &Gateways::default(), home.path())
         .unwrap();

@@ -74,7 +74,7 @@ impl Runner {
         book.hold_for(self.state.work_items.iter().map(|item| &item.agent))?;
         let mut agents = settings.role_agents(&book)?;
         let gateways = kelpie.gateways();
-        let mut lineup = settings.lineup(&book, &gateways, &self.home)?;
+        let mut lineup = settings.lineup(&book, &gateways, &self.home);
         // The gateways the agents in use were listed under.
         let mut in_use = &gateways;
         // The gateways must hold as a start checks them.
@@ -90,8 +90,12 @@ impl Runner {
             // The agents the runner has, under the new settings as a start reads them.
             agents = settings.role_agents(&book)?;
             in_use = &self.gateways;
-            lineup = settings.lineup(&book, in_use, &self.home)?;
+            lineup = settings.lineup(&book, in_use, &self.home);
         }
+        // As a start does, only a reviewer the project named in `agents.allow` is
+        // held to what a round cannot work around. Read after the wait above, so it
+        // names the reviewers this reread adopts and not the ones it turned away.
+        let named = settings.named_reviewers(&book, &self.home);
         // A start refuses a hook that does not resolve, and a change to either table is checked as one.
         if settings.hooks != self.settings.hooks
             || settings.worker.guard_hooks != self.settings.worker.guard_hooks
@@ -157,13 +161,15 @@ impl Runner {
             let coderabbit = |r: &ListedReviewer| r.bot().is_some_and(|b| b.bot == Bot::Coderabbit);
             lineup.iter().any(coderabbit)
         };
-        // As a start does, only the reviewers the project lists are checked.
-        let chosen = settings.agents.reviewers.is_some();
-        if chosen && listed(&lineup) && !listed(&self.lineup) {
-            check_coderabbit(&self.remote, &lineup, &self.ports)?;
+        // As a start does, only the reviewers the project named in `agents.allow`
+        // are held, and only when the naming changed or a named reviewer's file
+        // did: one it named before was held at the reread that named it.
+        let named_new = named != self.settings.named_reviewers(&self.book, &self.home);
+        if listed(&named) && named_new {
+            check_coderabbit(&self.remote, &named, &self.ports)?;
         }
-        if chosen && lineup != self.lineup {
-            check_local(&lineup, &self.ports)?;
+        if !named.is_empty() && (named_new || lineup != self.lineup) {
+            check_local(&named, &self.ports)?;
         }
         crate::skills::check(&settings.skills, &self.paths.skills)?;
         let skills = (settings.skills != self.settings.skills)

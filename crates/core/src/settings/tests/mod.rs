@@ -51,10 +51,7 @@ fn the_example_holds_the_first_build_defaults() {
     assert_eq!(s.concurrency.active_items.get(), 1);
     assert_eq!(s.concurrency.pending_rulings, 2);
     assert_eq!(s.agents.gone_keys(), Vec::<&str>::new());
-    assert_eq!(
-        s.agents.reviewers, None,
-        "kelpie's default list, with no bot"
-    );
+    assert_eq!(s.agents.reviewers, None, "the example sets no gone key");
     assert!(s.pacing.enabled);
     assert_eq!(s.pacing.kickoff_hours.get(), 8);
     assert_eq!(s.worker.turn_timeout.get(), 60);
@@ -408,7 +405,7 @@ fn the_review_skill_is_refused_by_name_saying_what_replaces_it() {
         "{err}"
     );
     assert!(
-        err.contains("the body of a reviewer's agent file, listed in `agents.reviewers`"),
+        err.contains("the body of a reviewer's agent file in kelpie's home's `agents` folder"),
         "{err}"
     );
 }
@@ -514,8 +511,9 @@ fn a_zero_turn_timeout_is_refused() {
     );
 }
 
-const BOT_FILES: &str = "review bots are reviewer agent files on the `bot` harness, listed \
-                         in `agents.reviewers` and run once a pass in their place";
+const BOT_FILES: &str = "review bots are reviewer agent files on the `bot` harness, a \
+                         candidate like every other reviewer file, and run once a pass in \
+                         their place";
 
 #[test]
 fn the_review_bot_settings_bot_files_replace_are_refused_saying_what_replaces_each() {
@@ -525,9 +523,10 @@ fn the_review_bot_settings_bot_files_replace_are_refused_saying_what_replaces_ea
         refused(&gate("enabled = true")),
         format!(
             "`coderabbit.enabled` is no longer a setting, because {BOT_FILES}: for `true`, \
-             list `coderabbit` where its read should come, as in \
-             `agents.reviewers = [\"defect-hunter-lite\", \"coderabbit\"]`, and for `false` leave \
-             it out; then delete the key"
+             nothing to do: every reviewer file is a candidate, so `coderabbit` is one too; \
+             for `false`, `agents.allow` is how one is kept out, and it keeps out every \
+             agent it does not name, so name every other agent the project uses, its \
+             implementers, `pm` and `representative` included; then delete the key"
         )
     );
     assert_eq!(
@@ -554,9 +553,9 @@ fn the_review_bot_settings_bot_files_replace_are_refused_saying_what_replaces_ea
     assert_eq!(
         refused(&listed),
         format!(
-            "`pull_request_reviewers` is no longer a setting, because {BOT_FILES}: list each \
-             bot's file, `coderabbit`, `cubic` or `codex`, in `agents.reviewers` where its \
-             read should come, which `shep kelpie add` writes out"
+            "`pull_request_reviewers` is no longer a setting, because {BOT_FILES}: each bot's \
+             file, `coderabbit`, `cubic` or `codex`, is a candidate like every other reviewer \
+             file: `agents.allow` is how one is kept out"
         )
     );
     let generated = EXAMPLE.replace(GIT, &format!("[app.dogs.kelpie]\ngenerated = []\n{GIT}"));
@@ -567,8 +566,9 @@ fn the_review_bot_settings_bot_files_replace_are_refused_saying_what_replaces_ea
     );
 }
 
-// A live table from before bot files, its own review list set: every key
-// it must drop is named at once, and the fix lists its own reviewers.
+// A live table from before bot files, its old review list still set: every key
+// it must drop is named at once, and the fix for the bot says what `agents.allow`
+// must hold, which is every agent the project uses and not its reviewers alone.
 #[test]
 fn a_table_carrying_several_removed_keys_names_them_all_at_once() {
     let text = EXAMPLE
@@ -602,9 +602,10 @@ fn a_table_carrying_several_removed_keys_names_them_all_at_once() {
     );
     assert!(
         err.contains(
-            "`agents.reviewers = [\"iq3-xxs-review\", \"defect-hunter-lite\", \"coderabbit\"]`"
+            "name every other agent the project uses, its implementers, `pm` and \
+                      `representative` included"
         ),
-        "{err}"
+        "{err}: a list of reviewers alone would leave out every implementer"
     );
 }
 
@@ -616,38 +617,39 @@ fn the_review_settings_reviewer_files_replace_are_refused_saying_what_replaces_e
         (
             "models.reviewer",
             table("models.reviewer", model),
-            "write the model and effort as a reviewer's agent file, or list kelpie's \
-             `defect-hunter`, Opus 5.5 at high, in `agents.reviewers`",
+            "write the model and effort as a reviewer's agent file, or use kelpie's \
+             `defect-hunter`, Opus 5.5 at high, which every project may pick",
         ),
         (
             "models.deep_reviewer",
             table("models.deep_reviewer", model),
-            "list `defect-hunter` in `agents.reviewers`: it is the deep round, and its \
-             file holds the model and effort",
+            "`defect-hunter` is the deep round, and its file holds the model and effort: \
+             write a reviewer file that `extends: kelpie:defect-hunter`",
         ),
         (
             "agents.reviewer",
             with_agents("reviewer = \"opus-high\"\n"),
-            "list the reviewer's agent file in `agents.reviewers`",
+            "write the reviewer as an agent file with `role: reviewer`",
         ),
         (
             "agents.deep_reviewer",
             with_agents("deep_reviewer = \"opus-high\"\n"),
-            "list `defect-hunter`, or a reviewer file with `second_look: true`, in \
-             `agents.reviewers`",
+            "`defect-hunter` is the deep round: write a reviewer file with \
+             `second_look: true`, or one that `extends: kelpie:defect-hunter`",
         ),
         (
             "review.reviewers",
             table("review", "reviewers = [\"deep\"]"),
-            "list them in `agents.reviewers`: `deep` is now `defect-hunter`, and \
-             `claude` and each of kelpie's `[local_reviewers]` an agent file of its own",
+            "write each as an agent file with `role: reviewer`: `deep` is now \
+             `defect-hunter`, and `claude` and each of kelpie's `[local_reviewers]` \
+             one of its own",
         ),
         (
             "review.local",
             table("review.local", "kind = \"command\"\ncommand = \"~/q.sh\""),
             "write the round as an agent file with `role: reviewer`, its `kind` as \
-             `harness`, and list it in `agents.reviewers`; `kind = \"off\"` is \
-             `agents.reviewers = [\"defect-hunter\"]`",
+             `harness`; `kind = \"off\"` has no replacement, since every reviewer file \
+             `agents.allow` holds is a candidate",
         ),
         ("review", table("review", ""), "delete it"),
     ];
@@ -656,7 +658,9 @@ fn the_review_settings_reviewer_files_replace_are_refused_saying_what_replaces_e
             parse_err(&text),
             format!(
                 "the [app.dogs.kelpie] table on shep: `{key}` is no longer a setting, \
-                 because reviewers are agent files listed in `agents.reviewers`: {fix}"
+                 because reviewers are agent files in kelpie's home's `agents` folder: every \
+                 one `agents.allow` holds is a candidate, and `reviews.need` says how many \
+                 read a work item: {fix}"
             )
         );
     }

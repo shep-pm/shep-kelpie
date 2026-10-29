@@ -1,6 +1,6 @@
 //! A review bot's round, in its place in the review pass
 //!
-//! A bot in `agents.reviewers` reads the pull request once a pass, as any
+//! A bot among a pass's candidates reads the pull request once a pass, as any
 //! reviewer does. Its round marks a draft ready, waits for its window and lease,
 //! summons it by label or comment, and returns the lease once it answers. A
 //! window over an hour on, `review_wait` with no review, a silent or unlisted

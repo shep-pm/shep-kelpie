@@ -5,7 +5,9 @@ async fn a_project_that_spends_codex_checks_codex_answers_its_usage() {
     let codex = "---\nrole: implementer\nharness: stand-in\nmodel: gpt-5-codex\n\
                  effort: medium\nusage: codex\n---\n";
     let scene = Scene::leaving_out_on_koji("codex", codex).await;
-    scene.runs("golbat", |_| {});
+    scene.runs("golbat", |t| {
+        holds(t, &["codex"]);
+    });
     let report = scene.report().await;
     let found = ok(&report, "golbat: codex usage");
     assert_eq!(found, "reads Codex usage: 5-hour window 0%, week 0%");
@@ -45,8 +47,10 @@ impl Scene {
             let agents = scene.kelpie_home.join("agents");
             crate::test::write_in(&agents, &format!("{name}.md"), text);
             let book = crate::agents::Agents::load(&agents).unwrap();
+            // `iq3-xxs-review` is left out too: a project that names a reviewer on a
+            // gateway kelpie's settings hold none of is the reviewers line's to refuse.
             let rest: Vec<&str> = (book.iter().map(|(n, _)| n.as_str()))
-                .filter(|n| *n != name)
+                .filter(|n| *n != name && *n != crate::agents::IQ3_XXS_REVIEW)
                 .collect();
             t["agents"]["allow"] = json!(rest);
         })
@@ -56,7 +60,9 @@ impl Scene {
     /// A flock whose `golbat` may run a pi agent, which `koji` does not run
     async fn pi_on_golbat() -> Self {
         let scene = Self::leaving_out_on_koji("qwen", QWEN).await;
-        scene.runs("golbat", |_| {});
+        scene.runs("golbat", |t| {
+            holds(t, &["qwen"]);
+        });
         scene
     }
 }
@@ -227,6 +233,11 @@ async fn a_pi_reviewer_of_contributions_gets_a_pi_line_only_while_contributions_
     ] {
         scene.runs(project, |t| {
             t.insert("contributions".into(), json!({ "pick": pick, key: value }));
+            // A reviewer file is a candidate for every review round, so only a
+            // project picking contributions may name one at all.
+            if pick != "off" {
+                holds(t, &["qwen-r"]);
+            }
         });
     }
     let report = scene.report().await;
@@ -248,7 +259,7 @@ impl Scene {
     fn runs_goose_on_golbat(&self) {
         crate::test::write_in(&self.kelpie_home.join("agents"), "goose.md", GOOSE);
         self.runs("golbat", |t| {
-            t.insert("agents".into(), json!({ "reviewers": ["goose"] }));
+            holds(t, &["goose"]);
         });
     }
 }

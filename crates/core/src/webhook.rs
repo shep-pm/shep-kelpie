@@ -415,7 +415,7 @@ impl KelpieSettings {
             },
             crate::settings::Removed {
                 key: "local_reviewers",
-                because: "reviewers are agent files listed in a project's `agents.reviewers`",
+                because: "reviewers are agent files in kelpie's home's `agents` folder",
                 fix: "write each `[local_reviewers.<name>]` table as `agents/<name>.md` in \
                       kelpie's home, with `role: reviewer`, its `kind` as `harness`; a `kind = \"claude\"` or \
                       `\"session\"` table is a session reviewer on its model and effort \
@@ -512,7 +512,7 @@ mod tests {
         assert!(
             err.starts_with(
                 "`local_reviewers` is no longer a setting, because reviewers are agent files \
-                 listed in a project's `agents.reviewers`: write each"
+                 in kelpie's home's `agents` folder: write each"
             ),
             "{err}"
         );

@@ -374,7 +374,12 @@ mod tests {
         let project = resolve(&root, sheep);
         let agents = resolve(&root, &project["properties"]["agents"]);
         assert_eq!(agents["additionalProperties"], false, "{agents}");
-        for old in ["implementers", "implementer_choice", "fallback_after"] {
+        for old in [
+            "implementers",
+            "implementer_choice",
+            "fallback_after",
+            "reviewers",
+        ] {
             let key = &agents["properties"][old];
             assert_eq!(key["deprecated"], true, "{old}: {key}");
             let resolved = resolve(&root, key);
@@ -386,7 +391,8 @@ mod tests {
             );
         }
         let old = "[app.dogs.kelpie.agents]\nimplementers = [\"sonnet-high\"]\n\
-                   implementer_choice = \"order\"\nfallback_after = 15\n";
+                   implementer_choice = \"order\"\nfallback_after = 15\n\
+                   reviewers = [\"defect-hunter-lite\"]\n";
         let text =
             include_str!("../settings.example.toml").replace("[app.dogs.kelpie.agents]\n", old);
         let table = toml::to_string(&crate::test::project_table(&text)).unwrap();

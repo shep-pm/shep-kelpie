@@ -8,8 +8,8 @@
 # nothing; and the report is kelpie's `SEVERITY|file:line|what|why` line and
 # `CLEAN`, not prose. It sits beside `defect-hunter`, which also checks what
 # the issue asks for but hunts for defects; this one reads the diff against
-# the requirements. It is not on the default list: a project opts in by
-# listing it under `agents.reviewers`. It reads once, with no `second_look`,
+# the requirements. It is no default for a contribution's pass: a project that names
+# the agents it may use holds it in `agents.allow` to run it. It reads once, with no `second_look`,
 # because a reviewer that always finds something must not loop (ADR 0007).
 # Its sessions read the worktree with Read, Grep and Glob, and run no
 # command. The body below is its prompt: kelpie puts the commit the change is

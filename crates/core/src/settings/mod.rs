@@ -169,9 +169,12 @@ const AUDIT: &str = "the whole-issue check is gone";
 const LOOP: &str = "the review loop and its judge are gone";
 const SHOTS: &str = "shots and the preview are parked";
 const AGENT_FILES: &str = "agents are files in kelpie's home's `agents` folder";
-const REVIEWER_FILES: &str = "reviewers are agent files listed in `agents.reviewers`";
-const BOT_FILES: &str = "review bots are reviewer agent files on the `bot` harness, listed \
-                         in `agents.reviewers` and run once a pass in their place";
+const REVIEWER_FILES: &str = "reviewers are agent files in kelpie's home's `agents` folder: \
+                             every one `agents.allow` holds is a candidate, and `reviews.need` \
+                             says how many read a work item";
+const BOT_FILES: &str = "review bots are reviewer agent files on the `bot` harness, a \
+                         candidate like every other reviewer file, and run once a pass in \
+                         their place";
 const ONCE_A_PASS: &str = "a review bot reads once a pass, so no round cap is counted";
 const GROUPED: &str = "every project setting sits in a table now";
 const PANEL: &str = "the ruling panel is gone: the project manager answers the kinds \
@@ -216,8 +219,8 @@ const REMOVED: &[Removed] = &[
         key: "skills.review",
         because: "no step drives `code-review` now: a reviewer's prompt is the body of its \
                   agent file",
-        fix: "write the prompt as the body of a reviewer's agent file, listed in \
-              `agents.reviewers`, and delete the key",
+        fix: "write the prompt as the body of a reviewer's agent file in kelpie's home's \
+              `agents` folder, and delete the key",
     },
     Removed {
         key: "models.auditor",
@@ -274,14 +277,14 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "models.reviewer",
         because: REVIEWER_FILES,
-        fix: "write the model and effort as a reviewer's agent file, or list kelpie's \
-              `defect-hunter`, Opus 5.5 at high, in `agents.reviewers`",
+        fix: "write the model and effort as a reviewer's agent file, or use kelpie's \
+              `defect-hunter`, Opus 5.5 at high, which every project may pick",
     },
     Removed {
         key: "models.deep_reviewer",
         because: REVIEWER_FILES,
-        fix: "list `defect-hunter` in `agents.reviewers`: it is the deep round, and its \
-              file holds the model and effort",
+        fix: "`defect-hunter` is the deep round, and its file holds the model and effort: \
+              write a reviewer file that `extends: kelpie:defect-hunter`",
     },
     Removed {
         key: "models",
@@ -292,26 +295,27 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "agents.reviewer",
         because: REVIEWER_FILES,
-        fix: "list the reviewer's agent file in `agents.reviewers`",
+        fix: "write the reviewer as an agent file with `role: reviewer`",
     },
     Removed {
         key: "agents.deep_reviewer",
         because: REVIEWER_FILES,
-        fix: "list `defect-hunter`, or a reviewer file with `second_look: true`, in \
-              `agents.reviewers`",
+        fix: "`defect-hunter` is the deep round: write a reviewer file with \
+              `second_look: true`, or one that `extends: kelpie:defect-hunter`",
     },
     Removed {
         key: "review.reviewers",
         because: REVIEWER_FILES,
-        fix: "list them in `agents.reviewers`: `deep` is now `defect-hunter`, and \
-              `claude` and each of kelpie's `[local_reviewers]` an agent file of its own",
+        fix: "write each as an agent file with `role: reviewer`: `deep` is now \
+              `defect-hunter`, and `claude` and each of kelpie's `[local_reviewers]` \
+              one of its own",
     },
     Removed {
         key: "review.local",
         because: REVIEWER_FILES,
         fix: "write the round as an agent file with `role: reviewer`, its `kind` as \
-              `harness`, and list it in `agents.reviewers`; `kind = \"off\"` is \
-              `agents.reviewers = [\"defect-hunter\"]`",
+              `harness`; `kind = \"off\"` has no replacement, since every reviewer file \
+              `agents.allow` holds is a candidate",
     },
     Removed {
         key: "review",
@@ -321,8 +325,8 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "pull_request_reviewers",
         because: BOT_FILES,
-        fix: "list each bot's file, `coderabbit`, `cubic` or `codex`, in `agents.reviewers` \
-              where its read should come, which `shep kelpie add` writes out",
+        fix: "each bot's file, `coderabbit`, `cubic` or `codex`, is a candidate like every \
+              other reviewer file: `agents.allow` is how one is kept out",
     },
     Removed {
         key: "rulings.decide",
@@ -357,8 +361,11 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "coderabbit.enabled",
         because: BOT_FILES,
-        fix: "for `true`, list `coderabbit` where its read should come, as in \
-              LISTED_WITH_CODERABBIT, and for `false` leave it out; then delete the key",
+        fix: "for `true`, nothing to do: every reviewer file is a candidate, so \
+              `coderabbit` is one too; for `false`, `agents.allow` is how one is kept \
+              out, and it keeps out every agent it does not name, so name every other \
+              agent the project uses, its implementers, `pm` and `representative` \
+              included; then delete the key",
     },
     Removed {
         key: "coderabbit.rounds",
@@ -846,39 +853,11 @@ impl Settings {
 
 /// Refuses `text` when it sets a key a removed feature left behind
 ///
-/// The fix for `coderabbit.enabled` shows the project's reviewers, as its
-/// table lists them or as the default gives them with no paddock gateway, with
-/// `coderabbit` after them.
-///
 /// # Errors
 ///
 /// A message naming every removed key `text` sets, each with what replaces it.
 pub(crate) fn refuse_removed_settings(text: &str) -> Result<(), String> {
-    removed::refuse(text, REMOVED, NOW_TABLES).map_err(|message| {
-        let table = text.parse::<toml::Table>().unwrap_or_default();
-        let listed = table
-            .get("agents")
-            .and_then(|agents| agents.get("reviewers"))
-            .and_then(toml::Value::as_array)
-            .map(|names| {
-                names
-                    .iter()
-                    .filter_map(|n| n.as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or_else(|| {
-                let names = default_reviewers(&Gateways::default()).into_iter();
-                names.map(|n| n.as_str().to_owned()).collect::<Vec<_>>()
-            });
-        let all: Vec<String> = listed
-            .into_iter()
-            .chain(["coderabbit".to_owned()])
-            .collect();
-        message.replace(
-            "LISTED_WITH_CODERABBIT",
-            &format!("`agents.reviewers = {all:?}`"),
-        )
-    })
+    removed::refuse(text, REMOVED, NOW_TABLES)
 }
 
 #[cfg(test)]

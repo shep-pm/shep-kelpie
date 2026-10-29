@@ -225,6 +225,16 @@ impl Rig {
         });
     }
 
+    /// Names `name` in `agents.pm`, read when a runner next opens
+    pub fn pm(&self, name: &str) {
+        self.edit_settings(|s| {
+            s.replace(
+                "[app.dogs.kelpie.agents]\n",
+                &format!("[app.dogs.kelpie.agents]\npm = \"{name}\"\n"),
+            )
+        });
+    }
+
     /// Ranks `names` after `sonnet-high` and sets `reviews.need` to their count
     pub fn reviewers(&self, names: &[&str]) {
         self.agent_board

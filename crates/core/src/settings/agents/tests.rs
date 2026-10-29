@@ -431,10 +431,9 @@ fn allowing(names: &str, contributions: &str) -> Settings {
     Settings::from_table(&table, "shep", Path::new("/h"), Path::new("/p")).unwrap()
 }
 
-fn lineup(settings: &Settings) -> Result<Vec<String>, String> {
+fn lineup(settings: &Settings) -> Vec<String> {
     let lineup = settings.lineup(&book(), &Gateways::default(), Path::new("/h"));
-    let lineup = lineup.map_err(|e| e.to_string())?;
-    Ok(lineup.iter().map(|r| r.name.to_string()).collect())
+    lineup.iter().map(|r| r.name.to_string()).collect()
 }
 
 // The reviewer files of `book` a pass with no `agents.reviewers` may pick from
@@ -458,7 +457,7 @@ fn an_absent_allow_lets_every_agent_through_as_before() {
     settings.representative(&book()).unwrap();
     settings.triager(&book()).unwrap();
     settings.security_reviewer(&book()).unwrap();
-    assert_eq!(lineup(&settings).unwrap(), EVERY_REVIEWER);
+    assert_eq!(lineup(&settings), EVERY_REVIEWER);
 }
 
 #[test]
@@ -470,7 +469,7 @@ fn an_empty_allow_allows_every_agent_as_an_absent_one_does() {
     settings.representative(&book()).unwrap();
     settings.triager(&book()).unwrap();
     settings.security_reviewer(&book()).unwrap();
-    assert_eq!(lineup(&settings).unwrap(), EVERY_REVIEWER);
+    assert_eq!(lineup(&settings), EVERY_REVIEWER);
     let allow = settings.agents.allow.as_ref().unwrap();
     assert!(allow.holds(&AgentName::kelpies("anything-at-all")));
 }
@@ -522,22 +521,31 @@ fn an_implementer_allow_leaves_out_is_no_pick_for_the_board() {
 }
 
 #[test]
-fn a_listed_reviewer_or_a_contributions_default_allow_leaves_out_is_refused() {
-    let listed = project("allow = [\"sonnet-high\"]\nreviewers = [\"defect-hunter\"]\n");
+fn an_old_reviewers_list_loads_and_is_read_by_nothing() {
+    let old = project("reviewers = [\"opus-high\", \"fable\", \"sonnet-high\"]\n");
+    assert_eq!(old.agents.gone_keys(), ["agents.reviewers"]);
+    assert_eq!(lineup(&old), EVERY_REVIEWER, "the list names no reviewer");
+    let default = old
+        .contribution_lineup(&book(), &Gateways::default(), Path::new("/h"))
+        .unwrap();
     assert_eq!(
-        lineup(&listed).unwrap_err(),
-        "setting `agents`: `agents.reviewers` names defect-hunter, which `agents.allow` leaves \
-         out: add it to `agents.allow`, or name another"
+        default.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+        ["defect-hunter-lite"],
+        "a contribution takes kelpie's default, not the old list"
     );
+    assert_eq!(project("").agents.gone_keys(), Vec::<&str>::new());
+}
 
-    let default = project("allow = [\"sonnet-high\"]\n");
+#[test]
+fn a_reviewer_or_a_contributions_default_allow_leaves_out_is_refused() {
+    let only = project("allow = [\"sonnet-high\"]\n");
     assert_eq!(
-        lineup(&default).unwrap(),
+        lineup(&only),
         Vec::<String>::new(),
         "a pass picks only from the reviewers allowed"
     );
     let err =
-        (default.contribution_lineup(&book(), &Gateways::default(), Path::new("/h"))).unwrap_err();
+        (only.contribution_lineup(&book(), &Gateways::default(), Path::new("/h"))).unwrap_err();
     assert_eq!(
         err.to_string(),
         "setting `agents`: `contributions.reviewers` names defect-hunter-lite, which \
@@ -549,7 +557,7 @@ fn a_listed_reviewer_or_a_contributions_default_allow_leaves_out_is_refused() {
         "reviewers = [\"defect-hunter\"]\n",
     );
     assert_eq!(
-        lineup(&own).unwrap(),
+        lineup(&own),
         ["defect-hunter-lite"],
         "the default is allowed"
     );

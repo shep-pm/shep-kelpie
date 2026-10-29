@@ -169,7 +169,9 @@ impl Scene {
         );
         table["git"]["checkout"] = json!(repo);
         table["git"]["remote"] = json!(format!("shep-pm/{name}"));
-        table["agents"]["reviewers"] = json!(["defect-hunter"]);
+        // A private project that names the models its owner runs: the reviewers
+        // it asked for, and the implementers the agent board may pick among.
+        table["agents"]["allow"] = json!(["defect-hunter", "opus-high", "sonnet-high"]);
         crate::flock::set::migrate::pm_decides(&mut table);
         edit(&mut table);
         let launch = Launch {
@@ -250,6 +252,14 @@ fn missing(report: &Report, subject: &str) -> (String, String) {
     }
 }
 
+// Names `names` in the project's `agents.allow`, beside what every table holds
+fn holds(t: &mut Map<String, Value>, names: &[&str]) {
+    let listed = t["agents"]["allow"]
+        .as_array_mut()
+        .expect("every table names an allow");
+    listed.extend(names.iter().map(|n| json!(n)));
+}
+
 fn subjects(report: &Report) -> Vec<&str> {
     report.lines.iter().map(|l| l.subject.as_str()).collect()
 }
@@ -258,7 +268,7 @@ fn subjects(report: &Report) -> Vec<&str> {
 async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
     let mut scene = Scene::new().await;
     scene.runs("golbat", |t| {
-        t["agents"]["reviewers"] = json!(["defect-hunter", "coderabbit"]);
+        holds(t, &["coderabbit"]);
     });
     scene.shepherd.writes();
     let labels = scene.forge.repo_labels_now();
@@ -327,7 +337,9 @@ async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
 #[tokio::test]
 async fn a_listed_implementer_with_no_description_makes_its_line_unsure_naming_it() {
     let scene = Scene::new().await;
-    scene.runs("golbat", |_| {});
+    scene.runs("golbat", |t| {
+        holds(t, &["mine"]);
+    });
     let agents = scene.kelpie_home.join("agents");
     let mine = "---\nrole: implementer\nharness: claude-code\nmodel: claude-opus-5-5\n\
                 effort: high\n---\n";
@@ -564,9 +576,7 @@ async fn labels_a_repo_lacks_are_named_with_the_command_that_makes_them() {
     assert_eq!(what, "shep-pm/koji has no ready-for-human, in-progress");
     assert!(fix.starts_with("`shep kelpie add` in "), "{fix}");
 
-    scene.runs("golbat", |t| {
-        t["agents"]["reviewers"] = json!(["defect-hunter", "coderabbit"])
-    });
+    scene.runs("golbat", |t| holds(t, &["coderabbit"]));
     let (what, _) = missing(&scene.report().await, "golbat: labels");
     assert_eq!(
         what,
@@ -588,21 +598,17 @@ async fn a_repo_the_account_cannot_push_to_is_told_how_to_get_access() {
 #[tokio::test]
 async fn coderabbit_on_a_repo_that_is_not_public_is_missing_its_plan() {
     let scene = Scene::new().await;
-    scene.runs("golbat", |t| {
-        t["agents"]["reviewers"] = json!(["defect-hunter", "coderabbit"])
-    });
+    scene.runs("golbat", |t| holds(t, &["coderabbit"]));
     scene.forge.set_visibility(Visibility::Private);
     let (what, fix) = missing(&scene.report().await, "golbat: coderabbit");
     assert!(what.contains("is not public"), "{what}");
-    assert!(fix.contains("take `coderabbit` off"), "{fix}");
+    assert!(fix.contains("keep `coderabbit` out"), "{fix}");
 }
 
 #[tokio::test]
 async fn each_listed_review_bot_says_when_it_last_reviewed_on_the_repo() {
     let scene = Scene::new().await;
-    scene.runs("golbat", |t| {
-        t["agents"]["reviewers"] = json!(["defect-hunter", "coderabbit", "cubic"])
-    });
+    scene.runs("golbat", |t| holds(t, &["coderabbit", "cubic"]));
     let report = scene.report().await;
     for (file, name) in [("coderabbit", "CodeRabbit"), ("cubic", "cubic")] {
         assert_eq!(
@@ -615,9 +621,7 @@ async fn each_listed_review_bot_says_when_it_last_reviewed_on_the_repo() {
 #[tokio::test]
 async fn a_review_bot_that_has_never_reviewed_on_the_repo_is_missing() {
     let scene = Scene::new().await;
-    scene.runs("golbat", |t| {
-        t["agents"]["reviewers"] = json!(["defect-hunter", "coderabbit"])
-    });
+    scene.runs("golbat", |t| holds(t, &["coderabbit"]));
     scene.forge.set_last_bot_review(None);
     let report = scene.report().await;
     let (what, fix) = missing(&report, "golbat: coderabbit");
@@ -626,17 +630,16 @@ async fn a_review_bot_that_has_never_reviewed_on_the_repo_is_missing() {
     assert!(!report.passed());
 }
 
-// Writes kelpie's agent file `name.md` holding `text`, and lists it alone
-// as golbat's reviewer.
+// Writes kelpie's agent file `name.md` holding `text`, and names it in
+// golbat's `agents.allow`, so the runner holds it to what a round cannot work around
 fn reviewed_by(scene: &Scene, name: &str, text: &str) {
     crate::test::write_in(
         &scene.kelpie_home.join("agents"),
         &format!("{name}.md"),
         text,
     );
-    let name = name.to_owned();
     scene.runs("golbat", |t| {
-        t["agents"]["reviewers"] = json!([name]);
+        holds(t, &[name]);
     });
 }
 
@@ -653,17 +656,6 @@ async fn a_local_command_that_is_not_there_is_named() {
     );
     assert!(fix.contains("point its agent file"), "{fix}");
     assert!(!report.passed());
-}
-
-#[tokio::test]
-async fn a_reviewer_with_no_agent_file_is_named() {
-    let scene = Scene::new().await;
-    scene.runs("golbat", |t| {
-        t["agents"]["reviewers"] = json!(["fable"]);
-    });
-    let (what, fix) = missing(&scene.report().await, "golbat: reviewers");
-    assert!(what.contains("fable, which has no agent file"), "{what}");
-    assert!(fix.contains("take it off `agents.reviewers`"), "{fix}");
 }
 
 #[tokio::test]
@@ -819,7 +811,7 @@ async fn a_local_endpoint_nothing_answers_on_is_named() {
 }
 
 #[tokio::test]
-async fn a_review_list_that_can_run_names_its_reviewers_in_order() {
+async fn the_reviewers_line_names_the_candidates_in_name_order() {
     let scene = Scene::new().await;
     let script = scene.home.join("review.sh");
     crate::test::write_script(&script, "#!/bin/sh\nexit 0\n");
@@ -829,7 +821,7 @@ async fn a_review_list_that_can_run_names_its_reviewers_in_order() {
     );
     crate::test::write_in(&scene.kelpie_home.join("agents"), "mine.md", &mine);
     scene.runs("golbat", |t| {
-        t["agents"]["reviewers"] = json!(["mine", "defect-hunter"]);
+        holds(t, &["mine"]);
     });
     let report = scene.report().await;
     assert_eq!(
@@ -838,7 +830,8 @@ async fn a_review_list_that_can_run_names_its_reviewers_in_order() {
     );
     assert_eq!(
         ok(&report, "golbat: reviewers"),
-        "each pull request is read by mine, then defect-hunter"
+        "each pull request is read by defect-hunter, then mine",
+        "the candidates are the reviewer files `allow` holds, in name order"
     );
 }
 

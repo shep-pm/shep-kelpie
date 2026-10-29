@@ -304,8 +304,8 @@ pub(crate) async fn tables(
 /// Kelpie's own gateways, as its section of the shepherd's settings holds them.
 /// A section that does not parse holds none: the runner reports it when it starts.
 ///
-/// `add` needs them to pick a project's default reviewers, and `agents init
-/// --detect` to ask each one for the models it serves.
+/// `agents init --detect` needs them to ask each gateway for the models it
+/// serves.
 ///
 /// # Errors
 ///

@@ -296,9 +296,7 @@ fn runnable(tables: &Tables, name: &ProjectName, place: Place<'_>) -> Result<Set
     let book = Agents::load(&paths.agents).map_err(|e| e.to_string())?;
     settings.role_agents(&book).map_err(invalid)?;
     let gateways = loaded.kelpie.gateways();
-    let lineup = settings
-        .lineup(&book, &gateways, place.home)
-        .map_err(invalid)?;
+    let lineup = settings.lineup(&book, &gateways, place.home);
     if let Some(refused) = settings.rulings.refusal() {
         return Err(invalid(refused));
     }

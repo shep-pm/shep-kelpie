@@ -59,6 +59,18 @@ const ON_GATEWAY: &str = "---\nrole: reviewer\nharness: pi\nmodel: qwen3.8:27b\n
 const ON_ELSEWHERE: &str = "---\nrole: reviewer\nharness: pi\nmodel: qwen3.8:27b\n\
                             effort: medium\ngateway: elsewhere\ncontext: 65536\n---\nReview {{DIFF}}.\n";
 
+// Every reviewer file a scene's agent folder holds that needs no gateway, in name order
+const EVERY_REVIEWER: [&str; 8] = [
+    "coderabbit",
+    "codex",
+    "cubic",
+    "defect-hunter",
+    "defect-hunter-lite",
+    "qwen",
+    "spec",
+    "standards",
+];
+
 // Writes `files` into the agent folder every project's settings are checked against.
 fn write_agents(shepherd: &FakeShepherd, files: &[(&str, &str)]) {
     let folder = shepherd.scratch("home").join("kelpie").join("agents");
@@ -160,15 +172,11 @@ impl Scene {
         }
     }
 
-    /// A flock whose `koji` lists `local`, a reviewer on the gateway in
-    /// kelpie's own settings, and holds `box`, a reviewer on a gateway of
-    /// kelpie has none of
+    /// A flock whose agent files hold `local`, a reviewer on the gateway in
+    /// kelpie's own settings, and `box`, a reviewer on a gateway of which
+    /// kelpie has none
     async fn keyed_gateway() -> Self {
-        let table = TABLE.replace(
-            "reviewers = [\"standards\"]",
-            "reviewers = [\"standards\", \"local\"]",
-        );
-        let scene = Self::holding(&table).await;
+        let scene = Self::holding(TABLE).await;
         scene.shepherd.holds_section(GATEWAY);
         write_agents(
             &scene.shepherd,
@@ -249,6 +257,27 @@ impl Scene {
         let (sheep, _) = self.shepherd.sheep(name).unwrap();
         sheep.dogs.get(DOG).unwrap().as_map().clone()
     }
+
+    /// The reviewers a review pass may pick from in `name`'s settings, as its
+    /// runner reads them from its table, kelpie's own section and the agent
+    /// files every project is checked against
+    fn candidates(&self, name: &str) -> Vec<String> {
+        let home = self.shepherd.scratch("home");
+        let project = ProjectName::try_from(name).unwrap();
+        let paths = ProjectPaths::under(&home.join("kelpie"), self.shepherd.home(), &project);
+        let tables = Tables {
+            project: Some(self.table_of(name)),
+            kelpie: self.shepherd.section(),
+        };
+        let loaded = source::load(&tables, name, &home, &paths.folder).expect("a readable table");
+        let book = Agents::load(&paths.agents).unwrap();
+        (loaded
+            .settings
+            .lineup(&book, &loaded.kelpie.gateways(), &home))
+        .iter()
+        .map(|r| r.name.to_string())
+        .collect()
+    }
 }
 
 #[tokio::test]
@@ -291,6 +320,24 @@ async fn set_reads_a_number_a_boolean_and_a_word_as_what_they_are() {
     assert_eq!(table["ci"]["fix_attempts"], 3);
     assert_eq!(table["ci"]["block"], true);
     assert_eq!(table["agents"]["reviewers"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn an_old_reviewers_key_loads_and_is_read_by_nothing() {
+    let scene = Scene::new().await;
+    let said = scene.set("agents.reviewers", r#"["spec"]"#).await.unwrap();
+    assert!(said[0].contains("agents.reviewers"), "{said:?}");
+    assert_eq!(
+        scene.table()["agents"]["reviewers"],
+        serde_json::json!(["spec"]),
+        "the key still loads"
+    );
+    assert_eq!(
+        scene.candidates("koji"),
+        EVERY_REVIEWER,
+        "the key names no reviewer: every reviewer file is a candidate, and \
+         `iq3-xxs-review` names a gateway kelpie's settings hold none of"
+    );
 }
 
 #[tokio::test]
@@ -376,7 +423,7 @@ async fn a_table_the_runner_would_refuse_to_run_is_refused_and_nothing_is_writte
     let before = scene.table();
     for (key, value, reason) in [
         ("rulings.pm_alone", r#"["merge"]"#, "pm_alone"),
-        ("agents.reviewers", r#"["no-such-agent"]"#, "no-such-agent"),
+        ("agents.pm", r#""no-such-agent""#, "no-such-agent"),
     ] {
         let refused = scene.set(key, value).await.unwrap_err();
         assert!(refused.contains(reason), "{key}: {refused}");
@@ -451,7 +498,7 @@ async fn an_agent_on_a_gateway_kelpie_has_none_of_is_refused_naming_it_and_nothi
     let mut scene = Scene::keyed_gateway().await;
     let before = scene.table();
     let refused = scene
-        .set("agents.reviewers", r#"["standards", "box"]"#)
+        .set("agents.allow", r#"["standards", "local", "box"]"#)
         .await
         .unwrap_err();
     assert!(refused.contains("box"), "{refused}");
@@ -462,6 +509,32 @@ async fn an_agent_on_a_gateway_kelpie_has_none_of_is_refused_naming_it_and_nothi
     assert!(!refused.contains("KELPIE_TEST_KEY_NEVER_SET"), "{refused}");
     assert_eq!(scene.shepherd.writes(), []);
     assert_eq!(scene.table(), before);
+}
+
+#[tokio::test]
+async fn a_reviewer_on_a_gateway_kelpie_has_none_of_is_no_candidate_when_the_project_names_none() {
+    // With `agents.allow` naming no agent, every reviewer file is a candidate and
+    // none is held to what a round cannot work around, so `box` is left out of
+    // the lineup rather than refused.
+    let scene = Scene::keyed_gateway().await;
+    let candidates = scene.candidates("koji");
+    assert_eq!(
+        candidates,
+        [
+            "coderabbit",
+            "codex",
+            "cubic",
+            "defect-hunter",
+            "defect-hunter-lite",
+            "iq3-xxs-review",
+            "local",
+            "qwen",
+            "spec",
+            "standards",
+        ],
+        "`box` names a gateway kelpie's settings hold none of, and a project that \
+         named no reviewer is held to none of its candidates"
+    );
 }
 
 const WAKE: &str = "a running runner takes it at its next wake";
