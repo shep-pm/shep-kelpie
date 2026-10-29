@@ -556,8 +556,10 @@ impl Agents for FakeClaude {
                 Ok(said("pushed"))
             }
             Some(Scripted::PushMerging(branch, file, text)) => {
-                git(&call.cwd, &["fetch", "--quiet", "origin", branch]);
+                // A clone has no fetch refspec, so the tip is named.
                 let tip = format!("origin/{branch}");
+                let spec = format!("{branch}:refs/remotes/{tip}");
+                git(&call.cwd, &["fetch", "--quiet", "origin", &spec]);
                 git(&call.cwd, &["merge", "--quiet", "--no-edit", &tip]);
                 push(&call.cwd, &[(file, text)], file);
                 Ok(said("pushed"))

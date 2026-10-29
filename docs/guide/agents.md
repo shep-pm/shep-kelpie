@@ -76,7 +76,7 @@ key_env = "PADDOCK_KEY"
 
 `kind` says what the gateway is, which decides how kelpie checks its key and takes a lease on a model. It is `paddock` (the default when `kind` is left out) or `openai`. An unknown kind is refused naming it. `url` is its `http://` address, with its OpenAI routes under `/v1`. `key_env` names the variable in the runner's environment that holds the key the gateway gave kelpie, so set it in the runner sheep's `env`.
 
-The lease dog reads each `paddock` gateway's load with the same key, which the agent board picks a model on it by: one whose load the dog cannot read is never picked. The dog's environment comes from its own entry in the shepherd's `shep.toml` (shep 0.19.0 and later), so set the key there too, then run `shep daemon reload`:
+The lease dog reads each `paddock` gateway's load with the same key, which the agent board picks a model on it by: one whose load the dog cannot read is never picked. The dog's environment comes from its own entry in the shepherd's `shep.toml` (shep 0.19.0 and later), so set the key there too, then run `shep daemon reload` and restart the dog:
 
 ```toml
 [daemon.adopted_dogs.kelpie]
@@ -84,7 +84,7 @@ path = "/home/me/.cargo/bin/shep-kelpie"
 env = { PADDOCK_KEY = "{{secret:PADDOCK_KEY}}" }
 ```
 
-`shep restart kelpie` does not apply it; `shep daemon reload`, or `shep disable kelpie` then `shep enable kelpie`, does. The dog logs a load it cannot read, naming the gateway, the model and, for a key it lacks, the variable, once each time the reason changes. `doctor` reads the entry and says on its `gateway paddock: the dog's key` line whether it sets the key, never what it holds.
+The reload reads the file, and only a fresh spawn hands the dog its `env`: `shep disable kelpie` then `shep enable kelpie`. `shep restart kelpie` and a kelpie upgrade's restart keep the env it was enabled with. A `{{secret:...}}` naming no secret is refused at that enable, which leaves the dog stopped, so check the name with `shep secret list` first. The dog logs a load it cannot read, naming the gateway, the model and, for a key it lacks, the variable, once each time the reason changes. `doctor` reads the entry and says on its `gateway paddock: the dog's key` line whether it sets the key, never what it holds.
 
 Any OpenAI-compatible gateway, such as LiteLLM, OpenRouter or a bare llama.cpp server, takes `kind = "openai"`:
 

@@ -157,7 +157,7 @@ fn the_servers_sandbox_writes_the_worktree_and_build_folder_and_reaches_the_brow
     assert_eq!(policy.services, ["com.apple.FSEvents"]);
     assert!(policy.sockets.is_empty());
     assert!(
-        policy.no_write.iter().any(|p| p.ends_with(".git/config")),
+        policy.no_write.iter().any(|p| p.ends_with("7.git/config")),
         "{:?}",
         policy.no_write
     );

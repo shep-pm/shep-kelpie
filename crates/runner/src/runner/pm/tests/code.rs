@@ -205,7 +205,10 @@ fn one_line_longer_than_the_cap_is_cut_between_characters() {
 fn a_diff_git_cannot_give_is_left_out_and_named_and_the_wake_runs() {
     let (rig, runner, _) = with_open_item("golbat", "src/lib.rs", "pub fn x() {}\n");
     runner.lock().unwrap().take_notes();
-    git(&rig.repo(), &["update-ref", "-d", "refs/heads/kelpie/7"]);
+    git(
+        &rig.worktree_7(),
+        &["update-ref", "-d", "refs/heads/kelpie/7"],
+    );
     // Past the board's refresh, so its next write reads the branch again.
     rig.clock.advance(60);
     wake(&rig, &runner);

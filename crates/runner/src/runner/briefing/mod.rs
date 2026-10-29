@@ -8,6 +8,7 @@
 //! nothing here calls a model: the activity is a file's modified time.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use super::Runner;
@@ -210,19 +211,22 @@ impl Runner {
         }
         // A change saved while git runs marks the board due again.
         self.brief.due = false;
+        let worktrees: BTreeMap<TicketId, PathBuf> = (self.state.work_items.iter())
+            .map(|item| (item.issue, self.paths.worktree(item.issue)))
+            .collect();
         Some(GitJob {
-            repo: self.settings.git.checkout.clone(),
+            repo: git::Reading::of_clones(
+                &self.settings.git.checkout,
+                worktrees.values().map(PathBuf::as_path),
+            ),
             base: self.settings.git.base().to_owned(),
             git: std::mem::take(&mut self.brief.git),
             branches: (self.state.work_items.iter())
                 .map(|item| (item.issue, item.branch.clone()))
                 .collect(),
             bodies: self.brief.bodies.clone(),
-            patches: self.agents.pm.is_some().then(|| {
-                (self.state.work_items.iter())
-                    .map(|item| (item.issue, self.paths.worktree(item.issue)))
-                    .collect()
-            }),
+            worktrees,
+            patches: self.agents.pm.is_some(),
         })
     }
 
