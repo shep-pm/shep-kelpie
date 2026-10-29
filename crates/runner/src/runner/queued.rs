@@ -8,12 +8,15 @@
 
 use std::sync::Mutex;
 
-use super::add::{AddError, Added};
+use super::add::{AddError, Added, Room};
 use super::adopt::AdoptError;
 use super::posted::Queued;
 use super::rework::ReworkError;
 use super::trigger::lock;
 use super::{Answer, Runner};
+use crate::board::{OpenPullRequest, ReadyIssue};
+use crate::ports::{Forge, Tickets};
+use crate::settings::ForgeSlug;
 use crate::ticket::TicketId;
 
 /// Applies every verb queued since the last pass
@@ -47,14 +50,37 @@ fn add(runner: &Mutex<Runner>, ticket: TicketId) -> Result<(), String> {
 }
 
 fn read_and_add(runner: &Mutex<Runner>, ticket: TicketId) -> Result<Added, AddError> {
-    let (tickets, remote) = {
+    let (tickets, forge, remote, room) = {
         let mut held = lock(runner);
         held.looks.poll_reset();
-        held.add_room(ticket)?;
-        (held.ports.tickets.clone(), held.remote.clone())
+        let room = held.add_room(ticket)?;
+        (
+            held.ports.tickets.clone(),
+            held.ports.forge.clone(),
+            held.remote.clone(),
+            room,
+        )
     };
     let found = (tickets.issue(&remote, ticket)).map_err(AddError::Forge)?;
-    lock(runner).add_read(ticket, found)
+    // A queued one goes to the board, which is asked with the two listings a pass reads.
+    // An opened one needs neither.
+    let (listed, open) = match room {
+        Room::Opens => (Vec::new(), Vec::new()),
+        Room::Queues => ask_board_off_lock(tickets.as_ref(), forge.as_ref(), &remote)?,
+    };
+    lock(runner).add_read(ticket, found, listed, open)
+}
+
+// The board's own reads, with the lock let go: the ready issues, and the open pull
+// requests. `Runner::ask_board` reads them on the lock when the verb is asked outright.
+fn ask_board_off_lock(
+    tickets: &dyn Tickets,
+    forge: &dyn Forge,
+    remote: &ForgeSlug,
+) -> Result<(Vec<ReadyIssue>, Vec<OpenPullRequest>), AddError> {
+    let listed = (tickets.ready_issues(remote)).map_err(AddError::Forge)?;
+    let open = (forge.open_pull_requests(remote)).map_err(AddError::Forge)?;
+    Ok((listed, open))
 }
 
 fn rework(runner: &Mutex<Runner>, number: u64) -> Result<(), String> {
@@ -259,6 +285,24 @@ mod tests {
         let status = rig.ask(&runner, "status", None);
         assert_eq!(status["work_item"]["issue"], "8");
         assert_eq!(status["standing"], json!(null), "nothing stands");
+    }
+
+    #[test]
+    fn a_queued_add_for_a_dropped_issue_with_an_open_pull_request_is_refused() {
+        let (rig, runner) = seven_dropped_one_slot_held();
+        // #7's worker had opened its pull request before the drop, and it is still open
+        rig.forge.open_pull_request(80, "fix/seven", &[7]);
+        ask(&runner, Queued::Add(ticket(7)));
+
+        take_up(&runner);
+
+        let refused = "queued `add 7` refused: the board would pass #7 over: \
+                       PR #80 is open for it";
+        assert_eq!(lock(&runner).notes.take(), [refused]);
+        assert_eq!(rig.dropped(), [7], "#7 stays dropped");
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["work_item"]["issue"], "8");
+        assert_eq!(status["standing"], json!([refused]));
     }
 
     #[test]

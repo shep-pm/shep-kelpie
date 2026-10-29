@@ -626,6 +626,42 @@ fn add_with_a_free_slot_still_opens_a_dropped_issue_at_once() {
 }
 
 #[test]
+fn add_refuses_a_dropped_issue_the_board_would_pass_over_for_its_open_pull_request() {
+    let (rig, runner) = seven_dropped_two_slots_held("tropius");
+    // #7's worker had opened its pull request before the drop, and it is still open
+    rig.forge.open_pull_request(80, "fix/seven", &[7]);
+
+    assert_eq!(
+        rig.ask(&runner, "add", Some("7")),
+        json!({ "error": "the board would pass #7 over: PR #80 is open for it" }),
+        "queueing #7 would promise a slot the board never takes"
+    );
+    assert_eq!(rig.dropped(), [7], "#7 stays dropped");
+    assert_eq!(open_items(&rig, &runner), [8, 9]);
+    assert_eq!(
+        said(&runner)
+            .iter()
+            .filter(|line| line.starts_with("#7 skip-cleared"))
+            .count(),
+        0,
+        "no skip is cleared"
+    );
+}
+
+#[test]
+fn add_refuses_a_dropped_issue_the_board_would_pass_over_as_blocked() {
+    let (rig, runner) = seven_dropped_two_slots_held("carkol");
+    rig.forge.block(7, 32);
+
+    assert_eq!(
+        rig.ask(&runner, "add", Some("7")),
+        json!({ "error": "the board would pass #7 over: blocked by #32" })
+    );
+    assert_eq!(rig.dropped(), [7], "#7 stays dropped");
+    assert_eq!(open_items(&rig, &runner), [8, 9]);
+}
+
+#[test]
 fn an_adoption_for_an_issue_in_flight_waits_for_it_to_end() {
     let (rig, runner) = two_free_slots("rotom");
     rig.push_by_hand("fix/seven", "work.txt");
