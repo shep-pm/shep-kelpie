@@ -38,6 +38,7 @@ mod local_rounds;
 mod removed;
 mod repo_setup;
 mod reviewers;
+mod reviews;
 mod rulings;
 mod skills;
 mod tickets;
@@ -65,6 +66,7 @@ pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use local_rounds::{KeepDays, LocalRounds, RoundsFolder};
 pub use repo_setup::{CallRole, MarketplaceSource, Part, PluginId, RepoSetup};
 pub use reviewers::{ListedReviewer, default_reviewers};
+pub use reviews::Reviews;
 pub use rulings::{PM_ALONE, PM_DECIDES, RulingName, Rulings};
 pub use skills::{SkillChoice, SkillName, StepSkills};
 pub use tickets::{TicketSource, Tickets};
@@ -93,6 +95,9 @@ pub struct Settings {
     /// may use, from kelpie's agent files
     #[serde(default)]
     pub agents: RoleAgentNames,
+    /// How many reviewers read each work item. Two when absent.
+    #[serde(default)]
+    pub reviews: Reviews,
     /// Usage pacing
     pub pacing: Pacing,
     /// What every worker is started with

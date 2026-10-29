@@ -191,6 +191,10 @@ mod tests {
             .replace("# implementers =", "implementers =")
             .replace("# implementer_choice =", "implementer_choice =")
             .replace("# fallback_after =", "fallback_after =")
+            .replace(
+                "# [app.dogs.kelpie.reviews]\n# need = 2",
+                "[app.dogs.kelpie.reviews]\nneed = 2",
+            )
             .replace("# maintainer =", "maintainer =")
             .replace("# base =", "base =")
             .replace(

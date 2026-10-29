@@ -5,6 +5,7 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | file | covers | touch (`core/`: `crates/core/src/`, `dog/`: `crates/dog/src/dog/`, `adapters/`: `crates/adapters/src/`, `runner/`: `crates/runner/src/runner/`) |
 |---|---|---|
 | review.md | review, bots, rulings | `runner/{review,ruling}/`, `core/webhook.rs` |
+| review-pick.md | each round's reviewer, `reviews.need` | `runner/review/lineup.rs` |
 | review-outcomes.md | fix turn outcomes | `runner/review/outcomes/` |
 | local-review.md | local reviewers, kept rounds | `runner/review/keep.rs`, `core/settings/{local_rounds,local}.rs`, `adapters/local/` |
 | merge.md | CI, catch-up, merge | `runner/{gate,merge}/`, `runner/close_merged.rs` |

@@ -126,26 +126,27 @@ per_item_usd = 10
 # name is used. Leave it out, or leave it empty (`allow = []`), to allow
 # every agent.
 # allow = ["sonnet-high", "iq3-xxs-review", "defect-hunter-lite", "pm", "representative", "security-reviewer", "triager"]
-# The agents that review each pull request, from the same files, whose
-# role is `reviewer`: each reads it once, in this order. After each one that
-# finds anything above a nit, the worker gets one turn to fix all of that
-# reviewer's findings; a round of nits, or of nothing, goes straight to the
-# next. After the last, the pull request goes to CI. A reviewer whose file
-# sets `paths` runs only on a pull request that changes one of them.
+# The agents that may review each pull request, from the same files, whose
+# role is `reviewer`. The agent board picks each round's reviewer from them,
+# the first it ranks that the pacer lets start, and `reviews.need` of them read
+# it. After each one that finds anything above a nit, the worker gets one
+# turn to fix all of that reviewer's findings; a round of nits, or of nothing,
+# goes straight to the next. After the last to read, the pull request goes to CI.
+# A reviewer whose file sets `paths` runs only on a pull request that changes
+# one of them.
 # `defect-hunter-lite` is kelpie's own: Opus 5.5 at medium, reading for
 # defects once. `defect-hunter` is the same prompt at high effort, which then
 # looks again for what it missed, with one fix turn after both.
 # `iq3-xxs-review` is kelpie's own too: a local model, `iq3_xxs`, behind the
 # gateway named `paddock` in kelpie's settings. The review bots `coderabbit`, `cubic` and
-# `codex` are reviewers too, on files `add` writes but lists nowhere: one
-# listed here, as in `["iq3-xxs-review", "defect-hunter-lite", "coderabbit"]`, reads the
-# pull request in its place, once a pass, after waiting for its window, and
-# its open threads get the one fix turn. Each
+# `codex` are reviewers too, on files `add` writes: one the board picks
+# reads the pull request once a pass, and is passed over, not waited on,
+# while its window is closed. Its open threads get the one fix turn. Each
 # file holds its bot's window, and `rounds` there caps its reads of a work
 # item's pull request. CodeRabbit's free plan reviews public repos only, so
-# a repo GitHub marks private cannot list it. Absent, `iq3-xxs-review` where
-# kelpie's settings hold a gateway named `paddock` and then `defect-hunter-lite`,
-# with no bot; empty, no review at all.
+# a repo GitHub marks private cannot use it. Absent, every reviewer file
+# `agents.allow` holds but the one `contributions.security_reviewer` names
+# is a candidate; empty, no review at all.
 # reviewers = ["iq3-xxs-review", "defect-hunter-lite"]
 # The project manager, from a file whose role is `pm`: kelpie's own `pm` is
 # Opus 5.5 at medium. Code wakes it when a slot is free with two or more
@@ -178,6 +179,13 @@ per_item_usd = 10
 # Read by nothing: the agent board's handoff moves a work item, and
 # `shep kelpie upgrade` deletes it.
 # fallback_after = 15
+
+# How many reviewers read each work item. At least 1; 2 when absent. A pass
+# goes to CI once this many have read, or the agent board ranks no candidate
+# left. A review bot passed over or a reviewer that kept failing does not count,
+# so the next pick takes its place.
+# [app.dogs.kelpie.reviews]
+# need = 2
 
 # Turn `enabled` off for a stretch when usage limits do not matter: neither
 # the daily allowance nor the 5-hour window then holds anything, and `status`
@@ -346,7 +354,7 @@ compact_window = 200000
 # `all`. Anything but `off` needs the GitHub App to cover the repo, or the
 # runner refuses to start: the representative would post as the maintainer.
 # `reviewers` lists agent files, review bots welcome, in the order they run;
-# the project's `agents.reviewers` when absent. `security_reviewer` is the
+# the project's `agents.reviewers` when absent, else kelpie's default pass. `security_reviewer` is the
 # reviewer agent that reads a contribution for security. `quiet_days` and
 # `nudge_days` are whole days above 0, and `nudge_days` is below `quiet_days`.
 # The agent files are checked only when `pick` is not `off`.

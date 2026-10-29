@@ -19,9 +19,9 @@ _Avoid_: harness (the working name before 2026-09-25), control room
    work item for it.
 3. **Build.** A worker implements it inline, opens a draft pull request and
    ends its turn.
-4. **Review.** Each reviewer in the project's list reads the pull request
-   once, in order, and one with any finding, nits included, is followed by
-   one fix turn. The pass ends where it ends: no loop, no judge. No
+4. **Review.** `reviews.need` reviewers, each the agent board's pick for
+   its round, read the pull request once, and one with any finding, nits
+   included, is followed by one fix turn. The pass ends where it ends: no loop, no judge. No
    reviewer reads a head until CI has passed on it, so the worker's push and
    each fix turn's head wait for green first, and a red run goes to the
    worker's CI fix turn before any reviewer reads.
@@ -153,7 +153,9 @@ operator's model.
 
 **Lineup**:
 The agents a project lists for a role, such as `agents.reviewers` or
-`contributions.reviewers`, in order.
+`contributions.reviewers`, in order. A review pass's lineup is its
+candidates: the board picks each round's reviewer from them, so their
+order does not matter.
 _Avoid_: roster, pool
 
 **Harness**:
@@ -200,9 +202,10 @@ edited open issue, and the **triager** runs only on one that fails it.
 _Avoid_: lint, validation, triage
 
 **Reviewer**:
-An agent in a project's review list, `agents.reviewers`. Each reads the
-pull request once, in the list's order, against the issue's acceptance
-criteria. It runs a fresh session on a harness, whose file's body is its
+An agent file whose role is `reviewer`. Each round of a pass goes to the
+agent board's pick among the candidates the pass has not run, and
+`reviews.need` of them read the pull request once, against the issue's
+acceptance criteria. `agents.reviewers`, when set, narrows the candidates. It runs a fresh session on a harness, whose file's body is its
 prompt, or a command, or kelpie's own endpoint reviewer. One with a
 **second look** reads twice, the second time shown what it found the first
 and asked only for what it missed, before its one fix turn. Kelpie ships
@@ -348,9 +351,10 @@ One change to the board, such as a turn ending or a ruling raised, with an
 id that only grows. The PM's cursor names the last one it has read.
 
 **Pass**:
-One run down a project's reviewers, each once, in order. A pass starts
-again from the top only on new code that needs the whole review, such as
-a merge ruling's `rework`.
+One run of a work item's review: `reviews.need` reviewers, each once, each
+round the agent board's pick. It ends sooner when the board ranks no
+candidate left. A pass starts again only on new code that needs the whole
+review, such as a merge ruling's `rework`.
 
 **Finding**:
 One thing a reviewer reports, as `SEVERITY|file:line|what|why`, with a

@@ -571,8 +571,12 @@ impl Runner {
             &settings.repo_setup,
         );
         let plugins_head = crate::skills::default_head(checkout, settings.git.base());
-        check_coderabbit(&remote, &lineup, &ports)?;
-        check_local(&lineup, &ports)?;
+        // Only reviewers the project lists are held to these: a candidate it never
+        // chose is passed over at its round, by the repo's visibility or as down.
+        if settings.agents.reviewers.is_some() {
+            check_coderabbit(&remote, &lineup, &ports)?;
+            check_local(&lineup, &ports)?;
+        }
         let mut state = store.load()?.unwrap_or_default();
         book.hold_for(state.work_items.iter().map(|item| &item.agent))?;
         // An item saved before it recorded its base was cut for the one this start reads.

@@ -45,6 +45,7 @@ impl Rig {
             assert!(s.contains(RIG_REVIEWERS), "the rig's reviewers moved");
             s.replace(RIG_REVIEWERS, RIG_REVIEWERS_AND_CODERABBIT)
         });
+        self.reviews_need(Some(3));
     }
 
     /// Makes the project's `git.merging` `auto`, read when a runner next opens
@@ -215,12 +216,33 @@ impl Rig {
         store.save(&state).unwrap();
     }
 
-    /// Lists `names` as the project's reviewers, read when a runner next opens
+    /// Lists `names` as the project's reviewers, and has each read the pull
+    /// request by setting `reviews.need` to their count, read when a runner next opens
     pub fn reviewers(&self, names: &[&str]) {
         let listed = format!("reviewers = {names:?}\n");
         self.edit_settings(|s| {
             assert!(s.contains(RIG_REVIEWERS), "the rig's reviewers moved");
             s.replace(RIG_REVIEWERS, &listed)
+        });
+        // An empty list reads nobody, and `reviews.need` is at least one.
+        self.reviews_need(Some(names.len().max(1)));
+    }
+
+    /// Sets `reviews.need` to `need`, or leaves it out for the default when
+    /// `None`, read when a runner next opens
+    pub fn reviews_need(&self, need: Option<usize>) {
+        const TABLE: &str = "\n[app.dogs.kelpie.reviews]\nneed = ";
+        self.edit_settings(|mut s| {
+            if let Some(at) = s.find(TABLE) {
+                let end = s[at + TABLE.len()..]
+                    .find('\n')
+                    .map_or(s.len(), |n| at + TABLE.len() + n + 1);
+                s.replace_range(at..end, "");
+            }
+            match need {
+                Some(need) => format!("{s}{TABLE}{need}\n"),
+                None => s,
+            }
         });
     }
 

@@ -192,6 +192,59 @@ fn coderabbit_listed_for_a_repo_that_is_not_public_stops_the_runner() {
     }
 }
 
+// The project names no `agents.reviewers`, so every reviewer file is a candidate.
+fn with_no_reviewers_list(rig: &Rig) {
+    rig.edit_settings(|s| s.replace(crate::test::RIG_REVIEWERS, ""));
+}
+
+#[test]
+fn a_private_repo_with_no_reviewers_list_opens_with_coderabbit_among_the_candidates() {
+    let rig = Rig::new("shep");
+    with_no_reviewers_list(&rig);
+    rig.write_agent(
+        "coderabbit",
+        "---\nrole: reviewer\nharness: bot\nbot: coderabbit\nreviews: 1\nhours: 1\n---\n",
+    );
+    rig.forge.set_visibility(Visibility::Private);
+    let runner = rig.open().expect("a candidate is not a listed reviewer");
+    let bots = runner.lock().unwrap().listed_bots();
+    assert!(!bots.is_empty(), "it is still a candidate");
+}
+
+#[test]
+fn a_local_reviewer_that_is_missing_does_not_stop_a_project_with_no_reviewers_list() {
+    let rig = Rig::new("shep");
+    with_no_reviewers_list(&rig);
+    let gone = rig.home.path().join("bin/gone");
+    rig.write_agent(
+        "gone",
+        &format!(
+            "---\nrole: reviewer\nharness: command\ncommand: {}\n---\n",
+            gone.display()
+        ),
+    );
+    rig.open().expect("a candidate is not a listed reviewer");
+}
+
+#[test]
+fn a_local_reviewer_the_project_lists_that_is_missing_stops_the_runner() {
+    let rig = Rig::new("shep");
+    let gone = rig.home.path().join("bin/gone");
+    rig.write_agent(
+        "gone",
+        &format!(
+            "---\nrole: reviewer\nharness: command\ncommand: {}\n---\n",
+            gone.display()
+        ),
+    );
+    rig.reviewers(&["qwen", "gone"]);
+    let err = rig.open().unwrap_err().to_string();
+    assert!(
+        err.starts_with("setting `agents.reviewers`: gone: cannot run "),
+        "{err}"
+    );
+}
+
 #[test]
 fn coderabbit_listed_for_a_public_repo_asks_the_forge_once() {
     let rig = Rig::new("shep");

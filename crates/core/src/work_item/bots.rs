@@ -10,7 +10,7 @@ use crate::settings::AgentName;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "why", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum BotSkipped {
-    /// Its window opens more than an hour on, so waiting would hold the pass
+    /// Its window is closed, so waiting would hold the pass
     Window {
         /// The bot's reviewer, as the project lists it
         reviewer: AgentName,
@@ -85,7 +85,7 @@ impl BotSkipped {
     /// Why, plainly
     pub fn why(&self) -> String {
         match self {
-            Self::Window { .. } => "its window opens more than an hour on".into(),
+            Self::Window { .. } => "its window is closed".into(),
             Self::Silent { head, .. } => format!(
                 "it never reviewed {} in the wait its agent file allows after its summon",
                 head.get(..7).unwrap_or(head)

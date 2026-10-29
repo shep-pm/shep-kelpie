@@ -1,37 +1,119 @@
 //! Who reviews each round
 //!
-//! Each round goes to the first listed reviewer the pass has not run,
-//! skipping any that cannot run: one limited to paths the pull request does
-//! not change, a local one that has reviewed nothing twice running, or a
-//! review bot that has made its `rounds` of reads. A pass of the bots alone
-//! skips every other reviewer. The pass ends once none is left. A round's
-//! reviewer is kept in its state once it starts, so a round cut short
-//! resumes with the same one.
+//! Each round goes to the agent board's pick among the candidates the pass has
+//! not run that can run: not one limited to paths the pull request leaves
+//! alone, a local one that read nothing twice running, or a bot that has made
+//! its `rounds`. It takes the first ranked one the pacer lets start and, for a
+//! bot, whose window is open now. The pass ends once `reviews.need` reviewers
+//! have read, or the board ranks none left. A kept reviewer resumes its round.
 
 use std::path::Path;
 use std::process::Stdio;
 
 use super::super::Runner;
+use super::super::pace::Walked;
+use super::super::report::Begin;
+use crate::lease::door::PickAsk;
+use crate::pacer::Scope;
 use crate::ports::Timestamp;
 use crate::settings::{AgentName, ListedReviewer, NonBlank};
-use crate::work_item::{Phase, Review, WorkItem};
+use crate::state::StateError;
+use crate::work_item::{BotSkipped, Phase, Review, WorkItem};
+
+/// What a round's step does about who reads it
+pub(super) enum Chosen {
+    /// This reviewer reads
+    Reviewer(ListedReviewer),
+    /// The pass is over
+    Ended,
+    /// The board ranked none of these candidates, which could run
+    Unranked(Vec<AgentName>),
+    /// The step does this instead, and is made again
+    Instead(Box<Begin>),
+    /// The changed files could not be listed, for this reason
+    Failed(String),
+}
 
 impl Runner {
-    /// Who reviews `review`'s round in `worktree`, diffed from `base`, or
-    /// none once the pass has run every reviewer that can run
+    /// Who reviews `review`'s round in `worktree`, diffed from `base`: the
+    /// board's first pick the pass has not run that the pacer lets start and,
+    /// for a review bot, whose window is open, or that the pass is over
     ///
-    /// # Errors
-    ///
-    /// A message when git cannot list the changed files.
+    /// A board that cannot be reached picks nobody, and the round asks again.
     pub(super) fn choose_reviewer(
+        &mut self,
+        review: &Review,
+        worktree: &Path,
+        base: &str,
+    ) -> Result<Chosen, StateError> {
+        if let Some(reviewer) = review.reviewer.as_ref().and_then(|n| self.listed(n)) {
+            return Ok(Chosen::Reviewer(reviewer));
+        }
+        let due = match self.due(review, worktree, base) {
+            Ok(due) => due,
+            Err(reason) => return Ok(Chosen::Failed(reason)),
+        };
+        let Some(item) = self.current().filter(|_| !self.enough_read(review)) else {
+            return Ok(Chosen::Ended);
+        };
+        let Some(number) = item.pull_request else {
+            return Ok(Chosen::Ended);
+        };
+        let ask = PickAsk {
+            kind: item.kind.clone(),
+            tier: item.tier,
+            pin: None,
+            slack: Some(self.slack(item.slack)),
+            agents: due.iter().map(|r| r.name.clone()).collect(),
+            leave_out: self.ran_of(review),
+        };
+        let Ok(picks) = self.board_picks(&ask) else {
+            return Ok(Chosen::Instead(Box::new(Begin::Idle)));
+        };
+        let now = self.ports.clock.now();
+        let ranked: Vec<AgentName> = picks.into_iter().map(|pick| pick.agent).collect();
+        if ranked.is_empty() {
+            return Ok(Chosen::Unranked(ask.agents));
+        }
+        // A bot whose window is closed is passed over, and not waited on.
+        if let Some((first, opens)) = ranked
+            .first()
+            .and_then(|first| Some((first, self.window_opens(first, now)?)))
+        {
+            let reviewer = first.clone();
+            self.update(|item| {
+                if let Phase::Review(round) = &mut item.phase {
+                    round.reviewer = Some(reviewer.clone());
+                }
+            })?;
+            let skipped = BotSkipped::Window {
+                reviewer: first.clone(),
+                opens,
+            };
+            return self
+                .pass_over(number, skipped)
+                .map(|begin| Chosen::Instead(Box::new(begin)));
+        }
+        let open: Vec<&AgentName> = (ranked.iter())
+            .filter(|agent| self.window_opens(agent, now).is_none())
+            .collect();
+        if open.is_empty() {
+            return Ok(Chosen::Ended);
+        }
+        Ok(match self.first_unpaced(open, Scope::Turn)? {
+            Walked::Opens(name) => (self.listed(&name)).map_or(Chosen::Ended, Chosen::Reviewer),
+            Walked::Reads(reads) => Chosen::Instead(Box::new(reads)),
+            Walked::Held { first, .. } => Chosen::Instead(Box::new(first.unwrap_or(Begin::Idle))),
+        })
+    }
+
+    // The candidates `review`'s pass has not run that can run now.
+    fn due(
         &self,
         review: &Review,
         worktree: &Path,
         base: &str,
-    ) -> Result<Option<ListedReviewer>, String> {
-        if let Some(reviewer) = review.reviewer.as_ref().and_then(|n| self.listed(n)) {
-            return Ok(Some(reviewer));
-        }
+    ) -> Result<Vec<ListedReviewer>, String> {
         let ran = self.ran_of(review);
         let changed = match self.lineup.iter().any(|r| !r.paths.is_empty()) {
             true => changed_files(&self.settings.git.checkout, worktree, base)?,
@@ -56,7 +138,27 @@ impl Runner {
             kind && touched && !(r.is_local() && down(r)) && !read_out(r)
         };
         let due = |r: &&ListedReviewer| !ran.contains(&r.name) && runs(r);
-        Ok(self.lineup.iter().find(due).cloned())
+        Ok(self.lineup.iter().filter(due).cloned().collect())
+    }
+
+    // Whether `reviews.need` reviewers have read in `review`'s pass: those whose
+    // round ran, but a bot passed over or a reviewer that kept failing.
+    fn enough_read(&self, review: &Review) -> bool {
+        let Some(item) = self.current() else {
+            return false;
+        };
+        let counts = |name: &&AgentName| {
+            let passed_over = item.bots_skipped.iter().any(|s| s.reviewer() == *name);
+            !passed_over && !item.reviewers_skipped.contains(name)
+        };
+        let read = self.ran_of(review).iter().filter(counts).count();
+        u32::try_from(read).map_or(true, |read| read >= self.settings.reviews.need.get())
+    }
+
+    // When the window of `reviewer`, if a review bot, opens, while it is closed at `now`.
+    fn window_opens(&self, reviewer: &AgentName, now: Timestamp) -> Option<Timestamp> {
+        let bot = self.listed(reviewer).and_then(|r| r.bot())?;
+        self.ports.leases.opens(&bot.bot.lease(), bot.window, now)
     }
 
     // The reviewers `review`'s pass has run. A state file saved before `ran`
@@ -72,7 +174,8 @@ impl Runner {
     }
 
     /// Where the review goes once `review`'s reviewer is done: the next
-    /// reviewer's round, or CI at `now` once none is left to run
+    /// round, or CI at `now` once `reviews.need` reviewers have read or no
+    /// candidate is left to run
     ///
     /// A pass with a bot it went on without ends in a round step of its own,
     /// which first reads whether that bot reviewed the head since.
@@ -82,18 +185,19 @@ impl Runner {
         let Some(item) = self.current() else {
             return Phase::Review(next);
         };
-        match self.choose_reviewer(
-            &next,
-            &item.worktree,
-            &item.review_base(self.item_base(item)),
-        ) {
-            Ok(None) if !next.unread && item.bots_skipped.is_empty() => Phase::Ci {
+        let base = item.review_base(self.item_base(item));
+        // A diff git could not take is the next round's step to report, and a
+        // pass no reviewer read ends in a step of its own, which says so.
+        let over = self.enough_read(&next)
+            || self
+                .due(&next, &item.worktree, &base)
+                .is_ok_and(|due| due.is_empty());
+        match over && !next.unread && item.bots_skipped.is_empty() {
+            true => Phase::Ci {
                 head: None,
                 since: now,
             },
-            // A diff git could not take is the next round's step to report,
-            // and a pass no reviewer read ends in a step of its own, which says so.
-            Ok(_) | Err(_) => Phase::Review(next),
+            false => Phase::Review(next),
         }
     }
 

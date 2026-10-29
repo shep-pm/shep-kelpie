@@ -28,7 +28,7 @@ fn cubic() -> LeaseKind {
 }
 
 // A project listing the rig's qwen and Claude rounds, then `bots`.
-pub(super) fn listing(project: &str, bots: &[&str]) -> Rig {
+pub(in crate::runner) fn listing(project: &str, bots: &[&str]) -> Rig {
     let rig = Rig::new(project);
     let names: Vec<&str> = ["qwen", "claude"]
         .into_iter()
@@ -101,7 +101,11 @@ pub(super) fn summoned(head: &str) -> Option<StepReport> {
     })
 }
 
-pub(super) fn bot_reviewed(round: u32, bot: &'static str, open: usize) -> Option<StepReport> {
+pub(in crate::runner) fn bot_reviewed(
+    round: u32,
+    bot: &'static str,
+    open: usize,
+) -> Option<StepReport> {
     Some(StepReport::BotReviewed {
         issue: ticket(7),
         pull_request: 71,
@@ -226,7 +230,7 @@ fn a_cubic_refusal_closes_its_window_for_its_span_and_the_pass_goes_on_to_codera
             pull_request: 71,
             round: 3,
             reviewer: AgentName::kelpies("cubic"),
-            reason: "its window opens more than an hour on".into(),
+            reason: "its window is closed".into(),
         })
     );
     assert!(

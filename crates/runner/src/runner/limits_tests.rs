@@ -51,7 +51,9 @@ fn named(project: &str, (ranked, names): Agents) -> (Rig, Mutex<Runner>) {
         }
     });
     if !ranked.is_empty() {
-        rig.agent_board.ranks(ranked);
+        // The reviewers too, which each review round asks the board to rank.
+        let reviewers = ["qwen", "claude", "codex-review", "coder-review"];
+        rig.agent_board.ranks(&[ranked, &reviewers[..]].concat());
     }
     let runner = rig.open().unwrap();
     (rig, runner)

@@ -157,10 +157,12 @@ impl Runner {
             let coderabbit = |r: &ListedReviewer| r.bot().is_some_and(|b| b.bot == Bot::Coderabbit);
             lineup.iter().any(coderabbit)
         };
-        if listed(&lineup) && !listed(&self.lineup) {
+        // As a start does, only the reviewers the project lists are checked.
+        let chosen = settings.agents.reviewers.is_some();
+        if chosen && listed(&lineup) && !listed(&self.lineup) {
             check_coderabbit(&self.remote, &lineup, &self.ports)?;
         }
-        if lineup != self.lineup {
+        if chosen && lineup != self.lineup {
             check_local(&lineup, &self.ports)?;
         }
         crate::skills::check(&settings.skills, &self.paths.skills)?;

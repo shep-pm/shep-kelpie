@@ -437,6 +437,17 @@ fn lineup(settings: &Settings) -> Result<Vec<String>, String> {
     Ok(lineup.iter().map(|r| r.name.to_string()).collect())
 }
 
+// The reviewer files of `book` a pass with no `agents.reviewers` may pick from
+const EVERY_REVIEWER: [&str; 7] = [
+    "coderabbit",
+    "codex",
+    "cubic",
+    "defect-hunter",
+    "defect-hunter-lite",
+    "spec",
+    "standards",
+];
+
 #[test]
 fn an_absent_allow_lets_every_agent_through_as_before() {
     let settings = project("pm = \"pm\"\n");
@@ -447,7 +458,7 @@ fn an_absent_allow_lets_every_agent_through_as_before() {
     settings.representative(&book()).unwrap();
     settings.triager(&book()).unwrap();
     settings.security_reviewer(&book()).unwrap();
-    assert_eq!(lineup(&settings).unwrap(), ["defect-hunter-lite"]);
+    assert_eq!(lineup(&settings).unwrap(), EVERY_REVIEWER);
 }
 
 #[test]
@@ -459,7 +470,7 @@ fn an_empty_allow_allows_every_agent_as_an_absent_one_does() {
     settings.representative(&book()).unwrap();
     settings.triager(&book()).unwrap();
     settings.security_reviewer(&book()).unwrap();
-    assert_eq!(lineup(&settings).unwrap(), ["defect-hunter-lite"]);
+    assert_eq!(lineup(&settings).unwrap(), EVERY_REVIEWER);
     let allow = settings.agents.allow.as_ref().unwrap();
     assert!(allow.holds(&AgentName::kelpies("anything-at-all")));
 }
@@ -511,7 +522,7 @@ fn an_implementer_allow_leaves_out_is_no_pick_for_the_board() {
 }
 
 #[test]
-fn a_listed_or_default_reviewer_allow_leaves_out_is_refused() {
+fn a_listed_reviewer_or_a_contributions_default_allow_leaves_out_is_refused() {
     let listed = project("allow = [\"sonnet-high\"]\nreviewers = [\"defect-hunter\"]\n");
     assert_eq!(
         lineup(&listed).unwrap_err(),
@@ -521,7 +532,14 @@ fn a_listed_or_default_reviewer_allow_leaves_out_is_refused() {
 
     let default = project("allow = [\"sonnet-high\"]\n");
     assert_eq!(
-        lineup(&default).unwrap_err(),
+        lineup(&default).unwrap(),
+        Vec::<String>::new(),
+        "a pass picks only from the reviewers allowed"
+    );
+    let err =
+        (default.contribution_lineup(&book(), &Gateways::default(), Path::new("/h"))).unwrap_err();
+    assert_eq!(
+        err.to_string(),
         "setting `agents`: `agents.reviewers` names defect-hunter-lite, which `agents.allow` \
          leaves out: add it to `agents.allow`, or list other reviewers in `agents.reviewers`"
     );
