@@ -267,7 +267,7 @@ ntfy = "yes"
 
 [webhook.token]
 what = "Kelpie sends a token beside the URL"
-discord = { cannot = "a Discord webhook's URL is its credential", doc = "docs/design/review.md", says = "URL is a credential" }
+discord = { cannot = "a Discord webhook's URL is its credential", doc = "docs/design/rulings.md", says = "URL is a credential" }
 ntfy = "yes"
 
 [gateway]

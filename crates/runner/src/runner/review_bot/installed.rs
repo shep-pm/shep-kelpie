@@ -12,12 +12,18 @@ use crate::state::StateError;
 use crate::work_item::BotSkipped;
 
 impl Runner {
-    // Whether the forge says `bot` has never reviewed on this repo. A forge
-    // that cannot say leaves the bot to its wait. A review once seen is
-    // remembered, so a silent summon asks the forge once.
-    pub(super) fn never_reviewed(&mut self, bot: Bot) -> bool {
+    /// Whether the forge says `bot` has never reviewed on this repo
+    ///
+    /// A forge that cannot say leaves the bot to its wait. A review once seen
+    /// is remembered, so a silent summon asks the forge once, and takes the
+    /// bot back into the project's picks.
+    ///
+    /// # Errors
+    ///
+    /// [`StateError`] when the state cannot be saved after a review seen.
+    pub(super) fn never_reviewed(&mut self, bot: Bot) -> Result<bool, StateError> {
         if self.bots_reviewed.contains(&bot) {
-            return false;
+            return Ok(false);
         }
         let profile = self.profile(bot);
         let last = self
@@ -27,10 +33,15 @@ impl Runner {
         match last {
             Ok(Some(_)) => {
                 self.bots_reviewed.insert(bot);
-                false
+                if !self.state.bots_left_out.is_empty() {
+                    let mut saved = self.state.clone();
+                    self.bot_back_in(&mut saved, bot);
+                    self.save(saved)?;
+                }
+                Ok(false)
             }
-            Ok(None) => true,
-            Err(_) => false,
+            Ok(None) => Ok(true),
+            Err(_) => Ok(false),
         }
     }
 

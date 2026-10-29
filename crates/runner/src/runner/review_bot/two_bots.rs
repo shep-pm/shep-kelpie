@@ -48,7 +48,7 @@ pub(super) fn reviewed(rig: &Rig) -> (Mutex<Runner>, String) {
 
 // Issue `issue`'s pull request, numbered ten times it plus one, brought to
 // the same point.
-pub(super) fn item_reviewed(rig: &Rig, runner: &Mutex<Runner>, issue: u64) -> String {
+pub(in crate::runner) fn item_reviewed(rig: &Rig, runner: &Mutex<Runner>, issue: u64) -> String {
     let branch = format!("kelpie/{issue}");
     rig.ask(runner, "add", Some(&issue.to_string()));
     rig.forge

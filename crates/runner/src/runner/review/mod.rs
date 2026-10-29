@@ -13,6 +13,8 @@ mod attached;
 mod awaited;
 #[cfg(test)]
 mod axes;
+#[cfg(test)]
+mod bots_left_out;
 pub(super) mod calls;
 mod checks;
 mod criteria;
