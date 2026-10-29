@@ -1,13 +1,13 @@
 //! `shep kelpie settings migrate`: writes the keys each project's table is missing
 //!
 //! A project's old `rulings.pm_alone` list becomes `rulings.pm_decides`, and
-//! each kind of ruling the map lacks is written at its default; a key there is
-//! never changed. The keys of the panel, the issue writer and the implementer
-//! list the agent board replaced ([`GONE_KEYS`]) are deleted and named with the
-//! value each held, with the gone roles in `repo_setup.roles`
-//! ([`GONE_ROLES`]) and the `unlabelled` kind. `agents.reviewers` goes too, its
-//! names joining an `agents.allow` that is already a list. Each table is then
-//! checked as `set` checks it, and one the runner would refuse is not written.
+//! each kind the map lacks is written at its default; a key there is never
+//! changed. The panel's keys, the issue writer's and the implementer list the
+//! agent board replaced ([`GONE_KEYS`]) are deleted and named with the value
+//! each held, with the gone roles in `repo_setup.roles` ([`GONE_ROLES`]) and
+//! the `unlabelled` kind. `agents.reviewers` goes too: its names join an
+//! `agents.allow` that is already a list, and `contributions.reviewers` where
+//! the project names none. Each table is checked as `set` checks it.
 
 use std::process::ExitCode;
 
@@ -37,6 +37,9 @@ const REVIEWERS: &str = "agents.reviewers";
 
 /// Where they join them
 const ALLOW: &str = "agents.allow";
+
+/// Where they go when the project names no reviewers of its own for a contribution
+const CONTRIBUTION_REVIEWERS: &str = "contributions.reviewers";
 
 /// The list of roles that may still name a role that is gone
 const ROLES: &str = "repo_setup.roles";
@@ -176,24 +179,24 @@ fn inline(value: &Value) -> String {
 }
 
 // Moves the names `agents.reviewers` lists into `agents.allow` when that is
-// already a list, each name once, and deletes the key: an absent or empty
-// `allow` is left as it is, since every reviewer file is allowed already and a
-// list of reviewers alone would refuse every implementer. Says what it changed.
+// already a list, each name once, and into `contributions.reviewers` when the
+// project names none there, so a contribution keeps the reviewers its project
+// named. Deletes the key either way. Says what it changed.
 fn reviewers(table: &mut Map<String, Value>) -> (Vec<String>, Option<String>) {
     let (outer, key) = leaves(REVIEWERS);
     let Some(agents) = table.get_mut(outer).and_then(Value::as_object_mut) else {
         return (Vec::new(), None);
     };
-    let Some(Value::Array(listed)) = agents.get(key) else {
+    let Some(Value::Array(held)) = agents.get(key) else {
         return (Vec::new(), None);
     };
-    let listed = listed.clone();
+    let named = each_once(held);
     let joined = agents
         .get_mut(leaves(ALLOW).1)
         .and_then(Value::as_array_mut)
         .filter(|allow| !allow.is_empty())
-        .map(|allow| {
-            let missing: Vec<Value> = (listed.iter())
+        .and_then(|allow| {
+            let missing: Vec<Value> = (named.iter())
                 .filter(|name| !allow.contains(name))
                 .cloned()
                 .collect();
@@ -205,7 +208,36 @@ fn reviewers(table: &mut Map<String, Value>) -> (Vec<String>, Option<String>) {
     let removed = agents
         .remove(key)
         .map(|value| format!("{REVIEWERS} = {}", inline(&value)));
-    (joined.flatten().into_iter().collect(), removed)
+    let carried = carried(table, &named);
+    (joined.into_iter().chain(carried).collect(), removed)
+}
+
+// `names` with each name once, in the order the list held them
+fn each_once(names: &[Value]) -> Vec<Value> {
+    let mut seen: Vec<Value> = Vec::new();
+    for name in names {
+        if !seen.contains(name) {
+            seen.push(name.clone());
+        }
+    }
+    seen
+}
+
+// Writes `named` where a contribution's pass reads its reviewers, when the
+// project names none of its own. A list already there is left as it is, and so
+// is a `contributions` that is no table at all: the check refuses that one.
+fn carried(table: &mut Map<String, Value>, named: &[Value]) -> Option<String> {
+    let (outer, key) = leaves(CONTRIBUTION_REVIEWERS);
+    let contributions = table
+        .entry(outer)
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()?;
+    if contributions.contains_key(key) {
+        return None;
+    }
+    let list = Value::Array(named.to_vec());
+    contributions.insert(key.to_owned(), list.clone());
+    Some(format!("{CONTRIBUTION_REVIEWERS} = {}", inline(&list)))
 }
 
 // Deletes the roles that are gone from `repo_setup.roles`, and names each it deleted.

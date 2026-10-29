@@ -12,7 +12,7 @@ Whether and how kelpie picks up other people's pull requests. It sees and lists 
 
 ## Checks at start
 
-- `Settings::contribution_lineup` shares its body with `lineup` (`crates/core/src/settings/reviewers/mod.rs`), so the bot-order check applies. Its refusals name `contributions.reviewers` when that key is set, and `agents.reviewers` when it falls back.
+- `Settings::contribution_lineup` shares `lineup`'s body (`settings/reviewers/mod.rs`), so the bot-order check applies. Its refusals name `contributions.reviewers` for its own list and kelpie's default, and `agents.reviewers` when it falls back.
 - Agent files are checked only when `pick` is not `off`, so a project that never opts in needs none.
 - `Runner::open` refuses a `pick` other than `off` when `ports.voice.covers(&remote)` is false: `SettingsError::Invalid` on `contributions.pick`. The representative would otherwise post as the maintainer, which no worker or reviewer may do. `pick = "off"` starts on any repo. `crates/runner/src/runner/mod.rs`
 - `Settings::security_reviewer` checks, whenever `pick` is not `off`, that `security_reviewer` has a file whose role is `reviewer` and that runs sessions. `Runner::open` calls it.

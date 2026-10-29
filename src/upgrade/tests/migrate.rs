@@ -274,7 +274,11 @@ async fn a_bare_upgrade_moves_a_listed_reviewers_list_into_a_listed_allow() {
         .find(|l| l.starts_with("project koji: "))
         .unwrap_or_else(|| panic!("{said:?}"));
     assert!(
-        wrote.contains("agents.allow = [\"sonnet-high\", \"standards\"]; removed "),
+        wrote.contains("agents.allow = [\"sonnet-high\", \"standards\"], contributions.reviewers"),
+        "{wrote}"
+    );
+    assert!(
+        wrote.contains("contributions.reviewers = [\"standards\"]; removed "),
         "{wrote}"
     );
     assert!(
@@ -289,6 +293,11 @@ async fn a_bare_upgrade_moves_a_listed_reviewers_list_into_a_listed_allow() {
         serde_json::json!(["sonnet-high", "standards"])
     );
     assert_eq!(agents.get("reviewers"), None);
+    assert_eq!(
+        written["contributions"]["reviewers"],
+        serde_json::json!(["standards"]),
+        "a contribution keeps the reviewers the project named"
+    );
 }
 
 #[tokio::test]

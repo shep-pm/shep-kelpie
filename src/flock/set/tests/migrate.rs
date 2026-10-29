@@ -1,7 +1,7 @@
 //! `settings migrate` against the stand-in shepherd's flock
 
 use super::*;
-use crate::settings::RulingName;
+use crate::settings::{Gateways, RulingName};
 
 impl Scene {
     async fn migrate(&self) -> Result<Vec<String>, String> {
@@ -300,7 +300,8 @@ async fn a_reviewers_list_joins_a_listed_allow_and_is_deleted() {
 
     assert!(
         said[1].contains(
-            "agents.allow = [\"sonnet-high\", \"standards\", \"spec\"]; \
+            "agents.allow = [\"sonnet-high\", \"standards\", \"spec\"], \
+             contributions.reviewers = [\"standards\", \"spec\"]; \
              removed agents.reviewers = [\"standards\", \"spec\"]"
         ),
         "{said:?}"
@@ -311,6 +312,10 @@ async fn a_reviewers_list_joins_a_listed_allow_and_is_deleted() {
     assert_eq!(
         agents["allow"],
         serde_json::json!(["sonnet-high", "standards", "spec"])
+    );
+    assert_eq!(
+        read["contributions"]["reviewers"],
+        serde_json::json!(["standards", "spec"])
     );
 
     assert_eq!(scene.shepherd.writes().len(), 2, "one write per project");
@@ -343,6 +348,13 @@ async fn with_no_allow_a_reviewers_list_is_deleted_and_no_allow_is_written() {
         serde_json::json!([]),
         "an empty one stays empty"
     );
+    for table in [eevee_table, koji_table] {
+        assert_eq!(
+            table["contributions"]["reviewers"],
+            serde_json::json!(["standards"]),
+            "a contribution keeps the reviewers its project named"
+        );
+    }
 }
 
 #[tokio::test]
@@ -360,5 +372,67 @@ async fn a_reviewer_already_allowed_is_not_written_twice() {
         agents["allow"],
         serde_json::json!(["standards", "opus-high", "spec"]),
         "each name once, in the order the lists held them"
+    );
+}
+
+#[tokio::test]
+async fn a_reviewers_list_that_names_one_name_twice_writes_it_once() {
+    let table = with_agents("allow = [\"sonnet-high\"]\nreviewers = [\"spec\", \"spec\"]");
+    let scene = Scene::holding(&table).await;
+
+    let said = scene.migrate().await.unwrap();
+
+    assert!(
+        said[1].contains("contributions.reviewers = [\"spec\"]"),
+        "{said:?}"
+    );
+    let read = scene.table();
+    assert_eq!(
+        agents_of(&read)["allow"],
+        serde_json::json!(["sonnet-high", "spec"]),
+        "{read:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_project_that_names_its_own_contribution_reviewers_keeps_them() {
+    let agents = with_agents("allow = [\"sonnet-high\"]\nreviewers = [\"standards\"]");
+    let table = format!("{agents}\n[contributions]\nreviewers = [\"spec\"]\n");
+    let scene = Scene::holding(&table).await;
+
+    scene.migrate().await.unwrap();
+
+    let read = scene.table();
+    assert_eq!(
+        read["contributions"]["reviewers"],
+        serde_json::json!(["spec"])
+    );
+    assert_eq!(
+        agents_of(&read)["allow"],
+        serde_json::json!(["sonnet-high", "standards"]),
+        "the reviewers the project named are still allowed"
+    );
+}
+
+#[tokio::test]
+async fn a_migrated_project_still_runs_the_reviewers_it_named_on_a_contribution() {
+    let agents = with_agents("allow = [\"sonnet-high\"]\nreviewers = [\"standards\"]");
+    let scene = Scene::holding(&format!("{agents}\n[contributions]\npick = \"all\"\n")).await;
+
+    scene.migrate().await.unwrap();
+
+    let home = scene.shepherd.scratch("home");
+    let name = ProjectName::try_from("koji").unwrap();
+    let paths = ProjectPaths::under(&home.join("kelpie"), scene.shepherd.home(), &name);
+    let table = scene.table();
+    let settings = Settings::from_table(&table, "koji", &home, &paths.folder).unwrap();
+    let book = Agents::load(&home.join("kelpie").join("agents")).unwrap();
+    let lineup = settings
+        .contribution_lineup(&book, &Gateways::default(), &home)
+        .unwrap();
+    assert_eq!(
+        lineup.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+        ["standards"],
+        "the pass runs the reviewers the project named, not kelpie's defaults"
     );
 }
