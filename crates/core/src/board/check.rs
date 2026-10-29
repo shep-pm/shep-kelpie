@@ -200,10 +200,17 @@ pub fn check(title: &str, body: &str, labels: &[String]) -> Vec<Failure> {
     failures
 }
 
+/// The version of the check's rules, which [`key`] takes in
+///
+/// Raise it with any change to what [`check`] refuses: every issue is then
+/// checked once more, and each that now fails is owed a new triage pass.
+pub const VERSION: u32 = 2;
+
 /// A digest of what [`check`] reads of an issue, which an edit changes
 ///
-/// Its title, its body, and its priority and kind labels in any order. A label
-/// the check does not read, such as a triage label, changes nothing.
+/// Its title, its body, its priority and kind labels in any order, and the
+/// check's [`VERSION`]. A label the check does not read, such as a triage
+/// label, changes nothing.
 pub fn key(title: &str, body: &str, labels: &[String]) -> u64 {
     let mut read: Vec<String> = (labels.iter())
         .filter(|l| is_priority_label(l) || kind_of(l).is_some())
@@ -211,7 +218,12 @@ pub fn key(title: &str, body: &str, labels: &[String]) -> u64 {
         .collect();
     read.sort();
     read.dedup();
-    let text = format!("{}\0{}\0{}", title.trim(), body.trim(), read.join("\0"));
+    let text = format!(
+        "v{VERSION}\0{}\0{}\0{}",
+        title.trim(),
+        body.trim(),
+        read.join("\0")
+    );
     fnv1a(text.as_bytes())
 }
 

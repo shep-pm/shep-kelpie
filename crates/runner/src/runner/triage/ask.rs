@@ -92,10 +92,7 @@ impl Runner {
         if self.settings.triage.pick == TriagePick::All {
             return true;
         }
-        match self.maintainer() {
-            Ok(login) => login.eq_ignore_ascii_case(author),
-            Err(_) => false,
-        }
+        self.own_author(author)
     }
 
     // What `author` may be asked: the role `triage.authors` lists them in, else
@@ -110,9 +107,9 @@ impl Runner {
         if let Some(role) = self.settings.triage.role_of(author) {
             return role;
         }
-        match self.maintainer() {
-            Ok(login) if login.eq_ignore_ascii_case(author) => AuthorRole::Maintainer,
-            _ => AuthorRole::of(association),
+        match self.own_author(author) {
+            true => AuthorRole::Maintainer,
+            false => AuthorRole::of(association),
         }
     }
 

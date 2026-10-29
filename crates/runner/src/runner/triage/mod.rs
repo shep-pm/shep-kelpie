@@ -3,9 +3,9 @@
 //! The runner lists the open issues once a board poll ([`poll_read`]) and checks
 //! them ([`checks`]). While `triage.pick` is not `off`, `status` lists as due,
 //! oldest first, each the check refused that carries no [`TRIAGE_LABELS`] but
-//! `ready-for-agent` or a `needs-triage` above `pruned_through`, opened after
-//! `triage.since` by no bot, and under `maintainer` by the maintainer.
-//! [`Runner::triage_due`] starts one research call at a time ([`flight::triage`]),
+//! `ready-for-agent` or a `needs-triage` above `pruned_through`, opened by a person
+//! or the App after `triage.since` (a `ready-for-agent` one at any time), and under
+//! `maintainer` by the maintainer or the App. [`Runner::triage_due`] starts one research call at a time ([`flight::triage`]),
 //! on the oldest or the issue `shep kelpie triage` queued; [`research`] reads its
 //! reply, [`comment`] posts it, and [`ready`] rewrites a maintainer's issue.
 
@@ -644,26 +644,42 @@ impl Runner {
     }
 }
 
-// Whether `issue` is untouched, `owed` the triager for a failed check, opened after
-// `since`, and by `only` when one is named. `needs-triage`, and a `ready-for-agent`
-// the check refused, are no decision: whether kelpie triaged an issue is its record,
-// and past `pruned_through`, where that may be gone, kelpie's own `needs-triage`.
+// Whether `login` is the App's own, as the App's login names it, with or without
+// its `[bot]`
+fn is_app(login: &str, app: Option<&str>) -> bool {
+    app.is_some_and(|app| plain_login(app) == plain_login(login))
+}
+
+// Whether a person or the project's own App opened `issue`: any other bot's is no
+// work for the check or the triager
+pub(super) fn opened_by_us_or_people(issue: &OpenIssue, app: Option<&str>) -> bool {
+    !issue.author_is_bot || is_app(&issue.author, app)
+}
+
+// Whether `issue` is untouched, `owed` the triager for a failed check, and opened by
+// no bot but the App, after `since` unless it carries `ready-for-agent`, and by
+// `only` or the App when one is named. `needs-triage` and a refused `ready-for-agent`
+// are no decision: that is kelpie's record, and past `pruned_through` its own label.
 fn untouched(
     issue: &OpenIssue,
     since: Timestamp,
     pruned_through: u64,
     only: Option<&str>,
     owed: bool,
+    app: Option<&str>,
 ) -> bool {
     let decided = (issue.labels.iter()).any(|l| {
         TRIAGE_LABELS.contains(&l.as_str())
             && (l != TRIAGE || issue.number <= pruned_through)
             && l != READY
     });
+    let held = issue.labels.iter().any(|l| l == READY);
     owed && !decided
-        && !issue.author_is_bot
-        && issue.created > since
-        && only.is_none_or(|login| issue.author.eq_ignore_ascii_case(login))
+        && opened_by_us_or_people(issue, app)
+        && (held || issue.created > since)
+        && only.is_none_or(|login| {
+            issue.author.eq_ignore_ascii_case(login) || is_app(&issue.author, app)
+        })
 }
 
 // The question texts a questions block asks: the lines `questions_block`
@@ -699,6 +715,8 @@ mod local_tests;
 mod mention_tests;
 #[cfg(test)]
 mod pick_tests;
+#[cfg(test)]
+mod reach_tests;
 #[cfg(test)]
 mod ready_tests;
 #[cfg(test)]

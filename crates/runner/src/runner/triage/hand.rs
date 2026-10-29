@@ -12,26 +12,27 @@
 use super::super::Runner;
 use super::super::contributions::post::forge_is_busy;
 use super::comment::NEEDS_TRIAGE;
-use super::{TRIAGE_LABELS, ticket};
+use super::{TRIAGE_LABELS, is_app, ticket};
 use crate::board::{READY, TRIAGE};
 use crate::ports::{ForgeError, OpenIssue, OpenPull, Timestamp};
 use crate::state::{StateError, TriageStep, Triaged};
 
-// Whether `issue` is the maintainer's, opened since `since`, and carries no
-// triage decision other than `ready-for-agent` and `needs-triage`
+// Whether `issue` is the maintainer's or the App's, carries no triage decision
+// other than `ready-for-agent` and `needs-triage`, and is opened since `since`
+// or carries `ready-for-agent`, which the board holds whatever its age
 fn maintainers_undecided(
     issue: &OpenIssue,
     since: Timestamp,
     pruned_through: u64,
     maintainer: &str,
+    app: Option<&str>,
 ) -> bool {
     let decided = (issue.labels.iter())
         .any(|l| l != READY && l != TRIAGE && TRIAGE_LABELS.contains(&l.as_str()));
     !decided
-        && !issue.author_is_bot
         && issue.number > pruned_through
-        && issue.created > since
-        && issue.author.eq_ignore_ascii_case(maintainer)
+        && (carries(&issue.labels, READY) || issue.created > since)
+        && (issue.author.eq_ignore_ascii_case(maintainer) || is_app(&issue.author, app))
 }
 
 fn carries(labels: &[String], label: &str) -> bool {
@@ -99,9 +100,10 @@ impl Runner {
         let Ok(maintainer) = self.maintainer() else {
             return Ok(());
         };
+        let app = self.app_login();
         let candidates: Vec<usize> = (open.iter().enumerate())
             .filter(|(_, i)| {
-                maintainers_undecided(i, since, pruned_through, &maintainer)
+                maintainers_undecided(i, since, pruned_through, &maintainer, app.as_deref())
                     && self.check_owed(i.number)
                     && self.swap_owed(i)
                     && !self.triage_given_up(i.number)

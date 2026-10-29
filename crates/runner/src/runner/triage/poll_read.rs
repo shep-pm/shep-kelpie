@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use super::super::Runner;
 use super::super::trigger::lock;
-use super::{ticket, untouched};
+use super::{opened_by_us_or_people, ticket, untouched};
 use crate::board::{READY, check};
 use crate::ports::{Forge, ForgeError, Issue, OpenIssue, OpenPull, Tickets, Timestamp};
 use crate::settings::{ForgeSlug, TriagePick};
@@ -39,6 +39,8 @@ pub(in crate::runner) struct PollJob {
     asked: u64,
     /// The key of each issue's check result that needs no new check
     checked: BTreeMap<u64, u64>,
+    /// The App's login, whose issues are read as a person's
+    app: Option<String>,
 }
 
 /// What a poll read
@@ -95,17 +97,18 @@ impl PollJob {
         let hand_labelled = self.take_back
             && (open.iter())
                 .any(|i| i.labels.iter().any(|l| l == READY) || self.taken.contains(&i.number));
+        let app = self.app.as_deref();
         // Every issue the pick rule may list, whoever opened it: a superset of
         // what the apply lists, which decides it from the state it finds.
         let to_triage = self.research
             || self.triage.is_some_and(|(since, pruned_through)| {
-                (open.iter()).any(|i| untouched(i, since, pruned_through, None, true))
+                (open.iter()).any(|i| untouched(i, since, pruned_through, None, true, app))
             });
         // The check makes the maintainer's passing issue ready only where no
         // open pull request closes it.
         let to_check = (open.iter()).any(|i| {
             let key = check::key(&i.title, &i.body, &i.labels);
-            !i.author_is_bot
+            opened_by_us_or_people(i, app)
                 && self.checked.get(&i.number) != Some(&key)
                 && check::check(&i.title, &i.body, &i.labels).is_empty()
         });
@@ -166,6 +169,7 @@ impl Runner {
                 .filter(|c| c.triage != CheckTriage::Ran)
                 .map(|c| (c.issue, c.key))
                 .collect(),
+            app: self.app_login(),
         };
         Some((now, job))
     }
@@ -229,6 +233,7 @@ impl Runner {
         // The check reads the listing before the take-back and the due list.
         // Those reach only an issue it refused.
         self.check_issues(&open, pulls.as_ref(), &busy);
+        let app = self.app_login();
         let only = match self.settings.triage.pick {
             TriagePick::Maintainer => match self.maintainer() {
                 Ok(login) => Some(login),
@@ -253,6 +258,7 @@ impl Runner {
                     pruned_through,
                     only.as_deref(),
                     self.check_owed(i.number),
+                    app.as_deref(),
                 ) && self.first_pass_owed(i.number)
                     && !self.ready_at_work(i, pulls.as_ref())
             })
