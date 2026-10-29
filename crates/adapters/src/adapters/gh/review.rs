@@ -61,8 +61,16 @@ pub(super) fn login_token() -> Result<InstallationToken, ForgeError> {
 fn login_token_with(
     run: impl Fn(&[&str]) -> Result<Vec<u8>, ForgeError>,
 ) -> Result<InstallationToken, ForgeError> {
-    match run(&["auth", "status", "--hostname", "github.com"]) {
+    // Only the active account's token is the one `auth token` prints.
+    match run(&["auth", "status", "--hostname", "github.com", "--active"]) {
         Err(spawn @ ForgeError::Spawn(_)) => return Err(spawn),
+        Err(held @ ForgeError::Held(_)) => return Err(held),
+        Err(ForgeError::Limited { cooldown, .. }) => {
+            return Err(ForgeError::Limited {
+                said: "`gh auth status` was rate limited".to_owned(),
+                cooldown,
+            });
+        }
         Err(_) => {
             return Err(ForgeError::Failed(
                 "`gh auth status` says the login is invalid".to_owned(),
@@ -248,7 +256,7 @@ pub(crate) fn parse_reviewed(stdout: &[u8], repo: &ForgeSlug) -> Result<Reviewed
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::PullRequestState;
+    use crate::ports::{Cooldown, PullRequestState};
 
     // Recorded from gh 2.96: `gh api graphql` with `QUERY` on shep-pm/shep#617,
     // where the maintainer's reviews are empty replies and every thread is
@@ -288,7 +296,7 @@ mod tests {
         token: &'static [u8],
     ) -> impl Fn(&[&str]) -> Result<Vec<u8>, ForgeError> {
         move |args| match args {
-            ["auth", "status", "--hostname", "github.com"] => status.clone(),
+            ["auth", "status", "--hostname", "github.com", "--active"] => status.clone(),
             ["auth", "token"] => Ok(token.to_vec()),
             other => panic!("unexpected gh call {other:?}"),
         }
@@ -311,6 +319,22 @@ mod tests {
         for part in INVALID_LOGIN.lines().chain(["octocat", "gho_dead123"]) {
             assert!(!error.contains(part), "{error}");
         }
+    }
+
+    #[test]
+    fn a_rate_limited_status_check_keeps_its_cooldown_and_none_of_what_gh_printed() {
+        let cooldown = Cooldown::default();
+        let limited = gh_saying(
+            Err(ForgeError::Limited {
+                said: format!("gh failed: {INVALID_LOGIN}"),
+                cooldown,
+            }),
+            b"",
+        );
+        let error = login_token_with(limited).unwrap_err();
+        assert!(matches!(&error, ForgeError::Limited { cooldown: c, .. } if *c == cooldown));
+        assert!(!error.to_string().contains("octocat"), "{error}");
+        assert!(!error.to_string().contains("invalid"), "{error}");
     }
 
     #[test]
