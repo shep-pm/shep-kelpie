@@ -72,12 +72,11 @@ fn choosing_a_reviewer_by_its_paths_never_follows_a_git_file_pointed_elsewhere()
 
 // The step's fence check reads the same trusted git, and parks the worker.
 #[test]
-fn a_review_of_a_worktree_whose_commondir_points_elsewhere_is_refused() {
+fn a_review_of_a_clone_whose_objects_point_elsewhere_is_refused() {
     let rig = Rig::new("shep");
     let runner = at_round_2(&rig, "claude", "work.txt");
-    let worktree = rig.worktree_7();
     let elsewhere = Elsewhere::copy_of(&rig.repo(), rig.home.path());
-    elsewhere.as_common_dir_of(&worktree);
+    elsewhere.as_alternate_of(&rig.git_dir_7());
 
     match step(&runner).unwrap() {
         Some(StepReport::Failed { question, .. }) => {
@@ -96,5 +95,4 @@ fn a_review_of_a_worktree_whose_commondir_points_elsewhere_is_refused() {
             .all(|s| s.call.role != Role::Reviewer),
         "no reviewer ran"
     );
-    elsewhere.assert_plain_git_starts_it(&worktree);
 }
