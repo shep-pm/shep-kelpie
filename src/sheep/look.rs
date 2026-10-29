@@ -218,7 +218,7 @@ mod tests {
     use super::*;
     use crate::home::ProjectName;
     use crate::runner::{StepReport, step};
-    use crate::settings::Merging;
+    use crate::settings::{AgentName, Merging};
     use crate::shepherd::SHEP_VERSION;
     use crate::test::{FakeShepherd, Memory, Rig, Scripted, project_table};
 
@@ -269,7 +269,14 @@ mod tests {
     #[test]
     fn a_refused_change_lands_once_what_refused_it_is_fixed() {
         let rig = Rig::new("shep");
-        let runner = rig.open().unwrap();
+        let mut settings = rig.settings();
+        settings.agents.reviewers = Some(
+            crate::test::RIG_REVIEWERS
+                .iter()
+                .map(|name| AgentName::try_from((*name).to_owned()).unwrap())
+                .collect(),
+        );
+        let runner = rig.open_settings(settings.clone()).unwrap();
         let entry = std::fs::read_to_string(rig.settings_file()).unwrap();
         let mut on = project_table(&entry);
         let listed = ["qwen", "claude", "coderabbit"].map(|n| Value::String(n.into()));
@@ -289,7 +296,7 @@ mod tests {
             rig.home.path().to_owned(),
         );
         let agents = agents::snapshot(&paths.agents);
-        look.last = Some((rig.settings(), rig.kelpie_settings(), agents));
+        look.last = Some((settings, rig.kelpie_settings(), agents));
 
         rig.forge.set_visibility(crate::ports::Visibility::Private);
         let coderabbit = |runner: &std::sync::Mutex<crate::runner::Runner>| {

@@ -18,6 +18,17 @@ fn settings_with(rig: &Rig, edit: impl FnOnce(String) -> String) -> crate::setti
     rig.settings()
 }
 
+fn listed_settings(rig: &Rig, names: &[&str]) -> crate::settings::Settings {
+    let mut settings = rig.settings();
+    settings.agents.reviewers = Some(
+        names
+            .iter()
+            .map(|n| crate::settings::AgentName::try_from((*n).to_owned()).unwrap())
+            .collect(),
+    );
+    settings
+}
+
 #[test]
 fn a_changed_setting_takes_effect_at_once() {
     let rig = Rig::new("shep");
@@ -156,6 +167,7 @@ fn a_changed_maintainer_alone_takes_effect_at_once() {
 }
 
 fn paddock_at(rig: &Rig, url: &str) {
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
     let webhook = format!(
         "[webhook]\nkind = \"ntfy\"\nurl = \"{}\"\n",
         Rig::WEBHOOK_URL
@@ -202,6 +214,7 @@ const LOCAL: &str = "---\nrole: reviewer\nharness: pi\nmodel: m\neffort: low\n\
 fn list_local(rig: &Rig) {
     rig.write_agent("local", LOCAL);
     rig.reviewers(&["qwen", "claude", "local"]);
+    rig.allow(&["sonnet-high", "qwen", "claude", "local"]);
 }
 
 fn paddock_keyed_by_cargo(rig: &Rig) {
@@ -225,7 +238,10 @@ fn a_gateway_taken_away_from_a_listed_agent_is_refused_as_a_start_refuses_it() {
     );
     rig.set_kelpie_settings(&webhook);
     let mut runner = runner.lock().unwrap();
-    let err = runner.reread(rig.settings(), rig.kelpie_settings());
+    let err = runner.reread(
+        listed_settings(&rig, &["qwen", "claude", "local"]),
+        rig.kelpie_settings(),
+    );
     let err = err.unwrap_err().to_string();
     assert!(
         err.contains("local: gateway paddock is not in kelpie's settings"),
@@ -291,17 +307,19 @@ fn agents_naming_a_gateway_added_with_them_wait_with_it_for_the_next_start() {
             "settings changed: reviews now in effect; gateways and agents from the runner's next start"
         )
     );
-    assert_eq!(
-        runner.settings().agents.reviewers.as_ref().map(Vec::len),
-        Some(2)
+    assert!(
+        runner
+            .listed(&crate::settings::AgentName::kelpies("local"))
+            .is_none()
     );
     drop(runner);
 
     let restarted = rig.open().unwrap();
     let restarted = restarted.lock().unwrap();
-    assert_eq!(
-        restarted.settings().agents.reviewers.as_ref().map(Vec::len),
-        Some(3)
+    assert!(
+        restarted
+            .listed(&crate::settings::AgentName::kelpies("local"))
+            .is_some()
     );
     assert!(restarted.gateways().get(&paddock()).is_some());
 }
@@ -319,10 +337,19 @@ fn a_changed_reviewer_file_is_checked_as_a_start_checks_it_and_named() {
     define(&script.display().to_string());
     let runner = rig.open().unwrap();
     let mut runner = runner.lock().unwrap();
+    runner
+        .reread(
+            listed_settings(&rig, &["mine", "claude"]),
+            rig.kelpie_settings(),
+        )
+        .unwrap();
 
     define("/nonexistent/review.sh");
     let err = runner
-        .reread(rig.settings(), rig.kelpie_settings())
+        .reread(
+            listed_settings(&rig, &["mine", "claude"]),
+            rig.kelpie_settings(),
+        )
         .unwrap_err();
     assert!(
         err.to_string()
@@ -332,7 +359,10 @@ fn a_changed_reviewer_file_is_checked_as_a_start_checks_it_and_named() {
 
     define("~/review.sh");
     let line = runner
-        .reread(rig.settings(), rig.kelpie_settings())
+        .reread(
+            listed_settings(&rig, &["mine", "claude"]),
+            rig.kelpie_settings(),
+        )
         .unwrap();
     assert_eq!(
         line.as_deref(),
@@ -342,7 +372,10 @@ fn a_changed_reviewer_file_is_checked_as_a_start_checks_it_and_named() {
 
     std::fs::remove_file(rig.paths().agents.join("mine.md")).unwrap();
     let err = runner
-        .reread(rig.settings(), rig.kelpie_settings())
+        .reread(
+            listed_settings(&rig, &["mine", "claude"]),
+            rig.kelpie_settings(),
+        )
         .unwrap_err();
     assert!(
         err.to_string().contains("mine, which has no agent file"),
@@ -383,10 +416,12 @@ fn a_webhook_taken_away_takes_effect_at_once() {
 #[test]
 fn a_change_that_does_not_hold_keeps_the_settings_the_runner_has() {
     let rig = Rig::new("shep");
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
     let runner = rig.open().unwrap();
     rig.forge.set_visibility(Visibility::Private);
     rig.coderabbit_on();
-    let next = rig.settings();
+    rig.allow(&["sonnet-high", "qwen", "claude", "coderabbit"]);
+    let next = listed_settings(&rig, &["qwen", "claude", "coderabbit"]);
     let mut runner = runner.lock().unwrap();
     let err = runner
         .reread(next, rig.kelpie_settings())
@@ -403,12 +438,10 @@ fn a_change_that_does_not_hold_keeps_the_settings_the_runner_has() {
         .clone()
         .unwrap_or_default();
     assert!(!listed.iter().any(|name| name.as_str() == "coderabbit"));
+    rig.reviewers(crate::test::RIG_REVIEWERS);
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
     let missing = settings_with(&rig, |s| {
         s.replace(
-            crate::test::RIG_REVIEWERS_AND_CODERABBIT,
-            crate::test::RIG_REVIEWERS,
-        )
-        .replace(
             "build_env = {}\n",
             "instructions_file = \"/nonexistent/w.md\"\n",
         )

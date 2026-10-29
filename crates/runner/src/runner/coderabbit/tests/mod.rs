@@ -45,6 +45,7 @@ pub(in crate::runner) fn reviewed_by_qwen_with(
 ) -> (Rig, Mutex<Runner>, String) {
     let rig = Rig::new(project);
     rig.coderabbit_on();
+    rig.allow(&["sonnet-high", "qwen", "claude", "coderabbit"]);
     setup(&rig);
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
@@ -125,6 +126,9 @@ fn reviewed(open_threads: usize) -> Option<StepReport> {
 #[test]
 fn a_pass_with_no_bot_listed_never_touches_the_forge_for_a_review() {
     let (rig, runner, head) = Rig::with_pull_request("webapp");
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
+    drop(runner);
+    let runner = rig.open().unwrap();
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
         rig.verdict(&runner),
@@ -527,6 +531,7 @@ fn a_summon_nobody_answers_is_counted_spent_and_then_passed_over() {
 fn a_bot_alone_that_never_answers_leaves_the_pass_unreviewed() {
     let rig = Rig::new("acme");
     rig.reviewers(&["coderabbit"]);
+    rig.allow(&["sonnet-high", "coderabbit"]);
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);

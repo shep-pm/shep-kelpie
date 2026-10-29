@@ -103,6 +103,7 @@ fn next_item(rig: &Rig, runner: &Mutex<Runner>) -> String {
 // request 71, and whose CodeRabbit round is next
 fn coderabbit_only(project: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
+    rig.allow(&["sonnet-high", "coderabbit"]);
     rig.reviewers(&["coderabbit"]);
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));

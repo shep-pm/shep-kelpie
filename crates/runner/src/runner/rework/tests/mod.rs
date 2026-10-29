@@ -429,6 +429,7 @@ fn with_rounds(rig: &Rig, rounds: u32) {
 fn a_rework_of_a_pull_request_coderabbit_reviewed_spends_no_second_read() {
     let rig = Rig::new("shep");
     rig.coderabbit_on();
+    rig.allow(&["sonnet-high", "qwen", "claude", "coderabbit"]);
     with_rounds(&rig, 1);
     let reviewed = reviewed_71(&rig);
     rig.push_by_hand("kelpie/7", "later.txt");

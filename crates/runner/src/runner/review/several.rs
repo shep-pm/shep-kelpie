@@ -12,6 +12,7 @@ use crate::test::{Rig, Scripted, ScriptedRound};
 pub(super) fn listing(list: &[&str]) -> Rig {
     let rig = Rig::new("koji");
     rig.reviewers(list);
+    allow_reviewers(&rig, list);
     let script = rig.home.path().join("bin/review");
     std::fs::create_dir_all(script.parent().unwrap()).unwrap();
     crate::test::write_script(&script, "#!/bin/sh\nexit 0\n");
@@ -26,6 +27,11 @@ pub(super) fn listing(list: &[&str]) -> Rig {
          paths: [\"src/**\"]\n---\nRead {{DIFF}} for defects.\n",
     );
     rig
+}
+
+pub(super) fn allow_reviewers(rig: &Rig, names: &[&str]) {
+    let allowed = [&["sonnet-high"][..], names].concat();
+    rig.allow(&allowed);
 }
 
 // Steps until the review is done, naming who reviewed each round by the
@@ -266,12 +272,9 @@ fn after_mine_the_list_becomes(to: &[&str]) -> Vec<&'static str> {
     let runner = at_review(&rig, "work.txt");
     step(&runner).unwrap(); // round 1, mine: clean by default
     drop(runner);
-    rig.edit_settings(|s| {
-        s.replace(
-            r#"reviewers = ["mine", "claude"]"#,
-            &format!("reviewers = {to:?}"),
-        )
-    });
+    rig.reviewers(to);
+    allow_reviewers(&rig, to);
+    rig.reviews_need(Some(2));
     let runner = rig.open().unwrap();
     rig.claude.script([Scripted::Text(CLEAN)]);
     let after = reviewers_until_ci(&rig, &runner);

@@ -36,6 +36,7 @@ fn adopted(project: &str) -> (Rig, Mutex<Runner>, String) {
 pub(super) fn adopted_set(project: &str, setup: impl FnOnce(&Rig)) -> (Rig, Mutex<Runner>, String) {
     let rig = Rig::new(project);
     rig.coderabbit_on();
+    rig.allow(&["sonnet-high", "qwen", "claude", "coderabbit"]);
     setup(&rig);
     let reviewed = rig.push_by_hand("fix/timeline", "work.txt");
     rig.forge

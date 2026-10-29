@@ -153,6 +153,7 @@ fn summoned(project: &str) -> (Rig, Mutex<Runner>, String) {
 
 fn summoned_in(rig: Rig) -> (Rig, Mutex<Runner>, String) {
     rig.coderabbit_on();
+    rig.allow(&["sonnet-high", "qwen", "claude", "coderabbit"]);
     let runner = rig.open_with(vec![Arc::new(StandIn)]).unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
@@ -351,6 +352,7 @@ fn a_stand_in_summon_with_no_sign_goes_out_once_more_by_its_label() {
 fn an_owed_stand_in_summon_marked_done_is_answered_not_summoned_again() {
     let rig = Rig::new("shep");
     rig.coderabbit_on();
+    rig.allow(&["sonnet-high", "qwen", "claude", "coderabbit"]);
     let reviewed = rig.push_by_hand("fix/timeline", "work.txt");
     rig.forge.coderabbit.post_as(80, LOGIN, |seen| {
         seen.reviews.push(review(&reviewed, Rig::EPOCH - 3600))
@@ -402,6 +404,7 @@ fn notes(runner: &Mutex<Runner>) -> Vec<String> {
 // the draft marked ready, and the dog granting no lease.
 fn ready_without_a_lease(rig: &Rig) -> Mutex<Runner> {
     rig.coderabbit_on();
+    rig.allow(&["sonnet-high", "qwen", "claude", "coderabbit"]);
     let runner = rig.open_with(vec![Arc::new(StandIn)]).unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);

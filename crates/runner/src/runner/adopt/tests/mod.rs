@@ -52,6 +52,7 @@ fn file_5(rig: &Rig) -> PathBuf {
 #[test]
 fn adopt_starts_at_ci_and_the_first_turn_names_the_file_ahead_of_the_red_run() {
     let rig = Rig::new("shep");
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
     rig.ci_on();
     let head = opened_80(&rig);
     let runner = running(&rig);
@@ -406,6 +407,7 @@ fn an_adopted_turn_that_pushes_nothing_is_sent_back_once_then_parks_on_a_ruling(
 #[test]
 fn a_push_by_anyone_else_after_adoption_parks_it() {
     let rig = Rig::new("golbat");
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
     opened_80(&rig);
     let runner = running(&rig);
     rig.ask(&runner, "adopt", Some("80"));
@@ -430,6 +432,7 @@ fn a_push_by_anyone_else_after_adoption_parks_it() {
 #[test]
 fn a_branch_behind_main_is_caught_up_by_a_merge_never_a_rewrite() {
     let rig = Rig::new("chelone");
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
     let head = opened_80(&rig);
     let runner = running(&rig);
     rig.ask(&runner, "adopt", Some("80"));
@@ -609,6 +612,7 @@ fn a_start_retried_after_a_failure_begins_at_the_head_origin_holds_now() {
 #[test]
 fn a_ready_pull_request_reaches_the_merge_ruling_without_parking() {
     let rig = Rig::new("webapp");
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
     let head = opened_80(&rig);
     rig.forge.ready_pull_request(80);
     let runner = running(&rig);
@@ -671,6 +675,7 @@ fn taking_the_label_off_a_waiting_pull_request_takes_it_back() {
 // adoption. Returns its head.
 fn adopted_reviewed_under_auto(rig: &Rig, titles: &[&str]) -> (Mutex<Runner>, String) {
     rig.coderabbit_on();
+    rig.allow(&["sonnet-high", "qwen", "claude", "coderabbit"]);
     rig.merge_auto();
     let head = opened_80(rig);
     rig.forge.ready_pull_request(80);

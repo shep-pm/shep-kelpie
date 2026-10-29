@@ -18,7 +18,7 @@ use crate::review_bot::Profile;
 use crate::runner::{
     CHECKS_SETTLE, OpenError, Pass, Runner, SETTLE_LEAST, StepReport, advance, answer, step,
 };
-use crate::settings::SettingsError;
+use crate::settings::{Settings, SettingsError};
 use crate::state::StateError;
 use crate::webhook::{KelpieSettings, Webhook};
 
@@ -88,11 +88,8 @@ const WORKFLOW: &str = ".github/workflows/ci.yml";
 /// The `git.checkout` in `settings.example.toml`, which the rig points at its own
 const EXAMPLE_REPO: &str = "~/GitHub/shep";
 
-/// The reviewers `settings.example.toml` lists, commented out
-const EXAMPLE_REVIEWERS: &str = "# reviewers = [\"iq3-xxs-review\", \"defect-hunter-lite\"]\n";
-
 /// The rig's reviewers: its qwen round and then its own Claude session, `claude`
-pub const RIG_REVIEWERS: &str = "reviewers = [\"qwen\", \"claude\"]\n";
+pub const RIG_REVIEWERS: &[&str] = &["qwen", "claude"];
 
 /// What the rig adds to its settings to run no retro
 pub const NO_RETRO: &str = "\n[app.dogs.kelpie.skills]\nretro = { kind = \"none\" }\n";
@@ -107,8 +104,7 @@ model: claude-sonnet-5\neffort: medium\n---\nReview the change against {{BASE}} 
 defects. Output one finding per line as SEVERITY|file:line|what|why, or exactly CLEAN.\n";
 
 /// The rig's reviewers with CodeRabbit read last
-pub const RIG_REVIEWERS_AND_CODERABBIT: &str =
-    "reviewers = [\"qwen\", \"claude\", \"coderabbit\"]\n";
+pub const RIG_REVIEWERS_AND_CODERABBIT: &[&str] = &["qwen", "claude", "coderabbit"];
 
 /// One project's world: kelpie's home, the maintainer's home, and the
 /// project's repo cloned from a bare origin
@@ -163,7 +159,7 @@ pub struct Rig {
     /// until it swaps in a pacer with one
     pub pace: Arc<dyn Pace>,
     /// The agent board, which ranks `sonnet-high` first, then the project's other
-    /// implementers by name, until a test sets it
+    /// agents by name after the rig's reviewers, until a test sets it
     pub agent_board: FakeAgentBoard,
     /// GitHub as kelpie's App sees it: the rig has registered no App until
     /// [`Rig::with_app`]
@@ -197,23 +193,14 @@ impl Rig {
 
     /// A project with the example settings, pointed at a fresh repo, whose
     /// agent board ranks `sonnet-high` first (`FakeAgentBoard::ranks_first`),
-    /// then the ask's other agents by name, until a test sets it
+    /// then the rig's reviewers and the ask's other agents, until a test sets it
     pub fn new(project: &str) -> Self {
         let rig = Self::stand_ins(project, Home::made());
         rig.make_repo();
 
         let example = include_str!("../../../../settings.example.toml");
         assert!(example.contains(EXAMPLE_REPO), "the example's repo moved");
-        // Most tests are about what comes after the review, so the rig's
-        // project runs a short one: a local round and then a Claude session. A
-        // test of another lineup names it with [`Rig::reviewers`].
-        assert!(
-            example.contains(EXAMPLE_REVIEWERS),
-            "the example's reviewers moved"
-        );
-        let settings = example
-            .replace(EXAMPLE_REPO, &rig.repo().display().to_string())
-            .replace(EXAMPLE_REVIEWERS, RIG_REVIEWERS);
+        let settings = example.replace(EXAMPLE_REPO, &rig.repo().display().to_string());
         // A retro is one more call after every batch, so most tests
         // leave it off and a test of the retro turns it on with [`Rig::retro_on`].
         let settings = format!("{settings}{NO_RETRO}");
@@ -224,6 +211,7 @@ impl Rig {
         let paths = rig.paths();
         std::fs::create_dir_all(&paths.folder).unwrap();
         std::fs::write(rig.settings_file(), settings).unwrap();
+        rig.reviewers(RIG_REVIEWERS);
         rig.write_agent("claude", CLAUDE_REVIEWER);
         // Kelpie's own agents bind nothing, so each runs as the file the maintainer binds.
         crate::agents::write_bound_stubs(
@@ -414,6 +402,24 @@ impl Rig {
         self.open_with(vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)])
     }
 
+    /// Starts a runner on `settings`, with the rig's standard stand-ins
+    pub fn open_settings(&self, settings: Settings) -> Result<Mutex<Runner>, OpenError> {
+        self.open_configured(
+            settings,
+            vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)],
+            Arc::new(self.claude.clone()),
+        )
+    }
+
+    /// Starts a runner whose settings list `names` in `agents.reviewers`, as
+    /// a project written before the agent board lists them
+    pub fn open_listing(&self, names: &[&str]) -> Result<Mutex<Runner>, OpenError> {
+        let mut settings = self.settings();
+        let name = |n: &&str| crate::settings::AgentName::try_from((*n).to_owned()).unwrap();
+        settings.agents.reviewers = Some(names.iter().map(name).collect());
+        self.open_settings(settings)
+    }
+
     /// Has the runners this rig starts ask `facts` what a harness says of an MCP server
     pub fn harness_mcp_is(&self, facts: Arc<dyn HarnessMcp>) {
         *self.harness_mcp.lock().unwrap() = facts;
@@ -436,6 +442,15 @@ impl Rig {
 
     fn open_with_agents(
         &self,
+        review_bots: Vec<Arc<dyn Profile>>,
+        agents: Arc<dyn Agents>,
+    ) -> Result<Mutex<Runner>, OpenError> {
+        self.open_configured(self.try_settings()?, review_bots, agents)
+    }
+
+    fn open_configured(
+        &self,
+        settings: Settings,
         review_bots: Vec<Arc<dyn Profile>>,
         agents: Arc<dyn Agents>,
     ) -> Result<Mutex<Runner>, OpenError> {
@@ -474,7 +489,7 @@ impl Rig {
         };
         Runner::open(
             self.project.clone(),
-            self.try_settings()?,
+            settings,
             self.try_kelpie_settings()?,
             &paths,
             self.home.path(),
