@@ -157,10 +157,11 @@ impl Runner {
         }
         let extra_instructions = instructions::read_extra(&settings)?;
         check_bots(&lineup, &self.ports)?;
-        let listed = |lineup: &[ListedReviewer]| {
+        let names_coderabbit = |lineup: &[ListedReviewer]| {
             // parity: review-bot.private-repos
-            let coderabbit = |r: &ListedReviewer| r.bot().is_some_and(|b| b.bot == Bot::Coderabbit);
-            lineup.iter().any(coderabbit)
+            let is_coderabbit =
+                |r: &ListedReviewer| r.bot().is_some_and(|b| b.bot == Bot::Coderabbit);
+            lineup.iter().any(is_coderabbit)
         };
         // As a start does, only the reviewers the project named in `agents.allow`
         // are held, and only when the naming changed or a named reviewer's file
@@ -168,7 +169,7 @@ impl Runner {
         let was_named = self.settings.named_reviewers(&self.book, &self.home);
         let named_new = named != was_named;
         // A CodeRabbit that is not public is left out and logged, once, when it is first named.
-        let coderabbit_note = if listed(&named) && !listed(&was_named) {
+        let coderabbit_note = if names_coderabbit(&named) && !names_coderabbit(&was_named) {
             coderabbit_left_out(&self.remote, &named, &self.ports)?
         } else {
             None

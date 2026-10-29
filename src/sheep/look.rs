@@ -301,17 +301,17 @@ mod tests {
 
         // A reviewer the project names whose command is not there refuses the change.
         let script = rig.home.path().join("bin/gone");
-        let file = format!(
+        let agent_file = format!(
             "---\nrole: reviewer\nharness: command\ncommand: {}\n---\n",
             script.display()
         );
-        rig.write_agent("gone", &file);
-        let gone = |runner: &std::sync::Mutex<crate::runner::Runner>| {
+        rig.write_agent("gone", &agent_file);
+        let allows_gone = |runner: &std::sync::Mutex<crate::runner::Runner>| {
             let settings = runner.lock().unwrap().settings().clone();
             (settings.agents.allow).is_some_and(|allow| allow.holds(&AgentName::kelpies("gone")))
         };
         look.again(&runner);
-        assert!(!gone(&runner));
+        assert!(!allows_gone(&runner));
         let failed = look.failed.clone().unwrap();
         assert!(failed.contains("agents.allow"), "{failed}");
         assert!(failed.contains("gone: cannot run"), "{failed}");
@@ -319,7 +319,7 @@ mod tests {
         std::fs::create_dir_all(script.parent().unwrap()).unwrap();
         crate::test::write_script(&script, "#!/bin/sh\nexit 0\n");
         look.again(&runner);
-        assert!(gone(&runner));
+        assert!(allows_gone(&runner));
         assert_eq!(look.failed, None);
     }
 

@@ -202,8 +202,10 @@ fn coderabbit_named_for_a_repo_that_is_not_public_is_left_out_and_logged() {
         rig.ask(&runner, "add", Some("7"));
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         rig.claude.script([Scripted::Push("work.txt", "work\n")]);
-        // The pull request is marked ready as it is for an unnamed CodeRabbit on such a
-        // repo, and then its round is passed over: never summoned, never labelled.
+        // Issue 7 and its pull request 71 are the fixtures the review tests share. The
+        // pull request is marked ready as it is for an unnamed CodeRabbit on such a repo,
+        // and then its round is passed over: never summoned, never labelled. Three steps
+        // reach that round.
         let reports: Vec<_> = (0..3).map(|_| step(&runner).unwrap()).collect();
         assert!(
             reports
@@ -214,7 +216,8 @@ fn coderabbit_named_for_a_repo_that_is_not_public_is_left_out_and_logged() {
         assert!(
             reports.iter().any(|r| matches!(
                 r,
-                Some(StepReport::ReviewerSkipped { reason, .. }) if reason.contains("not public")
+                Some(StepReport::ReviewerSkipped { reviewer, reason, .. })
+                    if reviewer.as_str() == "coderabbit" && reason.contains("not public")
             )),
             "{seen_by}: its round is passed over: {reports:?}"
         );

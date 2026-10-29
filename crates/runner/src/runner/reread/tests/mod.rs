@@ -365,18 +365,21 @@ fn a_changed_reviewer_file_is_checked_as_a_start_checks_it_and_named() {
 fn a_coderabbit_the_project_newly_names_on_a_private_repo_is_refused_as_at_a_start() {
     let rig = Rig::new("shep");
     rig.forge.set_visibility(Visibility::Private);
-    // No `agents.allow`: `coderabbit` is already a candidate the project named
-    // no, so a start holds nothing of it and the runner opens on a repo
-    // CodeRabbit's plan cannot review.
+    // The runner opens with no `agents.allow`, so `coderabbit` is a candidate
+    // nothing named, and the start says nothing of it. The repo is not public.
     let runner = rig.open().unwrap();
     rig.allow(&["sonnet-high", "coderabbit"]);
     let mut runner = runner.lock().unwrap();
     let left = "reviewer coderabbit is left out of the agent board's ask: shep-pm/shep is \
                 private, and CodeRabbit's free plan reviews public repos only";
-    let told = |runner: &mut crate::runner::Runner| {
+    let take_told = |runner: &mut crate::runner::Runner| {
         runner.take_notes().iter().filter(|n| *n == left).count()
     };
-    assert_eq!(told(&mut runner), 0, "a start that named none says nothing");
+    assert_eq!(
+        take_told(&mut runner),
+        0,
+        "a start that named none says nothing"
+    );
 
     runner
         .reread(rig.settings(), rig.kelpie_settings())
@@ -390,12 +393,16 @@ fn a_coderabbit_the_project_newly_names_on_a_private_repo_is_refused_as_at_a_sta
             .is_some_and(|allow| allow.holds(&crate::settings::AgentName::kelpies("coderabbit"))),
         "the runner applies the new list"
     );
-    assert_eq!(told(&mut runner), 1, "the reread says it once");
+    assert_eq!(take_told(&mut runner), 1, "the reread says it once");
 
     runner
         .reread(rig.settings(), rig.kelpie_settings())
         .unwrap();
-    assert_eq!(told(&mut runner), 0, "a reread with no change says nothing");
+    assert_eq!(
+        take_told(&mut runner),
+        0,
+        "a reread with no change says nothing"
+    );
 }
 
 #[test]
