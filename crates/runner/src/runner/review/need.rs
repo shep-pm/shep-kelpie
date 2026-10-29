@@ -12,7 +12,7 @@ use crate::runner::review_bot::late_reads::passed_over;
 use crate::runner::review_bot::two_bots::{bot_reviewed, listing as with_bots};
 use crate::runner::{Runner, StepReport, step};
 use crate::settings::{AgentName, LocalRound};
-use crate::test::{Rig, Scripted, Told};
+use crate::test::{Rig, Scripted, Told, ticket};
 
 // `two_local`'s project, whose candidates are `mine`, `other` and `claude`, and
 // whose `reviews.need` is left out.
@@ -205,4 +205,26 @@ fn a_late_bot_review_is_still_read_after_the_pass() {
     assert_eq!(step(&runner).unwrap(), bot_reviewed(4, "cubic", 1));
     let roles: Vec<Role> = rig.claude.all_calls().iter().map(|c| c.role).collect();
     assert_eq!(roles, [Role::Worker, Role::Reviewer], "no new pass");
+}
+
+#[test]
+fn a_board_that_ranks_no_candidate_with_nobody_read_marks_the_item_unreviewed() {
+    let rig = three_candidates();
+    let runner = at_review(&rig, "work.txt");
+    rig.agent_board.ranks(&[]);
+
+    let report = step(&runner).unwrap();
+
+    let reason = "the agent board ranked none of mine, other, claude";
+    assert_eq!(
+        report,
+        Some(StepReport::Unreviewed {
+            issue: ticket(7),
+            pull_request: 71,
+            reason: reason.into(),
+        })
+    );
+    let item = &rig.ask(&runner, "status", None)["work_item"];
+    assert_eq!(item["unreviewed"], reason);
+    assert!(rig.reviewer.seen().is_empty());
 }

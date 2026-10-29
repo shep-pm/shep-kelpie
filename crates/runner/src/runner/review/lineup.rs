@@ -26,6 +26,8 @@ pub(super) enum Chosen {
     Reviewer(ListedReviewer),
     /// The pass is over
     Ended,
+    /// The board ranked none of these candidates, which could run
+    Unranked(Vec<AgentName>),
     /// The step does this instead, and is made again
     Instead(Box<Begin>),
     /// The changed files could not be listed, for this reason
@@ -70,6 +72,9 @@ impl Runner {
         };
         let now = self.ports.clock.now();
         let ranked: Vec<AgentName> = picks.into_iter().map(|pick| pick.agent).collect();
+        if ranked.is_empty() {
+            return Ok(Chosen::Unranked(ask.agents));
+        }
         // A bot whose window is closed is passed over, and not waited on.
         if let Some((first, opens)) = ranked
             .first()

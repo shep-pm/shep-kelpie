@@ -115,7 +115,8 @@ impl Runner {
                 }
                 let chosen = match self.choose_reviewer(&review, &worktree, &base)? {
                     Chosen::Reviewer(chosen) => chosen,
-                    Chosen::Ended => return self.pass_ended(&review),
+                    Chosen::Ended => return self.pass_ended(&review, &[]),
+                    Chosen::Unranked(unranked) => return self.pass_ended(&review, &unranked),
                     Chosen::Instead(begin) => return Ok(*begin),
                     Chosen::Failed(reason) => return Ok(self.gate_failed(reason)),
                 };
@@ -267,11 +268,24 @@ impl Runner {
     // reviewer read because one was down or failing marks the work item
     // unreviewed, which the merge ruling names and which `auto` will not
     // merge. One with nobody to read it, by the project's own list, is noted.
-    fn pass_ended(&mut self, review: &Review) -> Result<Begin, StateError> {
+    fn pass_ended(&mut self, review: &Review, unranked: &[AgentName]) -> Result<Begin, StateError> {
         let since = self.ports.clock.now();
         let item = self.current().expect("a pass is a work item's");
         let (issue, number) = (item.issue, item.pull_request);
         let unread = review.unread.then(|| self.unread(item, review));
+        // Candidates that could run, none ranked, are not a choice of the project's.
+        let unread = match (unread, unranked.is_empty()) {
+            (unread, true) => unread,
+            (None, false) => None,
+            (unread, false) => {
+                let names: Vec<_> = unranked.iter().map(ToString::to_string).collect();
+                let board = format!("the agent board ranked none of {}", names.join(", "));
+                Some(Some(match unread.flatten() {
+                    Some(missed) => format!("{missed}, and {board}"),
+                    None => board,
+                }))
+            }
+        };
         // Nobody to read it, by the project's own list, sends it unread on purpose.
         let unread_by_choice = match &unread {
             Some(None) => match self.head_on_origin() {
