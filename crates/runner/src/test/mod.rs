@@ -18,7 +18,7 @@ use crate::review_bot::Profile;
 use crate::runner::{
     CHECKS_SETTLE, OpenError, Pass, Runner, SETTLE_LEAST, StepReport, advance, answer, step,
 };
-use crate::settings::SettingsError;
+use crate::settings::{Settings, SettingsError};
 use crate::state::StateError;
 use crate::webhook::{KelpieSettings, Webhook};
 
@@ -402,6 +402,15 @@ impl Rig {
         self.open_with(vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)])
     }
 
+    /// Starts a runner on `settings`, with the rig's standard stand-ins
+    pub fn open_settings(&self, settings: Settings) -> Result<Mutex<Runner>, OpenError> {
+        self.open_configured(
+            settings,
+            vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)],
+            Arc::new(self.claude.clone()),
+        )
+    }
+
     /// Has the runners this rig starts ask `facts` what a harness says of an MCP server
     pub fn harness_mcp_is(&self, facts: Arc<dyn HarnessMcp>) {
         *self.harness_mcp.lock().unwrap() = facts;
@@ -424,6 +433,15 @@ impl Rig {
 
     fn open_with_agents(
         &self,
+        review_bots: Vec<Arc<dyn Profile>>,
+        agents: Arc<dyn Agents>,
+    ) -> Result<Mutex<Runner>, OpenError> {
+        self.open_configured(self.try_settings()?, review_bots, agents)
+    }
+
+    fn open_configured(
+        &self,
+        settings: Settings,
         review_bots: Vec<Arc<dyn Profile>>,
         agents: Arc<dyn Agents>,
     ) -> Result<Mutex<Runner>, OpenError> {
@@ -462,7 +480,7 @@ impl Rig {
         };
         Runner::open(
             self.project.clone(),
-            self.try_settings()?,
+            settings,
             self.try_kelpie_settings()?,
             &paths,
             self.home.path(),

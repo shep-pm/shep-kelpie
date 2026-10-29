@@ -182,17 +182,7 @@ fn open_listed(rig: &Rig, names: &[&str]) -> Result<Mutex<Runner>, OpenError> {
             .map(|n| crate::settings::AgentName::try_from((*n).to_owned()).unwrap())
             .collect(),
     );
-    let ports = rig.open()?.into_inner().unwrap().ports;
-    Runner::open(
-        rig.project.clone(),
-        settings,
-        rig.kelpie_settings(),
-        &rig.paths(),
-        rig.home.path(),
-        Path::new(Rig::KELPIE),
-        ports,
-    )
-    .map(Mutex::new)
+    rig.open_settings(settings)
 }
 
 #[test]
