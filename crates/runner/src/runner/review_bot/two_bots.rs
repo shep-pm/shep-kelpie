@@ -230,7 +230,7 @@ fn a_cubic_refusal_closes_its_window_for_its_span_and_the_pass_goes_on_to_codera
             pull_request: 71,
             round: 3,
             reviewer: AgentName::kelpies("cubic"),
-            reason: "its window opens more than an hour on".into(),
+            reason: "its window is closed".into(),
         })
     );
     assert!(

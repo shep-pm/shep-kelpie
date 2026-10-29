@@ -76,7 +76,10 @@ fn each_round_goes_to_the_boards_first_pick_the_pass_has_not_run() {
     assert_eq!(reviewer_models(&rig), ["claude-sonnet-5"]);
     let asks = rig.agent_board.asks();
     let mine = &names(&["mine"])[0];
-    let reviews: Vec<_> = asks.iter().filter(|ask| ask.agents.contains(mine)).collect();
+    let reviews: Vec<_> = asks
+        .iter()
+        .filter(|ask| ask.agents.contains(mine))
+        .collect();
     assert_eq!(reviews[0].leave_out, []);
     assert_eq!(reviews[1].leave_out, names(&["other"]));
 }

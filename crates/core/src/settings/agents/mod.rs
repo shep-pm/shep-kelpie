@@ -327,9 +327,10 @@ pub struct RoleAgentNames {
     /// manager's pick may name its own. Whole minutes, `0` allowed. 60 when absent.
     #[serde(default = "default_slack")]
     pub slack: u32,
-    /// The agents that review each pull request, from kelpie's agent files,
-    /// each once a pass, in this order. When absent, `qwen` where the
-    /// maintainer's qwen-review script is installed, then `defect-hunter`.
+    /// The agents that may review each pull request, from kelpie's agent
+    /// files: the candidates the agent board picks each round's reviewer from.
+    /// When absent, every reviewer file `agents.allow` holds but the one
+    /// `contributions.security_reviewer` names.
     #[serde(default)]
     pub reviewers: Option<Vec<AgentName>>,
     /// The project manager, from kelpie's agent files, such as `pm`: woken

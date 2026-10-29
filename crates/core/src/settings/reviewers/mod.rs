@@ -1,10 +1,12 @@
 //! The review's reviewers, by name
 //!
-//! A project lists them in `agents.reviewers`, in the order the review runs
-//! them, each once, by agent files whose role is `reviewer`. A project that
-//! lists none runs `iq3-xxs-review` where kelpie's settings hold a gateway
-//! named `paddock`, then `defect-hunter-lite`. A review bot is listed the same way, by
-//! its file, and none is listed unless the project says so.
+//! `agents.reviewers` lists them, by agent files whose role is `reviewer`, and
+//! narrows a review pass's candidates. With none, every reviewer file
+//! `agents.allow` holds is a candidate but the one `contributions.security_reviewer`
+//! names. The agent board picks each round's reviewer, so order does not matter.
+//! A contribution's pass with no `contributions.reviewers` runs `agents.reviewers`,
+//! else `iq3-xxs-review` where a gateway is named `paddock`, then
+//! `defect-hunter-lite`.
 
 use std::path::Path;
 
@@ -61,10 +63,9 @@ impl Settings {
     ///
     /// The names `agents.reviewers` lists when it is set, in order, each once.
     /// Otherwise every agent file whose role is `reviewer` that `agents.allow`
-    /// holds and `gateways` can route, but the agent `contributions.security_reviewer`
-    /// names. The agent board picks each round's reviewer from them, so their
-    /// order does not matter. Agents come from `agents`, and `~/` in a command
-    /// expands against `home`.
+    /// holds and `gateways` can route, but the agent
+    /// `contributions.security_reviewer` names. Their order does not matter.
+    /// Agents come from `agents`, and `~/` in a command expands against `home`.
     ///
     /// # Errors
     ///

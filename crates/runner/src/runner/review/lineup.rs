@@ -1,14 +1,11 @@
 //! Who reviews each round
 //!
 //! Each round goes to the agent board's pick among the candidates the pass has
-//! not run, skipping any that cannot run: one limited to paths the pull request
-//! does not change, a local one that has reviewed nothing twice running, or a
-//! review bot that has made its `rounds` of reads. Of the board's ranking the
-//! round takes the first the pacer lets start, and for a review bot the first
-//! whose window is open now. A pass of the bots alone skips every other
-//! reviewer. The pass ends once `reviews.need` reviewers have read, or the board
-//! ranks none left. A round's reviewer is kept in its state once it starts, so a
-//! round cut short resumes with the same one.
+//! not run that can run: not one limited to paths the pull request leaves
+//! alone, a local one that read nothing twice running, or a bot that has made
+//! its `rounds`. It takes the first ranked one the pacer lets start and, for a
+//! bot, whose window is open now. The pass ends once `reviews.need` reviewers
+//! have read, or the board ranks none left. A kept reviewer resumes its round.
 
 use std::path::Path;
 use std::process::Stdio;
@@ -30,7 +27,7 @@ pub(super) enum Chosen {
     /// The pass is over
     Ended,
     /// The step does this instead, and is made again
-    Instead(Begin),
+    Instead(Box<Begin>),
     /// The changed files could not be listed, for this reason
     Failed(String),
 }
@@ -69,7 +66,7 @@ impl Runner {
             leave_out: self.ran_of(review),
         };
         let Ok(picks) = self.board_picks(&ask) else {
-            return Ok(Chosen::Instead(Begin::Idle));
+            return Ok(Chosen::Instead(Box::new(Begin::Idle)));
         };
         let now = self.ports.clock.now();
         let ranked: Vec<AgentName> = picks.into_iter().map(|pick| pick.agent).collect();
@@ -88,7 +85,9 @@ impl Runner {
                 reviewer: first.clone(),
                 opens,
             };
-            return self.pass_over(number, skipped).map(Chosen::Instead);
+            return self
+                .pass_over(number, skipped)
+                .map(|begin| Chosen::Instead(Box::new(begin)));
         }
         let open: Vec<&AgentName> = (ranked.iter())
             .filter(|agent| self.window_opens(agent, now).is_none())
@@ -98,8 +97,8 @@ impl Runner {
         }
         Ok(match self.first_unpaced(open, Scope::Turn)? {
             Walked::Opens(name) => (self.listed(&name)).map_or(Chosen::Ended, Chosen::Reviewer),
-            Walked::Reads(reads) => Chosen::Instead(reads),
-            Walked::Held { first, .. } => Chosen::Instead(first.unwrap_or(Begin::Idle)),
+            Walked::Reads(reads) => Chosen::Instead(Box::new(reads)),
+            Walked::Held { first, .. } => Chosen::Instead(Box::new(first.unwrap_or(Begin::Idle))),
         })
     }
 

@@ -108,7 +108,7 @@ fn a_usage_limit_reply_passes_codex_over_for_its_week_and_the_pass_goes_on() {
             pull_request: 71,
             round: 3,
             reviewer: AgentName::kelpies("codex"),
-            reason: "its window opens more than an hour on".into(),
+            reason: "its window is closed".into(),
         })
     );
     assert!(

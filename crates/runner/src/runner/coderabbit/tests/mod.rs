@@ -427,7 +427,7 @@ fn skipped(reason: &str) -> Option<StepReport> {
     })
 }
 
-const FAR_OFF: &str = "its window opens more than an hour on";
+const FAR_OFF: &str = "its window is closed";
 
 #[test]
 fn a_refusal_that_opens_more_than_an_hour_on_passes_the_bot_over_for_the_pass() {
@@ -473,17 +473,12 @@ fn a_window_the_dogs_book_opens_more_than_an_hour_on_is_skipped_unasked() {
 }
 
 #[test]
-fn a_window_that_opens_within_the_hour_is_waited_for() {
+fn a_window_closed_at_the_pick_is_passed_over_though_it_opens_within_the_hour() {
     let (rig, runner, _) = reviewed_by_qwen("koji");
     rig.leases.opens_at(&cr(), Timestamp(now(&rig) + FAR));
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::MarkedReady { .. })
-    ));
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::Summoned { .. })
-    ));
+    assert_eq!(step(&runner).unwrap(), skipped(FAR_OFF));
+    assert_eq!(rig.leases.told(), [], "no lease asked for");
+    assert!(rig.forge.readied().is_empty(), "nothing to mark ready for");
 }
 
 #[test]

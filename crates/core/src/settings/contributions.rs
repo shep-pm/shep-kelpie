@@ -33,7 +33,7 @@ pub struct Contributions {
     pub pick: Pick,
     /// The reviewers' agent files for a contribution, in the order the
     /// review runs them, each once. Review bots are welcome. The project's
-    /// `agents.reviewers` when absent.
+    /// `agents.reviewers` when absent, else kelpie's default pass.
     #[serde(default)]
     pub reviewers: Option<Vec<AgentName>>,
     /// The agent file whose role is `reviewer` that reads a contribution

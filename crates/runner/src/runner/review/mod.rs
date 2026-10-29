@@ -116,7 +116,7 @@ impl Runner {
                 let chosen = match self.choose_reviewer(&review, &worktree, &base)? {
                     Chosen::Reviewer(chosen) => chosen,
                     Chosen::Ended => return self.pass_ended(&review),
-                    Chosen::Instead(begin) => return Ok(begin),
+                    Chosen::Instead(begin) => return Ok(*begin),
                     Chosen::Failed(reason) => return Ok(self.gate_failed(reason)),
                 };
                 // Before any reader or bot is started on the head.

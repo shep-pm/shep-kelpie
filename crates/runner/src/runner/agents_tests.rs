@@ -81,7 +81,7 @@ fn a_project_naming_a_different_agent_per_role_reaches_each() {
     let rig = Rig::new("shep");
     rig.merge_auto();
     rig.write_agent("sonnet-low", SONNET_LOW);
-    rig.agent_board.ranks(&["opus-high"]);
+    rig.agent_board.ranks(&["opus-high", "qwen", "sonnet-low"]);
     rig.reviewers(&["qwen", "sonnet-low"]);
     let runner = rig.open().unwrap();
     whole_work_item(&rig, &runner);
