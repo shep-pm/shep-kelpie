@@ -35,6 +35,7 @@ pub(in crate::runner) fn listing(project: &str, bots: &[&str]) -> Rig {
         .chain(bots.iter().copied())
         .collect();
     rig.reviewers(&names);
+    rig.allow(&[&["sonnet-high"][..], &names].concat());
     rig
 }
 
@@ -287,6 +288,7 @@ fn a_private_repo_listing_cubic_alone_starts_and_cubic_reads() {
 fn an_adopted_pull_request_gets_a_pass_of_the_listed_bots() {
     let rig = Rig::new("shep");
     rig.reviewers(&["qwen", "claude", "coderabbit", "cubic"]);
+    rig.allow(&["sonnet-high", "qwen", "claude", "coderabbit", "cubic"]);
     let reviewed = rig.push_by_hand("fix/timeline", "work.txt");
     rig.forge
         .coderabbit

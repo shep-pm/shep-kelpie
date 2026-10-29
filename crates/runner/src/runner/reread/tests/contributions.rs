@@ -158,7 +158,7 @@ fn reviewers_on_a_gateway_added_with_them_wait_with_the_agents() {
     rig.write_agent("paddocked", reviewer);
     let next = settings_with(&rig, |s| {
         s.replace(
-            "pick = \"all\"\n",
+            "pick = \"all\"\nreviewers = [\"qwen\", \"claude\"]\n",
             "pick = \"all\"\nreviewers = [\"paddocked\"]\n",
         )
     });

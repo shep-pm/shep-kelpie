@@ -88,6 +88,7 @@ fn a_review_saved_mid_loop_goes_on_from_the_reviewer_after_the_one_it_recorded()
         "guard_cleared": false,
         "stage": { "stage": "round" },
         "last": "qwen",
+        "ran": ["qwen"],
     });
     std::fs::write(&state, saved.to_string()).unwrap();
 
@@ -115,6 +116,7 @@ fn a_review_saved_after_its_last_reviewer_goes_on_to_ci() {
         "guard_cleared": false,
         "stage": { "stage": "round" },
         "last": "claude",
+        "ran": ["qwen", "claude"],
     });
     std::fs::write(&state, saved.to_string()).unwrap();
 
@@ -330,6 +332,7 @@ fn reviewer_sessions_never_match_the_workers() {
 // turn opened the pull request.
 fn at_round_1(project: &str) -> (Rig, std::sync::Mutex<crate::runner::Runner>) {
     let rig = Rig::new(project);
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);

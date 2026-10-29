@@ -440,7 +440,9 @@ fn the_board_fills_a_free_slot_and_never_takes_an_open_issue_again() {
 
 #[test]
 fn an_adoption_goes_before_the_board_into_a_free_slot() {
-    let (rig, runner) = two_free_slots("shep");
+    let rig = two_slot_rig("shep");
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
+    let (rig, runner) = running(rig);
     rig.forge.list_ready(3, false);
     rig.push_by_hand("fix/timeline", "work.txt");
     rig.forge.open_pull_request(80, "fix/timeline", &[5]);

@@ -153,7 +153,6 @@ mod tests {
                 "# [[app.dogs.kelpie.hooks]]\n# point = \"publish\"\n# command =",
                 "[[app.dogs.kelpie.hooks]]\npoint = \"publish\"\ncommand =",
             )
-            .replace("# reviewers = [\"iq3-xxs-review\", \"defect-hunter-lite\"]", "reviewers = [\"qwen\"]")
             .replace(
                 "# test_command = \"cargo test --test {name}\"",
                 "test_command = \"cargo test --test {name}\"",
@@ -184,6 +183,10 @@ mod tests {
             .replace(
                 "# [app.dogs.kelpie.dependencies]\n# pick = \"off\"\n# bots = [\"dependabot\"]\n# on_red = \"close\"\n# web = [\"web/\", \"package.json\"]\n# wait_hours = 24\n",
                 "[app.dogs.kelpie.dependencies]\npick = \"off\"\nbots = [\"dependabot\"]\non_red = \"close\"\nweb = [\"web/\", \"package.json\"]\nwait_hours = 24\n",
+            )
+            .replace(
+                "[app.dogs.kelpie.agents]\n",
+                "[app.dogs.kelpie.agents]\nreviewers = [\"qwen\"]\n",
             )
             .replace("# allow =", "allow =")
             .replace("# representative =", "representative =")
@@ -221,8 +224,8 @@ mod tests {
             .replace("# command = \"scripts/", "command = \"scripts/")
             .replace("# results =", "results =");
         assert!(
-            text.contains("reviewers = [\"qwen\"]"),
-            "the example's list moved"
+            text.contains("[app.dogs.kelpie.reviews]\nneed = 2"),
+            "the example's review count moved"
         );
         // Each kind of skill once, every step naming it.
         let kinds = [

@@ -5,8 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::{
-    LeaseReads, NO_RETRO, RETRO_ON, RIG_REVIEWERS, RIG_REVIEWERS_AND_CODERABBIT, Rig,
-    project_table, write_in,
+    LeaseReads, NO_RETRO, RETRO_ON, RIG_REVIEWERS_AND_CODERABBIT, Rig, project_table, write_in,
 };
 use crate::pacer::DayStart;
 use crate::ports::{LocalLeases, Timestamp};
@@ -41,11 +40,7 @@ impl Rig {
 
     /// Lists CodeRabbit after the rig's reviewers, so it reads each pass last
     pub fn coderabbit_on(&self) {
-        self.edit_settings(|s| {
-            assert!(s.contains(RIG_REVIEWERS), "the rig's reviewers moved");
-            s.replace(RIG_REVIEWERS, RIG_REVIEWERS_AND_CODERABBIT)
-        });
-        self.reviews_need(Some(3));
+        self.reviewers(RIG_REVIEWERS_AND_CODERABBIT);
     }
 
     /// Makes the project's `git.merging` `auto`, read when a runner next opens
@@ -216,15 +211,25 @@ impl Rig {
         store.save(&state).unwrap();
     }
 
-    /// Lists `names` as the project's reviewers, and has each read the pull
-    /// request by setting `reviews.need` to their count, read when a runner next opens
-    pub fn reviewers(&self, names: &[&str]) {
-        let listed = format!("reviewers = {names:?}\n");
+    /// Restricts the project to `names` through `agents.allow`
+    pub fn allow(&self, names: &[&str]) {
         self.edit_settings(|s| {
-            assert!(s.contains(RIG_REVIEWERS), "the rig's reviewers moved");
-            s.replace(RIG_REVIEWERS, &listed)
+            let s: String = (s.lines())
+                .filter(|line| !line.starts_with("allow = "))
+                .map(|line| format!("{line}\n"))
+                .collect();
+            s.replace(
+                "[app.dogs.kelpie.agents]\n",
+                &format!("[app.dogs.kelpie.agents]\nallow = {names:?}\n"),
+            )
         });
-        // An empty list reads nobody, and `reviews.need` is at least one.
+    }
+
+    /// Ranks `names` after `sonnet-high` and sets `reviews.need` to their count
+    pub fn reviewers(&self, names: &[&str]) {
+        self.agent_board
+            .ranks_first(&[&["sonnet-high"][..], names].concat());
+        // `reviews.need` is at least one.
         self.reviews_need(Some(names.len().max(1)));
     }
 

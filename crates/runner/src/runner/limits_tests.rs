@@ -29,9 +29,15 @@ const CODER_REVIEW: &str = "---\nrole: reviewer\nharness: stand-in\nmodel: qwen3
 // `[agents]` table's keys
 type Agents = (&'static [&'static str], &'static str);
 
-const ALL_CODEX: Agents = (&["codex"], "reviewers = [\"qwen\", \"codex-review\"]\n");
+const ALL_CODEX: Agents = (
+    &["codex"],
+    "allow = [\"codex\", \"qwen\", \"codex-review\"]\n",
+);
 const BESIDE_QWEN: Agents = (&["sonnet-high", "coder"], "");
-const ALL_QWEN: Agents = (&["sonnet-high", "coder"], "reviewers = [\"qwen\"]\n");
+const ALL_QWEN: Agents = (
+    &["sonnet-high", "coder"],
+    "allow = [\"sonnet-high\", \"coder\", \"codex\", \"qwen\"]\n",
+);
 
 // A running project whose board ranks `ranked` and whose `[agents]` table holds `names`,
 // over kelpie's agent files and four more: `codex` on the Codex account and `coder` on a
@@ -44,16 +50,15 @@ fn named(project: &str, (ranked, names): Agents) -> (Rig, Mutex<Runner>) {
     rig.write_agent("coder-review", CODER_REVIEW);
     rig.edit_settings(|s| {
         assert!(s.contains(LISTED), "the example's agents table moved");
-        let s = s.replace(LISTED, &format!("[app.dogs.kelpie.agents]\n{names}"));
-        match names.contains("reviewers = ") {
-            true => s.replace(crate::test::RIG_REVIEWERS, ""),
-            false => s,
-        }
+        s.replace(LISTED, &format!("[app.dogs.kelpie.agents]\n{names}"))
     });
+    if !names.contains("allow = ") {
+        rig.allow(&["sonnet-high", "codex", "coder", "qwen", "claude", "pm"]);
+    }
     if !ranked.is_empty() {
         // The reviewers too, which each review round asks the board to rank.
-        let reviewers = ["qwen", "claude", "codex-review", "coder-review"];
-        rig.agent_board.ranks(&[ranked, &reviewers[..]].concat());
+        let candidates = ["qwen", "claude", "codex-review", "coder-review"];
+        rig.agent_board.ranks(&[ranked, &candidates[..]].concat());
     }
     let runner = rig.open().unwrap();
     (rig, runner)
@@ -143,7 +148,10 @@ fn a_first_pick_the_pacer_holds_gives_the_boards_second() {
 }
 
 // A local implementer listed alone, so no account is read before the board's ranking is.
-const ONLY_QWEN: Agents = (&["coder"], "reviewers = [\"qwen\"]\n");
+const ONLY_QWEN: Agents = (
+    &["coder"],
+    "allow = [\"sonnet-high\", \"coder\", \"codex\", \"qwen\"]\n",
+);
 
 #[test]
 fn a_later_pick_whose_account_is_unread_is_read_before_the_walk_gives_up() {
@@ -380,7 +388,7 @@ fn codex_usage_that_cannot_be_read_holds_until_it_can() {
 
 #[test]
 fn a_review_round_waits_on_its_reviewers_account_while_the_worker_works_on() {
-    let names: Agents = (&["codex"], "reviewers = [\"claude\"]\n");
+    let names: Agents = (&["codex"], "allow = [\"codex\", \"claude\"]\n");
     let (rig, runner) = named("chelone", names);
     rig.meter.set(Rig::utilization(0, 60));
     rig.ask(&runner, "add", Some("7"));
@@ -466,6 +474,7 @@ fn status_shows_who_holds_the_paddock_lease_on_a_gateway_model() {
         );
     let rig = Rig::new("rotom");
     rig.write_agent("mine", BEHIND_PADDOCK);
+    rig.allow(&["sonnet-high", "mine", "qwen", "claude"]);
     rig.agent_board.ranks(&["sonnet-high", "mine"]);
     let settings = std::fs::read_to_string(rig.kelpie_settings_file()).unwrap();
     let gateway = format!(
@@ -543,7 +552,10 @@ fn a_work_item_whose_agent_file_is_gone_fails_its_turn_saying_so() {
 
 #[test]
 fn a_review_round_on_a_local_agent_runs_on_that_agent() {
-    let names: Agents = (&["sonnet-high"], "reviewers = [\"coder-review\"]\n");
+    let names: Agents = (
+        &["sonnet-high"],
+        "allow = [\"sonnet-high\", \"coder-review\"]\n",
+    );
     let (rig, runner) = named("chelone", names);
     rig.meter.set(Rig::utilization(0, 1));
     rig.ask(&runner, "add", Some("7"));

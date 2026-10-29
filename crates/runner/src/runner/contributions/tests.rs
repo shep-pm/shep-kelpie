@@ -16,7 +16,12 @@ pub(in crate::runner) fn picking(pick: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new("shep");
     rig.with_app();
     rig.maintainer(MAINTAINER);
-    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.contributions]\npick = \"{pick}\"\n"));
+    rig.edit_settings(|s| {
+        format!(
+            "{s}\n[app.dogs.kelpie.contributions]\npick = \"{pick}\"\nreviewers = {reviewers:?}\n",
+            reviewers = crate::test::RIG_REVIEWERS,
+        )
+    });
     let runner = rig.open().unwrap();
     (rig, runner)
 }

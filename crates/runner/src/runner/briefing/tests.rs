@@ -23,6 +23,7 @@ fn main_at(rig: &Rig) -> String {
 // names the README.
 fn seven_and_eight(project: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
+    rig.allow(&["opus-high", "sonnet-high", "qwen", "claude"]);
     rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 3"));
     rig.forge.list_ready(9, false);
     rig.forge.label(9, "priority: P1");
@@ -44,6 +45,7 @@ fn seven_and_eight(project: &str) -> (Rig, Mutex<Runner>) {
 #[test]
 fn a_new_project_gets_its_board_at_start_with_nothing_on_it() {
     let rig = Rig::new("acme");
+    rig.allow(&["opus-high", "sonnet-high", "qwen", "claude"]);
     let runner = rig.open().unwrap();
     let path = rig.ask(&runner, "status", None)["board"].clone();
     assert_eq!(path, serde_json::json!(rig.paths().board));
@@ -72,9 +74,9 @@ fn a_new_project_gets_its_board_at_start_with_nothing_on_it() {
              such as a data migration, a release step or a change to a public interface.\n\
              - sonnet-high (implementer): standard tier, every kind; Builds everyday \
              features and anything with state, such as a store, a queue or a migration.\n\
+             - claude (reviewer): standard tier, every kind; no description\n\
              - qwen (reviewer): light tier, every kind; Reads a diff for defects with the \
              maintainer's local qwen-review script, as a first pass.\n\
-             - claude (reviewer): standard tier, every kind; no description\n\
              \n\
              ## Recent events\n\
              \n\
@@ -136,8 +138,8 @@ Implementers by name, then reviewers in their order. The agent board picks a wor
 
 - opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, such as a data migration, a release step or a change to a public interface.
 - sonnet-high (implementer): standard tier, every kind; Builds everyday features and anything with state, such as a store, a queue or a migration.
-- qwen (reviewer): light tier, every kind; Reads a diff for defects with the maintainer's local qwen-review script, as a first pass.
 - claude (reviewer): standard tier, every kind; no description
+- qwen (reviewer): light tier, every kind; Reads a diff for defects with the maintainer's local qwen-review script, as a first pass.
 
 ## Recent events
 
@@ -450,6 +452,7 @@ fn the_board_lists_the_projects_agents_from_their_files() {
          tier: heavy\n---\n",
     );
     rig.reviewers(&["claude", "qwen"]);
+    rig.allow(&["heavy", "opus-high", "sonnet-high", "claude", "qwen"]);
     let runner = rig.open().unwrap();
     let text = board(&rig);
     let section = text.split("## Agents\n").nth(1).unwrap();

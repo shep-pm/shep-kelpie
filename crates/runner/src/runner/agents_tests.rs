@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use crate::ports::{CLEAN, Checks, Finding, Role, Severity};
 use crate::runner::{Runner, StepReport, step};
 use crate::settings::Effort;
-use crate::test::{Rig, Scripted, ScriptedRound};
+use crate::test::{RIG_REVIEWERS, Rig, Scripted, ScriptedRound};
 
 const SONNET_LOW: &str = "---\nrole: reviewer\nharness: claude-code\n\
                           model: claude-sonnet-5\neffort: low\n---\nReview {{DIFF}}.\n";
@@ -81,8 +81,8 @@ fn a_project_naming_a_different_agent_per_role_reaches_each() {
     let rig = Rig::new("shep");
     rig.merge_auto();
     rig.write_agent("sonnet-low", SONNET_LOW);
-    rig.agent_board.ranks(&["opus-high", "qwen", "sonnet-low"]);
     rig.reviewers(&["qwen", "sonnet-low"]);
+    rig.agent_board.ranks(&["opus-high", "qwen", "sonnet-low"]);
     let runner = rig.open().unwrap();
     whole_work_item(&rig, &runner);
     let seen: Vec<(Role, String, Effort)> = rig
@@ -167,8 +167,7 @@ fn a_settings_file_that_cannot_be_written_keeps_the_turn_for_its_retry() {
 #[test]
 fn a_role_naming_an_agent_kelpie_lacks_stops_the_runner_naming_it() {
     let rig = Rig::new("shep");
-    rig.reviewers(&["fable"]);
-    let err = rig.open().unwrap_err().to_string();
+    let err = rig.open_listing(&["fable"]).unwrap_err().to_string();
     assert!(
         err.contains("`agents.reviewers` names fable, which has no agent file"),
         "{err}"
@@ -193,7 +192,7 @@ fn an_agent_file_a_setting_names_that_cannot_be_used_stops_the_runner_naming_it(
     ];
     for (text, why) in cases {
         rig.write_agent("qwen", text);
-        let err = rig.open().unwrap_err().to_string();
+        let err = rig.open_listing(RIG_REVIEWERS).unwrap_err().to_string();
         assert!(
             err.contains(&format!(
                 "names qwen, whose agent file {}: ",
@@ -280,8 +279,8 @@ fn an_agent_on_a_gateway_kelpie_cannot_route_to_stops_the_runner() {
         "---\nrole: reviewer\nharness: pi\nmodel: m\neffort: low\n\
          gateway: paddock\ncontext: 65536\n---\nReview {{DIFF}}.\n",
     );
-    rig.reviewers(&["qwen", "claude", "local"]);
-    let err = rig.open().unwrap_err().to_string();
+    let listed = ["qwen", "claude", "local"];
+    let err = rig.open_listing(&listed).unwrap_err().to_string();
     assert!(
         err.contains("local: gateway paddock is not in kelpie's settings"),
         "{err}"
@@ -289,7 +288,7 @@ fn an_agent_on_a_gateway_kelpie_cannot_route_to_stops_the_runner() {
     rig.set_kelpie_settings(
         "[gateways.paddock]\nurl = \"http://127.0.0.1:1\"\nkey_env = \"KELPIE_TEST_KEY_NEVER_SET\"\n",
     );
-    let err = rig.open().unwrap_err().to_string();
+    let err = rig.open_listing(&listed).unwrap_err().to_string();
     assert!(
         err.contains("KELPIE_TEST_KEY_NEVER_SET, which holds"),
         "{err}"

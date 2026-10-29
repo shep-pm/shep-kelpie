@@ -16,6 +16,7 @@ use crate::test::{Rig, Scripted};
 // project whose review is `defect-hunter` alone, or `listed`.
 fn at_review(rig: &Rig, listed: &[&str]) -> Mutex<Runner> {
     rig.reviewers(listed);
+    rig.allow(&[&["sonnet-high"][..], listed].concat());
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);

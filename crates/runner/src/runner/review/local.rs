@@ -265,10 +265,8 @@ fn a_session_that_says_neither_findings_nor_clean_fails() {
 
 #[test]
 fn a_missing_command_stops_the_runner_naming_it() {
-    let err = rig_with(&command("~/bin/no-such-review"))
-        .open()
-        .unwrap_err()
-        .to_string();
+    let rig = rig_with(&command("~/bin/no-such-review"));
+    let err = rig.open_listing(&["mine"]).unwrap_err().to_string();
     assert!(
         err.starts_with("setting `agents.reviewers`: mine: cannot run "),
         "{err}"
@@ -282,7 +280,8 @@ fn a_missing_command_stops_the_runner_naming_it() {
 #[test]
 fn an_unreachable_endpoint_stops_the_runner_naming_it() {
     let url = unreachable_url();
-    let err = rig_with(&endpoint(&url)).open().unwrap_err().to_string();
+    let rig = rig_with(&endpoint(&url));
+    let err = rig.open_listing(&["mine"]).unwrap_err().to_string();
     assert!(
         err.starts_with(&format!(
             "setting `agents.reviewers`: mine: cannot reach {url}/models: "
@@ -295,9 +294,12 @@ fn an_unreachable_endpoint_stops_the_runner_naming_it() {
 fn with_no_local_round_listed_no_command_is_needed() {
     let rig = Rig::new("koji");
     std::fs::remove_file(rig.home.path().join(".claude/scripts/qwen-review.sh")).unwrap();
-    assert!(rig.open().is_err(), "the listed qwen command is checked");
+    assert!(
+        rig.open_listing(&["qwen", "claude"]).is_err(),
+        "the listed qwen command is checked"
+    );
     rig.reviewers(&["claude"]);
-    assert!(rig.open().is_ok());
+    assert!(rig.open_listing(&["claude"]).is_ok());
 }
 
 // What qwen-review.sh itself writes, one line per file, when the GPU box
@@ -369,6 +371,7 @@ fn a_local_round_that_reviewed_nothing_goes_on_to_the_next_reviewer() {
 #[test]
 fn a_local_round_that_fails_in_two_passes_is_left_out_of_the_next_and_status_says_so() {
     let rig = Rig::new("koji");
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
     let runner = at_round_one(&rig);
     rig.reviewer
         .script([found(UNREACHABLE), found(UNREACHABLE)]);
