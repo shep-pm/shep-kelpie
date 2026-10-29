@@ -161,14 +161,11 @@ impl core::error::Error for WorktreeError {}
 
 /// Makes sure `worktree` is a clone of `repo` on `branch`, and `build` exists
 ///
-/// A new worktree is a [`clone`] whose branch starts where `start` says, just
-/// fetched, and does not track it. [`Start::Pushed`] reads the branch from
-/// `remote`. A linked worktree on the branch, made before worktrees were
-/// clones, is turned into one and keeps its files. Every call fetches
-/// `origin/main` into the checkout and sets the clone's to it. Where that
-/// fetch fails the worktree keeps the last one and
-/// [`Worktree::main_fetch_failed`] says why, so the turn goes on. A
-/// [`Start::Main`] branch starts on that ref, so there a failed fetch errors.
+/// A new worktree is a [`clone`] starting where `start` says, read from
+/// `remote` for [`Start::Pushed`]. A linked worktree on the branch is turned
+/// into one and keeps its files. Every call fetches `origin/main` into the
+/// checkout and sets the clone's to it. A failed fetch keeps the last one and
+/// [`Worktree::main_fetch_failed`] says why, except for [`Start::Main`].
 ///
 /// # Errors
 ///
@@ -278,9 +275,7 @@ fn mirror_tracking(repo: &Path, worktree: &Path, tracking: &str) -> Result<(), W
 
 /// Removes a work item's worktree, its branch and its build folder
 ///
-/// A clone's worktree and git dir are removed whole. A linked worktree is
-/// removed through git.
-///
+/// A clone's worktree and git dir are removed whole, a linked one through git.
 /// `remote` also deletes the branch on that [`Remote`]. Whatever is already
 /// gone, a branch the forge deleted first included, is skipped, so a removal
 /// cut short can run again.

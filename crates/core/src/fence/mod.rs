@@ -17,6 +17,8 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::worktree::{self, Remote, WorktreeError, git};
 
+#[cfg(test)]
+mod clone_tests;
 mod commit;
 mod nested;
 
@@ -446,9 +448,6 @@ fn folder(path: &Path, e: &std::io::Error) -> WorktreeError {
         kind: e.kind(),
     }
 }
-
-#[cfg(test)]
-mod clone_tests;
 
 #[cfg(test)]
 mod tests {
