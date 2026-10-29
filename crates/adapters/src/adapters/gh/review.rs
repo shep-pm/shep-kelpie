@@ -53,7 +53,32 @@ pub(super) fn viewer() -> Result<String, ForgeError> {
 }
 
 pub(super) fn login_token() -> Result<InstallationToken, ForgeError> {
-    parse_login_token(&gh(&["auth", "token"])?)
+    login_token_with(gh)
+}
+
+// `gh auth token` prints a token gh already knows is dead, so the login is
+// checked first. What `auth status` printed is dropped: it can hold part of a token.
+fn login_token_with(
+    run: impl Fn(&[&str]) -> Result<Vec<u8>, ForgeError>,
+) -> Result<InstallationToken, ForgeError> {
+    // Only the active account's token is the one `auth token` prints.
+    match run(&["auth", "status", "--hostname", "github.com", "--active"]) {
+        Err(spawn @ ForgeError::Spawn(_)) => return Err(spawn),
+        Err(held @ ForgeError::Held(_)) => return Err(held),
+        Err(ForgeError::Limited { cooldown, .. }) => {
+            return Err(ForgeError::Limited {
+                said: "`gh auth status` was rate limited".to_owned(),
+                cooldown,
+            });
+        }
+        Err(_) => {
+            return Err(ForgeError::Failed(
+                "`gh auth status` says the login is invalid".to_owned(),
+            ));
+        }
+        Ok(_) => {}
+    }
+    parse_login_token(&run(&["auth", "token"])?)
 }
 
 // The token is one line. What failed to parse is not echoed: it may be a token.
@@ -231,7 +256,7 @@ pub(crate) fn parse_reviewed(stdout: &[u8], repo: &ForgeSlug) -> Result<Reviewed
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::PullRequestState;
+    use crate::ports::{Cooldown, PullRequestState};
 
     // Recorded from gh 2.96: `gh api graphql` with `QUERY` on shep-pm/shep#617,
     // where the maintainer's reviews are empty replies and every thread is
@@ -259,6 +284,66 @@ mod tests {
             let error = parse_login_token(bad).unwrap_err().to_string();
             assert!(!error.contains("gho_abc"), "{error}");
         }
+    }
+
+    // gh 2.x's stderr for a login it knows is dead, with exit 1, written from
+    // gh's format by hand since the sandbox cannot run `gh auth`.
+    const INVALID_LOGIN: &str = include_str!("../../../../../fixtures/gh-auth-status-invalid.txt");
+
+    // A gh that answers `auth status` with `status` and `auth token` with `token`
+    fn gh_saying(
+        status: Result<Vec<u8>, ForgeError>,
+        token: &'static [u8],
+    ) -> impl Fn(&[&str]) -> Result<Vec<u8>, ForgeError> {
+        move |args| match args {
+            ["auth", "status", "--hostname", "github.com", "--active"] => status.clone(),
+            ["auth", "token"] => Ok(token.to_vec()),
+            other => panic!("unexpected gh call {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_valid_login_gives_the_token_gh_prints() {
+        let token = login_token_with(gh_saying(Ok(b"github.com\n".to_vec()), b"gho_abc123\n"));
+        assert_eq!(token.unwrap().expose(), "gho_abc123");
+    }
+
+    #[test]
+    fn an_invalid_login_is_refused_without_echoing_what_gh_status_printed() {
+        let failed = gh_saying(
+            Err(ForgeError::Failed(INVALID_LOGIN.to_owned())),
+            b"gho_dead123\n",
+        );
+        let error = login_token_with(failed).unwrap_err().to_string();
+        assert!(error.contains("invalid"), "{error}");
+        for part in INVALID_LOGIN.lines().chain(["octocat", "gho_dead123"]) {
+            assert!(!error.contains(part), "{error}");
+        }
+    }
+
+    #[test]
+    fn a_rate_limited_status_check_keeps_its_cooldown_and_none_of_what_gh_printed() {
+        let cooldown = Cooldown::default();
+        let limited = gh_saying(
+            Err(ForgeError::Limited {
+                said: format!("gh failed: {INVALID_LOGIN}"),
+                cooldown,
+            }),
+            b"",
+        );
+        let error = login_token_with(limited).unwrap_err();
+        assert!(matches!(&error, ForgeError::Limited { cooldown: c, .. } if *c == cooldown));
+        assert!(!error.to_string().contains("octocat"), "{error}");
+        assert!(!error.to_string().contains("invalid"), "{error}");
+    }
+
+    #[test]
+    fn a_gh_that_cannot_start_is_reported_as_such() {
+        let missing = gh_saying(Err(ForgeError::Spawn("not found".to_owned())), b"");
+        assert_eq!(
+            login_token_with(missing).unwrap_err(),
+            ForgeError::Spawn("not found".to_owned())
+        );
     }
 
     #[test]
