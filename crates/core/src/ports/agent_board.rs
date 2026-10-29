@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use crate::lease::door::{Pick, PickAsk};
+use crate::lease::door::{FitAsk, Fits, Pick, PickAsk};
 
 /// The board a runner asks, at dispatch, which agents may start a work item
 pub trait AgentBoard: Send + Sync + fmt::Debug {
@@ -13,4 +13,10 @@ pub trait AgentBoard: Send + Sync + fmt::Debug {
     ///
     /// An empty list is the board's answer that no allowed agent fits.
     fn pick(&self, item: &PickAsk) -> Option<Vec<Pick>>;
+
+    /// What the board says about the agent and kind `item` names, or None
+    /// when it cannot be asked
+    ///
+    /// [`Fits::No`] is the finding a runner raises an `agent-fit` ruling from.
+    fn fit(&self, item: &FitAsk) -> Option<Fits>;
 }

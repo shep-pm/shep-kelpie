@@ -98,7 +98,7 @@ pub fn within_slack(finish: u64, soonest: u64, slack: Option<u32>) -> bool {
 }
 
 // An item with no kind goes only to an agent whose file names no kinds
-fn takes(fit: &Fit, kind: Option<&str>) -> bool {
+pub(super) fn takes(fit: &Fit, kind: Option<&str>) -> bool {
     match (&fit.kinds, kind) {
         (None, _) => true,
         (Some(kinds), Some(kind)) => kinds.iter().any(|k| k == kind),

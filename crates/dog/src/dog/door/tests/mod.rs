@@ -48,20 +48,31 @@ fn door_seeing(
     board: Arc<Mutex<Board>>,
 ) -> (tempfile::TempDir, PathBuf, Arc<Mutex<Kept>>) {
     let dir = tempfile::tempdir().unwrap();
-    let desk = kept(dir.path(), capacity);
-    let socket = dir.path().join("lease.sock");
+    let (socket, desk) = door_in(dir.path(), capacity, shown, board);
+    (dir, socket, desk)
+}
+
+// A dog's door in `dir`, whose kelpie home is `dir/kelpie`, answering a pick
+// from `shown` and `board`. Its socket, and the desk holding the leases.
+fn door_in(
+    dir: &Path,
+    capacity: u32,
+    shown: Availability,
+    board: Arc<Mutex<Board>>,
+) -> (PathBuf, Arc<Mutex<Kept>>) {
+    let desk = kept(dir, capacity);
+    let socket = dir.join("lease.sock");
     let listener = open(&socket).unwrap();
-    let home = dir.path().join("kelpie");
     tokio::spawn(serve(
         listener,
         Arc::clone(&desk),
         Duration::ZERO,
-        home,
+        dir.join("kelpie"),
         Remote::default(),
         Arc::new(Mutex::new(shown)),
         board,
     ));
-    (dir, socket, desk)
+    (socket, desk)
 }
 
 // A client is blocking, so it runs off the runtime the dog's door is served on.
@@ -641,6 +652,7 @@ async fn a_dead_door_is_taken_over_and_closed_to_others() {
 }
 
 mod e2e;
+mod fit;
 mod forge;
 mod pick;
 

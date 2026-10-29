@@ -1,13 +1,15 @@
-//! The agent board: every project's finished items, for the `pick` ask
+//! The agent board: every project's finished items, for the `pick` and `fit` asks
 //!
 //! Every [`LOAD_TICK`] the dog looks at each project's usage ledger in
 //! kelpie's home and rereads one whose length or last write changed. A
 //! `pick` ask ranks the implementers and reviewers it names with
 //! `agent_board::pick`, each one's wait read from the
-//! [`availability`](super::availability). The dog knows no project's day start
-//! or kickoff hours, so a plan waits only on its 5-hour window, and the
-//! runner's pacer still holds at dispatch.
+//! [`availability`](super::availability): the dog knows no project's day
+//! start or kickoff hours, so a plan waits only on its 5-hour window. A
+//! `fit` ask reads every project's records at once, and the dog keeps what
+//! it has answered in its own marks file beside its book.
 
+mod fit;
 mod pick;
 
 use std::collections::BTreeMap;
@@ -25,13 +27,19 @@ use crate::home::ProjectName;
 use crate::settings::AgentName;
 use crate::usage::{self, FinishedLine, Line};
 
+pub(super) use fit::{load_marks, visit as fit_visit};
 pub(super) use pick::visit;
+
+/// Each agent and kind the dog answered a fit finding for, with the agent's
+/// items of that kind when it did
+pub(super) type Marks = BTreeMap<(AgentName, String), u32>;
 
 /// The agents the board ranks, implementers and reviewers, and the finished items of every project
 #[derive(Debug)]
 pub struct Board {
     ranked: Arc<BTreeMap<AgentName, Agent>>,
     ledgers: BTreeMap<ProjectName, Ledger>,
+    marks: Marks,
 }
 
 #[derive(Debug)]
@@ -43,11 +51,12 @@ struct Ledger {
 // A ledger's length and last write, which change with every line it gains.
 type Stamp = (u64, Option<SystemTime>);
 
-/// What a pick or `status` reads of the board, copied out of its lock
+/// What a pick, a `fit` ask or `status` reads of the board, copied out of its lock
 #[derive(Debug, Clone, Default)]
 pub struct View {
     ranked: Arc<BTreeMap<AgentName, Agent>>,
     ledgers: Vec<Arc<[FinishedLine]>>,
+    marks: Marks,
 }
 
 impl View {
@@ -67,10 +76,11 @@ impl Board {
         Self {
             ranked: Arc::new(ranked),
             ledgers: BTreeMap::new(),
+            marks: Marks::new(),
         }
     }
 
-    /// What it holds now, for a pick to read without the lock
+    /// What it holds now, for a pick, a `fit` ask or `status` to read without the lock
     pub(super) fn view(&self) -> View {
         View {
             ranked: Arc::clone(&self.ranked),
@@ -79,6 +89,7 @@ impl Board {
                 .values()
                 .map(|l| Arc::clone(&l.finished))
                 .collect(),
+            marks: self.marks.clone(),
         }
     }
 }
@@ -154,7 +165,9 @@ fn ledgers(kelpie_home: &Path) -> Option<BTreeMap<ProjectName, Option<(PathBuf, 
 
 /// The board of `agents`' implementers and reviewers, refreshed from the ledgers under `kelpie_home` from now on
 pub(super) fn begin(agents: &Agents, kelpie_home: PathBuf) -> Arc<Mutex<Board>> {
-    let board = Arc::new(Mutex::new(Board::new(agents)));
+    let mut board = Board::new(agents);
+    load_marks(&mut board, &kelpie_home);
+    let board = Arc::new(Mutex::new(board));
     tokio::spawn(keep(Arc::clone(&board), Arc::new(kelpie_home)));
     board
 }

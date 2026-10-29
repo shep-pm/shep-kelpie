@@ -8,3 +8,5 @@
 {"error":"no"}
 {"picks":[{"agent":"sonnet-high","finish":2400,"wait":0,"cost_usd":1.2},{"agent":"iq3-xxs","finish":6000,"wait":2400}]}
 {"picks":[]}
+{"fits":"yes"}
+{"fits":{"no":{"kind":"fix","worse":"slow","better":"quick","measure":{"hours":{"worse":3.0,"better":1.0}},"suggested_kinds":["docs"]}}}

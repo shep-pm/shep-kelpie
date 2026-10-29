@@ -21,7 +21,7 @@ use super::e2e::Remote;
 use super::{Kept, lock_desk};
 use crate::ipc::{Listener, ServerReadHalf, ServerStream, ServerWriteHalf, split};
 use crate::lease::counted::{CARGO_TEST, Taken, Taker, Ticket};
-use crate::lease::door::{Answer, Ask, E2E, FORGE, LONGEST_LINE, PICK};
+use crate::lease::door::{Answer, Ask, E2E, FIT, FORGE, LONGEST_LINE, PICK};
 
 /// How long a connection has to send its ask before the dog hangs up
 const ASK_WITHIN: Duration = Duration::from_secs(10);
@@ -57,7 +57,8 @@ pub fn open(socket: &Path) -> Result<Listener, String> {
 /// granting nothing new for `grace` from now
 ///
 /// An `e2e` ask is placed by the worktree it names under `kelpie_home`, and
-/// run through `remote`. A `pick` ask reads `board` and what is `shown`.
+/// run through `remote`. A `pick` ask reads `board` and what is `shown`, and a
+/// `fit` ask reads `board` and writes its marks under `kelpie_home`.
 pub(super) async fn serve(
     mut listener: Listener,
     desk: Arc<Mutex<Kept>>,
@@ -157,6 +158,9 @@ async fn visit(stream: ServerStream, mut place: Place, fresh_from: tokio::time::
         }
         Ok(ask) if ask.take == PICK => {
             return super::board::visit(&place, ask, &mut write).await;
+        }
+        Ok(ask) if ask.take == FIT => {
+            return super::board::fit_visit(&place, ask, &mut write).await;
         }
         Ok(ask) => {
             let why = format!(

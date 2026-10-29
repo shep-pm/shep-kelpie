@@ -37,6 +37,14 @@ impl Record {
         let decided = self.items - self.closed;
         (decided > 0).then(|| f64::from(self.merged) / f64::from(decided))
     }
+
+    /// The share of its items that had [`HEAVY_FIX_TURNS`] or more fix turns, 0.0 with no item
+    pub fn heavy_fix_share(&self) -> f64 {
+        if self.items == 0 {
+            return 0.0;
+        }
+        f64::from(self.heavy_fix_items) / f64::from(self.items)
+    }
 }
 
 /// The record of each agent and kind among `lines`, a line with no kind under None
