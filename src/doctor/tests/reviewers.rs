@@ -39,9 +39,6 @@ async fn a_reviewer_on_a_gateway_kelpie_lacks_is_no_candidate_when_the_project_n
     // is held to what a round cannot work around: `iq3-xxs-review` is left out
     // rather than refused.
     let scene = Scene::new().await;
-    let scripts = scene.home.join(".claude/scripts");
-    std::fs::create_dir_all(&scripts).unwrap();
-    crate::test::write_script(&scripts.join("qwen-review.sh"), "#!/bin/sh\nexit 0\n");
     scene.runs("golbat", |t| {
         t["agents"]["allow"] = json!([]);
     });
@@ -52,6 +49,45 @@ async fn a_reviewer_on_a_gateway_kelpie_lacks_is_no_candidate_when_the_project_n
         "{found}: a candidate on a gateway kelpie's settings hold none of is left out, \
          not refused"
     );
+}
+
+#[tokio::test]
+async fn a_candidate_the_project_named_no_that_cannot_run_is_no_line_s_to_refuse() {
+    // `qwen` is a shipped reviewer file, so it is a candidate of every project
+    // that names no agent, and its round is passed over when its script is not
+    // there. Only a reviewer the project named is held to what a round cannot
+    // work around, as the runner holds it.
+    let scene = Scene::new().await;
+    scene.runs("golbat", |t| {
+        t["agents"]["allow"] = json!([]);
+    });
+    let report = scene.report().await;
+    let found = ok(&report, "golbat: reviewers");
+    assert!(
+        found.contains("qwen"),
+        "{found}: the candidate is still a candidate, and no line refuses it"
+    );
+}
+
+#[tokio::test]
+async fn a_review_bot_the_project_named_no_gets_no_line() {
+    // `coderabbit`, `cubic` and `codex` are shipped reviewer files, so each is a
+    // candidate of a project that names no agent, and a round passes it over: on
+    // a repo that is not public, or as one never installed there.
+    let scene = Scene::new().await;
+    scene.forge.set_visibility(Visibility::Private);
+    scene.runs("golbat", |t| {
+        t["agents"]["allow"] = json!([]);
+    });
+    let report = scene.report().await;
+    let subjects = subjects(&report);
+    for bot in ["golbat: coderabbit", "golbat: cubic", "golbat: codex"] {
+        assert!(
+            !subjects.contains(&bot),
+            "{subjects:?}: a bot the project named \
+                 no is passed over at its round, so it is no line's to refuse"
+        );
+    }
 }
 
 #[tokio::test]

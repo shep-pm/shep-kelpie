@@ -524,8 +524,9 @@ fn the_review_bot_settings_bot_files_replace_are_refused_saying_what_replaces_ea
         format!(
             "`coderabbit.enabled` is no longer a setting, because {BOT_FILES}: for `true`, \
              nothing to do: every reviewer file is a candidate, so `coderabbit` is one too; \
-             for `false`, keep it out with `agents.allow = [\"defect-hunter-lite\"]`, which \
-             keeps out every agent it does not name; then delete the key"
+             for `false`, `agents.allow` is how one is kept out, and it keeps out every \
+             agent it does not name, so name every other agent the project uses, its \
+             implementers, `pm` and `representative` included; then delete the key"
         )
     );
     assert_eq!(
@@ -566,8 +567,8 @@ fn the_review_bot_settings_bot_files_replace_are_refused_saying_what_replaces_ea
 }
 
 // A live table from before bot files, its old review list still set: every key
-// it must drop is named at once, and the fix keeps the bot out with its own
-// reviewers in `agents.allow`.
+// it must drop is named at once, and the fix for the bot says what `agents.allow`
+// must hold, which is every agent the project uses and not its reviewers alone.
 #[test]
 fn a_table_carrying_several_removed_keys_names_them_all_at_once() {
     let text = EXAMPLE
@@ -600,8 +601,11 @@ fn a_table_carrying_several_removed_keys_names_them_all_at_once() {
         "`[coderabbit]` is named by its keys"
     );
     assert!(
-        err.contains("`agents.allow = [\"iq3-xxs-review\", \"defect-hunter-lite\"]`"),
-        "{err}"
+        err.contains(
+            "name every other agent the project uses, its implementers, `pm` and \
+                      `representative` included"
+        ),
+        "{err}: a list of reviewers alone would leave out every implementer"
     );
 }
 

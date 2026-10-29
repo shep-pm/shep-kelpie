@@ -176,7 +176,7 @@ pub(super) fn checks(
     lines.extend(gone_keys(at("old keys"), &settings));
     // The forge lines need the repo, and the checkout line says why when it is unknown.
     if let Some(repo) = &remote {
-        let bots = bots_listed(&settings, (&book, &gateways), here.home);
+        let bots = bots_listed(&settings, &book, here.home);
         lines.extend(forge_lines(&at, repo, &settings, &bots, probes));
         let (line, covered) = super::github::app(at("github app"), repo, probes.github);
         lines.push(line);
@@ -643,14 +643,12 @@ fn names(labels: &[NewLabel]) -> String {
     quoted.join(", ")
 }
 
-// The review bots among the project's candidates, in their order.
-fn bots_listed(
-    settings: &Settings,
-    (book, gateways): (&Agents, &Gateways),
-    home: &std::path::Path,
-) -> Vec<Bot> {
-    let lineup = settings.lineup(book, gateways, home);
-    let mut bots: Vec<Bot> = lineup
+// The review bots among the reviewers the project named, in their order. A bot
+// among the candidates it named no is passed over at its round, so it is no
+// line's to refuse, as the runner holds it.
+fn bots_listed(settings: &Settings, book: &Agents, home: &std::path::Path) -> Vec<Bot> {
+    let mut bots: Vec<Bot> = settings
+        .named_reviewers(book, home)
         .iter()
         .filter_map(|r| r.bot().map(|b| b.bot))
         .collect();
@@ -741,7 +739,10 @@ fn reviewers(
         let fix = "add the gateway to kelpie's settings, or take the reviewer off `agents.allow`";
         return Line::missing(subject, e.to_string(), fix);
     }
-    for reviewer in &lineup {
+    // Only a reviewer the project named is held to what a round cannot work
+    // around, as the runner holds it: a candidate it named no is passed over at
+    // its round, so a command that is not there is not this line's to refuse.
+    for reviewer in settings.named_reviewers(book, here.home) {
         // A round behind a gateway is checked on the gateway's own lines.
         let Some(round) = reviewer
             .runs

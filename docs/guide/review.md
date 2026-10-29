@@ -24,11 +24,11 @@ A contribution with no `contributions.reviewers` runs `defect-hunter-lite`, and 
 - `standards` reads `CODING_STANDARDS.md`, `CONTRIBUTING.md` and `CLAUDE.md` where the repo has them, and checks the diff against them and against the skill's twelve code smells, such as Duplicated Code and Speculative Generality. It covers the verbose and repeated code `defect-hunter` is told to skip. A documented standard overrides a smell, what tooling enforces is skipped, and a smell is never above `LOW`, since each is a judgement call.
 - `spec` checks the diff against the issue's acceptance criteria, which are cut at 4,000 bytes. It reports a requirement that is missing or partly done, behaviour nobody asked for, and a requirement that looks done but is wrong, quoting the criterion for each.
 
-A local model before the defect hunter, and a deeper read of the paths where it pays:
+A local model before the defect hunter, and a deeper read of the paths where it pays. A project names no reviewers of its own: `agents.allow` names the agents it may use, so it holds the reviewers it wants and its implementers too:
 
 ```toml
 [app.dogs.kelpie.agents]
-reviewers = ["gpu-box", "defect-hunter-lite", "merge-reader"]
+allow = ["sonnet-high", "gpu-box", "defect-hunter-lite", "merge-reader"]
 ```
 
 ```markdown
@@ -58,11 +58,11 @@ A missing command or an endpoint that doesn't answer stops the runner at start.
 
 ## Review bots
 
-A review bot reads the pull request on the forge, as a candidate like every other reviewer file, once a pass. shep-kelpie ships a file for each, `coderabbit`, `cubic` and `codex`, which `add` writes out and which no project runs until its `agents.allow` holds it:
+A review bot reads the pull request on the forge, as a candidate like every other reviewer file, once a pass. shep-kelpie ships a file for each, `coderabbit`, `cubic` and `codex`, which `add` writes out. A project that names the agents it may use runs a bot only while `agents.allow` holds it:
 
 ```toml
 [app.dogs.kelpie.agents]
-reviewers = ["defect-hunter-lite", "coderabbit"]
+allow = ["sonnet-high", "defect-hunter-lite", "coderabbit"]
 ```
 
 ```markdown
@@ -77,7 +77,7 @@ hours: 1
 
 A bot's file is named for its bot, since `reviews` in `hours` is its account's window, which the dog books from that file when it starts and every project shares. Its round marks a draft ready, since a bot may skip drafts, waits for the bot's window and lease, and summons it: CodeRabbit by the `review please` label, or by `@coderabbitai full review` on a pull request it read before that would otherwise find nothing new, cubic and Codex by their comments. A summon with no sign of being heard in fifteen minutes goes out once more. Once a review covers the head, the bot's open threads are its findings, and go to one fix turn as any reviewer's do. A refusal hands the window back to the dog and the round asks again. A window that opens more than an hour on, by the dog's book or by the bot's refusal, passes the bot over for the pass, and so does a bot that gives no review in its file's `review_wait` after its summon (minutes, 45 when unset), a bot that gives no sign of its summon in ten minutes and has never posted a review on the repo (its note says it may not be installed there), a status that declines the summon (CodeRabbit's `Review skipped: automatic reviews are disabled` or `Review skipped: excluded by label configuration`, which its `.coderabbit.yaml` sets and passes the bot over at once), as long as `review_wait` its round could not summon it, a bot `agents.allow` stops holding mid-round, and CodeRabbit on a repo the forge reports not public, which is checked just before each summon; `status` lists each under `bots_skipped`, and a pass nobody else read is marked unreviewed. A bot passed over that reviews the head anyway is still read: at the start of each later round, when CI goes green, and every five minutes while the merge ruling waits. Its review gets a round of its own, and its threads go to one fix turn as any review's. Once the pass has ended, that fix goes back to the merge ruling with no new pass, after the round of any other passed-over bot that has reviewed late too, and the ruling says no reviewer read it and comes to you even under `auto`. A merge ruling already waiting is withdrawn for it, which the log and the webhook say, and the work item takes a free slot for the round or waits for one. A bot that already read the pull request this pass and reviews a later head is not sent again: its open threads are named in the merge ruling, and under `auto` any above a nit hold the merge. Open nits are named in the merge ruling on their own, as in `3 nits left open (cubic)`, and never hold a merge. `rounds: 1` lets a bot read a work item's pull request once, whatever its passes, counting its reviews from before a rework or an adoption, and is unset by default. An adopted pull request goes through a pass of the candidate bots alone, and until each bot answers a summon of shep-kelpie's own, none of its reviews from before the adoption stands for its read. Codex's `reviews_on_ready: true` says it reviews a pull request when it leaves draft, as the repo's Codex settings may have it: then marking ready, under its lease, is the summon, with no comment, and it is never asked again by comment.In `contributions.reviewers`, list it before any other bot, whose mark-ready would draw its review outside its lease: the runner refuses the other order.
 
-No review bot is a candidate unless `agents.allow` holds it, and a project that holds none never asks the forge about one. CodeRabbit's free plan reviews public repos only, so a repo GitHub marks private cannot hold `coderabbit` in `agents.allow`, and holds `cubic` or `codex` instead. shep-kelpie asks CodeRabbit for a review by putting the `review please` label on, so the repo's `.coderabbit.yaml` must review only labelled pull requests. Without that, CodeRabbit reviews every push on its own and spends the hour a round is waiting on:
+A project that names the agents it may use runs only the bots `agents.allow` holds. One that names none has each shipped bot as a candidate and passes it over at its round when its repo cannot run it, so it is never held to a bot its repo has not installed. CodeRabbit's free plan reviews public repos only, so a repo GitHub marks private cannot hold `coderabbit` in `agents.allow`, and holds `cubic` or `codex` instead. shep-kelpie asks CodeRabbit for a review by putting the `review please` label on, so the repo's `.coderabbit.yaml` must review only labelled pull requests. Without that, CodeRabbit reviews every push on its own and spends the hour a round is waiting on:
 
 ```yaml
 reviews:

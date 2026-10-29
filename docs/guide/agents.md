@@ -29,11 +29,11 @@ A stub written before baselines dropped their binding (`extends: kelpie:pm` and 
 
 Kelpie also writes each shipped agent whole and read-only to `agents/.defaults/<name>.md`, to read and to diff against your file. Nothing loads it, and an edit there is lost: `add` and the dog's start write it again, so an upgrade's restart refreshes it. Override in `agents/<name>.md` instead.
 
-A project lists the agents that review its pull requests, from those files:
+A project names no reviewers of its own: every agent file whose role is `reviewer` that `agents.allow` holds is a candidate for each round. A project that names the agents it may use lists them there, its implementers included:
 
 ```toml
 [app.dogs.kelpie.agents]
-reviewers = ["defect-hunter-lite"]
+allow = ["sonnet-high", "defect-hunter-lite"]
 ```
 
 The agent board the lease dog keeps picks the implementer a new work item opens on, out of every file whose role is `implementer` that the project allows: of those that take the issue's `kind:` and that the pacer lets start, the cheapest that would finish within the slack of the soonest, then the soonest, then by name. An agent on a local model whose history names no cost counts as free. No label is written on the issue. A rework, an adopted pull request and a released contribution open on the board's pick as well, and the issue kelpie files for a contribution that closes none carries no `agent:` label. An issue labelled `agent:<name>!` (the prefix in any case) is pinned: the board tries that agent alone, and the item waits while it cannot start. A plain `agent:<name>` label does not choose, for a rework or an adopted pull request as for a new issue: only `agent:<name>!` does. A name whose file is missing or holds another role is refused. While the dog cannot be reached, no new work item opens, and `status` lists the issue under `skipped` as `unpicked` until the next poll reaches it. A rework or an adopted pull request waits the same way, queued and unchanged, with nothing listed. There is no default implementer and no list of them: an implementer the worker's fence or kelpie's gateways cannot run is left out of the board's ask, the log says why at each start and at the settings change that leaves it out, and `doctor` names it. An implementer's file must say `role: implementer`, and a reviewer's `role: reviewer`. When the runner starts, and when the implementer files or `agents.allow` change, it makes the `agent:` label of every implementer file the project allows that the repo lacks. It never removes or changes a label, since removing one strips it from every issue, closed ones included.

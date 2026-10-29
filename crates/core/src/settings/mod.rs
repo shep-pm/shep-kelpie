@@ -362,9 +362,10 @@ const REMOVED: &[Removed] = &[
         key: "coderabbit.enabled",
         because: BOT_FILES,
         fix: "for `true`, nothing to do: every reviewer file is a candidate, so \
-              `coderabbit` is one too; for `false`, keep it out with \
-              KEEP_CODERABBIT_OUT, which keeps out every agent it does not name; \
-              then delete the key",
+              `coderabbit` is one too; for `false`, `agents.allow` is how one is kept \
+              out, and it keeps out every agent it does not name, so name every other \
+              agent the project uses, its implementers, `pm` and `representative` \
+              included; then delete the key",
     },
     Removed {
         key: "coderabbit.rounds",
@@ -852,39 +853,11 @@ impl Settings {
 
 /// Refuses `text` when it sets a key a removed feature left behind
 ///
-/// The fix for `coderabbit.enabled` shows how the project would keep the bot
-/// out: `agents.allow` naming every other reviewer, as its table lists them or
-/// as the default gives them with no paddock gateway.
-///
 /// # Errors
 ///
 /// A message naming every removed key `text` sets, each with what replaces it.
 pub(crate) fn refuse_removed_settings(text: &str) -> Result<(), String> {
-    removed::refuse(text, REMOVED, NOW_TABLES).map_err(|message| {
-        let table = text.parse::<toml::Table>().unwrap_or_default();
-        let listed = table
-            .get("agents")
-            .and_then(|agents| agents.get("reviewers"))
-            .and_then(toml::Value::as_array)
-            .map(|names| {
-                names
-                    .iter()
-                    .filter_map(|n| n.as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or_else(|| {
-                let names = default_reviewers(&Gateways::default()).into_iter();
-                names.map(|n| n.as_str().to_owned()).collect::<Vec<_>>()
-            });
-        let kept_out: Vec<String> = listed
-            .into_iter()
-            .filter(|name| name != "coderabbit")
-            .collect();
-        message.replace(
-            "KEEP_CODERABBIT_OUT",
-            &format!("`agents.allow = {kept_out:?}`"),
-        )
-    })
+    removed::refuse(text, REMOVED, NOW_TABLES)
 }
 
 #[cfg(test)]
