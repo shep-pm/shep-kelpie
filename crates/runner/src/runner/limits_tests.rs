@@ -474,6 +474,7 @@ fn status_shows_who_holds_the_paddock_lease_on_a_gateway_model() {
         );
     let rig = Rig::new("rotom");
     rig.write_agent("mine", BEHIND_PADDOCK);
+    rig.allow(&["sonnet-high", "mine", "qwen", "claude"]);
     rig.agent_board.ranks(&["sonnet-high", "mine"]);
     let settings = std::fs::read_to_string(rig.kelpie_settings_file()).unwrap();
     let gateway = format!(

@@ -411,6 +411,15 @@ impl Rig {
         )
     }
 
+    /// Starts a runner whose settings list `names` in `agents.reviewers`, as
+    /// a project written before the agent board lists them
+    pub fn open_listing(&self, names: &[&str]) -> Result<Mutex<Runner>, OpenError> {
+        let mut settings = self.settings();
+        let name = |n: &&str| crate::settings::AgentName::try_from((*n).to_owned()).unwrap();
+        settings.agents.reviewers = Some(names.iter().map(name).collect());
+        self.open_settings(settings)
+    }
+
     /// Has the runners this rig starts ask `facts` what a harness says of an MCP server
     pub fn harness_mcp_is(&self, facts: Arc<dyn HarnessMcp>) {
         *self.harness_mcp.lock().unwrap() = facts;

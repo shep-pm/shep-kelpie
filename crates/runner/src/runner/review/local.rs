@@ -30,17 +30,6 @@ fn claude_alone() -> Rig {
     rig
 }
 
-fn open_listed(rig: &Rig, names: &[&str]) -> Result<Mutex<Runner>, crate::runner::OpenError> {
-    let mut settings = rig.settings();
-    settings.agents.reviewers = Some(
-        names
-            .iter()
-            .map(|name| AgentName::try_from((*name).to_owned()).unwrap())
-            .collect(),
-    );
-    rig.open_settings(settings)
-}
-
 fn endpoint(url: &str) -> String {
     format!(
         "---\nrole: reviewer\nharness: endpoint\nurl: {url}\nmodel: stand-in\n\
@@ -277,7 +266,7 @@ fn a_session_that_says_neither_findings_nor_clean_fails() {
 #[test]
 fn a_missing_command_stops_the_runner_naming_it() {
     let rig = rig_with(&command("~/bin/no-such-review"));
-    let err = open_listed(&rig, &["mine"]).unwrap_err().to_string();
+    let err = rig.open_listing(&["mine"]).unwrap_err().to_string();
     assert!(
         err.starts_with("setting `agents.reviewers`: mine: cannot run "),
         "{err}"
@@ -292,7 +281,7 @@ fn a_missing_command_stops_the_runner_naming_it() {
 fn an_unreachable_endpoint_stops_the_runner_naming_it() {
     let url = unreachable_url();
     let rig = rig_with(&endpoint(&url));
-    let err = open_listed(&rig, &["mine"]).unwrap_err().to_string();
+    let err = rig.open_listing(&["mine"]).unwrap_err().to_string();
     assert!(
         err.starts_with(&format!(
             "setting `agents.reviewers`: mine: cannot reach {url}/models: "
@@ -306,11 +295,11 @@ fn with_no_local_round_listed_no_command_is_needed() {
     let rig = Rig::new("koji");
     std::fs::remove_file(rig.home.path().join(".claude/scripts/qwen-review.sh")).unwrap();
     assert!(
-        open_listed(&rig, &["qwen", "claude"]).is_err(),
+        rig.open_listing(&["qwen", "claude"]).is_err(),
         "the listed qwen command is checked"
     );
     rig.reviewers(&["claude"]);
-    assert!(open_listed(&rig, &["claude"]).is_ok());
+    assert!(rig.open_listing(&["claude"]).is_ok());
 }
 
 // What qwen-review.sh itself writes, one line per file, when the GPU box

@@ -474,6 +474,7 @@ mod tests {
     fn a_pass_asks_the_gateway_for_its_leases_no_more_than_status_does() {
         let rig = Rig::new("rotom");
         rig.write_agent("mine", BEHIND_PADDOCK);
+        rig.allow(&["mine", "qwen", "claude"]);
         rig.agent_board.ranks(&["mine"]);
         let settings = std::fs::read_to_string(rig.kelpie_settings_file()).unwrap();
         let gateway =

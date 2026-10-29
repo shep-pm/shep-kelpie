@@ -33,6 +33,7 @@ fn an_item_in_ci_that_no_bot_read_gets_a_pass_of_the_listed_bots_before_its_merg
     for auto in [false, true] {
         let (rig, runner, head) = Rig::with_pull_request("shep");
         rig.coderabbit_on();
+        rig.allow(&["sonnet-high", "qwen", "claude", "coderabbit"]);
         if auto {
             rig.merge_auto();
         }
@@ -131,6 +132,7 @@ fn a_withdrawn_merge_rulings_posted_comment_is_edited_to_say_why() {
 #[test]
 fn an_item_a_bot_read_or_a_project_with_no_bot_goes_on_to_its_merge() {
     let (rig, runner, _) = Rig::parked("koji");
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
     let runner = as_version_3(&rig, runner, |saved| {
         saved["work_items"][0]["coderabbit"] = unread_tally();
     });
@@ -143,6 +145,7 @@ fn an_item_a_bot_read_or_a_project_with_no_bot_goes_on_to_its_merge() {
 
     let (rig, runner, _) = Rig::parked("rotom");
     rig.coderabbit_on();
+    rig.allow(&["sonnet-high", "qwen", "claude", "coderabbit"]);
     let runner = as_version_3(&rig, runner, |saved| {
         saved["work_items"][0]["coderabbit"] =
             json!({ "rounds": 1, "cap_cleared": false, "satisfied": true });

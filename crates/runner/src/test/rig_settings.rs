@@ -214,11 +214,10 @@ impl Rig {
     /// Restricts the project to `names` through `agents.allow`
     pub fn allow(&self, names: &[&str]) {
         self.edit_settings(|s| {
-            let s = s
-                .lines()
+            let s: String = (s.lines())
                 .filter(|line| !line.starts_with("allow = "))
-                .collect::<Vec<_>>()
-                .join("\n");
+                .map(|line| format!("{line}\n"))
+                .collect();
             s.replace(
                 "[app.dogs.kelpie.agents]\n",
                 &format!("[app.dogs.kelpie.agents]\nallow = {names:?}\n"),

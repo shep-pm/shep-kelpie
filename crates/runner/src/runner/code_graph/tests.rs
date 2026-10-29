@@ -56,9 +56,9 @@ fn pi_agents(rig: &Rig) {
         )
     };
     rig.write_agent("pi-box", &pi("implementer"));
-    rig.agent_board.ranks(&["pi-box", "pi-reviewer"]);
     rig.write_agent("pi-reviewer", &pi("reviewer"));
     rig.reviewers(&["pi-reviewer"]);
+    rig.agent_board.ranks(&["pi-box", "pi-reviewer"]);
 }
 
 // The rig's goose worker. A goose reviewer cannot be named in an agent file yet (#789).
@@ -79,9 +79,9 @@ fn codex_agents(rig: &Rig) {
         )
     };
     rig.write_agent("codex-box", &codex("implementer"));
-    rig.agent_board.ranks(&["codex-box", "codex-reviewer"]);
     rig.write_agent("codex-reviewer", &codex("reviewer"));
     rig.reviewers(&["codex-reviewer"]);
+    rig.agent_board.ranks(&["codex-box", "codex-reviewer"]);
 }
 
 // Issue 7's worker turn and a Claude reviewer's round after it.
