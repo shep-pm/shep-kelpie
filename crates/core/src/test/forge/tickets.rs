@@ -230,6 +230,15 @@ impl Tickets for FakeForge {
         Ok(())
     }
 
+    fn add_blocked_by(
+        &self,
+        _repo: &ForgeSlug,
+        id: TicketId,
+        blocker: TicketId,
+    ) -> Result<(), ForgeError> {
+        self.link(number(id), number(blocker))
+    }
+
     fn set_issue_label(
         &self,
         _repo: &ForgeSlug,

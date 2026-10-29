@@ -109,6 +109,17 @@ impl Tickets for RateHeld {
         })
     }
 
+    fn add_blocked_by(
+        &self,
+        repo: &ForgeSlug,
+        ticket: TicketId,
+        blocker: TicketId,
+    ) -> Result<(), ForgeError> {
+        self.call_tickets(Kind::AddBlockedBy, |t| {
+            t.add_blocked_by(repo, ticket, blocker)
+        })
+    }
+
     fn set_issue_label(
         &self,
         repo: &ForgeSlug,

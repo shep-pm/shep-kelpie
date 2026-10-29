@@ -644,6 +644,17 @@ pub(super) fn passed_over(skip: &Skip, shown: &dyn Fn(String) -> String) -> (Str
             }
             (format!("blocked by {}", named.join(", ")), true)
         }
+        Skip::Unlinked { by, error, .. } => {
+            let named: Vec<String> = by.iter().map(|t| briefing::ticket_ref(*t)).collect();
+            (
+                format!(
+                    "cannot link its blockers {}: {}",
+                    named.join(", "),
+                    shown(events::quote(error))
+                ),
+                true,
+            )
+        }
         Skip::Label { error, .. } => (shown(error.to_string()), true),
         Skip::Failed { error, .. } => (
             format!("cannot be read: {}", shown(events::quote(error))),

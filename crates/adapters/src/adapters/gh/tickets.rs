@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{Gh, attachment, board, issue, issues, thread};
+use super::{Gh, attachment, blocked, board, issue, issues, thread};
 use crate::board::ReadyIssue;
 use crate::ports::{
     FinishedParent, ForgeError, Issue, IssueCloseReason, OpenIssue, SubIssue, ThreadComment,
@@ -77,6 +77,15 @@ impl Tickets for Gh {
         reason: IssueCloseReason,
     ) -> Result<(), ForgeError> {
         issues::close_issue_as(repo, number(ticket)?, reason)
+    }
+
+    fn add_blocked_by(
+        &self,
+        repo: &ForgeSlug,
+        ticket: TicketId,
+        blocker: TicketId,
+    ) -> Result<(), ForgeError> {
+        blocked::add_blocked_by(repo, number(ticket)?, number(blocker)?)
     }
 
     fn set_issue_label(

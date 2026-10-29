@@ -189,6 +189,22 @@ pub trait Tickets: Send + Sync {
         reason: IssueCloseReason,
     ) -> Result<(), ForgeError>;
 
+    /// Links ticket `ticket` as blocked by `blocker`, so the source shows the
+    /// block too
+    ///
+    /// A link already there stays as it is. No link is ever removed.
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the source refuses the link, as it does for a
+    /// blocker it does not hold, or cannot be asked.
+    fn add_blocked_by(
+        &self,
+        repo: &ForgeSlug,
+        ticket: TicketId,
+        blocker: TicketId,
+    ) -> Result<(), ForgeError>;
+
     /// Adds `label` to ticket `ticket`, or takes it off
     ///
     /// # Errors

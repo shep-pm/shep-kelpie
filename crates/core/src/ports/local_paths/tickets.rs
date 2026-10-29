@@ -104,6 +104,15 @@ impl Tickets for Guarded {
         self.tickets.create_issue(repo, title, body, labels)
     }
 
+    fn add_blocked_by(
+        &self,
+        repo: &ForgeSlug,
+        ticket: TicketId,
+        blocker: TicketId,
+    ) -> Result<(), ForgeError> {
+        self.tickets.add_blocked_by(repo, ticket, blocker)
+    }
+
     fn close_issue(&self, repo: &ForgeSlug, ticket: TicketId) -> Result<(), ForgeError> {
         self.tickets.close_issue(repo, ticket)
     }

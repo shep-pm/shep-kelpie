@@ -3,6 +3,7 @@
 mod access;
 mod app;
 mod attachment;
+mod blocked;
 mod board;
 mod conditional;
 mod contents;

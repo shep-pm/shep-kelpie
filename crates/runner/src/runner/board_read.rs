@@ -14,7 +14,7 @@ use super::Runner;
 use super::parent::{self, Refused, Unbuilt, Unlisted};
 use super::trigger::lock;
 use super::turn::Slot;
-use crate::board::{OpenPullRequest, ReadyIssue};
+use crate::board::{Blocker, OpenPullRequest, ReadyIssue, Skip, check};
 use crate::ports::{Forge, ForgeError, Meter, MeterError, Tickets, Timestamp, Utilization};
 use crate::settings::{Account, ForgeSlug};
 use crate::ticket::TicketId;
@@ -47,6 +47,8 @@ pub(super) struct BoardRead {
     pub(super) ready: Result<Vec<ReadyIssue>, ForgeError>,
     /// The open pull requests, listed once the ready issues were read
     open: Option<Result<Vec<OpenPullRequest>, ForgeError>>,
+    /// The ready issues held because a blocker their `Blocked by:` line names could not be linked
+    pub(super) unlinked: Vec<Skip>,
     /// The finished tickets the forge reads as closed
     pub(super) closed: Vec<TicketId>,
     /// The search for a parent off the ready list, when the board lists none to close
@@ -73,10 +75,14 @@ impl BoardJob {
             writes: self.writes,
             ready: self.tickets.ready_issues(&self.repo),
             open: None,
+            unlinked: Vec::new(),
             closed: Vec::new(),
             unlisted: None,
             usage: Vec::new(),
         };
+        if let Ok(ready) = &mut read.ready {
+            read.unlinked = self.link_blockers(ready);
+        }
         let Ok(ready) = &read.ready else {
             return read;
         };
@@ -109,6 +115,54 @@ impl BoardJob {
                 .collect();
         }
         read
+    }
+}
+
+impl BoardJob {
+    // Links each blocker an issue's `Blocked by:` line names that the source does not list, so
+    // the pick reads one source. An issue with a work item or a finished one is left alone. Gives
+    // the skip of each issue a link failed for, which the pick must not take.
+    fn link_blockers(&self, ready: &mut [ReadyIssue]) -> Vec<Skip> {
+        let mut held = Vec::new();
+        for issue in ready.iter_mut() {
+            if self.items.contains(&issue.ticket) || self.finished.contains(&issue.ticket) {
+                continue;
+            }
+            // A link joins two tickets of one source, so a line naming the other's is no link.
+            let same_source =
+                |b: &TicketId| b.github().is_some() == issue.ticket.github().is_some();
+            let named = check::blockers(&issue.body).into_iter().filter(same_source);
+            let missing: Vec<TicketId> = named
+                .filter(|b| *b != issue.ticket && !issue.blocked_by.iter().any(|l| l.ticket == *b))
+                .collect();
+            let mut failed: Vec<(TicketId, String)> = Vec::new();
+            for blocker in missing {
+                match self
+                    .tickets
+                    .add_blocked_by(&self.repo, issue.ticket, blocker)
+                {
+                    Ok(()) => {
+                        // A blocker that cannot be read counts as open until the next read.
+                        let open = (self.tickets.issue(&self.repo, blocker)).is_ok_and(|b| b.open);
+                        issue.blocked_by.push(Blocker {
+                            ticket: blocker,
+                            open,
+                        });
+                    }
+                    Err(e) => failed.push((blocker, e.to_string())),
+                }
+            }
+            if let Some((_, error)) = failed.first() {
+                let mut by: Vec<TicketId> = failed.iter().map(|(b, _)| *b).collect();
+                by.sort_unstable();
+                held.push(Skip::Unlinked {
+                    issue: issue.ticket,
+                    by,
+                    error: error.clone(),
+                });
+            }
+        }
+        held
     }
 }
 
