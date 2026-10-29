@@ -540,8 +540,8 @@ fn a_listed_reviewer_or_a_contributions_default_allow_leaves_out_is_refused() {
         (default.contribution_lineup(&book(), &Gateways::default(), Path::new("/h"))).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "setting `agents`: `agents.reviewers` names defect-hunter-lite, which `agents.allow` \
-         leaves out: add it to `agents.allow`, or list other reviewers in `agents.reviewers`"
+        "setting `agents`: `contributions.reviewers` names defect-hunter-lite, which \
+         `agents.allow` leaves out: add it to `agents.allow`, or name another"
     );
 
     let own = allowing(

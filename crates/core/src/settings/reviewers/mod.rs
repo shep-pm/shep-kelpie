@@ -120,14 +120,15 @@ impl Settings {
             return listed(names.clone(), agents, home, SETTING, allow);
         }
         let names = default_reviewers(gateways);
-        let fix = "list other reviewers in `agents.reviewers`";
-        if let Some(refusal) = (names.iter()).find_map(|n| left_out(allow, n, SETTING, fix)) {
+        if let Some(refusal) =
+            (names.iter()).find_map(|n| left_out(allow, n, CONTRIBUTION_SETTING, "name another"))
+        {
             return Err(SettingsError::Invalid {
                 setting: "agents",
                 reason: refusal,
             });
         }
-        listed(names, agents, home, SETTING, allow)
+        listed(names, agents, home, CONTRIBUTION_SETTING, allow)
     }
 
     /// The agent that reads a contribution for security
