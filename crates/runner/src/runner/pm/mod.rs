@@ -294,7 +294,7 @@ pub(super) struct Desk {
     // The last few questions it settled, newest last
     settled: Vec<Settled>,
     flying: Option<Flying>,
-    // The CI logs a wake's launch writes, read with the lock let go, while it launches
+    // What the wake read with the lock let go, kept while it launches
     logs: Option<ci_logs::Logs>,
 }
 
@@ -503,8 +503,8 @@ impl Runner {
         matches!(self.wake(false), Woke::Did(true))
     }
 
-    /// [`Runner::wake_pm`], except that a wake about to launch whose CI logs are not read
-    /// hands back the reads, which [`wake_off_lock`] runs with the lock let go
+    /// [`Runner::wake_pm`], except that a wake about to launch whose reads are not made
+    /// hands them back, which [`wake_off_lock`] runs with the lock let go
     fn wake_pm_or_reads(&mut self) -> Woke {
         self.wake(true)
     }

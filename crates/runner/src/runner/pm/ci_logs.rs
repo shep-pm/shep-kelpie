@@ -133,7 +133,8 @@ impl Runner {
             .collect()
     }
 
-    // The reads a wake's logs need, or none when no item is parked on red and no workflow is red
+    // The reads a wake needs before it launches, or none when no item is parked on red,
+    // no workflow is red, and no standing line names a ticket the board cannot answer
     pub(super) fn pm_logs_job(&self) -> Option<LogsJob> {
         let heads: Vec<String> = self.still_red().into_iter().map(|(_, head)| head).collect();
         let runs: Vec<u64> = self.state.red.iter().map(|r| r.run).collect();
@@ -152,11 +153,11 @@ impl Runner {
     }
 }
 
-/// Wakes the project manager, reading its CI logs with the runner's lock let go
+/// Wakes the project manager, reading its CI logs and standing tickets with the runner's lock let go
 ///
-/// The first try goes as far as the launch and, finding logs to read, hands back the reads
-/// instead. They run with the lock let go, and the second try writes their files and launches.
-/// Says whether a call started.
+/// The first try goes as far as the launch and, finding reads to make, hands them back
+/// instead. They run with the lock let go, and the second try writes the files and the
+/// standing notes from them and launches. Says whether a call started.
 pub(in crate::runner) fn wake_off_lock(runner: &Mutex<Runner>) -> bool {
     let job = match lock(runner).wake_pm_or_reads() {
         Woke::Did(woke) => return woke,
@@ -175,7 +176,7 @@ pub(in crate::runner) fn wake_off_lock(runner: &Mutex<Runner>) -> bool {
 pub(super) enum Woke {
     /// It ran as far as it goes, and a call started or did not
     Did(bool),
-    /// The logs it would write are to be read first
+    /// What it would read before it launches is to be read first
     Reads(Box<LogsJob>),
 }
 
