@@ -217,14 +217,15 @@ impl Rig {
     }
 
     /// Lists `names` as the project's reviewers, and has each read the pull
-    /// request, read when a runner next opens
+    /// request by setting `reviews.need` to their count, read when a runner next opens
     pub fn reviewers(&self, names: &[&str]) {
         let listed = format!("reviewers = {names:?}\n");
         self.edit_settings(|s| {
             assert!(s.contains(RIG_REVIEWERS), "the rig's reviewers moved");
             s.replace(RIG_REVIEWERS, &listed)
         });
-        self.reviews_need(Some(names.len()));
+        // An empty list reads nobody, and `reviews.need` is at least one.
+        self.reviews_need(Some(names.len().max(1)));
     }
 
     /// Sets `reviews.need` to `need`, or leaves it out for the default when

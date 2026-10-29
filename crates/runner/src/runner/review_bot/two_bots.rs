@@ -101,7 +101,11 @@ pub(super) fn summoned(head: &str) -> Option<StepReport> {
     })
 }
 
-pub(super) fn bot_reviewed(round: u32, bot: &'static str, open: usize) -> Option<StepReport> {
+pub(in crate::runner) fn bot_reviewed(
+    round: u32,
+    bot: &'static str,
+    open: usize,
+) -> Option<StepReport> {
     Some(StepReport::BotReviewed {
         issue: ticket(7),
         pull_request: 71,
