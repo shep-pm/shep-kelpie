@@ -671,7 +671,7 @@ mod tests {
     // Issue 7 on the agent `mine`, its first turn due.
     fn on_mine(rig: &Rig) -> Mutex<Runner> {
         rig.write_agent("mine", MINE);
-        rig.implementers(&["sonnet-high", "mine"]);
+        rig.agent_board.ranks(&["sonnet-high", "mine"]);
         let runner = rig.open().unwrap();
         rig.forge.label(7, "agent:mine!");
         rig.ask(&runner, "add", Some("7"));
@@ -700,7 +700,7 @@ mod tests {
         let rig = Rig::new("shep");
         drop(on_mine(&rig));
         std::fs::remove_file(rig.paths().agents.join("mine.md")).unwrap();
-        rig.implementers(&["sonnet-high"]);
+        rig.agent_board.ranks(&["sonnet-high"]);
         let runner = rig.open().unwrap();
         assert!(matches!(
             step(&runner).unwrap(),

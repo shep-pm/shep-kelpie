@@ -2,11 +2,12 @@
 //!
 //! A project's old `rulings.pm_alone` list becomes `rulings.pm_decides`, and
 //! each kind of ruling the map lacks is written at its default; a key there is
-//! never changed. The keys of the panel and the issue writer ([`GONE_KEYS`])
-//! are deleted, with their roles in `repo_setup.roles` ([`GONE_ROLES`]),
-//! `agents.implementer_choice = "issue-writer"`, leaving `order`, and the
-//! `unlabelled` kind. Each table is checked as `set` checks it, and one the
-//! runner would refuse is not written.
+//! never changed. The keys of the panel, the issue writer and the implementer
+//! list the agent board replaced ([`GONE_KEYS`]) are deleted and named with
+//! the value each held, with the gone roles in `repo_setup.roles`
+//! ([`GONE_ROLES`]) and the `unlabelled` kind.
+//! Each table is checked as `set` checks it, and one the runner would refuse
+//! is not written.
 
 use std::process::ExitCode;
 
@@ -17,14 +18,18 @@ use crate::home::{ProjectName, ProjectPaths};
 use crate::settings::{PM_ALONE, PM_DECIDES, RulingName};
 use crate::shepherd::{self, Connection, Socket};
 
-/// The keys migrate deletes, each of which the loader refuses by name
-const GONE_KEYS: [&str; 6] = [
+/// The keys migrate deletes: the loader refuses the first six by name and
+/// ignores the rest, which doctor names
+const GONE_KEYS: [&str; 9] = [
     "rulings.decide",
     "rulings.full_panel_paths",
     "agents.advisor",
     "agents.researcher",
     "researcher",
     "agents.issue_writer",
+    "agents.implementers",
+    "agents.implementer_choice",
+    "agents.fallback_after",
 ];
 
 /// The list of roles that may still name a role that is gone
@@ -32,9 +37,6 @@ const ROLES: &str = "repo_setup.roles";
 
 /// The roles migrate deletes from `repo_setup.roles`, which refuses each by name
 const GONE_ROLES: [&str; 3] = ["advisor", "researcher", "issue-writer"];
-
-/// The choice of implementer migrate deletes, leaving the key to read `order`
-const WRITER_CHOICE: (&str, &str) = ("agents.implementer_choice", "issue-writer");
 
 /// The kind of ruling migrate deletes from `rulings.pm_decides` and the old list
 const WRITER_KIND: &str = "unlabelled";
@@ -126,9 +128,8 @@ async fn project(
         .then(|| PM_ALONE.to_owned())
         .into_iter()
         .collect();
-    removed.extend(gone_keys(&mut table).into_iter().map(str::to_owned));
+    removed.extend(gone_keys(&mut table));
     removed.extend(gone_roles(&mut table));
-    removed.extend(writer_choice(&mut table));
     removed.extend(gone_kinds);
     let said: Vec<String> = [("wrote", wrote.join(", ")), ("removed", removed.join(", "))]
         .into_iter()
@@ -143,8 +144,9 @@ async fn project(
     Ok(Some(format!("project {name}: {}", said.join("; "))))
 }
 
-// Deletes the keys that are gone from `table`, and names each it deleted.
-fn gone_keys(table: &mut Map<String, Value>) -> Vec<&'static str> {
+// Deletes the keys that are gone from `table`, and names each it deleted with
+// the value it held, so a rollback can write it back.
+fn gone_keys(table: &mut Map<String, Value>) -> Vec<String> {
     let mut removed = Vec::new();
     for setting in GONE_KEYS {
         let held = match setting.split_once('.') {
@@ -152,11 +154,16 @@ fn gone_keys(table: &mut Map<String, Value>) -> Vec<&'static str> {
             None => Some(&mut *table),
         };
         let key = leaves(setting).1;
-        if held.and_then(|held| held.remove(key)).is_some() {
-            removed.push(setting);
+        if let Some(value) = held.and_then(|held| held.remove(key)) {
+            removed.push(format!("{setting} = {}", inline(&value)));
         }
     }
     removed
+}
+
+// A value as the TOML a `key = ` takes on one line, its JSON when TOML has no form for it.
+fn inline(value: &Value) -> String {
+    toml::Value::try_from(value).map_or_else(|_| value.to_string(), |value| value.to_string())
 }
 
 // Deletes the roles that are gone from `repo_setup.roles`, and names each it deleted.
@@ -173,17 +180,6 @@ fn gone_roles(table: &mut Map<String, Value>) -> Vec<String> {
         .collect();
     roles.retain(|role| !gone(role));
     removed
-}
-
-// Deletes `agents.implementer_choice` when it holds `issue-writer`, and names it.
-fn writer_choice(table: &mut Map<String, Value>) -> Option<String> {
-    let ((outer, key), value) = (leaves(WRITER_CHOICE.0), WRITER_CHOICE.1);
-    let agents = table.get_mut(outer).and_then(Value::as_object_mut)?;
-    agents
-        .get(key)
-        .filter(|held| held.as_str() == Some(value))?;
-    agents.remove(key);
-    Some(format!("{} = {value:?}", WRITER_CHOICE.0))
 }
 
 // Deletes `unlabelled` from `rulings.pm_decides` and the old list, and names each it deleted.

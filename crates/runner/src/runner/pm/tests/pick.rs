@@ -323,10 +323,10 @@ fn a_picks_agent_that_allow_drops_before_dispatch_opens_on_the_boards_pick_keepi
     let (_, acted, _) = answered(step(&runner).unwrap());
     assert_eq!(acted, ["picked #12"]);
     rig.edit_settings(|s| {
-        let listed = "\nimplementers = [\"sonnet-high\"]\n";
-        assert!(s.contains(listed), "the example's implementers moved");
-        let allow = "\nallow = [\"sonnet-high\", \"pm\", \"qwen\", \"claude\"]";
-        s.replace(listed, &format!("{allow}{listed}"))
+        let listed = "[app.dogs.kelpie.agents]\n";
+        assert!(s.contains(listed), "the example's agents table moved");
+        let allow = "allow = [\"sonnet-high\", \"pm\", \"qwen\", \"claude\"]\n";
+        s.replace(listed, &format!("{listed}{allow}"))
     });
     let (settings, kelpie) = (rig.settings(), rig.kelpie_settings());
     runner.lock().unwrap().reread(settings, kelpie).unwrap();
@@ -357,7 +357,12 @@ fn a_picks_agent_that_allow_drops_before_dispatch_opens_on_the_boards_pick_keepi
 #[test]
 fn a_picks_own_slack_wins_over_the_settings() {
     let rig = Rig::new("koji");
-    rig.edit_settings(|s| s.replace("\nimplementers = ", "\nslack = 25\nimplementers = "));
+    rig.edit_settings(|s| {
+        s.replace(
+            "[app.dogs.kelpie.agents]\n",
+            "[app.dogs.kelpie.agents]\nslack = 25\n",
+        )
+    });
     let (rig, runner) = pm_on(rig);
     rig.forge.list_ready(9, false);
     rig.forge.list_ready(12, false);

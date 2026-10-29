@@ -510,8 +510,8 @@ fn label_error(labels: &[String], implementers: &[AgentName]) -> Option<LabelErr
 ///
 /// The prefix is read in any case, so `Agent:opus-high` is a label too, and
 /// a `!` at its end, which pins the work item to it, is not the name's.
-/// `implementers` names every agent kelpie can run a work item on: the ones
-/// the project lists, and every agent file whose role is `implementer`.
+/// `implementers` names every agent kelpie can run a work item on: each agent
+/// file whose role is `implementer` that `agents.allow` holds.
 ///
 /// # Errors
 ///

@@ -12,12 +12,12 @@ const CODER: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-cod
 const CODER2: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-coder2\n\
                        effort: low\nusage: none\n---\n";
 
-// A project listing `listed`, each on a local model of its own
-fn in_order(project: &str, listed: &[&str]) -> (Rig, Mutex<Runner>) {
+// A project whose board ranks `ranked`, each on a local model of its own
+fn in_order(project: &str, ranked: &[&str]) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
     rig.write_agent("coder", CODER);
     rig.write_agent("coder2", CODER2);
-    rig.implementers(listed);
+    rig.agent_board.ranks(ranked);
     let runner = rig.open().unwrap();
     (rig, runner)
 }
@@ -58,15 +58,16 @@ fn the_boards_first_pick_opens_the_item_with_no_call_and_no_label() {
 }
 
 #[test]
-fn the_ask_carries_every_allowed_implementer_the_listed_ones_first() {
-    let (rig, runner) = in_order("acme", &["coder2", "coder"]);
+fn the_ask_carries_every_allowed_implementer_by_name_which_the_board_ranks_unless_told() {
+    let (rig, runner) = in_order("acme", &[]);
+    rig.agent_board.ranks_listed();
     rig.forge.list_ready(6, false);
 
-    assert!(dispatched_on(step(&runner).unwrap(), 6, "coder2"));
+    assert!(dispatched_on(step(&runner).unwrap(), 6, "coder"));
 
     let asks = rig.agent_board.asks();
     let agents: Vec<&str> = asks[0].agents.iter().map(AgentName::as_str).collect();
-    assert_eq!(agents, ["coder2", "coder", "opus-high", "sonnet-high"]);
+    assert_eq!(agents, ["coder", "coder2", "opus-high", "sonnet-high"]);
     assert_eq!(
         (asks[0].pin.clone(), asks[0].kind.as_deref()),
         (None, Some("fix"))
@@ -80,8 +81,8 @@ fn slack_asked(slack: Option<u32>) -> Option<u32> {
     if let Some(minutes) = slack {
         rig.edit_settings(|s| {
             s.replace(
-                "\nimplementers = ",
-                &format!("\nslack = {minutes}\nimplementers = "),
+                "[app.dogs.kelpie.agents]\n",
+                &format!("[app.dogs.kelpie.agents]\nslack = {minutes}\n"),
             )
         });
     }
@@ -241,23 +242,4 @@ fn add_on_an_unreachable_board_is_refused_saying_so() {
         json!({ "error": "the agent board, which the dog keeps, cannot be reached" })
     );
     assert_eq!(rig.ask(&runner, "status", None)["work_items"], json!([]));
-}
-
-#[test]
-fn an_adopted_pull_request_opens_on_the_default_implementer_whatever_the_board_ranks() {
-    let rig = Rig::new("shep");
-    rig.push_by_hand("fix/timeline", "work.txt");
-    rig.forge.open_pull_request(80, "fix/timeline", &[5]);
-    let runner = rig.open().unwrap();
-    rig.agent_board.ranks(&["opus-high"]);
-    rig.ask(&runner, "adopt", Some("80"));
-
-    let report = step(&runner).unwrap();
-
-    assert!(
-        matches!(&report, Some(StepReport::Adopted { pull_request: 80, agent, .. })
-            if agent.as_str() == "sonnet-high"),
-        "{report:?}"
-    );
-    assert!(rig.agent_board.asks().is_empty(), "the board is not asked");
 }

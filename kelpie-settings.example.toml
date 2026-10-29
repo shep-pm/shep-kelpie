@@ -95,12 +95,11 @@ url = "https://ntfy.sh/your-private-topic"
 # `iq3-xxs-review` runs on a gateway named `paddock`, which a project that
 # lists no reviewers gets first only where this file holds that gateway. It
 # writes `qwen`, a reviewer that runs the
-# maintainer's qwen-review script, only where that script is installed. A
-# project lists the ones that build its work items in `agents.implementers`
-# and the ones that review its pull requests in `agents.reviewers`. An
-# issue's `agent:<name>` label runs it on any file below whose role is
-# `implementer`, listed or not, and an issue with no label runs on the
-# first implementer listed. The
+# maintainer's qwen-review script, only where that script is installed. The
+# agent board picks each work item's implementer from the files below whose
+# role is `implementer`, and a project lists the ones that review its pull
+# requests in `agents.reviewers`. An issue's `agent:<name>!` label runs it
+# on the implementer it names. The
 # agents guide describes every key:
 # https://github.com/shep-pm/shep-kelpie/blob/main/docs/guide/agents.md
 # An implementer's body is added to kelpie's own instructions; a pi

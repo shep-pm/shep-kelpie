@@ -162,7 +162,8 @@ pub struct Rig {
     /// The login's forge hold and pace, which no test's calls reach the cap of
     /// until it swaps in a pacer with one
     pub pace: Arc<dyn Pace>,
-    /// The agent board, which ranks the project's implementers in order until a test sets it
+    /// The agent board, which ranks `sonnet-high` first, then the project's other
+    /// implementers by name, until a test sets it
     pub agent_board: FakeAgentBoard,
     /// GitHub as kelpie's App sees it: the rig has registered no App until
     /// [`Rig::with_app`]
@@ -194,7 +195,9 @@ impl Rig {
     /// The part of [`Self::WEBHOOK_URL`] no output may carry
     pub const WEBHOOK_SECRET: &str = "s3cr3t";
 
-    /// A project with the example settings, pointed at a fresh repo
+    /// A project with the example settings, pointed at a fresh repo, whose
+    /// agent board ranks `sonnet-high` first (`FakeAgentBoard::ranks_first`),
+    /// then the ask's other agents by name, until a test sets it
     pub fn new(project: &str) -> Self {
         let rig = Self::stand_ins(project, Home::made());
         rig.make_repo();

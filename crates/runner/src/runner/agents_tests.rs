@@ -11,13 +11,13 @@ const HAIKU: &str = "---\nrole: implementer\nharness: claude-code\n\
                      model: claude-haiku-4-5-20251001\neffort: low\n---\n";
 
 /// The example's own `[agents]` table
-const LISTED: &str = "[app.dogs.kelpie.agents]\nimplementers = [\"sonnet-high\"]\n";
+const LISTED: &str = "[app.dogs.kelpie.agents]\n";
 
 // The rig's project with `names` as its `[agents]` table.
 fn name_agents(rig: &Rig, names: &str) {
     rig.edit_settings(|s| {
         assert!(s.contains(LISTED), "the example's agents table moved");
-        s.replace(LISTED, &format!("[app.dogs.kelpie.agents]\n{names}"))
+        s.replace(LISTED, &format!("{LISTED}{names}"))
     });
 }
 
@@ -81,7 +81,7 @@ fn a_project_naming_a_different_agent_per_role_reaches_each() {
     let rig = Rig::new("shep");
     rig.merge_auto();
     rig.write_agent("sonnet-low", SONNET_LOW);
-    name_agents(&rig, "implementers = [\"opus-high\"]\n");
+    rig.agent_board.ranks(&["opus-high"]);
     rig.reviewers(&["qwen", "sonnet-low"]);
     let runner = rig.open().unwrap();
     whole_work_item(&rig, &runner);
@@ -105,9 +105,9 @@ fn a_project_naming_a_different_agent_per_role_reaches_each() {
 #[test]
 fn naming_an_agent_while_the_runner_runs_takes_effect_at_the_next_dispatch() {
     let rig = Rig::new("shep");
-    rig.write_agent("haiku", HAIKU);
     let runner = rig.open().unwrap();
-    rig.implementers(&["haiku"]);
+    rig.write_agent("haiku", HAIKU);
+    rig.agent_board.ranks(&["haiku"]);
     let line = runner
         .lock()
         .unwrap()
@@ -172,19 +172,6 @@ fn a_role_naming_an_agent_kelpie_lacks_stops_the_runner_naming_it() {
     assert!(
         err.contains("`agents.reviewers` names fable, which has no agent file"),
         "{err}"
-    );
-    rig.edit_settings(|s| {
-        s.replace("reviewers = [\"fable\"]\n", crate::test::RIG_REVIEWERS)
-            .replace(
-                "implementers = [\"sonnet-high\"]\n",
-                "implementers = [\"fable\"]\n",
-            )
-    });
-    let err = rig.open().unwrap_err().to_string();
-    assert_eq!(
-        err,
-        "setting `agents`: `agents.implementers` names fable, which has no \
-         agent file: write `agents/fable.md` in kelpie's home"
     );
 }
 
@@ -290,15 +277,10 @@ fn an_agent_on_a_gateway_kelpie_cannot_route_to_stops_the_runner() {
     let rig = Rig::new("shep");
     rig.write_agent(
         "local",
-        "---\nrole: implementer\nharness: pi\nmodel: m\neffort: low\n\
-         gateway: paddock\ncontext: 65536\n---\n",
+        "---\nrole: reviewer\nharness: pi\nmodel: m\neffort: low\n\
+         gateway: paddock\ncontext: 65536\n---\nReview {{DIFF}}.\n",
     );
-    rig.edit_settings(|s| {
-        s.replace(
-            "implementers = [\"sonnet-high\"]\n",
-            "implementers = [\"sonnet-high\", \"local\"]\n",
-        )
-    });
+    rig.reviewers(&["qwen", "claude", "local"]);
     let err = rig.open().unwrap_err().to_string();
     assert!(
         err.contains("local: gateway paddock is not in kelpie's settings"),
@@ -314,6 +296,26 @@ fn an_agent_on_a_gateway_kelpie_cannot_route_to_stops_the_runner() {
     );
 }
 
+#[test]
+fn an_implementer_on_a_gateway_kelpie_cannot_route_to_is_noted_and_left_off_the_boards_ask() {
+    let rig = Rig::new("shep");
+    rig.write_agent(
+        "local",
+        "---\nrole: implementer\nharness: pi\nmodel: m\neffort: low\n\
+         gateway: paddock\ncontext: 65536\n---\n",
+    );
+    let runner = rig.open().unwrap();
+    let notes = runner.lock().unwrap().take_notes();
+    let left = "implementer local is left out of the agent board's ask: gateway paddock is \
+                not in kelpie's settings";
+    assert!(notes.iter().any(|n| n.starts_with(left)), "{notes:?}");
+
+    rig.ask(&runner, "add", Some("7"));
+    let asks = rig.agent_board.asks();
+    let agents: Vec<&str> = asks[0].agents.iter().map(|a| a.as_str()).collect();
+    assert_eq!(agents, ["opus-high", "sonnet-high"]);
+}
+
 // An implementer on a local model, which no setting lists
 const CODER: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-coder\n\
                       effort: low\nusage: none\n---\n";
@@ -325,8 +327,7 @@ fn allowing_coder() -> Rig {
     rig.write_agent("coder", CODER);
     name_agents(
         &rig,
-        "allow = [\"sonnet-high\", \"coder\", \"qwen\", \"claude\"]\n\
-         implementers = [\"sonnet-high\"]\n",
+        "allow = [\"sonnet-high\", \"coder\", \"qwen\", \"claude\"]\n",
     );
     rig
 }
@@ -388,7 +389,7 @@ fn an_open_work_item_whose_agent_allow_now_leaves_out_fails_its_turn_saying_so()
 fn an_empty_allow_holds_every_implementer_file_as_an_absent_one_does() {
     let rig = Rig::new("shep");
     rig.write_agent("coder", CODER);
-    name_agents(&rig, "allow = []\nimplementers = [\"sonnet-high\"]\n");
+    name_agents(&rig, "allow = []\n");
     let runner = rig.open().unwrap();
     assert_eq!(
         agent_labels_now(&rig),

@@ -144,6 +144,22 @@ async fn a_free_agent_with_history_is_ranked_above_a_busy_one() {
 }
 
 #[tokio::test]
+async fn a_local_agent_with_no_history_is_ranked_as_free_within_the_slack() {
+    let files = [
+        ("fast.md", on_paddock("fast-coder", "")),
+        ("fresh.md", on_paddock("fresh-coder", "tier: light\n")),
+    ];
+    let loads = [("fast-coder", FREE), ("fresh-coder", FREE)];
+    let dog = dog(&files, &loads).await;
+    finished(&dog.home, "koji", ("fast", "fix"), 5, (600, 0.25));
+    refresh(&dog.board, &dog.home);
+
+    let picks = picked(&dog.socket, item(Some("fix"), &["fast", "fresh"])).await;
+
+    assert_eq!(agents_of(&picks), ["fresh", "fast"]);
+}
+
+#[tokio::test]
 async fn an_agent_whose_load_is_unknown_is_not_picked() {
     let files = [
         ("fast.md", on_paddock("fast-coder", "")),
@@ -200,7 +216,11 @@ async fn a_new_finished_line_changes_the_next_pick_after_a_refresh() {
     let dog = dog(&files, &loads).await;
     finished(&dog.home, "koji", ("baker", "fix"), 4, (600, 0.5));
     refresh(&dog.board, &dog.home);
-    let ask = || item(Some("fix"), &["able", "baker"]);
+    // With no slack, the cost of a local agent with no history cannot reorder them.
+    let ask = || PickAsk {
+        slack: Some(0),
+        ..item(Some("fix"), &["able", "baker"])
+    };
     let before = picked(&dog.socket, ask()).await;
     assert_eq!(
         agents_of(&before),

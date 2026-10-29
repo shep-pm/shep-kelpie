@@ -112,7 +112,7 @@ fn agents(rig: &Rig, folder: &Path) -> (Base, Arc<Routed>) {
 
 fn rig_for(rig: &Rig) {
     rig.write_agent("codex-worker", WORKER);
-    rig.implementers(&["codex-worker"]);
+    rig.agent_board.ranks(&["codex-worker"]);
 }
 
 // The first image: a Codex turn runs as a child, and the runner is asked to

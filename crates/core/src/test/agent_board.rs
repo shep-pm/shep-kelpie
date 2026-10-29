@@ -2,8 +2,8 @@
 //!
 //! It answers in memory, so a test of dispatch never reaches the dog. It
 //! starts by ranking every agent an ask allows in the order the ask lists
-//! them, with no wait. A test ranks its own order, with its own finishes,
-//! ranks nobody, or makes the board unreachable.
+//! them, with no wait. A test puts some of them first, ranks its own order,
+//! with its own finishes, ranks nobody, or makes the board unreachable.
 
 use std::sync::{Arc, Mutex};
 
@@ -14,14 +14,19 @@ use crate::settings::AgentName;
 /// Seconds every ranked agent is said to take
 const TYPICAL_SECS: u64 = 3600;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 enum Answers {
-    // The ask's own agents, in its order
-    #[default]
-    Listed,
+    // The ask's own agents, these first in this order, then the rest in the ask's
+    Listed(Vec<AgentName>),
     // Each agent with the seconds to its finish
     Ranks(Vec<(AgentName, u64)>),
     Unreachable,
+}
+
+impl Default for Answers {
+    fn default() -> Self {
+        Self::Listed(Vec::new())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -54,7 +59,15 @@ impl FakeAgentBoard {
 
     /// Each pick ranks every agent the ask allows, in its order
     pub fn ranks_listed(&self) {
-        self.book.lock().unwrap().answers = Answers::Listed;
+        self.book.lock().unwrap().answers = Answers::Listed(Vec::new());
+    }
+
+    /// Each pick ranks every agent the ask allows, those of `first` it allows
+    /// ahead in this order, then the rest in the ask's
+    pub fn ranks_first(&self, first: &[&str]) {
+        let name = |a: &&str| AgentName::try_from((*a).to_owned()).unwrap();
+        let first = first.iter().map(name).collect();
+        self.book.lock().unwrap().answers = Answers::Listed(first);
     }
 
     /// Each pick goes unanswered, as when the dog cannot be reached
@@ -73,7 +86,8 @@ impl AgentBoard for FakeAgentBoard {
         let mut book = self.book.lock().unwrap();
         book.asks.push(item.clone());
         let order = match &book.answers {
-            Answers::Listed => (item.agents.iter())
+            Answers::Listed(first) => (first.iter())
+                .chain(item.agents.iter().filter(|agent| !first.contains(agent)))
                 .map(|agent| (agent.clone(), TYPICAL_SECS))
                 .collect(),
             Answers::Ranks(agents) => agents.clone(),

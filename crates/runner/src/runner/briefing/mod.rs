@@ -542,15 +542,14 @@ impl Runner {
         ready
     }
 
-    // The implementers the project lists, the default first, then its
+    // The implementers the agent board may pick, by name, then the project's
     // reviewers, each with the keys its file holds now.
     fn agent_lines(&self) -> Vec<AgentLine> {
-        let line = |name: &AgentName, role: Role, default: bool| {
+        let line = |name: &AgentName, role: Role| {
             let fit = self.book.get(name).map(|agent| &agent.fit);
             AgentLine {
                 name: name.to_string(),
                 role,
-                default,
                 tier: fit.map_or_else(Tier::default, Fit::tier),
                 kinds: fit
                     .and_then(|fit| fit.kinds.as_ref())
@@ -560,11 +559,11 @@ impl Runner {
                     .map(|text| self.shown(one_line(text.as_str()))),
             }
         };
-        let default = &self.agents.default_implementer.name;
-        let implementers = (self.agents.implementers.iter())
-            .map(|i| line(&i.name, Role::Implementer, &i.name == default));
-        let reviewers = (self.lineup.iter()).map(|r| line(&r.name, Role::Reviewer, false));
-        implementers.chain(reviewers).collect()
+        let implementers = (self.board_agents().into_iter())
+            .map(|name| line(&name, Role::Implementer))
+            .collect::<Vec<_>>();
+        let reviewers = (self.lineup.iter()).map(|r| line(&r.name, Role::Reviewer));
+        implementers.into_iter().chain(reviewers).collect()
     }
 
     fn ready_lines(&self) -> Option<Ready> {

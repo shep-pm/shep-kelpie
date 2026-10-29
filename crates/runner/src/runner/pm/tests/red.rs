@@ -16,9 +16,9 @@ pub(super) fn raised(project: &str, setup: impl FnOnce(&Rig)) -> (Rig, Mutex<Run
     let (rig, runner, head) = Rig::with_pull_request_set(project, |rig| {
         rig.fix_attempts(0);
         rig.edit_settings(|s| {
-            let listed = "\nimplementers = [\"sonnet-high\"]\n";
-            assert!(s.contains(listed), "the example's implementers moved");
-            s.replace(listed, "\nimplementers = [\"sonnet-high\"]\npm = \"pm\"\n")
+            let listed = "[app.dogs.kelpie.agents]\n";
+            assert!(s.contains(listed), "the example's agents table moved");
+            s.replace(listed, "[app.dogs.kelpie.agents]\npm = \"pm\"\n")
         });
     });
     setup(&rig);
