@@ -1,12 +1,12 @@
 # Contributions
 
-Whether and how kelpie picks up other people's pull requests. It sees and lists the others (below), reads each new head for security (`contribution-security.md`), hears what they say (`contribution-talk.md`), asks for a release (`contribution-release.md`), runs nothing of theirs but the CI runs of a head that passed the security review (below), records the reviewers' pass over a green head (`contribution-pass.md`), rules every merge (`contribution-merge.md`), and takes a released one over as its own work item (`contribution-release.md`). #617 to #619, #622 to #625, #634
+Kelpie follows other people's pull requests: security review (`contribution-security.md`), replies (`contribution-talk.md`), release and adoption (`contribution-release.md`), a pass over a green head (`contribution-pass.md`) and merge rulings (`contribution-merge.md`). It runs only CI on a head that passed security review. #617 to #619, #622 to #625, #634
 
 ## Settings
 
 - `[app.dogs.kelpie.contributions]`, `#[serde(default)]`: an absent table is `pick = "off"`. `deny_unknown_fields`, so a mistyped key is refused naming it. `crates/core/src/settings/contributions.rs`
 - `pick`: `off` (default, kelpie's own pull requests only), `label` (those the maintainer labels for it) or `all`. Kebab-case, any other word refused.
-- `reviewers`: ordered agent files whose role is `reviewer`, bots welcome, each once. Absent, it is kelpie's default pass, named in review.md.
+- `reviewers`: ordered reviewer agent files, bots welcome, each once, all held by `agents.allow`. Absent, kelpie's default contribution pass (review.md). After adoption: `reviews.need` reviewers, each the agent board's pick from reviewer files `agents.allow` holds except `contributions.security_reviewer`, ending sooner with no candidate.
 - `security_reviewer`: a reviewer agent file, `security-reviewer` when absent, shipped as `agents/security-reviewer.md`. It must run sessions: a command, endpoint or bot is refused.
 - `quiet_days` (7) and `nudge_days` (3): whole days above 0. `nudge_days` must be below `quiet_days`: the nudge comes before a contribution counts as quiet. A zero is refused by the parser, the ordering by `Contributions::check`, called from `Settings::from_table`, so a bad pair is refused by key when the settings are read and a reread keeps the old settings.
 
