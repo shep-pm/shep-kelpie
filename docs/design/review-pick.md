@@ -1,0 +1,5 @@
+# Review pick
+
+How a pass chooses each round's reviewer. The pass it sits in is in review.md.
+
+- Each round asks the agent board (`board_picks`) for a reviewer: the item's kind, tier and slack, no pin, as candidates those `agents.reviewers` lists (else every reviewer file `agents.allow` holds but `contributions.security_reviewer`) that can run (`paths`, a down local, a bot's `rounds`), and the pass's reviewers left out. It takes the first ranked one the pacer lets start (`Scope::Turn`) and, for a bot, whose window is open now; a held one or a bot with a closed window is skipped, not waited on, and a bot is passed over (`bots_skipped`, so a late review is still read). A board that cannot be reached leaves the round to ask again next poll, with no fallback. A reviewer counts toward `need` once its round ran, not a bot passed over or a reviewer that kept failing. The pass goes to CI at `need` reads or when the board ranks none left; every held one waits on the first hold. ADR 0018, #1539, `runner/review/lineup.rs`
