@@ -168,11 +168,70 @@ fn an_agent_file_named_with_an_underscore_is_no_implementer_the_board_ranks() {
     let ranked = |agents: &Agents| {
         Board::new(agents)
             .view()
-            .implementers
+            .ranked
             .keys()
             .cloned()
             .collect::<Vec<_>>()
     };
 
     assert_eq!(ranked(&loaded), ranked(&Agents::embedded()));
+}
+
+// An implementer and a reviewer of the same tier, each on a model the dog
+// reads no load for.
+fn build_and_read(dir: &Path) -> Agents {
+    let at = |role: &str| {
+        format!(
+            "---\nrole: {role}\nharness: stand-in\nmodel: lite\neffort: low\n\
+             usage: none\ntier: standard\n---\nRead the diff for defects.\n"
+        )
+    };
+    let folder = dir.join("agents");
+    write_in(&folder, "build.md", &at("implementer"));
+    write_in(&folder, "read.md", &at("reviewer"));
+    Agents::load(&folder).unwrap()
+}
+
+#[test]
+fn the_board_status_lists_implementers_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = build_and_read(dir.path());
+    let view = Board::new(&agents).view();
+
+    let status = view.status(&Availability::default(), Timestamp(EPOCH));
+    let shown: Vec<_> = status
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|k| k.as_str())
+        .collect();
+    let builders: Vec<_> = (agents.iter())
+        .filter(|(_, agent)| agent.role == Role::Implementer)
+        .map(|(name, _)| name.as_str())
+        .collect();
+    let ranked: Vec<_> = view.ranked.keys().map(|k| k.as_str()).collect();
+
+    assert_eq!(shown, builders, "every implementer and no reviewer");
+    assert!(ranked.contains(&"read"), "the board ranks a reviewer");
+}
+
+#[test]
+fn a_reviewers_finished_line_counts_toward_no_tier_median() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = build_and_read(dir.path());
+    let home = dir.path().join("kelpie");
+    let board = Mutex::new(Board::new(&agents));
+    finished(&home, "koji", ("build", "fix"), 4, (600, 0.5));
+    finished(&home, "koji", ("read", "fix"), 5, (600, 0.5));
+    refresh(&board, &home);
+
+    let status = lock(&board)
+        .view()
+        .status(&Availability::default(), Timestamp(EPOCH));
+
+    assert_eq!(
+        status["build"]["secs"], 3600,
+        "four items of its own and no tier median of five"
+    );
+    assert_eq!(status["build"]["cost_usd"], Value::Null);
 }
