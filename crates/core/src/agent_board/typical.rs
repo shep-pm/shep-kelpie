@@ -128,7 +128,7 @@ impl<'a> History<'a> {
 }
 
 // The middle of `sorted`, which is not empty, or `mean` of the middle two
-fn middle<T: Copy>(sorted: &[T], mean: impl Fn(T, T) -> T) -> T {
+pub(super) fn middle<T: Copy>(sorted: &[T], mean: impl Fn(T, T) -> T) -> T {
     let at = sorted.len() / 2;
     if sorted.len().is_multiple_of(2) {
         mean(sorted[at - 1], sorted[at])
