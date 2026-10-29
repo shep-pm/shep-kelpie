@@ -5,8 +5,7 @@ use std::io::{self, Read};
 use std::path::Path;
 use std::process::Stdio;
 
-use super::git::commits;
-use crate::worktree::in_repo;
+use super::git::{Reading, commits};
 
 /// The most of one diff kept, in bytes: about 16k tokens, so one huge
 /// branch cannot flood its context, and it reads the worktree for the rest
@@ -20,7 +19,7 @@ pub(in crate::runner) const CAP: usize = 64 * 1024;
 ///
 /// No external diff or text conversion runs, whatever git's config names.
 pub(super) fn read(
-    repo: &Path,
+    repo: &Reading,
     main: &str,
     head: &str,
     files: Option<&[String]>,
@@ -37,19 +36,17 @@ pub(super) fn read(
 /// commit. A merge that left no such commit, a squash or a rebase, has the
 /// branch's changes still apart from `main`, so it is the diff `read` gives.
 pub(in crate::runner) fn merged(
-    repo: &Path,
+    repo: &Reading,
     branch: &str,
     worktree: &Path,
     base: &str,
 ) -> Result<Vec<u8>, String> {
     let main = format!("refs/remotes/origin/{base}");
-    let head = format!("refs/heads/{branch}");
-    let tips = commits(repo, [&main, &head]);
-    let tip = |name: &String| match tips.get(name) {
-        Some(id) => Ok(id.clone()),
-        None => Err(format!("{name} is not in the checkout")),
-    };
-    let (main, head) = (tip(&main)?, tip(&head)?);
+    let main = commits(repo, [&main])
+        .remove(&main)
+        .ok_or_else(|| format!("{main} is not in the checkout"))?;
+    let head = (repo.head(worktree, branch))
+        .ok_or_else(|| format!("refs/heads/{branch} is not in the checkout"))?;
     let in_main = ["merge-base", "--is-ancestor", &head, &main];
     if !git_succeeds(repo, &in_main) {
         return read(repo, &main, &head, None, worktree);
@@ -80,8 +77,9 @@ pub(in crate::runner) fn merged(
 }
 
 // The first line git prints for `args`, if it succeeds and prints one
-fn git_line(repo: &Path, args: &[&str]) -> Option<String> {
-    let output = in_repo(repo)
+fn git_line(repo: &Reading, args: &[&str]) -> Option<String> {
+    let output = repo
+        .git()
         .arg("--no-replace-objects")
         .args(args)
         .stdin(Stdio::null())
@@ -97,8 +95,8 @@ fn git_line(repo: &Path, args: &[&str]) -> Option<String> {
 }
 
 // Whether git exits 0 for `args`
-fn git_succeeds(repo: &Path, args: &[&str]) -> bool {
-    in_repo(repo)
+fn git_succeeds(repo: &Reading, args: &[&str]) -> bool {
+    repo.git()
         .arg("--no-replace-objects")
         .args(args)
         .stdin(Stdio::null())
@@ -111,13 +109,14 @@ fn git_succeeds(repo: &Path, args: &[&str]) -> bool {
 // The diff of `revs`, two for a pair of commits and one for a range, cut
 // as `read` says
 fn cut(
-    repo: &Path,
+    repo: &Reading,
     revs: &[String],
     files: Option<&[String]>,
     worktree: &Path,
 ) -> Result<Vec<u8>, String> {
     let range = revs.join(" ");
-    let mut child = in_repo(repo)
+    let mut child = repo
+        .git()
         .arg("--no-replace-objects")
         .args(["diff", "--no-color", "--no-ext-diff", "--no-textconv"])
         // One section a file, in the order `--name-only` lists them.
@@ -239,7 +238,7 @@ mod tests {
         git(repo, &["commit", "--quiet", "-m", "after"]);
         git(repo, &["update-ref", "refs/remotes/origin/main", "main"]);
 
-        let diff = merged(repo, "feature", Path::new("/work/7"), "main").unwrap();
+        let diff = merged(&Reading::of(repo), "feature", Path::new("/work/7"), "main").unwrap();
 
         let diff = String::from_utf8(diff).unwrap();
         assert!(
@@ -261,16 +260,16 @@ mod tests {
         git(repo, &["commit", "--quiet", "-m", "base"]);
         let work = Path::new("/work/7");
 
-        let neither = merged(repo, "feature", work, "main").unwrap_err();
+        let neither = merged(&Reading::of(repo), "feature", work, "main").unwrap_err();
         assert_eq!(neither, "refs/remotes/origin/main is not in the checkout");
 
         git(repo, &["update-ref", "refs/remotes/origin/main", "main"]);
-        let no_branch = merged(repo, "feature", work, "main").unwrap_err();
+        let no_branch = merged(&Reading::of(repo), "feature", work, "main").unwrap_err();
         assert_eq!(no_branch, "refs/heads/feature is not in the checkout");
 
         git(repo, &["update-ref", "-d", "refs/remotes/origin/main"]);
         git(repo, &["branch", "feature"]);
-        let no_main = merged(repo, "feature", work, "main").unwrap_err();
+        let no_main = merged(&Reading::of(repo), "feature", work, "main").unwrap_err();
         assert_eq!(no_main, "refs/remotes/origin/main is not in the checkout");
     }
 
@@ -302,7 +301,7 @@ mod tests {
         );
         git(repo, &["update-ref", "refs/remotes/origin/main", "main"]);
 
-        let diff = merged(repo, "feature", Path::new("/work/7"), "main");
+        let diff = merged(&Reading::of(repo), "feature", Path::new("/work/7"), "main");
 
         let why = diff.expect_err("no commit took the branch in");
         assert!(why.contains("no merge commit that took it in"), "{why}");
@@ -325,7 +324,7 @@ mod tests {
         git(repo, &["commit", "--quiet", "-m", "squashed"]);
         git(repo, &["update-ref", "refs/remotes/origin/main", "main"]);
 
-        let diff = merged(repo, "feature", Path::new("/work/7"), "main").unwrap();
+        let diff = merged(&Reading::of(repo), "feature", Path::new("/work/7"), "main").unwrap();
 
         let diff = String::from_utf8(diff).unwrap();
         assert!(diff.contains("+++ b/b.txt\n"), "{diff}");
@@ -354,7 +353,14 @@ mod tests {
             .map(str::to_owned)
             .into();
 
-        let diff = read(repo, "main", "feature", Some(&files), Path::new("/work/7")).unwrap();
+        let diff = read(
+            &Reading::of(repo),
+            "main",
+            "feature",
+            Some(&files),
+            Path::new("/work/7"),
+        )
+        .unwrap();
 
         let diff = String::from_utf8(diff).unwrap();
         let last = diff.trim_end().lines().last().unwrap();

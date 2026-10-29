@@ -9,13 +9,14 @@
 //! are ignored, as everywhere kelpie reads a worker's commits.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 
 use super::patch;
 use crate::board::briefing::{Merge, named_paths};
 use crate::ticket::TicketId;
-use crate::worktree::in_repo;
+use crate::worktree::{clone, in_repo};
 
 /// Git's answers so far, by the commits they were read at
 #[derive(Debug, Default)]
@@ -26,10 +27,64 @@ pub(in crate::runner) struct Git {
     patches: BTreeMap<(String, String, PathBuf), Vec<u8>>,
 }
 
+/// The checkout, and the commits of the work items' clones it reads
+///
+/// A worker commits in its clone, whose objects the checkout does not hold,
+/// so a git run in the checkout is told of each clone's object folder as an
+/// alternate. A branch is read in its clone, which holds it.
+#[derive(Debug, Clone)]
+pub(in crate::runner) struct Reading {
+    path: PathBuf,
+    clones: Option<OsString>,
+}
+
+impl Reading {
+    /// The checkout at `path`, reading no clone
+    pub(in crate::runner) fn of(path: &Path) -> Self {
+        Self {
+            path: path.to_owned(),
+            clones: None,
+        }
+    }
+
+    /// The checkout at `path`, reading each of `worktrees` that is a clone of it
+    pub(in crate::runner) fn of_clones<'a>(
+        path: &Path,
+        worktrees: impl IntoIterator<Item = &'a Path>,
+    ) -> Self {
+        let objects = (worktrees.into_iter())
+            .filter_map(|worktree| clone::objects_of(path, worktree))
+            .collect::<Vec<_>>();
+        // A folder whose name holds the separator cannot be listed: the
+        // commits in it read as missing, as git's own would.
+        let clones = std::env::join_paths(objects)
+            .ok()
+            .filter(|joined| !joined.is_empty());
+        Self {
+            path: path.to_owned(),
+            clones,
+        }
+    }
+
+    /// The commit `branch` is at in `worktree`'s clone, in the checkout where it is none
+    pub(super) fn head(&self, worktree: &Path, branch: &str) -> Option<String> {
+        clone::branch_head(&self.path, worktree, branch)
+    }
+
+    /// `git` in the checkout
+    pub(super) fn git(&self) -> Command {
+        let mut git = in_repo(&self.path);
+        if let Some(clones) = &self.clones {
+            git.env("GIT_ALTERNATE_OBJECT_DIRECTORIES", clones);
+        }
+        git
+    }
+}
+
 /// What one board write asks git, with the answers kept so far
 #[derive(Debug)]
 pub(in crate::runner) struct GitJob {
-    pub(super) repo: PathBuf,
+    pub(super) repo: Reading,
     /// The project's base branch
     pub(super) base: String,
     pub(super) git: Git,
@@ -37,9 +92,10 @@ pub(in crate::runner) struct GitJob {
     pub(super) branches: Vec<(TicketId, String)>,
     /// The bodies of the issues ready or open, whose named paths it reads
     pub(super) bodies: Vec<(TicketId, String)>,
-    /// Where each open work item's worktree is, when it reads each
-    /// branch's diff, for a project manager
-    pub(super) patches: Option<BTreeMap<TicketId, PathBuf>>,
+    /// Where each open work item's worktree is
+    pub(super) worktrees: BTreeMap<TicketId, PathBuf>,
+    /// Whether it reads each branch's diff, for a project manager
+    pub(super) patches: bool,
 }
 
 /// What git answered for one board write
@@ -74,16 +130,18 @@ impl GitJob {
             mut git,
             branches,
             bodies,
+            worktrees,
             patches,
         } = self;
         let main_ref = format!("refs/remotes/origin/{base}");
-        let head_refs: Vec<String> = (branches.iter())
-            .map(|(_, branch)| format!("refs/heads/{branch}"))
-            .collect();
-        let tips = commits(&repo, [&main_ref].into_iter().chain(&head_refs));
-        let main = tips.get(&main_ref).cloned();
-        let heads: Vec<(TicketId, String)> = (branches.iter().zip(&head_refs))
-            .filter_map(|((ticket, _), head_ref)| Some((*ticket, tips.get(head_ref)?.clone())))
+        let main = commits(&repo, [&main_ref]).remove(&main_ref);
+        let heads: Vec<(TicketId, String)> = (branches.iter())
+            .filter_map(|(ticket, branch)| {
+                let worktree = worktrees
+                    .get(ticket)
+                    .map_or(Path::new(""), PathBuf::as_path);
+                Some((*ticket, repo.head(worktree, branch)?))
+            })
             .collect();
         let mut files = BTreeMap::new();
         if let Some(main) = &main {
@@ -135,7 +193,7 @@ impl GitJob {
             })
             .collect();
         let patches = match patches {
-            Some(worktrees) => (branches.iter())
+            true => (branches.iter())
                 .map(|(ticket, branch)| {
                     let head = heads.iter().find(|(t, _)| t == ticket).map(|(_, h)| h);
                     let worktree = worktrees.get(ticket).cloned().unwrap_or_default();
@@ -143,7 +201,7 @@ impl GitJob {
                     (*ticket, diff)
                 })
                 .collect(),
-            None => BTreeMap::new(),
+            false => BTreeMap::new(),
         };
         let live: BTreeSet<String> = heads.into_iter().map(|(_, head)| head).collect();
         git.keep(main.as_deref(), &live);
@@ -162,13 +220,13 @@ impl GitJob {
 
 impl Git {
     /// `origin/main`'s commit, as last fetched
-    fn main(repo: &Path, base: &str) -> Option<String> {
+    fn main(repo: &Reading, base: &str) -> Option<String> {
         let tracking = format!("refs/remotes/origin/{base}");
         read(repo, &["rev-parse", "--verify", "--quiet", &tracking]).map(trimmed)
     }
 
     /// Every file on `main`
-    fn tree(&mut self, repo: &Path, main: &str) -> &[String] {
+    fn tree(&mut self, repo: &Reading, main: &str) -> &[String] {
         if self.tree.as_ref().is_none_or(|(at, _)| at != main) {
             self.tree = Some((main.to_owned(), files_at(repo, main)));
         }
@@ -176,7 +234,7 @@ impl Git {
     }
 
     /// The files `head` changes since it left `main`, `None` when git cannot say
-    fn files(&mut self, repo: &Path, main: &str, head: &str) -> Option<Vec<String>> {
+    fn files(&mut self, repo: &Reading, main: &str, head: &str) -> Option<Vec<String>> {
         let key = (main.to_owned(), head.to_owned());
         if let Some(files) = self.diffs.get(&key) {
             return Some(files.clone());
@@ -190,7 +248,7 @@ impl Git {
 
     /// The files in conflict merging commits `a` and `b`, two heads or a head
     /// and `main`, empty when they merge cleanly, and `None` when git cannot say
-    pub(super) fn conflicts(&mut self, repo: &Path, a: &str, b: &str) -> Option<Vec<String>> {
+    pub(super) fn conflicts(&mut self, repo: &Reading, a: &str, b: &str) -> Option<Vec<String>> {
         let key = (a.min(b).to_owned(), a.max(b).to_owned());
         if let Some(files) = self.merges.get(&key) {
             return Some(files.clone());
@@ -237,7 +295,7 @@ impl Git {
     /// `branch`'s diff from `main`, at `head`, its commit where git read one
     fn patch(
         &mut self,
-        repo: &Path,
+        repo: &Reading,
         main: Option<&str>,
         base: &str,
         branch: &str,
@@ -261,7 +319,7 @@ impl Git {
 ///
 /// `rev-parse --verify` takes a single revision, so `for-each-ref` lists them.
 pub(super) fn commits<'a>(
-    repo: &Path,
+    repo: &Reading,
     refs: impl IntoIterator<Item = &'a String>,
 ) -> BTreeMap<String, String> {
     let mut args = vec!["for-each-ref", "--format=%(objectname) %(refname)"];
@@ -275,24 +333,26 @@ pub(super) fn commits<'a>(
 
 /// Every file on `origin/<base>` as last fetched, none where git cannot say
 pub(in crate::runner) fn files_on(repo: &Path, base: &str) -> Vec<String> {
-    Git::main(repo, base).map_or_else(Vec::new, |main| files_at(repo, &main))
+    let repo = Reading::of(repo);
+    Git::main(&repo, base).map_or_else(Vec::new, |main| files_at(&repo, &main))
 }
 
 // Every file at commit `at`.
-fn files_at(repo: &Path, at: &str) -> Vec<String> {
+fn files_at(repo: &Reading, at: &str) -> Vec<String> {
     let files = read(repo, &["ls-tree", "-r", "--name-only", "-z", at]);
     files.map(names).unwrap_or_default()
 }
 
-fn read(repo: &Path, args: &[&str]) -> Option<String> {
+fn read(repo: &Reading, args: &[&str]) -> Option<String> {
     match run(repo, args)? {
         (0, out) => Some(out),
         _ => None,
     }
 }
 
-fn run(repo: &Path, args: &[&str]) -> Option<(i32, String)> {
-    let output = in_repo(repo)
+fn run(repo: &Reading, args: &[&str]) -> Option<(i32, String)> {
+    let output = repo
+        .git()
         .arg("--no-replace-objects")
         .args(args)
         .stdin(Stdio::null())
@@ -328,7 +388,10 @@ mod tests {
         let mut cache = Git::default();
         let missing = "0123456789abcdef0123456789abcdef01234567";
         let other = "89abcdef0123456789abcdef0123456789abcdef";
-        assert_eq!(cache.conflicts(dir.path(), missing, other), None);
+        assert_eq!(
+            cache.conflicts(&Reading::of(dir.path()), missing, other),
+            None
+        );
         assert!(cache.merges.is_empty(), "an unknown merge is not kept");
     }
 
