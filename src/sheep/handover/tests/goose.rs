@@ -12,7 +12,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use super::super::super::{Hooks, JOIN_BOUND, Worker};
+use super::super::super::{Hooks, Worker};
 use super::exec::{FOLDER, read, worker_of, write};
 use super::*;
 use crate::adapters::{Base, GooseCli};
@@ -292,7 +292,7 @@ fn incoming(folder: &Path, host: &str, carry: Carry) {
     let lines = crate::usage::read(&rig.paths().folder.join(crate::usage::FILE)).unwrap();
     let turn = lines.first().expect("a usage line for the turn");
     write(folder, "ledger", &serde_json::to_string(turn).unwrap());
-    assert!(worker.stop(JOIN_BOUND, || {}));
+    assert!(worker.stop(CALL_PATIENCE, || {}));
 }
 
 #[test]
@@ -327,5 +327,5 @@ fn a_goose_turn_whose_record_is_gone_refuses_the_handover_and_the_old_image_keep
     assert_eq!(turn_of_7(&rig, &runner), "running");
     write(folder, "go", "");
     eventually("the turn's end", || turn_of_7(&rig, &runner) == "ended");
-    assert!(worker.stop(JOIN_BOUND, || {}));
+    assert!(worker.stop(CALL_PATIENCE, || {}));
 }
