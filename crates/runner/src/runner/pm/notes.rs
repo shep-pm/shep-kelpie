@@ -39,6 +39,12 @@ pub(super) const NOTES_KEEP: usize = 16 * 1024;
 /// The most `pm-standing.md` holds, in bytes, about 1k tokens
 pub(super) const STANDING_MAX: usize = 4 * 1024;
 
+/// What a wake says of a standing line whose end has passed
+pub(super) const ENDED: &str = "standing ended: ";
+
+/// What a wake says of a standing line whose ticket it could not read
+pub(super) const UNSETTLED: &str = "standing unsettled: ";
+
 /// When a standing line stops holding, written at its end
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum End {
@@ -124,6 +130,16 @@ fn blocks(lines: &[String]) -> Vec<(Option<String>, Vec<String>)> {
     out
 }
 
+/// The notes a launch try handed back, minus the ones this wake's sweep names again
+///
+/// A try that never reached the project manager put its notes back, and the
+/// sweep names every standing line whose ticket still cannot be read, so the
+/// carried ones of those are dropped here and each line is named once.
+pub(super) fn carried(mut lost: Vec<String>) -> Vec<String> {
+    lost.retain(|note| !note.starts_with(UNSETTLED));
+    lost
+}
+
 /// What a wake makes of a standing line's end
 enum Holding {
     /// Its end has passed, so the line goes
@@ -181,7 +197,7 @@ impl Runner {
                     Holding::Stands => left.push(line),
                     Holding::Unread(why) => {
                         self.notes.push(format!("{why}, so a standing line stands"));
-                        told.push(format!("standing unsettled: {line}: {why}"));
+                        told.push(format!("{UNSETTLED}{line}: {why}"));
                         left.push(line);
                     }
                 }
@@ -205,8 +221,8 @@ impl Runner {
         }
         for line in &gone {
             let said = plain(&self.shown(line.clone()), WORDS);
-            self.pm_note(&format!("standing ended: {said}"));
-            told.push(format!("standing ended: {line}"));
+            self.pm_note(&format!("{ENDED}{said}"));
+            told.push(format!("{ENDED}{line}"));
         }
         told
     }

@@ -158,6 +158,49 @@ fn a_standing_line_whose_ticket_read_fails_stands_and_is_named_as_unsettled() {
 }
 
 #[test]
+fn a_standing_line_named_as_unsettled_is_named_once_after_a_wake_that_failed() {
+    let (rig, runner) = with_pm("koji");
+    rig.forge.list_ready(9, false);
+    rig.forge.block(9, 900);
+    std::fs::create_dir_all(rig.paths().pm).unwrap();
+    std::fs::write(
+        rig.paths().pm.join(PM_STANDING),
+        "Hold the release notes (until #41)\n",
+    )
+    .unwrap();
+    // The source cannot say how #41 stands, so the line stands and is named unsettled
+    rig.forge.remove_issue(41);
+    let down = AgentError::Failed(Harness::ClaudeCode, "overloaded".into());
+    rig.claude
+        .script([Scripted::Fail(down), Scripted::Say("{\"pick\": null}")]);
+    rig.ask(&runner, "tell", Some("first"));
+    assert!(
+        matches!(step(&runner).unwrap(), Some(StepReport::PmFailed { .. })),
+        "its call failed, so the wake handed back what it carried"
+    );
+
+    rig.clock.advance(super::super::DOWN_FOR + 1);
+    answered(Some(step_until(&runner, |r| {
+        matches!(r, StepReport::PmAnswered { .. })
+    })));
+
+    let named = "standing unsettled: Hold the release notes (until #41)";
+    let [failed, second] = pm_seen(&rig).try_into().unwrap();
+    assert!(failed.call.prompt.contains(named), "{}", failed.call.prompt);
+    let prompt = &second.call.prompt;
+    assert!(prompt.contains(named), "{prompt}");
+    assert_eq!(
+        prompt.matches(named).count(),
+        1,
+        "the carried note and the sweep named the same line: {prompt}"
+    );
+    assert!(
+        read(&rig, PM_STANDING).contains("Hold the release notes (until #41)"),
+        "an unanswered end keeps its line"
+    );
+}
+
+#[test]
 fn a_standing_line_the_board_cannot_answer_is_read_once_a_wake_through_the_ticket_port() {
     let (rig, runner) = with_pm("koji");
     rig.forge.list_ready(9, false);

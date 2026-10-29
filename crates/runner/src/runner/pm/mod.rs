@@ -707,8 +707,10 @@ impl Runner {
         let wakes = std::mem::take(&mut self.pm.due);
         self.pm.holding_since = None;
         let told = self.state.pm_told.clone();
-        let mut lost = std::mem::take(&mut self.pm.lost);
-        // Each standing line whose end has passed goes before the wake reads the file
+        // Each standing line whose end has passed goes before the wake reads
+        // the file, and a try that never reached the wake handed back notes
+        // the sweep names again
+        let mut lost = notes::carried(std::mem::take(&mut self.pm.lost));
         lost.extend(self.pm_stand_ends());
         let notes = self.pm_notes();
         let full = fresh || self.pm.full_prompt;
