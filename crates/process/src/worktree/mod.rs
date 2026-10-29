@@ -643,7 +643,8 @@ pub fn change_start(repo: &Path, worktree: &Path, base: &str) -> Result<String, 
 /// Git for the worktree, with its git dirs named rather than found, since
 /// git that finds them reads the config of whatever repo the worker points
 /// it at. The worktree's `commondir` is checked against the repo's, hooks
-/// are off, and replace refs are ignored.
+/// are off, and replace refs are ignored. It reads the `config` of the repo's
+/// common dir or of a clone, which the worker must not be able to write.
 ///
 /// # Errors
 ///

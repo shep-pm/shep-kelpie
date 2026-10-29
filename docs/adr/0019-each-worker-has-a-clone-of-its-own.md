@@ -10,7 +10,7 @@ On Windows that does not hold. srt-win drops a write grant on a path that does n
 
 - Each worker has a clone of its own on every platform, not on Windows alone.
 - The clone's git dir is the sibling `<worktree>.git`. It is made by `git init --bare`, then `core.bare=false`, and its `objects/info/alternates` names the checkout's objects, so nothing is fetched and the clone costs the files and little else.
-- The worker may write its whole git dir and nothing of the checkout's. Its branch, lock and reflog sit in folders it already owns, so the grant needs no path that is not there yet.
+- The worker may write its git dir but `config`, `hooks`, `info` and `modules`, and nothing of the checkout's. Its branch, lock and reflog sit in folders it already owns, so the grant needs no path that is not there yet. The fence denies those four writes as it denies the checkout's today, because kelpie's trusted git reads the clone's `config` outside the sandbox: a `core.sshCommand`, a `credential.helper`, a filter or an include the worker wrote there would run as kelpie.
 - The clone copies three settings from the checkout: `remote.origin.url`, `remote.origin.pushurl` and `core.hooksPath`. It holds no ref but its branch. A ref kelpie wants in it, such as `origin/main`, is set by `update-ref` from the checkout's commit.
 - Kelpie's git reads a clone through the same trusted call it uses for a linked worktree, with the clone's git dir named as both git dirs. A clone whose alternates name another repo's objects is refused.
 - Kelpie never reads `origin/<base>` from a clone, whose refs the worker writes. It reads the commit from the checkout and passes it.
@@ -27,4 +27,5 @@ This record covers the first slice, which teaches kelpie's git to read a clone. 
 
 - A repo-local setting of the checkout other than the three copied, such as a credential helper, does not reach a clone. A push of kelpie's from a clone reads the machine's and the clone's config.
 - The checkout keeps a branch ref for each converted worktree until kelpie removes it.
+- The slice that grants a worker its clone must deny-write `config`, `hooks`, `info` and `modules`. Kelpie's own git sets only the four settings in `TRUSTED_CONFIG` and does not guard against the rest of the config.
 - Objects a worker writes sit in the clone, and go with it when the work item is removed.

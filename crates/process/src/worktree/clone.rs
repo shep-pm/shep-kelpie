@@ -3,7 +3,8 @@
 //! The clone's git dir is the sibling `<worktree>.git`. Its refs, index and
 //! config are its own, and its `objects/info/alternates` names the checkout's
 //! objects, so nothing is fetched and a commit the worker makes lands in the
-//! clone alone. Kelpie's git reads a clone through [`super::trusted`].
+//! clone alone. Kelpie's git reads a clone through [`super::trusted`], which
+//! reads the clone's `config`: the worker must not be able to write it.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -152,7 +153,7 @@ pub fn mirror(repo: &Path, worktree: &Path, refs: &[&str]) -> Result<(), Worktre
             repo,
             ["rev-parse", "--verify", &format!("{name}^{{commit}}")],
         )?;
-        in_worktree(&["update-ref", name, &commit])?;
+        in_worktree(&["update-ref", "--no-deref", name, &commit])?;
     }
     Ok(())
 }
@@ -439,6 +440,30 @@ mod tests {
         rig.commit("b.txt");
 
         assert!(holds_work(&rig.repo, &rig.worktree, "kelpie/7", "main").unwrap());
+    }
+
+    #[test]
+    fn a_mirrored_ref_the_worker_made_a_link_to_its_branch_leaves_the_branch_alone() {
+        let rig = Rig::new();
+        rig.make();
+        git(
+            &rig.repo,
+            &["update-ref", "refs/remotes/origin/main", "main"],
+        );
+        let work = rig.commit("b.txt");
+        rig.in_clone(&[
+            "symbolic-ref",
+            "refs/remotes/origin/main",
+            "refs/heads/kelpie/7",
+        ]);
+
+        mirror(&rig.repo, &rig.worktree, &["refs/remotes/origin/main"]).unwrap();
+
+        assert_eq!(rig.in_clone(&["rev-parse", "refs/heads/kelpie/7"]), work);
+        assert_eq!(
+            rig.in_clone(&["rev-parse", "refs/remotes/origin/main"]),
+            git(&rig.repo, &["rev-parse", "origin/main"])
+        );
     }
 
     #[test]
