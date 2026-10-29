@@ -56,7 +56,7 @@ shep-kelpie-worker-folder = { path = "crates/worker_folder" }
 # The sandbox runtime a macOS and Linux worker runs under: kelpie's own
 # binary is its wrapper (`crabpot::run_from_args`), so no node `srt` is on
 # that path. The library only, without the `crabpot` binary.
-crabpot = { version = "0.4", default-features = false }
+crabpot = { version = "0.5", default-features = false }
 # The secret's random bytes, from the system's source on every platform
 getrandom = { version = "0.4", default-features = false, features = ["std"] }
 # The authenticator codes that answer a ruling from ntfy (RFC 6238 TOTP)
