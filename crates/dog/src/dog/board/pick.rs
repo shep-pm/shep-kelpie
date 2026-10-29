@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use super::View;
-use crate::agent_board::{self, Candidate, DEFAULT_SECS, History, Item, Typical};
+use crate::agent_board::{self, Candidate, DEFAULT_SECS, History, Item, Record, Typical};
 use crate::agents::{Agent, Role, Tier};
 use crate::dog::availability::{self, Availability};
 use crate::dog::door::{Place, say};
@@ -36,15 +36,18 @@ impl View {
         Value::Object(agents.collect())
     }
 
+    /// Each agent and kind the ledgers give a record to
+    pub(super) fn tallies(&self) -> BTreeMap<(String, Option<String>), Record> {
+        agent_board::records(self.ledgers.iter().flat_map(|l| l.iter()))
+    }
+
     /// Each agent's track record per kind of work, from every project's ledger
     ///
     /// Keyed by agent and then by kind, `none` for items of no kind. A rate,
     /// median or cost the ledger cannot say is null.
     pub fn records(&self) -> Value {
         let mut agents = serde_json::Map::new();
-        for ((agent, kind), record) in
-            agent_board::records(self.ledgers.iter().flat_map(|l| l.iter()))
-        {
+        for ((agent, kind), record) in self.tallies() {
             let kinds = agents.entry(agent).or_insert_with(|| json!({}));
             kinds[kind.as_deref().unwrap_or("none")] = json!({
                 "items": record.items,

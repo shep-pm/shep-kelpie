@@ -12,6 +12,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
+use crate::agent_board::Finding;
 use crate::agents::Tier;
 use crate::home;
 use crate::ipc::{self, ClientStream};
@@ -114,6 +115,10 @@ pub const FORGE: &str = "forge";
 /// item: the dog answers one line and closes
 pub const PICK: &str = "pick";
 
+/// What an ask names to have the agent board say whether an agent still fits
+/// a kind of work: the dog answers one line and closes
+pub const FIT: &str = "fit";
+
 /// What the dog says, first, when the project that asked for [`E2E`] has no
 /// host to run it on
 pub const NO_E2E_HOST: &str = "this project has no e2e host";
@@ -150,11 +155,14 @@ pub struct Ask {
     /// The work item a `pick` ask wants agents for
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pick: Option<PickAsk>,
+    /// The agent and kind a `fit` ask is about
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit: Option<FitAsk>,
 }
 
 impl Ask {
     /// An ask for the counted lease `take` from process `pid`, running
-    /// `what`, with no folder, forge ask or pick, from a command not yet
+    /// `what`, with no folder, forge ask, pick or fit, from a command not yet
     /// under a grant
     pub fn new(take: impl Into<String>, pid: u32, what: impl Into<String>) -> Self {
         Self {
@@ -165,6 +173,7 @@ impl Ask {
             worktree: None,
             forge: None,
             pick: None,
+            fit: None,
         }
     }
 }
@@ -226,6 +235,28 @@ pub struct Pick {
     pub cost_usd: Option<f64>,
 }
 
+/// What a runner asks the agent board about one agent and one kind, in a [`FIT`] ask
+// wire format: changing this is a breaking change to the door
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FitAsk {
+    /// The agent the finding would be about
+    pub agent: AgentName,
+    /// The kind it is read at
+    pub kind: String,
+}
+
+/// What the dog says about a [`FIT`] ask
+// wire format: changing this is a breaking change to the door
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Fits {
+    /// The agent still fits the kind, so the runner raises nothing
+    Yes,
+    /// It does not, with the finding the dog read it from
+    No(Finding),
+}
+
 /// What the dog answers, one line each
 // wire format: changing this is a breaking change to the door
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -248,6 +279,8 @@ pub enum Answer {
     Done(i32),
     /// The agents a pick ask may start, in the order to try them; none fits when empty
     Picks(Vec<Pick>),
+    /// What a fit ask answered about the agent and kind it named
+    Fits(Fits),
     /// Refused, saying why, and the dog closes the connection
     Error(String),
 }
@@ -352,6 +385,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::agent_board::Measure;
 
     #[test]
     fn a_worker_never_gets_shep_s_socket_or_a_relative_one() {
@@ -525,6 +559,40 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&picks).unwrap(),
             json!({ "picks": [{ "agent": "sonnet-high", "finish": 600, "wait": 0 }] })
+        );
+        let fit = Ask {
+            take: FIT.into(),
+            fit: Some(FitAsk {
+                agent: AgentName::kelpies("sonnet-high"),
+                kind: "fix".into(),
+            }),
+            ..ask.clone()
+        };
+        assert_eq!(
+            serde_json::to_value(&fit).unwrap()["fit"],
+            json!({ "agent": "sonnet-high", "kind": "fix" })
+        );
+        let finding = Finding {
+            kind: "fix".into(),
+            worse: "slow".into(),
+            better: "quick".into(),
+            measure: Measure::Hours {
+                worse: 3.0,
+                better: 1.0,
+            },
+            suggested_kinds: vec!["docs".into()],
+        };
+        assert_eq!(
+            serde_json::to_value([Answer::Fits(Fits::Yes), Answer::Fits(Fits::No(finding))])
+                .unwrap(),
+            json!([
+                { "fits": "yes" },
+                { "fits": { "no": {
+                    "kind": "fix", "worse": "slow", "better": "quick",
+                    "measure": { "hours": { "worse": 3.0, "better": 1.0 } },
+                    "suggested_kinds": ["docs"],
+                } } }
+            ])
         );
     }
 

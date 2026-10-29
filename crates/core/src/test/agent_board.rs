@@ -2,12 +2,15 @@
 //!
 //! It answers in memory, so a test of dispatch never reaches the dog. It
 //! starts by ranking every agent an ask allows in the order the ask lists
-//! them, with no wait. A test puts some of them first, ranks its own order,
-//! with its own finishes, ranks nobody, or makes the board unreachable.
+//! them, with no wait, and by saying every agent fits every kind. A test puts
+//! some of them first, ranks its own order, with its own finishes, ranks
+//! nobody, says one agent does not fit a kind, or makes the board unreachable.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use crate::lease::door::{Pick, PickAsk};
+use crate::agent_board::Finding;
+use crate::lease::door::{FitAsk, Fits, Pick, PickAsk};
 use crate::ports::AgentBoard;
 use crate::settings::AgentName;
 
@@ -33,6 +36,9 @@ impl Default for Answers {
 struct Book {
     answers: Answers,
     asks: Vec<PickAsk>,
+    // Each agent and kind a test has set an answer for
+    fits: BTreeMap<(AgentName, String), Fits>,
+    fit_asks: Vec<FitAsk>,
 }
 
 /// A board that ranks what a test sets
@@ -70,7 +76,17 @@ impl FakeAgentBoard {
         self.book.lock().unwrap().answers = Answers::Listed(first);
     }
 
-    /// Each pick goes unanswered, as when the dog cannot be reached
+    /// Each fit ask about `agent` and `kind` answers that it fits
+    pub fn fits(&self, agent: &str, kind: &str) {
+        self.answer_fit(agent, kind, Fits::Yes);
+    }
+
+    /// Each fit ask about `agent` and `kind` answers `finding`
+    pub fn does_not_fit(&self, agent: &str, kind: &str, finding: Finding) {
+        self.answer_fit(agent, kind, Fits::No(finding));
+    }
+
+    /// Each pick and each fit ask goes unanswered, as when the dog cannot be reached
     pub fn unreachable(&self) {
         self.book.lock().unwrap().answers = Answers::Unreachable;
     }
@@ -78,6 +94,19 @@ impl FakeAgentBoard {
     /// What each pick was asked, in order
     pub fn asks(&self) -> Vec<PickAsk> {
         self.book.lock().unwrap().asks.clone()
+    }
+
+    /// What each fit ask was asked, in order
+    pub fn fit_asks(&self) -> Vec<FitAsk> {
+        self.book.lock().unwrap().fit_asks.clone()
+    }
+
+    fn answer_fit(&self, agent: &str, kind: &str, fits: Fits) {
+        let key = (
+            AgentName::try_from(agent.to_owned()).unwrap(),
+            kind.to_owned(),
+        );
+        self.book.lock().unwrap().fits.insert(key, fits);
     }
 }
 
@@ -105,5 +134,19 @@ impl AgentBoard for FakeAgentBoard {
             cost_usd: None,
         });
         Some(picks.collect())
+    }
+
+    fn fit(&self, item: &FitAsk) -> Option<Fits> {
+        let mut book = self.book.lock().unwrap();
+        book.fit_asks.push(item.clone());
+        if matches!(book.answers, Answers::Unreachable) {
+            return None;
+        }
+        Some(
+            book.fits
+                .get(&(item.agent.clone(), item.kind.clone()))
+                .cloned()
+                .unwrap_or(Fits::Yes),
+        )
     }
 }
