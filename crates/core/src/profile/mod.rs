@@ -99,21 +99,6 @@ pub fn instructions_for(
     text
 }
 
-// Claude Code opens a worktree's whole common git dir to sandboxed writes.
-// These are the parts a commit and a push do not need, and whose change
-// would run code outside the sandbox. `refs/remotes` stays open for the
-// push's tracking ref; kelpie fetches `origin/main` before cutting from it.
-const GIT_DENY: [&str; 8] = [
-    "config",
-    "hooks",
-    "info",
-    "modules",
-    "HEAD",
-    "index",
-    "packed-refs",
-    "refs/tags",
-];
-
 // A clone's own git dir is the worker's whole. These are the parts that run
 // code outside the sandbox when changed, and the alternates that lend it
 // another repo's objects.
@@ -239,11 +224,10 @@ pub struct WorkerProfile<'a> {
     pub worktree: &'a Path,
     /// The worker's build folder, its `CARGO_TARGET_DIR`
     pub build: &'a Path,
-    /// The project repo's common git dir, which holds objects and refs. On a
-    /// clone it is the project checkout's, which the worker reads and never writes.
+    /// The project checkout's git dir, which the clone borrows objects from.
+    /// The worker reads it and never writes it.
     pub git_common_dir: &'a Path,
-    /// The worktree's own git dir, inside the common one. On a clone it is the
-    /// clone's own, outside the checkout's, and the worker writes it.
+    /// The clone's own git dir, outside the checkout's, which the worker writes
     pub git_dir: &'a Path,
     /// The work item's branch
     pub branch: &'a str,
@@ -295,10 +279,7 @@ pub struct WorkerProfile<'a> {
 impl WorkerProfile<'_> {
     /// The worker's sandbox
     pub fn reach(&self) -> Reach {
-        let (write, no_write) = match self.is_clone() {
-            true => self.clone_writes(),
-            false => self.worktree_writes(),
-        };
+        let (write, no_write) = self.clone_writes();
         // The whole home is denied, and what the call needs is allowed back into
         // it. Kelpie's home is the shepherd's too unless `KELPIE_HOME` puts it
         // elsewhere, and either may sit outside the machine's home.
@@ -324,9 +305,9 @@ impl WorkerProfile<'_> {
             self.kelpie,
             self.git_common_dir,
             self.skills,
+            self.git_dir,
         ]
         .into_iter()
-        .chain(self.is_clone().then_some(self.git_dir))
         .map(Path::to_owned)
         .chain(tools)
         .chain(self.login_carve_outs())
@@ -387,44 +368,6 @@ impl WorkerProfile<'_> {
         }
     }
 
-    // A git dir outside the common one is a clone's own repo: the common git
-    // dir is then the project checkout's, and the worker never writes it.
-    fn is_clone(&self) -> bool {
-        !self.git_dir.starts_with(self.git_common_dir)
-    }
-
-    // A linked worktree: what a commit and a push need of the common git dir.
-    fn worktree_writes(&self) -> (Vec<PathBuf>, Vec<PathBuf>) {
-        let git = |p: &str| self.git_common_dir.join(p);
-        let branch_ref = git("refs/heads").join(self.branch);
-        let tracking_ref = git("refs/remotes/origin").join(self.branch);
-        let write = vec![
-            self.worktree.to_owned(),
-            self.build.to_owned(),
-            git("objects"),
-            self.git_dir.to_owned(),
-            git("logs/refs/heads").join(self.branch),
-            with_suffix(&branch_ref, ".lock"),
-            branch_ref,
-            git("logs/refs/remotes/origin").join(self.branch),
-            with_suffix(&tracking_ref, ".lock"),
-            tracking_ref,
-            // A commit locks `packed-refs` before it finds nothing to delete from
-            // it. The lock is all it needs then, and the file stays denied
-            // below, so a write that needs the file still fails. One a killed
-            // git leaves is removed by `worktree::prepare`.
-            git("packed-refs.lock"),
-        ];
-        // The clone's own base branch, which a push of every branch would carry.
-        let no_write: Vec<PathBuf> = GIT_DENY
-            .iter()
-            .map(|p| git(p))
-            .chain([git("refs/heads").join(self.base)])
-            .chain(fence::deny_write(self.worktree))
-            .collect();
-        (write, no_write)
-    }
-
     // A clone: its git dir whole, less what git runs code from or borrows
     // objects through. It names no ref, since a ref that does not exist yet
     // cannot be granted, and the push guard keeps its base branch off the remote.
@@ -457,12 +400,8 @@ impl WorkerProfile<'_> {
 
     // The folders git trusts on Windows: the common git dir and the worktree,
     // and a clone's own git dir beside them.
-    fn trusted_dirs(&self) -> Vec<&Path> {
-        let clone = self.is_clone().then_some(self.git_dir);
-        [self.git_common_dir, self.worktree]
-            .into_iter()
-            .chain(clone)
-            .collect()
+    fn trusted_dirs(&self) -> [&Path; 3] {
+        [self.git_common_dir, self.worktree, self.git_dir]
     }
 
     fn env(&self) -> BTreeMap<String, String> {
@@ -557,10 +496,4 @@ pub fn home_denials<'a>(homes: impl IntoIterator<Item = &'a Path>) -> Vec<String
     kept.into_iter()
         .map(|home| format!("{}/**", home.display()))
         .collect()
-}
-
-fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
-    let mut s = path.as_os_str().to_owned();
-    s.push(suffix);
-    s.into()
 }

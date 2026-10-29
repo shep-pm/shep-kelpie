@@ -18,7 +18,8 @@ use crate::adapters::SandboxRuntime;
 use crate::ports::{AgentCall, Policy, Reach, Role, Sandbox, Session, SessionId, Tools};
 use crate::profile::WorkerProfile;
 use crate::settings::{AgentHarness, BuildDir, Effort, EnvName, GuardHook, HookEvent, NonBlank};
-use crate::test::{NO_PROGRAM, git, linked_worktree, short_tempdir};
+use crate::test::{NO_PROGRAM, git, short_tempdir};
+use crate::worktree::{self, Remote, Start};
 
 /// A harness's fence: the call a worker makes and the policy its commands run under
 #[derive(Clone, Copy)]
@@ -257,7 +258,7 @@ impl World {
         self.root.join(p)
     }
 
-    // The worker's call: the worktree `wt` of the repo `repo`, its branch `wt`.
+    // The worker's call: the clone `wt` of the repo `repo`, its branch `wt`.
     fn call(
         &self,
         through: &Through,
@@ -270,7 +271,7 @@ impl World {
             build: &build,
             home: &self.path("home"),
             git_common_dir: &git,
-            git_dir: &git.join("worktrees/wt"),
+            git_dir: &worktree::clone::git_dir_of(&wt),
             branch: "wt",
             base: "main",
             kelpie_pushes: false,
@@ -386,24 +387,37 @@ fn assert_wrote_nothing_outside(
 /// The project of `eco` builds, tests, lints and pushes from inside the fence of `through`
 pub(crate) fn project(through: &Through, eco: Ecosystem) {
     let w = World::new();
-    let (repo, wt) = linked_worktree(&w.root);
-    copy_fixture(eco.fixture(), &wt);
-    git(&wt, &["add", "-A"]);
-    git(&wt, &["commit", "--quiet", "-m", "fixture"]);
     // A local bare remote the build folder holds, so the push needs no network and
-    // writes only what the fence grants. The tracking ref is there as it is after
-    // the branch's first push, since its folder is not the fence's to make.
+    // writes only what the fence grants. The checkout's `origin` is it, and the
+    // clone copies that.
     let remote = w.path("build/remote.git");
     git(
         &w.root,
         &["init", "--quiet", "--bare", remote.to_str().unwrap()],
     );
+    let (repo, wt) = (w.path("repo"), w.path("wt"));
+    fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "--quiet", "-b", "main"]);
+    git(&repo, &["commit", "--quiet", "--allow-empty", "-m", "init"]);
     git(
         &repo,
         &["remote", "add", "origin", remote.to_str().unwrap()],
     );
     git(&repo, &["config", "core.hooksPath", ".githooks"]);
-    git(&repo, &["update-ref", "refs/remotes/origin/wt", "HEAD"]);
+    git(&repo, &["push", "--quiet", "origin", "main"]);
+    worktree::prepare(
+        &repo,
+        &wt,
+        "wt",
+        Start::Main,
+        "main",
+        &Remote::Origin,
+        &w.path("build"),
+    )
+    .unwrap();
+    copy_fixture(eco.fixture(), &wt);
+    git(&wt, &["add", "-A"]);
+    git(&wt, &["commit", "--quiet", "-m", "fixture"]);
 
     eco.install(&w);
     let call = w.call(through, &eco.build_env(), &[]);

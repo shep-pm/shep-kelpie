@@ -94,7 +94,7 @@ Check this list before proposing an option. Where a later ADR reopened the decis
 
 Worker retros of 10 to 12 October 2026 kept proposing these. The maintainer turned them down on 12 October.
 
-- let the worker's sandbox write `packed-refs` or the shared `.git`: denied on purpose, and git is told not to try instead
+- let the worker's sandbox write `packed-refs` or the shared `.git`: denied on purpose, and git is told not to try instead. A worker now writes its own clone's `packed-refs` and `.git` (ADR 0019), and the checkout's stays unwritten
 - allow `/tmp` in the worker's fence: every worker shares it. Tests honour `TMPDIR`, and the worker's instructions now send its scratch files there (#951)
 - run `lease run cargo-test` outside the sandbox: it hands a worker an unsandboxed exec path
 - let workers run `gh api` or read-only GraphQL: a worker's `gh` is the maintainer's login

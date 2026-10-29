@@ -41,7 +41,7 @@ mod tests {
             worktree,
             build: Path::new("/k/targets/shep/7"),
             git_common_dir: common,
-            git_dir: Path::new(LINKED),
+            git_dir: Path::new(CLONE),
             branch: "kelpie/7",
             base: "main",
             kelpie_pushes: false,
@@ -68,32 +68,16 @@ mod tests {
     const WORKTREE: &str = r"C:\k\wt\shep\7";
     // With `/` separators, so a path is inside another on any host the tests run on
     const COMMON: &str = "C:/k/repos/shep/.git";
-    const LINKED: &str = "C:/k/repos/shep/.git/worktrees/7";
+    const CLONE: &str = "C:/k/wt/shep/7.git";
 
     #[test]
-    fn on_windows_git_is_told_to_trust_the_common_git_dir_and_the_worktree() {
+    fn on_windows_git_is_told_to_trust_the_checkouts_git_dir_the_worktree_and_the_clones_git_dir() {
         let profile = profile(Path::new(WORKTREE), Path::new(COMMON), None);
 
         assert_eq!(
             git_config(&profile, true),
             format!(
-                "{} 'safe.directory'='C:/k/repos/shep/.git' 'safe.directory'='C:/k/wt/shep/7'",
-                housekeeping::PARAMETERS
-            )
-        );
-    }
-
-    #[test]
-    fn on_windows_git_is_told_to_trust_a_clones_git_dir() {
-        let clone = WorkerProfile {
-            git_dir: Path::new("C:/k/wt/shep/7/.git"),
-            ..profile(Path::new(WORKTREE), Path::new(COMMON), None)
-        };
-
-        assert_eq!(
-            git_config(&clone, true),
-            format!(
-                "{} 'safe.directory'='C:/k/repos/shep/.git' 'safe.directory'='C:/k/wt/shep/7' 'safe.directory'='C:/k/wt/shep/7/.git'",
+                "{} 'safe.directory'='C:/k/repos/shep/.git' 'safe.directory'='C:/k/wt/shep/7' 'safe.directory'='C:/k/wt/shep/7.git'",
                 housekeeping::PARAMETERS
             )
         );
@@ -107,7 +91,7 @@ mod tests {
         assert_eq!(
             git_config(&profile, true),
             format!(
-                "{} 'safe.directory'='C:/k/repos/shep/.git' 'safe.directory'='C:/k/wt/shep/7' {}",
+                "{} 'safe.directory'='C:/k/repos/shep/.git' 'safe.directory'='C:/k/wt/shep/7' 'safe.directory'='C:/k/wt/shep/7.git' {}",
                 housekeeping::PARAMETERS,
                 login::GIT_CONFIG
             )
@@ -119,7 +103,7 @@ mod tests {
         let profile = profile(Path::new(r"C:\k\o'neil\7"), Path::new(COMMON), None);
 
         assert!(
-            git_config(&profile, true).ends_with(r#"'safe.directory'='C:/k/o'\''neil/7'"#),
+            git_config(&profile, true).contains(r#"'safe.directory'='C:/k/o'\''neil/7'"#),
             "{}",
             git_config(&profile, true)
         );
