@@ -1019,7 +1019,7 @@
       "id": 25,
       "type": "table",
       "title": "Work items by agent and kind",
-      "description": "Each agent and kind of work the project finished in the dashboard's time range: the share that merged and the mean hours an item took, which is what the agent board's pick reads and what an agent-fit ruling is raised from. Read it over a week or more, since an agent's record means little over a few items. A pair with no merged item has no row, since the share has no series to divide.",
+      "description": "Each agent and kind of work the project finished in the dashboard's time range: the share that merged and the mean hours an item took, which is what the agent board's pick reads and what an agent-fit ruling is raised from. Read it over a week or more, since an agent's record means little over a few items. The two queries reach the panel as two frames, and the merge transformation joins them into one row per agent and kind, so a pair with finished items and none merged has an empty share, which is what a share with nothing to divide is.",
       "gridPos": {
         "h": 8,
         "w": 24,
@@ -1054,6 +1054,12 @@
           "instant": true
         }
       ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "unit": "short"
@@ -1061,8 +1067,8 @@
         "overrides": [
           {
             "matcher": {
-              "id": "byFrameRefID",
-              "options": "A"
+              "id": "byName",
+              "options": "Value #A"
             },
             "properties": [
               {
@@ -1077,8 +1083,8 @@
           },
           {
             "matcher": {
-              "id": "byFrameRefID",
-              "options": "B"
+              "id": "byName",
+              "options": "Value #B"
             },
             "properties": [
               {

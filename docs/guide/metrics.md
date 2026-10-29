@@ -93,7 +93,7 @@ What is left is spent outside kelpie: your own `gh`, scripts and tools on the sa
 
 **Tool errors by kind and role** counts each kind over the dashboard's own time range, per role and project, sorted by the count, so the row at the top is the friction to fix. `other` is usually the largest, and is the worker's own command failing rather than anything around it.
 
-**Work items by agent and kind** is the track record on the endpoint: for each agent and kind of work finished in the dashboard's own time range, the share that merged and the mean hours an item took. These are what the agent board's pick reads and what an `agent-fit` ruling is raised from. Read it over a week or more, since an agent's record means little over a few items. The median hours the board uses for its estimate stay in the board's own record: kelpie sends the seconds totals, not `le` counters, which would multiply the series for a number a mean already gives.
+**Work items by agent and kind** is the track record on the endpoint: for each agent and kind of work finished in the dashboard's own time range, the share that merged and the mean hours an item took. These are what the agent board's pick reads and what an `agent-fit` ruling is raised from. Read it over a week or more, since an agent's record means little over a few items. A pair with finished items and none merged has an empty share, since the share has nothing to divide. The median hours the board uses for its estimate stay in the board's own record: kelpie sends the seconds totals, not `le` counters, which would multiply the series for a number a mean already gives.
 
 ## The alerts
 
