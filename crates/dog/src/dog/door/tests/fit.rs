@@ -19,8 +19,8 @@ fn implementer(fit: &str) -> String {
     )
 }
 
-// `slow`, which takes `fix` and `docs` and takes twice as long at it, and
-// `quick`, which takes `fix` alone.
+// `slow`, whose file takes `fix` and `docs`, and `quick`, whose file takes
+// `fix` alone.
 fn pair(dir: &Path) -> Agents {
     write_in(dir, "slow.md", &implementer("kinds: [fix, docs]\n"));
     write_in(dir, "quick.md", &implementer("kinds: [fix]\n"));
