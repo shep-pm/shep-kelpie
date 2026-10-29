@@ -10,9 +10,13 @@
 
 use std::io::Write as _;
 use std::path::Path;
+use std::str::FromStr;
 
-use crate::ports::PM_NOTES;
+use jiff::civil::Date;
+
+use crate::ports::{PM_NOTES, Timestamp};
 use crate::runner::Runner;
+use crate::ticket::TicketId;
 
 use super::act::{WORDS, plain};
 use super::prompt;
@@ -34,6 +38,205 @@ pub(super) const NOTES_KEEP: usize = 16 * 1024;
 
 /// The most `pm-standing.md` holds, in bytes, about 1k tokens
 pub(super) const STANDING_MAX: usize = 4 * 1024;
+
+/// When a standing line stops holding, written at its end
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum End {
+    /// It goes when ticket `n` closes, whichever way it closes
+    Ticket(TicketId),
+    /// It holds through this day and goes at the first wake after it
+    Day(Date),
+}
+
+/// The end at the end of `line`, or None when it has none or its last group is no end
+///
+/// Only a `(until ...)` group closing the line is an end. One mid-line, or one
+/// before the last group, is plain text.
+fn end_of(line: &str) -> Option<End> {
+    let text = line.trim_end();
+    let open = text.rfind('(')?;
+    let group = &text[open..];
+    if !group.ends_with(')') {
+        return None;
+    }
+    let named = group.get(1..group.len() - 1)?.strip_prefix("until ")?.trim();
+    match named.starts_with('#') || named.starts_with('k') {
+        true => TicketId::from_str(named.strip_prefix('#').unwrap_or(named))
+            .ok()
+            .map(End::Ticket),
+        false => day(named).map(End::Day),
+    }
+}
+
+// `YYYY-MM-DD` as a day the calendar has, or None
+fn day(text: &str) -> Option<Date> {
+    let shaped = text.len() == 10
+        && text
+            .bytes()
+            .enumerate()
+            .all(|(at, b)| if at == 4 || at == 7 { b == b'-' } else { b.is_ascii_digit() });
+    match shaped {
+        true => Date::strptime("%Y-%m-%d", text).ok(),
+        false => None,
+    }
+}
+
+// The day the wake runs on, as a tell heading writes it, or None when the clock names none
+fn today(now: Timestamp) -> Option<Date> {
+    let at = crate::board::briefing::date_time(now);
+    day(at.split_once(' ').map(|(day, _)| day)?)
+}
+
+// The standing file's lines, or None when it is not there
+fn standing_lines(file: &Path) -> Option<Vec<String>> {
+    Some(std::fs::read_to_string(file).ok()?.lines().map(str::to_owned).collect())
+}
+
+// The standing file's lines, each `## ` tell heading kept with the lines under it
+fn blocks(lines: &[String]) -> Vec<(Option<String>, Vec<String>)> {
+    let mut out: Vec<(Option<String>, Vec<String>)> = Vec::new();
+    for line in lines {
+        match line.starts_with("## ") {
+            true => out.push((Some(line.clone()), Vec::new())),
+            false => {
+                if out.is_empty() {
+                    out.push((None, Vec::new()));
+                }
+                out.last_mut().expect("a block was opened").1.push(line.clone());
+            }
+        }
+    }
+    out
+}
+
+/// What a wake makes of a standing line's end
+enum Holding {
+    /// Its end has passed, so the line goes
+    Gone,
+    /// It carries no end, or its end has not passed
+    Stands,
+    /// Its end names a ticket kelpie could not read, so the line stands and the wake says so
+    Unread(String),
+}
+
+impl Runner {
+    /// Each ticket a standing line's end names that the board cannot answer, once each
+    ///
+    /// A line with no end, one whose end is a day, and one whose ticket the
+    /// board shows open each need no read.
+    pub(super) fn pm_stand_reads(&self) -> Vec<TicketId> {
+        let Some(lines) = standing_lines(&self.paths.pm.join(PM_STANDING)) else {
+            return Vec::new();
+        };
+        let mut named: Vec<TicketId> = (lines.iter())
+            .filter_map(|line| match end_of(line) {
+                Some(End::Ticket(ticket)) if !self.board_shows_open(ticket) => Some(ticket),
+                _ => None,
+            })
+            .collect();
+        named.sort_unstable();
+        named.dedup();
+        named
+    }
+
+    /// Rewrites `pm-standing.md` without every line whose end has passed, and
+    /// returns what the wake tells the project manager of them
+    ///
+    /// Each line that goes is recorded in `pm-notes.md`. A tell heading whose
+    /// lines all go goes with them. A line kept because its ticket could not be
+    /// read is named as unsettled.
+    pub(super) fn pm_stand_ends(&mut self) -> Vec<String> {
+        let file = self.paths.pm.join(PM_STANDING);
+        let Some(lines) = standing_lines(&file) else {
+            return Vec::new();
+        };
+        let today = today(self.ports.clock.now());
+        let mut kept: Vec<String> = Vec::new();
+        let mut gone: Vec<String> = Vec::new();
+        let mut told: Vec<String> = Vec::new();
+        for (heading, body) in blocks(&lines) {
+            let mut left: Vec<String> = Vec::new();
+            let mut ended = 0;
+            for line in body {
+                match self.end_holds(&line, today) {
+                    Holding::Gone => {
+                        gone.push(line);
+                        ended += 1;
+                    }
+                    Holding::Stands => left.push(line),
+                    Holding::Unread(why) => {
+                        self.notes.push(format!("{why}, so a standing line stands"));
+                        told.push(format!("standing unsettled: {line}: {why}"));
+                        left.push(line);
+                    }
+                }
+            }
+            if !left.is_empty() || (heading.is_some() && ended == 0) {
+                kept.extend(heading);
+                kept.append(&mut left);
+            }
+        }
+        if gone.is_empty() {
+            return told;
+        }
+        let body = match kept.is_empty() {
+            true => String::new(),
+            false => format!("{}\n", kept.join("\n")),
+        };
+        if let Err(e) = replace(&file, &body) {
+            self.notes
+                .push(format!("cannot end a standing line: {}", failed(&file, &e)));
+            return Vec::new();
+        }
+        for line in &gone {
+            let said = plain(&self.shown(line.clone()), WORDS);
+            self.pm_note(&format!("standing ended: {said}"));
+            told.push(format!("standing ended: {line}"));
+        }
+        told
+    }
+
+    // Whether the board says `ticket` is still open: its work item is open, or it is on the ready list
+    fn board_shows_open(&self, ticket: TicketId) -> bool {
+        self.state.item(ticket).is_some() || self.board_ready().contains(&ticket)
+    }
+
+    // Whether `line`'s end has passed, answering its ticket from the wake's reads or a read now
+    fn end_holds(&mut self, line: &str, today: Option<Date>) -> Holding {
+        let Some(end) = end_of(line) else {
+            return Holding::Stands;
+        };
+        match end {
+            End::Day(day) => match today {
+                Some(today) if day < today => Holding::Gone,
+                _ => Holding::Stands,
+            },
+            End::Ticket(ticket) if self.board_shows_open(ticket) => Holding::Stands,
+            End::Ticket(ticket) => match self.ticket_closed(ticket) {
+                Ok(true) => Holding::Gone,
+                Ok(false) => Holding::Stands,
+                Err(why) => Holding::Unread(why),
+            },
+        }
+    }
+
+    // Whether ticket `ticket` has closed, whichever way, from what the wake's reads found or a read now
+    fn ticket_closed(&self, ticket: TicketId) -> Result<bool, String> {
+        let named = ticket.shown();
+        match (self.pm.logs.as_ref()).and_then(|logs| logs.found(ticket)) {
+            Some(read) => match read {
+                Ok(issue) => Ok(!issue.open),
+                Err(e) => Err(format!("kelpie could not read {named} ({e})")),
+            },
+            None => self
+                .ports
+                .tickets
+                .issue(&self.remote, ticket)
+                .map(|issue| !issue.open)
+                .map_err(|e| format!("kelpie could not read {named} ({e})")),
+        }
+    }
+}
 
 /// Moves the older part of `notes` to the end of `archive`, and says how many
 /// bytes it moved
@@ -311,6 +514,51 @@ impl Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test::ticket;
+
+    fn day(text: &str) -> Date {
+        Date::strptime("%Y-%m-%d", text).unwrap()
+    }
+
+    #[test]
+    fn only_the_last_marker_at_a_line_end_is_the_end() {
+        assert_eq!(end_of("Never merge a head with CI red."), None);
+        assert_eq!(end_of("Hold #12 (until #9)"), Some(End::Ticket(ticket(9))));
+        assert_eq!(
+            end_of("Hold k3 (until k9)"),
+            Some(End::Ticket(TicketId::Local(
+                core::num::NonZeroU64::new(9).unwrap(),
+            ))),
+            "a local ticket is written as `k9`"
+        );
+        assert_eq!(end_of("Hold #12 (until 2026-10-05)"), Some(End::Day(day("2026-10-05"))));
+        assert_eq!(
+            end_of("Hold #12 (until 2026-10-05)  "),
+            Some(End::Day(day("2026-10-05"))),
+            "the line's trailing spaces are trimmed"
+        );
+        assert_eq!(
+            end_of("Hold #12 (until #5) (until #9)"),
+            Some(End::Ticket(ticket(9))),
+            "the last marker is the end"
+        );
+        assert_eq!(
+            end_of("Hold #12 (until #9) holds the release"),
+            None,
+            "a marker mid-line is plain text"
+        );
+        assert_eq!(
+            end_of("Hold #12 (until #9) (until the release)"),
+            None,
+            "the last group is no end, so the one before it is plain text"
+        );
+        assert_eq!(end_of("Hold #12 (until 2026-02-30)"), None, "no such day");
+        assert_eq!(end_of("Hold #12 (until 2026-10-5)"), None, "not the written shape");
+        assert_eq!(end_of("Hold #12 (until #0)"), None, "no ticket is zero");
+        assert_eq!(end_of("Hold #12 (until 2026-10-05"), None, "no closing bracket");
+        assert_eq!(end_of("Hold #12 (until the release)"), None);
+        assert_eq!(end_of("Hold #12 (Until #9)"), None, "the marker is written as `until`");
+    }
 
     /// A log of `n` entries, each a `## wake <n>` heading over 20 lines of 64
     /// bytes, so entry 1 is 1,290 bytes and entry 10 up are 1,291

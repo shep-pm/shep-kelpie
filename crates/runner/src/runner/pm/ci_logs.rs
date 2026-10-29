@@ -1,19 +1,22 @@
-//! The end of a red run's log for each work item parked on a `StillRed`
-//! ruling, written into the project manager's folder before it wakes, since
-//! it runs no `gh`
+//! What a wake reads before it launches: the end of a red run's log for each
+//! work item parked on a `StillRed` ruling, written into the project manager's
+//! folder before it wakes, since it runs no `gh`, and the source's answer for
+//! each standing line whose ticket end the board cannot answer
 //!
-//! They are read as a worker's red prompt reads them, with `failed_run_logs`.
+//! The logs are read as a worker's red prompt reads them, with `failed_run_logs`.
 //! The folder is emptied first, so a log never outlives its ruling. Each
 //! workflow red on `main` has the end of its latest red run's failed log
-//! beside them, as `ci/main-<run>.log`. The forge is asked with the runner's
-//! lock let go: [`wake_off_lock`] names the reads, runs them as a [`LogsJob`],
-//! and tries again over what they found. The files are written under the lock.
+//! beside them, as `ci/main-<run>.log`. The forge and the ticket source are
+//! asked with the runner's lock let go: [`wake_off_lock`] names the reads, runs
+//! them as a [`LogsJob`], and tries again over what they found. The files are
+//! written under the lock, and the standing notes are rewritten from the
+//! ticket answers.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use crate::ports::{FailedLogs, Forge, ForgeError};
+use crate::ports::{FailedLogs, Forge, ForgeError, Issue, Tickets};
 use crate::runner::Runner;
 use crate::runner::trigger::lock;
 use crate::settings::ForgeSlug;
@@ -137,14 +140,17 @@ impl Runner {
     pub(super) fn pm_logs_job(&self) -> Option<LogsJob> {
         let heads: Vec<String> = self.still_red().into_iter().map(|(_, head)| head).collect();
         let runs: Vec<u64> = self.state.red.iter().map(|r| r.run).collect();
-        if heads.is_empty() && runs.is_empty() {
+        let ends = self.pm_stand_reads();
+        if heads.is_empty() && runs.is_empty() && ends.is_empty() {
             return None;
         }
         Some(LogsJob {
             forge: Arc::clone(&self.ports.forge),
+            tickets: Arc::clone(&self.ports.tickets),
             remote: self.remote.clone(),
             heads,
             runs,
+            ends,
         })
     }
 }
@@ -176,12 +182,15 @@ pub(super) enum Woke {
     Reads(Box<LogsJob>),
 }
 
-/// The CI logs a wake writes, to be read without the runner's lock
+/// What a wake reads before it launches, without the runner's lock
 pub(super) struct LogsJob {
     forge: Arc<dyn Forge>,
+    tickets: Arc<dyn Tickets>,
     remote: ForgeSlug,
     heads: Vec<String>,
     runs: Vec<u64>,
+    // Each standing line's ticket end the board cannot answer
+    ends: Vec<TicketId>,
 }
 
 /// What a [`LogsJob`] read, errors as the inline call returns them
@@ -191,16 +200,27 @@ pub(super) struct Logs {
     failed: BTreeMap<String, Result<FailedLogs, ForgeError>>,
     // By run, the end of its failed log
     tails: BTreeMap<u64, Result<String, ForgeError>>,
+    // By ticket, whether the source still holds it open
+    issues: BTreeMap<TicketId, Result<Issue, ForgeError>>,
+}
+
+impl Logs {
+    // What the read found of ticket `ticket`, or None when it read none
+    pub(super) fn found(&self, ticket: TicketId) -> Option<&Result<Issue, ForgeError>> {
+        self.issues.get(&ticket)
+    }
 }
 
 impl LogsJob {
-    // In the order the wake would have asked: each parked item's, then each red workflow's
+    // In the order the wake would have asked: each parked item's, then each red workflow's, then each standing end
     fn run(self) -> Logs {
         let Self {
             forge,
+            tickets,
             remote,
             heads,
             runs,
+            ends,
         } = self;
         // A `StillRed` ruling is raised only on a pull request's red run
         // (`ci_failed`), never on a merge queue removal, so not `merge_group`.
@@ -213,7 +233,17 @@ impl LogsJob {
         let tails = (runs.into_iter())
             .map(|run| (run, forge.run_log_tail(&remote, run)))
             .collect();
-        Logs { failed, tails }
+        let issues = (ends.into_iter())
+            .map(|ticket| {
+                let read = tickets.issue(&remote, ticket);
+                (ticket, read)
+            })
+            .collect();
+        Logs {
+            failed,
+            tails,
+            issues,
+        }
     }
 }
 

@@ -53,6 +53,99 @@ fn a_wake_over_the_limit_rolls_the_file_before_its_call() {
 }
 
 #[test]
+fn a_standing_line_ended_by_a_closed_ticket_is_removed_at_the_next_wake() {
+    let (rig, runner) = with_pm("koji");
+    rig.forge.list_ready(9, false);
+    rig.forge.list_ready(12, false);
+    std::fs::create_dir_all(rig.paths().pm).unwrap();
+    std::fs::write(
+        rig.paths().pm.join(PM_STANDING),
+        "Never merge a head with CI red (until #9)\nHold the release notes (until #12)\n",
+    )
+    .unwrap();
+    // #9 closed, so the board no longer shows it. #12 stays on the ready list,
+    // held off dispatch by a blocker, and a read of it would fail, so a line
+    // named unsettled would say it had been read.
+    rig.forge.close_issue(9);
+    rig.forge.block(12, 900);
+    rig.forge.remove_issue(12);
+
+    rig.ask(&runner, "tell", Some("first"));
+    rig.claude.script([Scripted::Say("{\"pick\": null}")]);
+    let (_, acted, dropped) = answered(step(&runner).unwrap());
+    assert_eq!(dropped, Vec::<String>::new());
+    assert!(!acted.iter().any(|a| a.contains("standing")), "{acted:?}");
+
+    let standing = read(&rig, PM_STANDING);
+    assert!(
+        !standing.contains("Never merge a head with CI red"),
+        "its ticket closed, so the line is out of the file: {standing}"
+    );
+    assert!(
+        standing.contains("Hold the release notes (until #12)"),
+        "the board shows #12 open, so its line stands unread: {standing}"
+    );
+
+    let notes = read(&rig, "pm-notes.md");
+    assert_eq!(notes.matches("standing ended:").count(), 1, "{notes}");
+    assert!(
+        notes.contains("standing ended: Never merge a head with CI red (until #9)"),
+        "{notes}"
+    );
+
+    let [wake] = pm_seen(&rig).try_into().unwrap();
+    let prompt = &wake.call.prompt;
+    assert!(
+        prompt.contains("standing ended: Never merge a head with CI red (until #9)"),
+        "{prompt}"
+    );
+    assert!(!prompt.contains("standing unsettled"), "{prompt}");
+}
+
+#[test]
+fn a_standing_line_ended_by_a_date_goes_at_the_first_wake_after_that_day() {
+    let (rig, runner) = with_pm("koji");
+    std::fs::create_dir_all(rig.paths().pm).unwrap();
+    std::fs::write(
+        rig.paths().pm.join(PM_STANDING),
+        "Hold the release notes (until 2026-09-21)\nNever merge a head with CI red.\n",
+    )
+    .unwrap();
+    rig.ask(&runner, "tell", Some("first"));
+    rig.claude.script([
+        Scripted::Say("{\"pick\": null}"),
+        Scripted::Say("{\"pick\": null}"),
+    ]);
+    answered(step(&runner).unwrap());
+
+    let standing = read(&rig, PM_STANDING);
+    assert!(
+        standing.contains("Hold the release notes (until 2026-09-21)"),
+        "the line holds through the day it names: {standing}"
+    );
+
+    rig.clock.advance(24 * 60 * 60);
+    rig.ask(&runner, "tell", Some("second"));
+    answered(step(&runner).unwrap());
+
+    let standing = read(&rig, PM_STANDING);
+    assert!(
+        !standing.contains("Hold the release notes"),
+        "the first wake after the day it names ends it: {standing}"
+    );
+    assert!(
+        standing.contains("Never merge a head with CI red."),
+        "a line with no end stands: {standing}"
+    );
+    let notes = read(&rig, "pm-notes.md");
+    assert!(
+        notes.contains("standing ended: Hold the release notes (until 2026-09-21)"),
+        "{notes}"
+    );
+    assert_eq!(notes.matches("standing ended:").count(), 1, "{notes}");
+}
+
+#[test]
 fn a_new_session_is_given_the_standing_notes_inline_and_told_where_the_archive_is() {
     let (rig, runner) = with_pm("koji");
     rig.forge.list_ready(9, false);

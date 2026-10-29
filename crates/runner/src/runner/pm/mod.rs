@@ -707,7 +707,9 @@ impl Runner {
         let wakes = std::mem::take(&mut self.pm.due);
         self.pm.holding_since = None;
         let told = self.state.pm_told.clone();
-        let lost = std::mem::take(&mut self.pm.lost);
+        let mut lost = std::mem::take(&mut self.pm.lost);
+        // Each standing line whose end has passed goes before the wake reads the file
+        lost.extend(self.pm_stand_ends());
         let notes = self.pm_notes();
         let full = fresh || self.pm.full_prompt;
         // The board the wake carries in its prompt, and writes to `board.md`
