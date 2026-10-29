@@ -52,12 +52,14 @@ pub struct Choice<'a> {
 
 /// The candidates that fit `item`, in the order the board tries them
 ///
-/// Those within the slack of the soonest finish come first, cheapest first,
-/// a local agent whose history names no cost counting as free. The rest
-/// follow, soonest first. The last tie is the agent's name.
+/// Those within the slack of the soonest finish come first. An agent with a
+/// cost comes first, cheapest first, a local agent whose history names no
+/// cost counting as free. Agents with none follow, lowest tier first as a
+/// stand-in for price. Ties go soonest first, then by name. The rest follow,
+/// soonest first.
 pub fn pick<'a>(item: &Item<'_>, candidates: &[Candidate<'a>]) -> Vec<Choice<'a>> {
-    // Each fit beside the cost it is ranked on.
-    let mut fits: Vec<(Choice<'a>, Option<f64>)> = candidates
+    // Each fit beside the cost and tier it is ranked on.
+    let mut fits: Vec<(Choice<'a>, Option<f64>, Tier)> = candidates
         .iter()
         .filter(|c| item.pin.is_none_or(|pin| pin == c.agent))
         .filter(|c| !item.leave_out.contains(c.agent))
@@ -70,18 +72,22 @@ pub fn pick<'a>(item: &Item<'_>, candidates: &[Candidate<'a>]) -> Vec<Choice<'a>
                 wait,
                 cost_usd: c.typical.cost_usd,
             };
-            Some((choice, c.typical.cost_usd.or(c.local.then_some(0.0))))
+            Some((
+                choice,
+                c.typical.cost_usd.or(c.local.then_some(0.0)),
+                c.fit.tier(),
+            ))
         })
         .collect();
-    let Some(soonest) = fits.iter().map(|(c, _)| c.finish).min() else {
+    let Some(soonest) = fits.iter().map(|(c, ..)| c.finish).min() else {
         return Vec::new();
     };
-    fits.sort_by_key(|(c, _)| (c.finish, c.agent));
+    fits.sort_by_key(|(c, ..)| (c.finish, c.agent));
     let (mut eligible, rest): (Vec<_>, Vec<_>) =
-        (fits.into_iter()).partition(|(c, _)| within_slack(c.finish, soonest, item.slack));
-    eligible.sort_by(|(_, a), (_, b)| cheaper(*a, *b));
+        (fits.into_iter()).partition(|(c, ..)| within_slack(c.finish, soonest, item.slack));
+    eligible.sort_by(|(_, a, a_tier), (_, b, b_tier)| cheaper(*a, *b, *a_tier, *b_tier));
     eligible.extend(rest);
-    eligible.into_iter().map(|(choice, _)| choice).collect()
+    eligible.into_iter().map(|(choice, ..)| choice).collect()
 }
 
 /// Whether `finish` is within `slack` minutes of `soonest`, both seconds
@@ -100,12 +106,13 @@ fn takes(fit: &Fit, kind: Option<&str>) -> bool {
     }
 }
 
-fn cheaper(a: Option<f64>, b: Option<f64>) -> Ordering {
+// A cost beats none; with none on both sides the lower tier stands in for the lower price
+fn cheaper(a: Option<f64>, b: Option<f64>, a_tier: Tier, b_tier: Tier) -> Ordering {
     match (a, b) {
         (Some(a), Some(b)) => a.total_cmp(&b),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
+        (None, None) => a_tier.cmp(&b_tier),
     }
 }
 
@@ -328,6 +335,46 @@ mod tests {
         assert_eq!(
             order(&pick(&Item::default(), &candidates)),
             ["sooner", "later", "unknown"]
+        );
+    }
+
+    #[test]
+    fn no_history_hosted_agents_go_lowest_tier_first_whatever_their_names() {
+        let (opus, sonnet, haiku) = (name("a-opus"), name("b-sonnet"), name("c-haiku"));
+        let (heavy, standard, light) = (
+            fit(Tier::Heavy, None),
+            fit(Tier::Standard, None),
+            fit(Tier::Light, None),
+        );
+        let candidates = [
+            candidate(&opus, &heavy, Some(0), 600, None),
+            candidate(&haiku, &light, Some(0), 600, None),
+            candidate(&sonnet, &standard, Some(0), 600, None),
+        ];
+        let choices = pick(&Item::default(), &candidates);
+        assert_eq!(order(&choices), ["c-haiku", "b-sonnet", "a-opus"]);
+        assert!(
+            choices.iter().all(|c| c.cost_usd.is_none()),
+            "the tier ranks, it reports no cost"
+        );
+    }
+
+    #[test]
+    fn a_priced_agent_goes_before_every_agent_with_no_cost_and_equal_tiers_go_by_name() {
+        let (zed, amy, priced, local) = (name("zed"), name("amy"), name("priced"), name("local"));
+        let (light, heavy) = (fit(Tier::Light, None), fit(Tier::Heavy, None));
+        let candidates = [
+            candidate(&zed, &light, Some(0), 600, None),
+            candidate(&amy, &light, Some(0), 600, None),
+            candidate(&priced, &heavy, Some(0), 600, Some(9.0)),
+            Candidate {
+                local: true,
+                ..candidate(&local, &heavy, Some(0), 600, None)
+            },
+        ];
+        assert_eq!(
+            order(&pick(&Item::default(), &candidates)),
+            ["local", "priced", "amy", "zed"]
         );
     }
 }
