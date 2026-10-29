@@ -1,4 +1,4 @@
-//! The two example files document every setting kelpie accepts
+//! The two example files document kelpie's settings, except named legacy keys
 //!
 //! `settings.example.toml` holds the keys of a project's `[app.dogs.kelpie]`
 //! table, and `kelpie-settings.example.toml` those of the `[kelpie]` section of
@@ -185,7 +185,14 @@ fn entries(text: &str) -> Vec<Entry> {
 // What is wrong between a file and the schema, one line each, naming the key
 // and the file. `section` is the table the schema's keys sit in. The table of
 // the Flockfile entry that holds the section is not part of the schema.
-fn problems(file: &str, text: &str, root: &Value, schema: &Value, section: &[&str]) -> Vec<String> {
+fn problems(
+    file: &str,
+    text: &str,
+    root: &Value,
+    schema: &Value,
+    section: &[&str],
+    legacy_keys: &[&str],
+) -> Vec<String> {
     let section: Vec<String> = section.iter().map(|s| (*s).to_owned()).collect();
     let mut problems = Vec::new();
     let mut documented: BTreeMap<String, bool> = BTreeMap::new();
@@ -217,6 +224,9 @@ fn problems(file: &str, text: &str, root: &Value, schema: &Value, section: &[&st
     }
     let mut accepted = BTreeSet::new();
     schema_keys(root, schema, "", &mut accepted);
+    for key in legacy_keys {
+        assert!(accepted.remove(*key), "{key} is not a schema key");
+    }
     for key in accepted.iter().filter(|k| !documented.contains_key(*k)) {
         problems.push(format!("{file} lacks `{key}`"));
     }
@@ -243,6 +253,7 @@ fn every_project_setting_is_documented_in_the_settings_example() {
         &root,
         &root[SHEEP_SCHEMA_KEY],
         &["app", "dogs", "kelpie"],
+        &["agents.reviewers"],
     ));
 }
 
@@ -255,6 +266,7 @@ fn every_kelpie_setting_is_documented_in_the_kelpie_settings_example() {
         &root,
         &root,
         &["kelpie"],
+        &[],
     ));
 }
 
@@ -298,7 +310,7 @@ fn small_schema() -> Value {
 
 fn small_problems(text: &str) -> Vec<String> {
     let schema = small_schema();
-    problems("small.toml", text, &schema, &schema, &["app"])
+    problems("small.toml", text, &schema, &schema, &["app"], &[])
 }
 
 const SMALL_EXAMPLE: &str = r#"[app]
