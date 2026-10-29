@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use super::View;
-use crate::agent_board::{self, Candidate, History, Item};
-use crate::agents::{Agent, Tier};
+use crate::agent_board::{self, Candidate, DEFAULT_SECS, History, Item, Typical};
+use crate::agents::{Agent, Role, Tier};
 use crate::dog::availability::{self, Availability};
 use crate::dog::door::{Place, say};
 use crate::dog::lock_desk;
@@ -22,7 +22,7 @@ impl View {
     /// A cost or a wait the board cannot say is null.
     pub fn status(&self, shown: &Availability, now: Timestamp) -> Value {
         let history = self.history();
-        let agents = self.implementers.iter().map(|(name, agent)| {
+        let agents = self.implementers().map(|(name, agent)| {
             let tier = agent.fit.tier();
             let typical = history.item(name.as_str(), tier, None);
             let turn = history.turn_secs(name.as_str(), tier, None);
@@ -36,8 +36,11 @@ impl View {
         Value::Object(agents.collect())
     }
 
+    // The ledger's items, each with its agent's tier. A finished line names
+    // the implementer that built the item, so a reviewer's name reaches none
+    // and its tier counts toward no median.
     fn history(&self) -> History<'_> {
-        let tiers: BTreeMap<&str, Tier> = (self.implementers.iter())
+        let tiers: BTreeMap<&str, Tier> = (self.implementers())
             .map(|(name, agent)| (name.as_str(), agent.fit.tier()))
             .collect();
         let tier_of = |name: &str| tiers.get(name).copied();
@@ -45,20 +48,19 @@ impl View {
     }
 }
 
-// The implementers `ask` names, in the order the board tries them for its item at `now`.
+// The agents `ask` names, in the order the board tries them for its item at `now`.
 fn answer(view: &View, shown: &Availability, ask: &PickAsk, now: Timestamp) -> Vec<Pick> {
     let history = view.history();
     let kind = ask.kind.as_deref();
-    let candidates: Vec<_> = (view.implementers.iter())
+    let candidates: Vec<_> = (view.ranked.iter())
         .filter(|(name, _)| ask.agents.contains(name))
         .map(|(name, agent)| {
-            let tier = agent.fit.tier();
-            let turn = history.turn_secs(name.as_str(), tier, kind);
+            let (typical, turn) = estimate(&history, name.as_str(), agent, kind);
             Candidate {
                 agent: name,
                 fit: &agent.fit,
                 wait: wait(agent, shown, turn, now),
-                typical: history.item(name.as_str(), tier, kind),
+                typical,
                 local: !(agent.runs.session()).is_some_and(|(_, limit)| limit.is_account()),
             }
         })
@@ -78,6 +80,25 @@ fn answer(view: &View, shown: &Availability, ask: &PickAsk, now: Timestamp) -> V
             cost_usd: choice.cost_usd,
         })
         .collect()
+}
+
+// What `agent` typically takes for an item of `kind`, and one of its turns:
+// the ledger's medians for an implementer, and the default for a reviewer,
+// whose items no ledger line names.
+fn estimate(
+    history: &History<'_>,
+    name: &str,
+    agent: &Agent,
+    kind: Option<&str>,
+) -> (Typical, u64) {
+    if agent.role != Role::Implementer {
+        return (Typical::default(), DEFAULT_SECS);
+    }
+    let tier = agent.fit.tier();
+    (
+        history.item(name, tier, kind),
+        history.turn_secs(name, tier, kind),
+    )
 }
 
 // Seconds before `agent` can start, from its model's load or its plan's

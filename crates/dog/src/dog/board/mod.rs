@@ -2,10 +2,11 @@
 //!
 //! Every [`LOAD_TICK`] the dog looks at each project's usage ledger in
 //! kelpie's home and rereads one whose length or last write changed. A
-//! `pick` ask ranks the implementers it names with `agent_board::pick`, each
-//! one's wait read from the [`availability`](super::availability). The dog
-//! knows no project's day start or kickoff hours, so a plan waits only on its
-//! 5-hour window, and the runner's pacer still holds at dispatch.
+//! `pick` ask ranks the implementers and reviewers it names with
+//! `agent_board::pick`, each one's wait read from the
+//! [`availability`](super::availability). The dog knows no project's day start
+//! or kickoff hours, so a plan waits only on its 5-hour window, and the
+//! runner's pacer still holds at dispatch.
 
 mod pick;
 
@@ -26,10 +27,10 @@ use crate::usage::{self, FinishedLine, Line};
 
 pub(super) use pick::visit;
 
-/// The implementers the board ranks, and the finished items of every project
+/// The agents the board ranks, implementers and reviewers, and the finished items of every project
 #[derive(Debug)]
 pub struct Board {
-    implementers: Arc<BTreeMap<AgentName, Agent>>,
+    ranked: Arc<BTreeMap<AgentName, Agent>>,
     ledgers: BTreeMap<ProjectName, Ledger>,
 }
 
@@ -45,19 +46,26 @@ type Stamp = (u64, Option<SystemTime>);
 /// What a pick or `status` reads of the board, copied out of its lock
 #[derive(Debug, Clone, Default)]
 pub struct View {
-    implementers: Arc<BTreeMap<AgentName, Agent>>,
+    ranked: Arc<BTreeMap<AgentName, Agent>>,
     ledgers: Vec<Arc<[FinishedLine]>>,
 }
 
+impl View {
+    // The agents the board ranks that are implementers
+    fn implementers(&self) -> impl Iterator<Item = (&AgentName, &Agent)> {
+        (self.ranked.iter()).filter(|(_, agent)| agent.role == Role::Implementer)
+    }
+}
+
 impl Board {
-    /// The implementers among `agents`, with no ledger read yet
+    /// The implementers and reviewers among `agents`, with no ledger read yet
     pub(super) fn new(agents: &Agents) -> Self {
-        let implementers = (agents.iter())
-            .filter(|(_, agent)| agent.role == Role::Implementer)
+        let ranked = (agents.iter())
+            .filter(|(_, agent)| ranks(agent.role))
             .map(|(name, agent)| (name.clone(), agent.clone()))
             .collect();
         Self {
-            implementers: Arc::new(implementers),
+            ranked: Arc::new(ranked),
             ledgers: BTreeMap::new(),
         }
     }
@@ -65,7 +73,7 @@ impl Board {
     /// What it holds now, for a pick to read without the lock
     pub(super) fn view(&self) -> View {
         View {
-            implementers: Arc::clone(&self.implementers),
+            ranked: Arc::clone(&self.ranked),
             ledgers: self
                 .ledgers
                 .values()
@@ -73,6 +81,12 @@ impl Board {
                 .collect(),
         }
     }
+}
+
+// Whether the board ranks an agent of `role`: an implementer builds an item
+// and a reviewer reads one.
+fn ranks(role: Role) -> bool {
+    matches!(role, Role::Implementer | Role::Reviewer)
 }
 
 /// Rereads each project's ledger under `kelpie_home` that changed, and says how many it read
@@ -138,7 +152,7 @@ fn ledgers(kelpie_home: &Path) -> Option<BTreeMap<ProjectName, Option<(PathBuf, 
     Some(found)
 }
 
-/// The board of `agents`' implementers, refreshed from the ledgers under `kelpie_home` from now on
+/// The board of `agents`' implementers and reviewers, refreshed from the ledgers under `kelpie_home` from now on
 pub(super) fn begin(agents: &Agents, kelpie_home: PathBuf) -> Arc<Mutex<Board>> {
     let board = Arc::new(Mutex::new(Board::new(agents)));
     tokio::spawn(keep(Arc::clone(&board), Arc::new(kelpie_home)));

@@ -4,16 +4,16 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::agents::Agents;
+use crate::agents::{Agents, Tier};
 use crate::dog::availability::{Readers, Sources, read};
 use crate::dog::board::refresh;
 use crate::dog::board::tests::finished;
 use crate::forwarder::Upstream;
 use crate::lease::door::{Pick, PickAsk};
 use crate::lease::door_pick::pick;
-use crate::ports::{LocalLeases, ModelLoad, PaddockHolder};
-use crate::settings::{AgentName, Gateway, GatewayName, Gateways};
-use crate::test::write_in;
+use crate::ports::{LocalLeases, Meter, ModelLoad, PaddockHolder, Utilization};
+use crate::settings::{Account, AgentName, Gateway, GatewayName, Gateways};
+use crate::test::{FakeMeter, utilization, write_in};
 
 const FREE: ModelLoad = ModelLoad {
     slots: 1,
@@ -49,6 +49,22 @@ fn on_paddock(model: &str, fit: &str) -> String {
     )
 }
 
+// A reviewer on paddock's `model`, with the lines `fit` adds to its file.
+fn review_on_paddock(model: &str, fit: &str) -> String {
+    format!(
+        "---\nrole: reviewer\nharness: pi\nmodel: {model}\neffort: low\n\
+         gateway: paddock\ncontext: 65536\n{fit}---\nRead the diff for defects.\n"
+    )
+}
+
+// A reviewer on a Claude Code session, which spends the Claude plan.
+fn review_on_plan(fit: &str) -> String {
+    format!(
+        "---\nrole: reviewer\nharness: claude-code\nmodel: claude-sonnet-5-5\n\
+         effort: high\n{fit}---\nRead the diff for defects.\n"
+    )
+}
+
 struct Dog {
     // Each folder lives as long as the test.
     _folders: [tempfile::TempDir; 2],
@@ -60,6 +76,16 @@ struct Dog {
 // A dog that knows kelpie's own agents and `files`, has read each paddock
 // model at its `loads`, and reads ledgers under its `home`.
 async fn dog(files: &[(&str, String)], loads: &[(&'static str, ModelLoad)]) -> Dog {
+    dog_at(files, loads, &[]).await
+}
+
+// `dog`, with each account named in `plans` read once at that utilization
+// before its first ask.
+async fn dog_at(
+    files: &[(&str, String)],
+    loads: &[(&'static str, ModelLoad)],
+    plans: &[(Account, Utilization)],
+) -> Dog {
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().join("agents");
     for (name, text) in files {
@@ -71,9 +97,15 @@ async fn dog(files: &[(&str, String)], loads: &[(&'static str, ModelLoad)]) -> D
             .unwrap();
     let sources = Sources::of(&agents, &Gateways::reading(table, |_| Some("key".into())));
     let shown = Mutex::new(Availability::new(&sources));
+    let mut meters: BTreeMap<Account, Arc<dyn Meter>> = BTreeMap::new();
+    for (account, usage) in plans {
+        let meter = FakeMeter::idle();
+        meter.set(*usage);
+        meters.insert(*account, Arc::new(meter));
+    }
     let readers = Readers {
         leases: Arc::new(Paddock(loads.iter().copied().collect())),
-        meters: BTreeMap::new(),
+        meters,
         clock: Arc::new(FakeClock::at(EPOCH)),
     };
     read(&shown, &sources, &readers).await;
@@ -236,4 +268,73 @@ async fn a_new_finished_line_changes_the_next_pick_after_a_refresh() {
     assert_eq!(unread, before, "the ledger is read on the tick");
     assert_eq!(agents_of(&after), ["baker", "able"]);
     assert_eq!(after[0].cost_usd, Some(0.5));
+}
+
+#[tokio::test]
+async fn an_ask_naming_reviewers_ranks_a_local_one_before_a_hosted_one() {
+    let files = [
+        ("hosted.md", review_on_plan("")),
+        ("local.md", review_on_paddock("rev-coder", "")),
+    ];
+    let dog = dog_at(
+        &files,
+        &[("rev-coder", FREE)],
+        &[(Account::Claude, utilization(10, 40))],
+    )
+    .await;
+
+    let picks = picked(&dog.socket, item(None, &["hosted", "local"])).await;
+
+    assert_eq!(agents_of(&picks), ["local", "hosted"]);
+    assert_eq!(
+        picks
+            .iter()
+            .map(|p| (p.finish, p.cost_usd))
+            .collect::<Vec<_>>(),
+        [(3600, None), (3600, None)],
+        "each takes the hour an item with no history takes, and the tier ranks without reporting a cost"
+    );
+}
+
+#[tokio::test]
+async fn a_reviewer_on_a_held_plan_finishes_after_its_hold() {
+    let files = [("held.md", review_on_plan(""))];
+    let dog = dog_at(&files, &[], &[(Account::Claude, utilization(10, 60))]).await;
+
+    let picks = picked(&dog.socket, item(None, &["held"])).await;
+
+    assert_eq!(
+        picks,
+        [Pick {
+            agent: name("held"),
+            finish: 6 * 3600,
+            wait: 5 * 3600,
+            cost_usd: None,
+        }],
+        "the hold ends when the plan's window resets"
+    );
+}
+
+#[tokio::test]
+async fn a_reviewer_below_the_asks_tier_is_not_ranked() {
+    let files = [
+        (
+            "light.md",
+            review_on_paddock("light-coder", "tier: light\n"),
+        ),
+        (
+            "heavy.md",
+            review_on_paddock("heavy-coder", "tier: heavy\n"),
+        ),
+    ];
+    let loads = [("light-coder", FREE), ("heavy-coder", FREE)];
+    let dog = dog(&files, &loads).await;
+    let ask = PickAsk {
+        tier: Some(Tier::Standard),
+        ..item(None, &["light", "heavy"])
+    };
+
+    let picks = picked(&dog.socket, ask).await;
+
+    assert_eq!(agents_of(&picks), ["heavy"]);
 }
