@@ -3,9 +3,9 @@
 //! Every [`LOAD_TICK`] the dog reads the load of each model its agents call
 //! behind a paddock gateway. In the same pass it reads the plan meter of
 //! each account an agent's `limit` names, at most every [`RECHECK_SECS`].
-//! A failed load read is unknown, never free. A failed meter read keeps the
-//! last reading, with the time it was read. `status` shows it, and the
-//! agent board's pick waits on it.
+//! A failed load read is unknown, never free, and logged when its reason
+//! changes. A failed meter read keeps the last reading, with the time it was
+//! read. `status` shows it, and the agent board's pick waits on it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -30,6 +30,9 @@ pub const LOAD_TICK: Duration = Duration::from_secs(30);
 // The runner's Claude login, as the adapters' `LOGIN_VAR` names it.
 const LOGIN_VAR: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 
+const NO_LOAD: &str = "the gateway gave no load for it";
+const READ_FAILED: &str = "the read failed";
+
 /// What the dog reads availability through, which the binary builds from the adapters
 pub struct Ports {
     /// Reads a gateway model's load
@@ -53,6 +56,8 @@ type ModelKey = (GatewayName, String);
 pub struct Availability {
     models: BTreeMap<ModelKey, Seen<ModelLoad>>,
     accounts: BTreeMap<Account, Seen<Utilization>>,
+    // Why each model's last read failed, so a reason is logged once.
+    unread: BTreeMap<ModelKey, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +85,7 @@ impl Availability {
             accounts: (sources.accounts.iter())
                 .map(|account| (*account, Seen::default()))
                 .collect(),
+            unread: BTreeMap::new(),
         }
     }
 
@@ -121,10 +127,25 @@ impl Availability {
         self.accounts.get(&account)?.last.map(|(usage, _)| usage)
     }
 
-    fn loaded(&mut self, key: ModelKey, load: Option<ModelLoad>, now: Timestamp) {
-        let seen = self.models.entry(key).or_default();
-        seen.last = load.map(|load| (load, now));
+    // The line to log when the read failed for a reason other than the last one's.
+    fn loaded(
+        &mut self,
+        key: ModelKey,
+        load: Result<ModelLoad, String>,
+        now: Timestamp,
+    ) -> Option<String> {
+        let seen = self.models.entry(key.clone()).or_default();
+        seen.last = load.as_ref().ok().map(|load| (*load, now));
         seen.asked = Some(now);
+        let Err(why) = load else {
+            self.unread.remove(&key);
+            return None;
+        };
+        let line = format!(
+            "the dog cannot read the load of `{}` behind gateway `{}`: {why}",
+            key.1, key.0
+        );
+        (self.unread.insert(key, why.clone()) != Some(why)).then_some(line)
     }
 
     fn metered(&mut self, account: Account, usage: Option<Utilization>, now: Timestamp) {
@@ -154,8 +175,8 @@ fn merged(mut into: Value, from: Value) -> Value {
 
 /// The models and accounts the agent files name, and where each model is asked
 pub(super) struct Sources {
-    // `None` where the gateway's key is not set, so the model stays unknown.
-    models: BTreeMap<ModelKey, Option<Upstream>>,
+    // The reason where the model cannot be asked, such as an unset key.
+    models: BTreeMap<ModelKey, Result<Upstream, String>>,
     accounts: BTreeSet<Account>,
 }
 
@@ -169,7 +190,7 @@ impl Sources {
                 continue;
             }
             let up = gateways.upstream(&ModelHost::Gateway(gateway.clone()));
-            models.insert((gateway.clone(), model.to_owned()), up.ok());
+            models.insert((gateway.clone(), model.to_owned()), up);
         }
         let accounts = (agents.iter())
             .filter_map(|(_, agent)| match agent.runs.session()?.1 {
@@ -228,19 +249,28 @@ async fn keep(shown: Arc<Mutex<Availability>>, sources: Sources, readers: Reader
     ticks.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         ticks.tick().await;
-        read(&shown, &sources, &readers).await;
+        for line in read(&shown, &sources, &readers).await {
+            println!("{line}");
+        }
     }
 }
 
-/// One pass: every model's load, then each account's meter that is due
+/// One pass: every model's load, then each account's meter that is due,
+/// returning a line for each load read that fails for a new reason
 ///
 /// The reads block, so each runs off the dog's loop, and nothing holds `shown` meanwhile.
-pub(super) async fn read(shown: &Mutex<Availability>, sources: &Sources, readers: &Readers) {
+pub(super) async fn read(
+    shown: &Mutex<Availability>,
+    sources: &Sources,
+    readers: &Readers,
+) -> Vec<String> {
     let models = sources.models.clone();
     let leases = Arc::clone(&readers.leases);
     let loads = blocking(move || {
-        let load = |(key, up): (ModelKey, Option<Upstream>)| {
-            let load = up.and_then(|up| leases.paddock_load(&up, &key.1));
+        let load = |(key, up): (ModelKey, Result<Upstream, String>)| {
+            let load = up.and_then(|up| {
+                (leases.paddock_load(&up, &key.1)).ok_or_else(|| NO_LOAD.to_owned())
+            });
             (key, load)
         };
         models.into_iter().map(load).collect::<Vec<_>>()
@@ -249,14 +279,14 @@ pub(super) async fn read(shown: &Mutex<Availability>, sources: &Sources, readers
         sources
             .models
             .keys()
-            .map(|key| (key.clone(), None))
+            .map(|key| (key.clone(), Err(READ_FAILED.to_owned())))
             .collect()
     };
     let loads = loads.await.unwrap_or_else(unread);
     let now = readers.clock.now();
-    for (key, load) in loads {
-        lock(shown).loaded(key, load, now);
-    }
+    let logged = (loads.into_iter())
+        .filter_map(|(key, load)| lock(shown).loaded(key, load, now))
+        .collect();
     let due = lock(shown).due(readers.clock.now());
     for account in due {
         let usage = match readers.meters.get(&account) {
@@ -268,6 +298,7 @@ pub(super) async fn read(shown: &Mutex<Availability>, sources: &Sources, readers
         };
         lock(shown).metered(account, usage, readers.clock.now());
     }
+    logged
 }
 
 async fn blocking<T: Send + 'static>(read: impl FnOnce() -> T + Send + 'static) -> Option<T> {
