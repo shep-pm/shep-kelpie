@@ -1,6 +1,6 @@
 # CI and the merge
 
-CI, catching the branch up, the merge, work after it. Review passes, bots and rulings are in review.md, and `main`'s own CI in main-ci.md.
+CI, catching the branch up, the merge, work after it. Review passes and the review bots are in review.md, rulings in rulings.md, and `main`'s own CI in main-ci.md.
 
 - Red CI whose failed logs (read as the maintainer's login) name no file the branch changed: kelpie reruns that head's failed jobs once (`gh run rerun --failed`), no fix turn, `reran` on the item, `rerunning` in `status`, `ci-rerun` in the log. Unreadable log, a changed file named, a refused rerun, a rerun head, or a run its `timeout-minutes` ended: fix turn as below, saying the failure repeated after a rerun. #648, `runner/gate/rerun/`
 - A head with no check goes on as `Checks::Skipped` when no `origin/main` workflow runs on a pull request, else parks `no-checks` past `ci.queued_minutes` (a yes passes that head). `runner/gate/queued/none.rs`, ADR 0008. #1194
