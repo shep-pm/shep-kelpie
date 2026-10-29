@@ -22,6 +22,7 @@ Each ADR below is one decision that is hard to reverse. A later ADR can reopen p
 - 0016 [Kelpie takes any shepherd from its pinned shep on](0016-kelpie-takes-any-shepherd-from-its-pinned-shep-on.md): kelpie refuses only a shepherd on an earlier shep than it is built with, and leaves wire compatibility to shep's protocol handshake.
 - 0017 [The runner answers on a socket of its own](0017-the-runner-answers-on-a-socket-of-its-own.md): each runner answers a typed, versioned protocol and pushes its status stream on a local socket under kelpie's home, and the verbs use `shep trigger` for one release when no runner answers.
 - 0018 [The project manager decides, and the dog picks the agent](0018-the-pm-decides-and-the-dog-picks-the-agent.md): the panel, the issue writer and per-project agent lists go, the project manager answers the ruling kinds `rulings.pm_decides` gives it, an issue skill and a code check replace the issue writer with the triager only on issues that fail it, and the dog's agent board picks each implementer and reviewer at dispatch from the agent files by kind, tier, availability and `agents.slack`. Reopens two lines of 0006.
+- 0019 [Each worker has a clone of its own](0019-each-worker-has-a-clone-of-its-own.md): a worker's worktree is a clone with a git dir of its own beside it, borrowing the checkout's objects through alternates on every platform, so the fence grants it nothing in the checkout's `.git` that Windows cannot grant.
 
 ## Decided against
 
@@ -86,6 +87,8 @@ Check this list before proposing an option. Where a later ADR reopened the decis
 - reviewers at once on one green head (0018)
 - project lineups inherited from the operator's defaults, shep-pm/shep#1079 (0018)
 - a project manager that watches every lock and meter itself (0018)
+- `CREATOR OWNER` or `OWNER RIGHTS` on the refs folder for a Windows worker (0019)
+- a Windows-only clone, with linked worktrees elsewhere (0019)
 
 ### Decided against without an ADR
 
