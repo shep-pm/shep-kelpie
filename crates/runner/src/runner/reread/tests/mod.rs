@@ -403,12 +403,9 @@ fn a_change_that_does_not_hold_keeps_the_settings_the_runner_has() {
         .clone()
         .unwrap_or_default();
     assert!(!listed.iter().any(|name| name.as_str() == "coderabbit"));
+    rig.reviewers(crate::test::RIG_REVIEWERS);
     let missing = settings_with(&rig, |s| {
         s.replace(
-            crate::test::RIG_REVIEWERS_AND_CODERABBIT,
-            crate::test::RIG_REVIEWERS,
-        )
-        .replace(
             "build_env = {}\n",
             "instructions_file = \"/nonexistent/w.md\"\n",
         )

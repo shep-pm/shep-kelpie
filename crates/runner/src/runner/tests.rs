@@ -192,15 +192,9 @@ fn coderabbit_listed_for_a_repo_that_is_not_public_stops_the_runner() {
     }
 }
 
-// The project names no `agents.reviewers`, so every reviewer file is a candidate.
-fn with_no_reviewers_list(rig: &Rig) {
-    rig.edit_settings(|s| s.replace(crate::test::RIG_REVIEWERS, ""));
-}
-
 #[test]
 fn a_private_repo_with_no_reviewers_list_opens_with_coderabbit_among_the_candidates() {
     let rig = Rig::new("shep");
-    with_no_reviewers_list(&rig);
     rig.write_agent(
         "coderabbit",
         "---\nrole: reviewer\nharness: bot\nbot: coderabbit\nreviews: 1\nhours: 1\n---\n",
@@ -214,7 +208,6 @@ fn a_private_repo_with_no_reviewers_list_opens_with_coderabbit_among_the_candida
 #[test]
 fn a_local_reviewer_that_is_missing_does_not_stop_a_project_with_no_reviewers_list() {
     let rig = Rig::new("shep");
-    with_no_reviewers_list(&rig);
     let gone = rig.home.path().join("bin/gone");
     rig.write_agent(
         "gone",

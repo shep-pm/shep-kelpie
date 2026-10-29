@@ -147,7 +147,6 @@ per_item_usd = 10
 # a repo GitHub marks private cannot use it. Absent, every reviewer file
 # `agents.allow` holds but the one `contributions.security_reviewer` names
 # is a candidate; empty, no review at all.
-# reviewers = ["iq3-xxs-review", "defect-hunter-lite"]
 # The project manager, from a file whose role is `pm`: kelpie's own `pm` is
 # Opus 5.5 at medium. Code wakes it when a slot is free with two or more
 # ready issues, two open branches conflict, a work item is stuck, or you

@@ -102,21 +102,16 @@ fn absent_reviewers_are_the_projects_agents_reviewers() {
         .bind("defect-hunter", binding)
         .with("opus", REVIEWER);
     let home = tempfile::tempdir().unwrap();
-    let listed = EXAMPLE.replace(
-        "# reviewers = [\"iq3-xxs-review\", \"defect-hunter-lite\"]\n",
-        "reviewers = [\"opus\"]\n",
-    );
-    let settings = parse(&listed).unwrap();
+    let mut settings = parse(EXAMPLE).unwrap();
+    settings.agents.reviewers = Some(vec![crate::settings::AgentName::try_from("opus".to_owned()).unwrap()]);
     let lineup = settings
         .contribution_lineup(&book, &Gateways::default(), home.path())
         .unwrap();
     let names: Vec<&str> = lineup.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(names, ["opus"]);
 
-    let own = parse(&format!(
-        "{listed}\n{TABLE}reviewers = [\"defect-hunter\", \"opus\"]\n"
-    ))
-    .unwrap();
+    let mut own = parse(&with("reviewers = [\"defect-hunter\", \"opus\"]\n")).unwrap();
+    own.agents.reviewers = settings.agents.reviewers.clone();
     let lineup = own
         .contribution_lineup(&book, &Gateways::default(), home.path())
         .unwrap();

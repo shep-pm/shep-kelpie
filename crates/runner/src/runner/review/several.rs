@@ -266,12 +266,7 @@ fn after_mine_the_list_becomes(to: &[&str]) -> Vec<&'static str> {
     let runner = at_review(&rig, "work.txt");
     step(&runner).unwrap(); // round 1, mine: clean by default
     drop(runner);
-    rig.edit_settings(|s| {
-        s.replace(
-            r#"reviewers = ["mine", "claude"]"#,
-            &format!("reviewers = {to:?}"),
-        )
-    });
+    rig.reviewers(to);
     let runner = rig.open().unwrap();
     rig.claude.script([Scripted::Text(CLEAN)]);
     let after = reviewers_until_ci(&rig, &runner);

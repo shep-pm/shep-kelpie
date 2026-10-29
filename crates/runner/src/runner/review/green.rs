@@ -326,11 +326,7 @@ fn a_pull_request_closed_by_hand_while_the_review_waits_is_read_by_no_one() {
 // CodeRabbit alone is listed, and its summon spends a window that is scarce.
 fn bot_pushed() -> (Rig, Mutex<Runner>, String) {
     let rig = Rig::new("shep");
-    rig.coderabbit_on();
-    rig.edit_settings(|s| {
-        let both = crate::test::RIG_REVIEWERS_AND_CODERABBIT;
-        s.replace(both, "reviewers = [\"coderabbit\"]\n")
-    });
+    rig.reviewers(&["coderabbit"]);
     rig.ci_on();
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));

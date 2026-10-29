@@ -153,7 +153,6 @@ mod tests {
                 "# [[app.dogs.kelpie.hooks]]\n# point = \"publish\"\n# command =",
                 "[[app.dogs.kelpie.hooks]]\npoint = \"publish\"\ncommand =",
             )
-            .replace("# reviewers = [\"iq3-xxs-review\", \"defect-hunter-lite\"]", "reviewers = [\"qwen\"]")
             .replace(
                 "# test_command = \"cargo test --test {name}\"",
                 "test_command = \"cargo test --test {name}\"",
@@ -221,8 +220,8 @@ mod tests {
             .replace("# command = \"scripts/", "command = \"scripts/")
             .replace("# results =", "results =");
         assert!(
-            text.contains("reviewers = [\"qwen\"]"),
-            "the example's list moved"
+            text.contains("[app.dogs.kelpie.reviews]\nneed = 2"),
+            "the example's review count moved"
         );
         // Each kind of skill once, every step naming it.
         let kinds = [

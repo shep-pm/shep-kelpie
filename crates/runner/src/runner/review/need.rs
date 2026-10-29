@@ -18,12 +18,7 @@ use crate::test::{Rig, Scripted, Told, ticket};
 // whose `reviews.need` is left out.
 fn three_candidates() -> Rig {
     let rig = two_local();
-    rig.edit_settings(|s| {
-        s.replace(
-            r#"reviewers = ["mine", "other"]"#,
-            r#"reviewers = ["mine", "other", "claude"]"#,
-        )
-    });
+    rig.reviewers(&["mine", "other", "claude"]);
     rig.reviews_need(None);
     rig
 }

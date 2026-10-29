@@ -88,11 +88,8 @@ const WORKFLOW: &str = ".github/workflows/ci.yml";
 /// The `git.checkout` in `settings.example.toml`, which the rig points at its own
 const EXAMPLE_REPO: &str = "~/GitHub/shep";
 
-/// The reviewers `settings.example.toml` lists, commented out
-const EXAMPLE_REVIEWERS: &str = "# reviewers = [\"iq3-xxs-review\", \"defect-hunter-lite\"]\n";
-
 /// The rig's reviewers: its qwen round and then its own Claude session, `claude`
-pub const RIG_REVIEWERS: &str = "reviewers = [\"qwen\", \"claude\"]\n";
+pub const RIG_REVIEWERS: &[&str] = &["qwen", "claude"];
 
 /// What the rig adds to its settings to run no retro
 pub const NO_RETRO: &str = "\n[app.dogs.kelpie.skills]\nretro = { kind = \"none\" }\n";
@@ -107,8 +104,7 @@ model: claude-sonnet-5\neffort: medium\n---\nReview the change against {{BASE}} 
 defects. Output one finding per line as SEVERITY|file:line|what|why, or exactly CLEAN.\n";
 
 /// The rig's reviewers with CodeRabbit read last
-pub const RIG_REVIEWERS_AND_CODERABBIT: &str =
-    "reviewers = [\"qwen\", \"claude\", \"coderabbit\"]\n";
+pub const RIG_REVIEWERS_AND_CODERABBIT: &[&str] = &["qwen", "claude", "coderabbit"];
 
 /// One project's world: kelpie's home, the maintainer's home, and the
 /// project's repo cloned from a bare origin
@@ -163,7 +159,7 @@ pub struct Rig {
     /// until it swaps in a pacer with one
     pub pace: Arc<dyn Pace>,
     /// The agent board, which ranks `sonnet-high` first, then the project's other
-    /// implementers by name, until a test sets it
+    /// agents by name after the rig's reviewers, until a test sets it
     pub agent_board: FakeAgentBoard,
     /// GitHub as kelpie's App sees it: the rig has registered no App until
     /// [`Rig::with_app`]
@@ -197,23 +193,14 @@ impl Rig {
 
     /// A project with the example settings, pointed at a fresh repo, whose
     /// agent board ranks `sonnet-high` first (`FakeAgentBoard::ranks_first`),
-    /// then the ask's other agents by name, until a test sets it
+    /// then the rig's reviewers and the ask's other agents, until a test sets it
     pub fn new(project: &str) -> Self {
         let rig = Self::stand_ins(project, Home::made());
         rig.make_repo();
 
         let example = include_str!("../../../../settings.example.toml");
         assert!(example.contains(EXAMPLE_REPO), "the example's repo moved");
-        // Most tests are about what comes after the review, so the rig's
-        // project runs a short one: a local round and then a Claude session. A
-        // test of another lineup names it with [`Rig::reviewers`].
-        assert!(
-            example.contains(EXAMPLE_REVIEWERS),
-            "the example's reviewers moved"
-        );
-        let settings = example
-            .replace(EXAMPLE_REPO, &rig.repo().display().to_string())
-            .replace(EXAMPLE_REVIEWERS, RIG_REVIEWERS);
+        let settings = example.replace(EXAMPLE_REPO, &rig.repo().display().to_string());
         // A retro is one more call after every batch, so most tests
         // leave it off and a test of the retro turns it on with [`Rig::retro_on`].
         let settings = format!("{settings}{NO_RETRO}");
@@ -224,6 +211,7 @@ impl Rig {
         let paths = rig.paths();
         std::fs::create_dir_all(&paths.folder).unwrap();
         std::fs::write(rig.settings_file(), settings).unwrap();
+        rig.reviewers(RIG_REVIEWERS);
         rig.write_agent("claude", CLAUDE_REVIEWER);
         // Kelpie's own agents bind nothing, so each runs as the file the maintainer binds.
         crate::agents::write_bound_stubs(
