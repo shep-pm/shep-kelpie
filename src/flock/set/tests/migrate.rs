@@ -156,7 +156,8 @@ async fn a_table_whose_map_is_whole_has_the_panels_key_deleted_alone() {
         "decide = \"shadow\"\npm_decides = {{ {} }}",
         whole.join(", ")
     );
-    let scene = Scene::holding(&with_rulings(&lines)).await;
+    let table = TABLE.replace("reviewers = [\"standards\"]\n", "");
+    let scene = Scene::holding(&format!("{table}\n[rulings]\n{lines}\n")).await;
 
     let said = scene.migrate().await.unwrap();
 
@@ -183,6 +184,7 @@ async fn the_panels_expert_keys_and_roles_are_deleted_and_named_and_the_table_lo
         said[1].contains(
             "removed agents.advisor = \"advisor\", agents.researcher = \"researcher\", \
              researcher = { allowed_domains = [\"docs.rs\"] }, \
+             agents.reviewers = [\"standards\"], \
              advisor from repo_setup.roles, researcher from repo_setup.roles"
         ),
         "{said:?}"
@@ -255,7 +257,9 @@ async fn the_issue_writers_role_is_deleted_from_repo_setup_and_the_table_loads()
     let said = scene.migrate().await.unwrap();
 
     assert!(
-        said[1].contains("removed issue-writer from repo_setup.roles"),
+        said[1].contains(
+            "removed agents.reviewers = [\"standards\"], issue-writer from repo_setup.roles"
+        ),
         "{said:?}"
     );
     let roles = &scene.table()["repo_setup"]["roles"];
@@ -274,4 +278,87 @@ async fn the_issue_writers_agent_key_is_deleted_and_named_and_the_table_loads() 
         "{said:?}"
     );
     assert!(scene.table()["agents"].get("issue_writer").is_none());
+}
+
+// `TABLE` with `lines` in its `agents` table in place of its reviewers
+fn with_agents(lines: &str) -> String {
+    TABLE.replace("reviewers = [\"standards\"]", lines)
+}
+
+fn agents_of(table: &Map<String, Value>) -> &Map<String, Value> {
+    table["agents"]
+        .as_object()
+        .expect("the agents table is there")
+}
+
+#[tokio::test]
+async fn a_reviewers_list_joins_a_listed_allow_and_is_deleted() {
+    let table = with_agents("allow = [\"sonnet-high\"]\nreviewers = [\"standards\", \"spec\"]");
+    let mut scene = Scene::holding(&table).await;
+
+    let said = scene.migrate().await.unwrap();
+
+    assert!(
+        said[1].contains(
+            "agents.allow = [\"sonnet-high\", \"standards\", \"spec\"]; \
+             removed agents.reviewers = [\"standards\", \"spec\"]"
+        ),
+        "{said:?}"
+    );
+    let read = scene.table();
+    let agents = agents_of(&read);
+    assert_eq!(agents.get("reviewers"), None, "{agents:?}");
+    assert_eq!(
+        agents["allow"],
+        serde_json::json!(["sonnet-high", "standards", "spec"])
+    );
+
+    assert_eq!(scene.shepherd.writes().len(), 2, "one write per project");
+
+    let said = scene.migrate().await.unwrap();
+    assert_eq!(said, ["nothing to migrate"], "a second run writes nothing");
+    assert_eq!(scene.shepherd.writes(), []);
+}
+
+#[tokio::test]
+async fn with_no_allow_a_reviewers_list_is_deleted_and_no_allow_is_written() {
+    // eevee's `allow` is an empty list, which allows every agent as an absent one does
+    let empty = with_agents("allow = []\nreviewers = [\"standards\"]");
+    let scene = Scene::holding_each(TABLE, &empty).await;
+
+    let said = scene.migrate().await.unwrap();
+
+    assert!(
+        said[0].contains("removed agents.reviewers = [\"standards\"]"),
+        "{said:?}"
+    );
+    assert!(!said[0].contains("wrote agents.allow"), "{said:?}");
+    let (eevee_table, koji_table) = (scene.table_of("eevee"), scene.table());
+    let (eevee, koji) = (agents_of(&eevee_table), agents_of(&koji_table));
+    assert_eq!(koji.get("reviewers"), None, "{koji:?}");
+    assert_eq!(koji.get("allow"), None, "an absent allow stays absent");
+    assert_eq!(eevee.get("reviewers"), None, "{eevee:?}");
+    assert_eq!(
+        eevee["allow"],
+        serde_json::json!([]),
+        "an empty one stays empty"
+    );
+}
+
+#[tokio::test]
+async fn a_reviewer_already_allowed_is_not_written_twice() {
+    let table = with_agents(
+        "allow = [\"standards\", \"opus-high\"]\nreviewers = [\"standards\", \"spec\"]",
+    );
+    let scene = Scene::holding(&table).await;
+
+    scene.migrate().await.unwrap();
+
+    let read = scene.table();
+    let agents = agents_of(&read);
+    assert_eq!(
+        agents["allow"],
+        serde_json::json!(["standards", "opus-high", "spec"]),
+        "each name once, in the order the lists held them"
+    );
 }

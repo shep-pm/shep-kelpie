@@ -6,7 +6,7 @@ use shep_client::shep_core::values::UpDuration;
 use super::*;
 use crate::home::ProjectPaths;
 use crate::ports::Visibility;
-use crate::settings::{AgentName, BaseBranch, ForgeSlug, RulingName};
+use crate::settings::{BaseBranch, ForgeSlug, RulingName};
 use crate::state::STATE_FILE;
 use crate::test::{CALL_PATIENCE, FakeForge, FakeShepherd, ticket};
 
@@ -126,11 +126,8 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     let remote = settings.git.remote.as_ref().map(ForgeSlug::as_str);
     assert_eq!(remote, Some("shep-pm/koji-website"));
     assert!(settings.ci.block, "the checkout has workflows");
-    let reviewers = settings.agents.reviewers.clone().unwrap();
-    assert_eq!(
-        reviewers,
-        [AgentName::try_from("defect-hunter-lite".to_owned()).unwrap()]
-    );
+    assert_eq!(settings.agents.reviewers, None, "add names no reviewers");
+    assert_eq!(settings.agents.allow, None, "nor an allow list");
     assert_eq!(settings.agents.gone_keys(), Vec::<&str>::new());
     for name in ["sonnet-high", "opus-high"] {
         assert_eq!(scene.written(name), stub(name));
@@ -178,29 +175,41 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
 }
 
 #[tokio::test]
-async fn where_the_qwen_review_script_is_installed_add_still_lists_defect_hunter_lite_alone() {
+async fn add_writes_no_reviewers() {
+    let scene = Scene::new().await;
+    scene.add().await.unwrap();
+
+    let (runner, _) = scene.shepherd.sheep("koji").expect("a runner");
+    let agents = runner.dogs.get(DOG).expect("a kelpie table").as_map()["agents"]
+        .as_object()
+        .unwrap();
+    assert_eq!(agents.get("reviewers"), None, "{agents:?}");
+    assert_eq!(agents.get("allow"), None, "{agents:?}");
+    assert_eq!(scene.settings().agents.reviewers, None);
+}
+
+#[tokio::test]
+async fn where_the_qwen_review_script_is_installed_add_writes_no_reviewers_and_still_the_qwen_stub()
+{
     let scene = Scene::new().await;
     let script = scene.home.join(".claude/scripts/qwen-review.sh");
     std::fs::create_dir_all(script.parent().unwrap()).unwrap();
     crate::test::write_script(&script, "#!/bin/sh\nexit 0\n");
     scene.add().await.unwrap();
 
-    let listed = scene.settings().agents.reviewers.unwrap();
-    assert_eq!(listed, [AgentName::kelpies("defect-hunter-lite")]);
+    assert_eq!(scene.settings().agents.reviewers, None);
     assert_eq!(scene.written("qwen"), stub("qwen"));
 }
 
 #[tokio::test]
-async fn where_kelpie_holds_a_paddock_gateway_add_lists_iq3_xxs_review_first() {
+async fn where_kelpie_holds_a_paddock_gateway_add_writes_no_reviewers_and_still_its_stub() {
     let scene = Scene::new().await;
     scene.shepherd.holds_section(
         "[gateways.paddock]\nurl = \"http://gpu-box:8700\"\nkey_env = \"PADDOCK_KEY\"\n",
     );
     scene.add().await.unwrap();
 
-    let listed = scene.settings().agents.reviewers.unwrap();
-    let names = ["iq3-xxs-review", "defect-hunter-lite"].map(AgentName::kelpies);
-    assert_eq!(listed, names);
+    assert_eq!(scene.settings().agents.reviewers, None);
     for agent in ["iq3-xxs-review", "defect-hunter-lite"] {
         assert_eq!(scene.written(agent), stub(agent));
     }
@@ -265,15 +274,14 @@ async fn add_twice_changes_nothing() {
 }
 
 #[tokio::test]
-async fn a_public_repo_with_no_ci_gets_no_ci_and_still_lists_no_review_bot() {
+async fn a_public_repo_with_no_ci_gets_no_ci_and_lists_no_reviewer() {
     let scene = Scene::new().await;
     scene.forge.set_visibility(Visibility::Public);
     std::fs::remove_dir_all(scene.checkout.root.join(".github")).unwrap();
     scene.add().await.unwrap();
     let settings = scene.settings();
     assert!(!settings.ci.block);
-    let reviewers = settings.agents.reviewers.unwrap();
-    assert_eq!(reviewers, [AgentName::kelpies("defect-hunter-lite")]);
+    assert_eq!(settings.agents.reviewers, None);
 }
 
 #[tokio::test]
@@ -286,8 +294,7 @@ async fn add_writes_stubs_for_the_whole_agents_and_none_for_a_baseline() {
             "{baseline} is a baseline: its stub comes from `agents new`"
         );
     }
-    let reviewers = scene.settings().agents.reviewers.unwrap();
-    assert_eq!(reviewers, [AgentName::kelpies("defect-hunter-lite")]);
+    assert_eq!(scene.settings().agents.reviewers, None);
 }
 
 #[tokio::test]

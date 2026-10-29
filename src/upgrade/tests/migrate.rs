@@ -252,7 +252,43 @@ async fn a_bare_upgrade_deletes_the_keys_the_agent_board_replaced_and_names_them
     let written = koji.dogs.get(crate::shepherd::DOG).unwrap().as_map();
     let agents = written["agents"].as_object().unwrap();
     assert_eq!(agents.get("implementers"), None);
-    assert_eq!(agents["reviewers"], serde_json::json!(["standards"]));
+    assert_eq!(agents.get("reviewers"), None);
+}
+
+#[tokio::test]
+async fn a_bare_upgrade_moves_a_listed_reviewers_list_into_a_listed_allow() {
+    let shepherd = FakeShepherd::on(crate::shepherd::SHEP_VERSION);
+    let mut table = loading(&shepherd);
+    table["agents"]["allow"] = serde_json::json!(["sonnet-high"]);
+    let rig = Rig::holding_on(shepherd, false, table).await;
+    crate::agents::write_bound_stubs(
+        &rig.home.join("agents"),
+        "harness: claude-code\nmodel: claude-opus-5-5\neffort: high\n",
+    );
+    rig.cargo_installs("0.3.0", "0.19.0");
+
+    let (ran, said) = rig.upgrade(Action::Installed).await;
+
+    ran.unwrap();
+    let wrote = (said.iter())
+        .find(|l| l.starts_with("project koji: "))
+        .unwrap_or_else(|| panic!("{said:?}"));
+    assert!(
+        wrote.contains("agents.allow = [\"sonnet-high\", \"standards\"]; removed "),
+        "{wrote}"
+    );
+    assert!(
+        wrote.contains("agents.reviewers = [\"standards\"]"),
+        "{wrote}"
+    );
+    let (koji, _) = rig.shepherd.sheep("koji").unwrap();
+    let written = koji.dogs.get(crate::shepherd::DOG).unwrap().as_map();
+    let agents = written["agents"].as_object().unwrap();
+    assert_eq!(
+        agents["allow"],
+        serde_json::json!(["sonnet-high", "standards"])
+    );
+    assert_eq!(agents.get("reviewers"), None);
 }
 
 #[tokio::test]

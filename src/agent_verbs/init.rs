@@ -5,15 +5,14 @@
 //! what the harness lacks. `init --detect` takes no harness: it finds each CLI
 //! on the `PATH`, asks each gateway in kelpie's settings for the models it
 //! serves, and gives each role the first harness in the models file's `order`
-//! that was found and serves it. Neither writes over a file that is there, and
-//! neither touches a project's settings: each ends with the `shep kelpie set`
-//! lines that list what it wrote, which the operator runs themselves.
+//! that was found and serves it. Neither writes over a file that is there nor
+//! touches a project's settings, so neither prints a `shep kelpie set` line:
+//! the agent board picks from the agent files `agents.allow` holds.
 
 use std::path::Path;
 
 use crate::adapters::host::{Host, SystemHost};
-use crate::agents::Role;
-use crate::agents::init::{self, Choice, Found, Listed, Report};
+use crate::agents::init::{self, Choice, Found, Listed};
 use crate::forwarder::Upstream;
 use crate::settings::{EndpointUrl, GatewayName, Gateways, Harness, ModelHost};
 use crate::shepherd::{self, Socket};
@@ -85,7 +84,6 @@ fn detect(folder: &Path, file: &init::File, setup: &Setup<'_>) -> Result<Vec<Str
     let mut lines = found.lines();
     lines.extend(report.lines());
     lines.extend(bindings.none);
-    lines.extend(set_lines(&report));
     Ok(lines)
 }
 
@@ -115,9 +113,7 @@ fn one(folder: &Path, file: &init::File, ask: Ask) -> Result<Vec<String>, String
         .collect();
     let mut report = init::write(folder, &choices)?;
     report.skipped = init::skipped(harness);
-    let mut lines = report.lines();
-    lines.extend(set_lines(&report));
-    Ok(lines)
+    Ok(report.lines())
 }
 
 // What `--detect` finds: each harness whose program is on the `PATH`, and each
@@ -196,20 +192,6 @@ fn server(ask: &Ask, harness: Harness) -> Result<Option<ModelHost>, String> {
             harness.as_str()
         )),
         _ => Ok(named),
-    }
-}
-
-// The `shep kelpie set` line that lists the reviewers `init` wrote, which the
-// operator runs to put them on a project. The agent board picks among its
-// implementers with no setting.
-fn set_lines(report: &Report) -> Vec<String> {
-    let names = (report.names(Role::Reviewer).iter())
-        .map(|name| format!("\"{name}\""))
-        .collect::<Vec<String>>()
-        .join(", ");
-    match names.is_empty() {
-        true => Vec::new(),
-        false => vec![format!("shep kelpie set agents.reviewers '[{names}]'")],
     }
 }
 

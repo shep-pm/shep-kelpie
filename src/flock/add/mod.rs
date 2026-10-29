@@ -18,13 +18,13 @@ use shep_client::shep_core::protocol::request::Response;
 use shep_client::shep_core::status::ProcStatus;
 
 use super::share::share_none;
-use super::{Checkout, Launch, flock, gateways, kelpie_sheep, send, tables};
+use super::{Checkout, Launch, flock, kelpie_sheep, send, tables};
 use crate::board::{HUMAN, IN_PROGRESS, READY};
 use crate::coderabbit::LABEL as SUMMON;
 use crate::dog;
 use crate::home::ProjectName;
 use crate::ports::{Forge, NewLabel};
-use crate::settings::{BaseBranch, Gateways, Settings, table_of};
+use crate::settings::{BaseBranch, Settings, table_of};
 use crate::shepherd::{Connection, DOG};
 
 /// The labels kelpie reads and sets on a project's issues and pull requests
@@ -161,10 +161,7 @@ pub async fn add(
     // The runner's table as set, or the one to write.
     let (set, table) = match tables.remove(name.as_str()) {
         Some(set) => (true, set),
-        None => {
-            let gateways = gateways(client).await?;
-            (false, settings(name, place, &base, &gateways)?)
-        }
+        None => (false, settings(name, place, &base)?),
     };
     if set {
         let loaded = Settings::from_table(&table, name.as_str(), place.home, place.home)
@@ -267,12 +264,14 @@ pub async fn add(
     }
 }
 
-// The project's settings: the defaults with what the checkout and the forge say.
+// The project's settings: the defaults with what the checkout and the forge
+// say. `add` names no reviewers: the agent board picks each round's reviewer
+// from the reviewer files `agents.allow` holds, and a project that wants a
+// narrower pass lists them itself.
 fn settings(
     name: &ProjectName,
     place: Place<'_>,
     base: &BaseBranch,
-    gateways: &Gateways,
 ) -> Result<Map<String, Value>, String> {
     let root = &place.checkout.root;
     let mut table = table_of(DEFAULTS)?;
@@ -285,13 +284,6 @@ fn settings(
     if let Some(Value::Object(ci)) = table.get_mut("ci") {
         let workflows = root.join(".github/workflows").is_dir();
         ci.insert("block".into(), Value::Bool(workflows));
-    }
-    // `iq3-xxs-review` first where kelpie holds a paddock gateway, and no
-    // review bot: those are listed by hand.
-    let reviewers = crate::settings::default_reviewers(gateways);
-    let reviewers = reviewers.iter().map(|name| text(name.as_str())).collect();
-    if let Some(Value::Object(agents)) = table.get_mut("agents") {
-        agents.insert("reviewers".into(), Value::Array(reviewers));
     }
     super::set::migrate::pm_decides(&mut table);
     Settings::from_table(&table, name.as_str(), place.home, place.folder)

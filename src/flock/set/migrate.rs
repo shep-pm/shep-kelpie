@@ -3,11 +3,11 @@
 //! A project's old `rulings.pm_alone` list becomes `rulings.pm_decides`, and
 //! each kind of ruling the map lacks is written at its default; a key there is
 //! never changed. The keys of the panel, the issue writer and the implementer
-//! list the agent board replaced ([`GONE_KEYS`]) are deleted and named with
-//! the value each held, with the gone roles in `repo_setup.roles`
-//! ([`GONE_ROLES`]) and the `unlabelled` kind.
-//! Each table is checked as `set` checks it, and one the runner would refuse
-//! is not written.
+//! list the agent board replaced ([`GONE_KEYS`]) are deleted and named with the
+//! value each held, with the gone roles in `repo_setup.roles`
+//! ([`GONE_ROLES`]) and the `unlabelled` kind. `agents.reviewers` goes too, its
+//! names joining an `agents.allow` that is already a list. Each table is then
+//! checked as `set` checks it, and one the runner would refuse is not written.
 
 use std::process::ExitCode;
 
@@ -31,6 +31,12 @@ const GONE_KEYS: [&str; 9] = [
     "agents.implementer_choice",
     "agents.fallback_after",
 ];
+
+/// The key whose names join a listed `agents.allow` before it is deleted
+const REVIEWERS: &str = "agents.reviewers";
+
+/// Where they join them
+const ALLOW: &str = "agents.allow";
 
 /// The list of roles that may still name a role that is gone
 const ROLES: &str = "repo_setup.roles";
@@ -123,12 +129,15 @@ async fn project(
     };
     let listed = lookup(&table, PM_ALONE).is_some();
     let gone_kinds = writer_kind(&mut table);
-    let wrote = pm_decides(&mut table);
+    let mut wrote = pm_decides(&mut table);
+    let (joined, gone_reviewers) = reviewers(&mut table);
+    wrote.extend(joined);
     let mut removed: Vec<String> = (listed && lookup(&table, PM_ALONE).is_none())
         .then(|| PM_ALONE.to_owned())
         .into_iter()
         .collect();
     removed.extend(gone_keys(&mut table));
+    removed.extend(gone_reviewers);
     removed.extend(gone_roles(&mut table));
     removed.extend(gone_kinds);
     let said: Vec<String> = [("wrote", wrote.join(", ")), ("removed", removed.join(", "))]
@@ -164,6 +173,39 @@ fn gone_keys(table: &mut Map<String, Value>) -> Vec<String> {
 // A value as the TOML a `key = ` takes on one line, its JSON when TOML has no form for it.
 fn inline(value: &Value) -> String {
     toml::Value::try_from(value).map_or_else(|_| value.to_string(), |value| value.to_string())
+}
+
+// Moves the names `agents.reviewers` lists into `agents.allow` when that is
+// already a list, each name once, and deletes the key: an absent or empty
+// `allow` is left as it is, since every reviewer file is allowed already and a
+// list of reviewers alone would refuse every implementer. Says what it changed.
+fn reviewers(table: &mut Map<String, Value>) -> (Vec<String>, Option<String>) {
+    let (outer, key) = leaves(REVIEWERS);
+    let Some(agents) = table.get_mut(outer).and_then(Value::as_object_mut) else {
+        return (Vec::new(), None);
+    };
+    let Some(Value::Array(listed)) = agents.get(key) else {
+        return (Vec::new(), None);
+    };
+    let listed = listed.clone();
+    let joined = agents
+        .get_mut(leaves(ALLOW).1)
+        .and_then(Value::as_array_mut)
+        .filter(|allow| !allow.is_empty())
+        .map(|allow| {
+            let missing: Vec<Value> = (listed.iter())
+                .filter(|name| !allow.contains(name))
+                .cloned()
+                .collect();
+            let before = allow.len();
+            allow.extend(missing);
+            (allow.len() > before)
+                .then(|| format!("{ALLOW} = {}", inline(&Value::Array(allow.clone()))))
+        });
+    let removed = agents
+        .remove(key)
+        .map(|value| format!("{REVIEWERS} = {}", inline(&value)));
+    (joined.flatten().into_iter().collect(), removed)
 }
 
 // Deletes the roles that are gone from `repo_setup.roles`, and names each it deleted.
