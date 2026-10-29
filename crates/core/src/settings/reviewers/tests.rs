@@ -83,49 +83,10 @@ fn gateways_with(name: &str, kind: GatewayKind) -> Gateways {
 }
 
 #[test]
-fn a_project_that_lists_none_runs_defect_hunter_lite_alone_without_paddock() {
-    let (settings, home) = project(None);
-    let lineup = settings
-        .lineup(&book(), &Gateways::default(), home.path())
-        .unwrap();
-    assert_eq!(names(&lineup), ["defect-hunter-lite"]);
-    assert!(!lineup[0].second_look);
-    assert!(lineup[0].prompt.is_some());
-
+fn an_empty_list_leaves_a_pass_no_candidate() {
     let (empty, home) = project(Some("[]"));
     let none = empty.lineup(&book(), &Gateways::default(), home.path());
     assert!(none.unwrap().is_empty());
-}
-
-#[test]
-fn a_project_that_lists_none_runs_iq3_xxs_review_then_defect_hunter_lite_with_paddock() {
-    let (settings, home) = project(None);
-    let paddock = gateways_with("paddock", GatewayKind::Paddock);
-    let lineup = settings.lineup(&book(), &paddock, home.path()).unwrap();
-    assert_eq!(names(&lineup), ["iq3-xxs-review", "defect-hunter-lite"]);
-    assert!(lineup[0].is_local() && !lineup[1].is_local());
-    let (gateway, model) = lineup[0].runs.gateway().unwrap();
-    assert_eq!((gateway.as_str(), model), ("paddock", "iq3_xxs"));
-}
-
-#[test]
-fn the_qwen_script_no_longer_changes_the_default_lineup() {
-    let (settings, home) = project(None);
-    let script = home.path().join(".claude/scripts/qwen-review.sh");
-    std::fs::create_dir_all(script.parent().unwrap()).unwrap();
-    std::fs::write(&script, "#!/bin/sh\n").unwrap();
-    let lineup = settings
-        .lineup(&book(), &Gateways::default(), home.path())
-        .unwrap();
-    assert_eq!(names(&lineup), ["defect-hunter-lite"]);
-}
-
-#[test]
-fn only_a_gateway_named_paddock_adds_iq3_xxs_review() {
-    let (settings, home) = project(None);
-    let gateways = gateways_with("gpu", GatewayKind::Paddock);
-    let lineup = settings.lineup(&book(), &gateways, home.path()).unwrap();
-    assert_eq!(names(&lineup), ["defect-hunter-lite"]);
 }
 
 #[test]
@@ -209,4 +170,57 @@ fn a_bot_that_reviews_on_ready_is_refused_after_another_bot_and_kept_before_it()
             .is_ok(),
         "kelpie's own Codex file does not review on ready"
     );
+}
+
+#[test]
+fn with_no_list_the_candidates_are_every_allowed_reviewer_file_but_the_security_reviewer() {
+    let (mut settings, home) = project(None);
+    let paddock = gateways_with("paddock", GatewayKind::Paddock);
+    let lineup = settings.lineup(&book(), &paddock, home.path()).unwrap();
+    assert_eq!(
+        names(&lineup),
+        [
+            "coderabbit",
+            "codex",
+            "cubic",
+            "defect-hunter",
+            "defect-hunter-lite",
+            "gpu-box",
+            "iq3-xxs-review",
+            "opus",
+            "qwen",
+            "spec",
+            "standards"
+        ],
+        "security-reviewer, an implementer and the project manager are not reviewers a pass reads"
+    );
+
+    let none = settings
+        .lineup(&book(), &Gateways::default(), home.path())
+        .unwrap();
+    assert!(
+        !names(&none).contains(&"iq3-xxs-review"),
+        "a reviewer on a gateway the settings do not hold cannot run"
+    );
+
+    settings.agents.allow =
+        Some(vec![AgentName::kelpies("spec"), AgentName::kelpies("opus")].into());
+    let allowed = settings.lineup(&book(), &paddock, home.path()).unwrap();
+    assert_eq!(names(&allowed), ["opus", "spec"]);
+
+    settings.contributions.security_reviewer = AgentName::kelpies("spec");
+    let moved = settings.lineup(&book(), &paddock, home.path()).unwrap();
+    assert_eq!(names(&moved), ["opus"]);
+}
+
+#[test]
+fn a_contributions_pass_with_no_lists_still_runs_the_default_reviewers() {
+    let (settings, home) = project(None);
+    let paddock = gateways_with("paddock", GatewayKind::Paddock);
+    let lineup = (settings.contribution_lineup(&book(), &paddock, home.path())).unwrap();
+    assert_eq!(names(&lineup), ["iq3-xxs-review", "defect-hunter-lite"]);
+
+    let (listed, home) = project(Some(r#"["opus"]"#));
+    let lineup = (listed.contribution_lineup(&book(), &paddock, home.path())).unwrap();
+    assert_eq!(names(&lineup), ["opus"]);
 }
