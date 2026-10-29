@@ -64,10 +64,13 @@ fn a_new_project_gets_its_board_at_start_with_nothing_on_it() {
              \n\
              ## Agents\n\
              \n\
-             Implementers, the default first, then reviewers in their order. An `agent:` label \
-             picks a work item's implementer: tier and kinds are shown, nothing picks by them.\n\
+             Implementers by name, then reviewers in their order. The agent board picks a work \
+             item's implementer by its kind, tier and slack, and a pick's agent or an \
+             `agent:<name>!` label pins it.\n\
              \n\
-             - sonnet-high (implementer, default): standard tier, every kind; Builds everyday \
+             - opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, \
+             such as a data migration, a release step or a change to a public interface.\n\
+             - sonnet-high (implementer): standard tier, every kind; Builds everyday \
              features and anything with state, such as a store, a queue or a migration.\n\
              - qwen (reviewer): light tier, every kind; Reads a diff for defects with the \
              maintainer's local qwen-review script, as a first pass.\n\
@@ -129,9 +132,10 @@ const TWO_BRANCHES: &str = r#"# Board: acme, 2026-09-21 14:18 UTC
 
 ## Agents
 
-Implementers, the default first, then reviewers in their order. An `agent:` label picks a work item's implementer: tier and kinds are shown, nothing picks by them.
+Implementers by name, then reviewers in their order. The agent board picks a work item's implementer by its kind, tier and slack, and a pick's agent or an `agent:<name>!` label pins it.
 
-- sonnet-high (implementer, default): standard tier, every kind; Builds everyday features and anything with state, such as a store, a queue or a migration.
+- opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, such as a data migration, a release step or a change to a public interface.
+- sonnet-high (implementer): standard tier, every kind; Builds everyday features and anything with state, such as a store, a queue or a migration.
 - qwen (reviewer): light tier, every kind; Reads a diff for defects with the maintainer's local qwen-review script, as a first pass.
 - claude (reviewer): standard tier, every kind; no description
 
@@ -315,7 +319,7 @@ fn a_turn_the_gateway_answered_busy_waits_on_its_gateway_and_not_on_a_lease() {
         text.contains("#7: worker waits 11m for its gateway, which answered busy\n"),
         "{text}"
     );
-    assert!(!text.contains("lease"), "{text}");
+    assert!(!text.contains(" lease"), "{text}");
 
     busy.release();
     assert_eq!(driven.heard(), None, "the grant is no report");
@@ -326,7 +330,7 @@ fn a_turn_the_gateway_answered_busy_waits_on_its_gateway_and_not_on_a_lease() {
         text.contains("#7: worker has its gateway back, after waiting 11m\n"),
         "{text}"
     );
-    assert!(!text.contains("lease"), "{text}");
+    assert!(!text.contains(" lease"), "{text}");
     work.release();
     assert!(work.answered(CALL_PATIENCE), "the turn never answered");
 }
@@ -445,7 +449,6 @@ fn the_board_lists_the_projects_agents_from_their_files() {
          description: Design work that\n  needs the strongest agent.\nkinds: [design, migration]\n\
          tier: heavy\n---\n",
     );
-    rig.implementers(&["heavy", "sonnet-high"]);
     rig.reviewers(&["claude", "qwen"]);
     let runner = rig.open().unwrap();
     let text = board(&rig);
@@ -455,8 +458,10 @@ fn the_board_lists_the_projects_agents_from_their_files() {
     assert_eq!(
         lines,
         [
-            "- heavy (implementer, default): heavy tier, kinds design, migration; \
+            "- heavy (implementer): heavy tier, kinds design, migration; \
              Design work that needs the strongest agent.",
+            "- opus-high (implementer): heavy tier, every kind; Builds work that is hard to \
+             undo, such as a data migration, a release step or a change to a public interface.",
             "- sonnet-high (implementer): standard tier, every kind; Builds everyday features \
              and anything with state, such as a store, a queue or a migration.",
             "- claude (reviewer): standard tier, every kind; no description",

@@ -433,7 +433,7 @@ fn a_board_with_only_taken_issues_dispatches_nothing() {
 // A project listing both of kelpie's own implementers.
 fn listing_opus(project: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
-    rig.implementers(&["sonnet-high", "opus-high"]);
+    rig.agent_board.ranks(&["sonnet-high", "opus-high"]);
     let runner = rig.open().unwrap();
     (rig, runner)
 }
@@ -853,7 +853,7 @@ const LOCAL_CODER: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwe
 fn afternoon() -> (Rig, Mutex<Runner>, Vec<Hold>) {
     let rig = Rig::new("shep");
     rig.write_agent("coder", LOCAL_CODER);
-    rig.implementers(&["coder", "sonnet-high"]);
+    rig.agent_board.ranks(&["coder", "sonnet-high"]);
     rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 12"));
     let runner = rig.open().unwrap();
     for issue in [1, 2, 3, 4, 5, 430] {

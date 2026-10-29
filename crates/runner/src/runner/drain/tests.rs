@@ -225,9 +225,9 @@ fn drain_takes_no_params() {
 fn a_drained_runner_does_not_wake_the_project_manager() {
     let rig = Rig::new("eevee");
     rig.edit_settings(|s| {
-        let listed = "\nimplementers = [\"sonnet-high\"]\n";
-        assert!(s.contains(listed), "the example's implementers moved");
-        s.replace(listed, "\nimplementers = [\"sonnet-high\"]\npm = \"pm\"\n")
+        let listed = "[app.dogs.kelpie.agents]\n";
+        assert!(s.contains(listed), "the example's agents table moved");
+        s.replace(listed, "[app.dogs.kelpie.agents]\npm = \"pm\"\n")
     });
     let runner = rig.open().unwrap();
     assert_eq!(

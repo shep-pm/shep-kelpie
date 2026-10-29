@@ -47,6 +47,38 @@ fn running(rig: &Rig) -> Mutex<Runner> {
 }
 
 #[test]
+fn a_rework_opens_on_the_agent_boards_pick() {
+    let rig = Rig::new("webapp");
+    reviewed_71(&rig);
+    rig.agent_board.ranks(&["opus-high", "sonnet-high"]);
+    let runner = running(&rig);
+
+    let item = &rig.ask(&runner, "rework", Some("71"))["work_item"];
+
+    assert_eq!(item["agent"], "opus-high");
+    let [ask] = rig.agent_board.asks().try_into().unwrap();
+    assert_eq!(ask.pin, None);
+}
+
+#[test]
+fn a_rework_whose_issue_has_a_pinned_agent_label_asks_the_board_for_that_one_alone() {
+    let rig = Rig::new("webapp");
+    reviewed_71(&rig);
+    rig.forge.label(7, "agent:sonnet-high!");
+    rig.agent_board.ranks(&["opus-high", "sonnet-high"]);
+    let runner = running(&rig);
+
+    let item = &rig.ask(&runner, "rework", Some("71"))["work_item"];
+
+    assert_eq!(item["agent"], "sonnet-high");
+    let [ask] = rig.agent_board.asks().try_into().unwrap();
+    assert_eq!(
+        ask.pin.map(|pin| pin.to_string()),
+        Some("sonnet-high".into())
+    );
+}
+
+#[test]
 fn a_rework_keeps_the_base_its_pull_request_merges_into_when_git_base_moved_on() {
     let rig = Rig::new("webapp");
     reviewed_71(&rig);

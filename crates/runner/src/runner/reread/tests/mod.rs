@@ -196,12 +196,12 @@ fn a_changed_gateway_alone_waits_for_the_next_start() {
 }
 
 // The gateway's key is read from `CARGO_PKG_NAME`, which `cargo test` sets for its tests.
-const LOCAL: &str = "---\nrole: implementer\nharness: pi\nmodel: m\neffort: low\n\
-                     gateway: paddock\ncontext: 65536\n---\n";
+const LOCAL: &str = "---\nrole: reviewer\nharness: pi\nmodel: m\neffort: low\n\
+                     gateway: paddock\ncontext: 65536\n---\nReview {{DIFF}}.\n";
 
 fn list_local(rig: &Rig) {
     rig.write_agent("local", LOCAL);
-    rig.implementers(&["sonnet-high", "local"]);
+    rig.reviewers(&["qwen", "claude", "local"]);
 }
 
 fn paddock_keyed_by_cargo(rig: &Rig) {
@@ -235,33 +235,46 @@ fn a_gateway_taken_away_from_a_listed_agent_is_refused_as_a_start_refuses_it() {
 }
 
 #[test]
-fn held_agents_are_checked_against_the_new_settings_as_a_start_checks_them() {
+fn an_implementer_new_guard_hooks_fence_out_is_left_off_the_boards_ask() {
     let rig = Rig::new("shep");
     paddock_keyed_by_cargo(&rig);
-    list_local(&rig);
+    let implementer = LOCAL.replace("role: reviewer", "role: implementer");
+    rig.write_agent("local", implementer.trim_end_matches("Review {{DIFF}}.\n"));
     let runner = rig.open().unwrap();
-    // `local` runs on pi, which a start refuses beside guard hooks.
-    let hook = "[[app.dogs.kelpie.worker.guard_hooks]]\nevent = \"PreToolUse\"\n\
-                matcher = \"Bash\"\ncommand = \"~/check.sh\"\n";
-    rig.edit_settings(|s| format!("{s}\n{hook}"));
-    // A reviewer on `other`, a gateway the runner lacks, holds the new
-    // list, which drops `local`.
-    let reviewer = "---\nrole: reviewer\nharness: endpoint\ngateway: other\nmodel: coder\n\
-                    context: 32768\n---\n";
-    rig.write_agent("other", reviewer);
-    rig.implementers(&["sonnet-high"]);
-    rig.reviewers(&["claude", "other"]);
-    let webhook = std::fs::read_to_string(rig.kelpie_settings_file()).unwrap();
-    let other = "[gateways.other]\nurl = \"http://gpu:8701\"\nkey_env = \"CARGO_PKG_NAME\"\n";
-    rig.set_kelpie_settings(&format!("{webhook}{other}"));
-    let mut runner = runner.lock().unwrap();
-    let err = runner.reread(rig.settings(), rig.kelpie_settings());
-    let err = err.unwrap_err().to_string();
-    assert!(
-        err.contains("implementer local runs on pi, which cannot run `worker.guard_hooks`"),
-        "{err}"
+    // `local` runs on pi, which cannot run guard hooks.
+    let check = rig.home.path().join("check.sh");
+    crate::test::write_script(&check, "#!/bin/sh\nexit 0\n");
+    let hook = format!(
+        "[[app.dogs.kelpie.worker.guard_hooks]]\nevent = \"PreToolUse\"\n\
+         matcher = \"Bash\"\ncommand = \"{}\"\n",
+        check.display()
     );
-    assert!(runner.settings().worker.guard_hooks.is_empty());
+    rig.edit_settings(|s| format!("{s}\n{hook}"));
+    (runner.lock().unwrap())
+        .reread(rig.settings(), rig.kelpie_settings())
+        .unwrap();
+    let notes = runner.lock().unwrap().take_notes();
+    let left = "implementer local is left out of the agent board's ask: implementer local runs \
+                on pi, which cannot run `worker.guard_hooks`";
+    assert!(notes.iter().any(|n| n.starts_with(left)), "{notes:?}");
+    rig.edit_settings(|s| {
+        s.replace(
+            "[app.dogs.kelpie.agents]\n",
+            "[app.dogs.kelpie.agents]\nslack = 20\n",
+        )
+    });
+    (runner.lock().unwrap())
+        .reread(rig.settings(), rig.kelpie_settings())
+        .unwrap();
+    let notes = runner.lock().unwrap().take_notes();
+    assert!(
+        !notes.iter().any(|n| n.starts_with(left)),
+        "told once: {notes:?}"
+    );
+    rig.ask(&runner, "add", Some("7"));
+    let asks = rig.agent_board.asks();
+    let agents: Vec<_> = asks[0].agents.iter().map(|a| a.as_str()).collect();
+    assert_eq!(agents, ["opus-high", "sonnet-high"]);
 }
 
 #[test]
@@ -276,12 +289,18 @@ fn agents_naming_a_gateway_added_with_them_wait_with_it_for_the_next_start() {
         line.unwrap().as_deref(),
         Some("settings changed; gateways and agents from the runner's next start")
     );
-    assert_eq!(runner.settings().agents.implementers.len(), 1);
+    assert_eq!(
+        runner.settings().agents.reviewers.as_ref().map(Vec::len),
+        Some(2)
+    );
     drop(runner);
 
     let restarted = rig.open().unwrap();
     let restarted = restarted.lock().unwrap();
-    assert_eq!(restarted.settings().agents.implementers.len(), 2);
+    assert_eq!(
+        restarted.settings().agents.reviewers.as_ref().map(Vec::len),
+        Some(3)
+    );
     assert!(restarted.gateways().get(&paddock()).is_some());
 }
 
@@ -420,14 +439,14 @@ fn every_implementer_agents_label_is_made_on_open_and_none_on_a_new_list_only() 
     let made = ["bug", "Agent:Sonnet-high", "agent:opus-high"];
     assert_eq!(kept_labels(&rig), made, "sonnet-high's is there already");
 
-    rig.implementers(&["sonnet-high", "opus-high"]);
+    rig.agent_board.ranks(&["sonnet-high", "opus-high"]);
     let mut runner = runner.lock().unwrap();
     runner
         .reread(rig.settings(), rig.kelpie_settings())
         .unwrap();
     assert_eq!(kept_labels(&rig), made);
 
-    rig.implementers(&["opus-high"]);
+    rig.agent_board.ranks(&["opus-high"]);
     runner
         .reread(rig.settings(), rig.kelpie_settings())
         .unwrap();
@@ -453,18 +472,24 @@ fn a_fresh_repo_gets_every_implementers_label_when_the_runner_opens() {
 }
 
 #[test]
-fn a_fallback_after_alone_is_no_change() {
+fn a_key_the_agent_board_replaced_alone_is_no_change() {
     let rig = Rig::new("shep");
     let runner = rig.open().unwrap();
-    let next = settings_with(&rig, |s| {
-        s.replace(
-            "\nimplementers = ",
-            "\nfallback_after = 15\nimplementers = ",
-        )
-    });
     let mut runner = runner.lock().unwrap();
-    let line = runner.reread(next, rig.kelpie_settings()).unwrap();
-    assert_eq!(line, None, "nothing reads it");
+    for old in [
+        "fallback_after = 15",
+        "implementers = [\"opus-high\"]",
+        "implementer_choice = \"order\"",
+    ] {
+        let next = settings_with(&rig, |s| {
+            s.replace(
+                "[app.dogs.kelpie.agents]\n",
+                &format!("[app.dogs.kelpie.agents]\n{old}\n"),
+            )
+        });
+        let line = runner.reread(next, rig.kelpie_settings()).unwrap();
+        assert_eq!(line, None, "nothing reads {old}");
+    }
 }
 
 #[test]
@@ -472,7 +497,10 @@ fn a_changed_agents_slack_takes_effect_at_once() {
     let rig = Rig::new("shep");
     let runner = rig.open().unwrap();
     let next = settings_with(&rig, |s| {
-        s.replace("\nimplementers = ", "\nslack = 20\nimplementers = ")
+        s.replace(
+            "[app.dogs.kelpie.agents]\n",
+            "[app.dogs.kelpie.agents]\nslack = 20\n",
+        )
     });
     let mut runner = runner.lock().unwrap();
     assert_eq!(runner.settings().agents.slack, 60);

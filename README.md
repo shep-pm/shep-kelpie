@@ -157,7 +157,7 @@ ok       sandbox: the sandbox runtime can run
 ok       shepherd: shep 0.17.0 at /path/to/.shep
 ok       dog: kelpie's dog is running and has named itself
 ok       scratch: checkout: /path/to/checkout is a git checkout with an origin
-ok       scratch: implementers: an issue with no `agent:` label runs on sonnet-high
+ok       scratch: implementers: the agent board picks among opus-high, sonnet-high
 ok       scratch: push access: may push to shep-pm/shep
 ok       scratch: labels: shep-pm/shep has `ready-for-agent`, `ready-for-human`, `in-progress`
 ok       scratch: github app: kelpie's App is installed on shep-pm/shep and mints a token
@@ -198,7 +198,7 @@ For npm, that is `registry.npmjs.org`. What an entry may be is in [`settings.exa
 `-p` takes a glob of project names for `set` and `get`, to change or read a setting in many projects at once. Quote it, or the shell expands `*` against files:
 
 ```sh
-shep kelpie set -p 'shep*' agents.implementers '["iq3-xxs", "sonnet-high"]'
+shep kelpie set -p 'shep*' agents.reviewers '["iq3-xxs-review", "defect-hunter-lite"]'
 shep kelpie get -p '*' agents.reviewers
 ```
 

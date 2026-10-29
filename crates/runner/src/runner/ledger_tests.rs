@@ -185,9 +185,9 @@ fn a_turn_s_line_costs_the_change_in_its_session_and_carries_the_last_reading() 
 // A running project whose settings name the project manager `pm`
 fn with_pm(rig: &Rig) -> Mutex<Runner> {
     rig.edit_settings(|s| {
-        let listed = "\nimplementers = [\"sonnet-high\"]\n";
-        assert!(s.contains(listed), "the example's implementers moved");
-        s.replace(listed, "\nimplementers = [\"sonnet-high\"]\npm = \"pm\"\n")
+        let listed = "[app.dogs.kelpie.agents]\n";
+        assert!(s.contains(listed), "the example's agents table moved");
+        s.replace(listed, "[app.dogs.kelpie.agents]\npm = \"pm\"\n")
     });
     let runner = rig.open().unwrap();
     rig.ask(&runner, "start", None);

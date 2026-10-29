@@ -9,6 +9,8 @@ use crate::ports::{CLEAN, Checks, PullRequestState, Session};
 use crate::runner::{StepReport, step};
 use crate::test::{Hold, Rig, Scripted, git, ticket};
 
+mod board;
+
 // Pull request 80 on `fix/timeline`, opened by kelpie's account from another
 // session: two commits pushed by hand, closing issue 5. Returns its head.
 fn opened_80(rig: &Rig) -> String {
@@ -22,11 +24,16 @@ fn running(rig: &Rig) -> Mutex<Runner> {
     rig.open().unwrap()
 }
 
+// Pull request 80 adopted on `sonnet-high`, the rig's board's first pick
 fn adopted_80() -> StepReport {
+    adopted_80_on("sonnet-high")
+}
+
+fn adopted_80_on(agent: &str) -> StepReport {
     StepReport::Adopted {
         issue: ticket(5),
         pull_request: 80,
-        agent: "sonnet-high".to_owned().try_into().unwrap(),
+        agent: agent.to_owned().try_into().unwrap(),
     }
 }
 
@@ -114,58 +121,6 @@ fn adopt_starts_at_ci_and_the_first_turn_names_the_file_ahead_of_the_red_run() {
         Some(StepReport::Ruling { id, .. })
      if id == ticket(80)));
     assert_eq!(rig.reviewer.seen(), [], "no qwen round, before or after");
-}
-
-#[test]
-fn a_waiting_pull_request_on_an_unlisted_labelled_implementer_is_held_by_its_account() {
-    let rig = Rig::new("shep");
-    rig.ci_on();
-    opened_80(&rig);
-    rig.write_codex_implementer();
-    rig.forge.label(5, "agent:codex");
-    rig.codex_day_began(0);
-    // 15% of Codex's week since the day began, past its allowance of 100 / 7.
-    rig.codex_meter.set(Rig::utilization(15, 0));
-    let runner = running(&rig);
-    rig.ask(&runner, "adopt", Some("80"));
-
-    let Some(StepReport::Held { kind, reason, .. }) = step(&runner).unwrap() else {
-        panic!("expected a hold");
-    };
-    assert_eq!(kind, crate::pacer::HoldKind::Allowance);
-    assert!(reason.starts_with("today's Codex allowance"), "{reason}");
-    assert_eq!(rig.codex_meter.reads(), 1);
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["adopted"], waiting(&[80], false), "still queued");
-    assert_eq!(status["work_item"], json!(null));
-    assert_eq!(status["rulings"], json!([]), "a hold is no `adopt-failed`");
-    assert_eq!(status["skipped"], json!([]));
-}
-
-#[test]
-fn a_pull_request_held_by_its_labelled_account_leaves_the_ones_behind_it_to_start() {
-    let rig = Rig::new("shep");
-    rig.ci_on();
-    opened_80(&rig);
-    rig.push_by_hand("fix/other", "other.txt");
-    rig.forge.open_pull_request(81, "fix/other", &[6]);
-    rig.write_codex_implementer();
-    rig.forge.label(5, "agent:codex");
-    rig.codex_day_began(0);
-    rig.codex_meter.set(Rig::utilization(15, 0));
-    let runner = running(&rig);
-    rig.ask(&runner, "adopt", Some("80"));
-    rig.ask(&runner, "adopt", Some("81"));
-
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::Adopted {
-            pull_request: 81,
-            ..
-        })
-    ));
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["adopted"], waiting(&[80], false), "80 stays queued");
 }
 
 #[test]

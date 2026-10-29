@@ -14,9 +14,7 @@ use super::{
 };
 use crate::agents::Agents;
 use crate::review_bot::Bot;
-use crate::settings::{
-    AgentName, Gateways, ListedReviewer, RoleAgents, Settings, SettingsError, TicketSource,
-};
+use crate::settings::{Gateways, ListedReviewer, Settings, SettingsError, TicketSource};
 use crate::skills::{RepoPlugins, Skills, default_head};
 use crate::webhook::KelpieSettings;
 
@@ -80,10 +78,10 @@ impl Runner {
         // The gateways the agents in use were listed under.
         let mut in_use = &gateways;
         // The gateways must hold as a start checks them.
-        check_gateways(&gateways, &book, &agents, &lineup)?;
+        check_gateways(&gateways, &book, &lineup)?;
         gateways.check_triage_spam(&settings.triage.spam)?;
         // Agents the adapters cannot route yet wait with the gateways they name.
-        if check_gateways(&self.gateways, &book, &agents, &lineup).is_err() {
+        if check_gateways(&self.gateways, &book, &lineup).is_err() {
             waiting.push("agents");
             settings.agents.clone_from(&self.settings.agents);
             // The listed contributions' reviewers are agents too, and the old book may lack them.
@@ -169,6 +167,7 @@ impl Runner {
         let skills = (settings.skills != self.settings.skills)
             .then(|| Skills::load(&settings.skills, &self.paths.skills));
         let had_labels = self.implementer_files();
+        let was_left_out = self.left_out_names();
         // A local start made no `agent:` label on the repo, so a board now on GitHub needs them.
         let to_github = settings.tickets.source != self.settings.tickets.source
             && settings.tickets.source == TicketSource::Github;
@@ -221,11 +220,12 @@ impl Runner {
             self.notes.extend(book.skipped());
         }
         self.book = book;
-        // A new implementer file needs its `agent:` label made, listed or not.
+        // A new implementer file needs its `agent:` label made.
         if self.implementer_files() != had_labels || to_github {
             self.make_agent_labels();
             self.make_priority_labels();
         }
+        self.notes.extend(self.left_out_notes(&was_left_out));
         self.gpu.point_at(gpu_metrics_url);
         self.extra_instructions = extra_instructions;
         self.webhook = webhook;
@@ -300,18 +300,17 @@ impl Runner {
     }
 }
 
-// Whether `gateways` route every listed agent that names one.
+// Whether `gateways` route every listed reviewer that names one.
 pub(crate) fn check_gateways(
     gateways: &Gateways,
     book: &Agents,
-    agents: &RoleAgents,
     lineup: &[ListedReviewer],
 ) -> Result<(), SettingsError> {
-    gateways.check_listed(book, listed(agents, lineup))
+    gateways.check_listed(book, lineup.iter().map(|r| &r.name))
 }
 
-/// Whether every listed agent names a gateway kelpie's settings hold and can reach. No key
-/// is read, for a shell that holds none of them.
+/// Whether every listed reviewer names a gateway kelpie's settings hold and can reach. No
+/// key is read, for a shell that holds none of them.
 ///
 /// # Errors
 ///
@@ -319,20 +318,9 @@ pub(crate) fn check_gateways(
 pub fn check_gateway_shapes(
     gateways: &Gateways,
     book: &Agents,
-    agents: &RoleAgents,
     lineup: &[ListedReviewer],
 ) -> Result<(), SettingsError> {
-    gateways.check_listed_without_keys(book, listed(agents, lineup))
-}
-
-// Every agent a project runs a call on: its implementers and its reviewers.
-fn listed<'a>(
-    agents: &'a RoleAgents,
-    lineup: &'a [ListedReviewer],
-) -> impl Iterator<Item = &'a AgentName> + 'a {
-    let implementers = agents.implementers.iter().map(|i| &i.name);
-    let reviewers = lineup.iter().map(|r| &r.name);
-    implementers.chain(reviewers)
+    gateways.check_listed_without_keys(book, lineup.iter().map(|r| &r.name))
 }
 
 #[cfg(test)]

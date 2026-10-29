@@ -103,8 +103,8 @@ others), its harness, the model and effort it runs on, and its prompt as the
 body. A file is a **baseline** plus a **binding**, or says both itself.
 An implementer or reviewer file may also say what it is chosen by:
 `description`, `kinds` and `tier`. Kelpie ships whole agents and baselines,
-and `add` writes the whole ones out. A project names its implementers, its
-reviewers and its PM by agent.
+and `add` writes the whole ones out. A project names its reviewers and its
+PM by agent, and the **agent board** picks among its implementers.
 _Avoid_: model (one part of an agent), bot (a review bot is one kind of
 reviewer)
 
@@ -145,8 +145,8 @@ The operator's file carries them, so kelpie's files need not choose the
 operator's model.
 
 **Lineup**:
-The agents a project lists for a role, such as `agents.implementers` or
-`agents.reviewers`, in order.
+The agents a project lists for a role, such as `agents.reviewers` or
+`contributions.reviewers`, in order.
 _Avoid_: roster, pool
 
 **Harness**:
@@ -166,12 +166,12 @@ _Avoid_: proxy, router
 
 **Implementer**:
 An agent kelpie can run a work item on, from a file whose role is
-`implementer`. The **agent board** picks the one a new work item opens on,
-listed or not, and an issue's `agent:<name>!` label **pins** it to one. A
-rework or adopted item opens on its `agent:` label or the **default
-implementer**, the first listed, which may be a local model. A work item
-keeps the implementer it opened on until a **handoff** moves it to the
-board's next pick. A pinned work item is never handed off.
+`implementer` that `agents.allow` holds. The **agent board** picks the one
+every new work item opens on, a rework and an adopted item included, and an
+issue's `agent:<name>!` label **pins** it to one. There is no default
+implementer. A work item keeps the implementer it opened on until a
+**handoff** moves it to the board's next pick. A pinned work item is never
+handed off.
 _Avoid_: worker model, local worker
 
 **Waiting for model**:

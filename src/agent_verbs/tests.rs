@@ -641,7 +641,10 @@ fn init_claude_code_binds_every_role_it_serves_and_the_files_load() {
     has("implementer: wrote claude-code claude-sonnet-5-5 at high");
     has("defect-hunter: wrote claude-code claude-opus-5-5 at high");
     has("pm: wrote claude-code claude-opus-5-5 at medium");
-    has("shep kelpie set agents.implementers '[\"implementer\"]'");
+    assert!(
+        !said.iter().any(|l| l.contains("agents.implementers")),
+        "the agent board picks the implementer with no setting: {said:#?}"
+    );
     has(
         "shep kelpie set agents.reviewers '[\"defect-hunter\", \"security-reviewer\", \"spec\", \"standards\"]'",
     );

@@ -17,8 +17,8 @@ use crate::ports::{Forge, NewLabel, Timestamp, Visibility};
 use crate::review_bot::{Bot, Login, Profile};
 use crate::runner::{NO_ORIGIN, check_checkout, check_instructions, source_of};
 use crate::settings::{
-    Account, AgentName, DoctorProbe, ForgeSlug, Gateways, Harness, Limit, PM_DECIDES, Pick,
-    RoleModel, Settings, SettingsError, TicketSource,
+    Account, AgentName, DoctorProbe, ForgeSlug, GatewayKeys, Gateways, Harness, Limit, PM_DECIDES,
+    Pick, RoleModel, Settings, SettingsError, TicketSource,
 };
 use crate::webhook::KelpieSettings;
 
@@ -168,8 +168,10 @@ pub(super) fn checks(
     lines.extend(super::mcp::hosts(at("repo mcp servers"), &settings, here));
     lines.extend(super::registries::line(at("package registries"), &settings));
     let gateways = kelpie.map(KelpieSettings::gateways).unwrap_or_default();
-    let (book, line) = implementers(at("implementers"), &settings, &paths);
+    let (book, line) = implementers(at("implementers"), &settings, &paths, &gateways);
     lines.push(line);
+    lines.extend(left_out(&at, &settings, &book, &gateways));
+    lines.extend(gone_keys(at("old keys"), &settings));
     // The forge lines need the repo, and the checkout line says why when it is unknown.
     if let Some(repo) = &remote {
         let bots = bots_listed(&settings, (&book, &gateways), here.home);
@@ -391,9 +393,14 @@ fn forge_lines(
     lines
 }
 
-// The agent files, and whether the project's implementers can be used.
+// The agent files, and whether the implementers the agent board may pick can be used.
 // Files that cannot be read leave kelpie's own agents for the other lines.
-fn implementers(subject: String, settings: &Settings, paths: &ProjectPaths) -> (Agents, Line) {
+fn implementers(
+    subject: String,
+    settings: &Settings,
+    paths: &ProjectPaths,
+    gateways: &Gateways,
+) -> (Agents, Line) {
     let book = match Agents::load(&paths.agents) {
         Ok(book) => book,
         Err(e) => {
@@ -405,12 +412,33 @@ fn implementers(subject: String, settings: &Settings, paths: &ProjectPaths) -> (
         }
     };
     let skipped: Vec<String> = book.skipped().collect();
+    let allowed = settings.allowed_implementers(&book);
+    let refused = settings.refused_implementers(&book, gateways, GatewayKeys::Unheld);
+    let usable: Vec<&AgentName> = (allowed.iter())
+        .map(|i| &i.name)
+        .filter(|name| !refused.iter().any(|(r, _)| r == *name))
+        .collect();
     let line = match settings.role_agents(&book) {
-        Ok(roles) => {
+        Err(e) => Line::missing(
+            subject,
+            e.to_string(),
+            "write or correct the agent file it names, or correct the setting",
+        ),
+        Ok(_) if allowed.is_empty() => Line::missing(
+            subject,
+            "no agent file whose role is `implementer` is one `agents.allow` holds",
+            "add an implementer to `agents.allow`, or write one with \
+             `shep kelpie agents new implementer`",
+        ),
+        Ok(_) if usable.is_empty() => Line::missing(
+            subject,
+            "every implementer `agents.allow` holds is left out of the agent board's ask",
+            "correct what each `implementer` line names",
+        ),
+        Ok(_) => {
             let described =
                 |name: &AgentName| book.get(name).is_some_and(|a| a.fit.description.is_some());
-            let bare: Vec<&AgentName> = (roles.implementers.iter())
-                .map(|i| &i.name)
+            let bare: Vec<&AgentName> = (usable.iter().copied())
                 .filter(|name| !described(name))
                 .collect();
             let mut fixes = Vec::new();
@@ -435,24 +463,48 @@ fn implementers(subject: String, settings: &Settings, paths: &ProjectPaths) -> (
                 fixes.push(format!("add a `description` key to {}", files.join(", ")));
             }
             if found.is_empty() {
+                let names: Vec<&str> = usable.iter().map(|name| name.as_str()).collect();
                 Line::ok(
                     subject,
-                    format!(
-                        "an issue with no `agent:` label runs on {}",
-                        roles.default_implementer.name
-                    ),
+                    format!("the agent board picks among {}", names.join(", ")),
                 )
             } else {
                 Line::unsure(subject, found.join("; "), fixes.join("; "))
             }
         }
-        Err(e) => Line::missing(
-            subject,
-            e.to_string(),
-            "write or correct the agent file it names, or correct `agents.implementers`",
-        ),
     };
     (book, line)
+}
+
+// A line for each implementer the agent board is never asked about, saying why.
+fn left_out(
+    at: &impl Fn(&str) -> String,
+    settings: &Settings,
+    book: &Agents,
+    gateways: &Gateways,
+) -> Vec<Line> {
+    let line = |(name, why): (AgentName, String)| {
+        Line::unsure(
+            at(&format!("implementer {name}")),
+            format!("{name} is left out: {why}"),
+            "correct what it names, or leave it out of `agents.allow`",
+        )
+    };
+    let refused = settings.refused_implementers(book, gateways, GatewayKeys::Unheld);
+    refused.into_iter().map(line).collect()
+}
+
+// The keys kelpie reads no longer that the project's table still holds, in one line.
+fn gone_keys(subject: String, settings: &Settings) -> Option<Line> {
+    let keys = settings.agents.gone_keys();
+    (!keys.is_empty()).then(|| {
+        let keys: Vec<String> = keys.iter().map(|key| format!("`{key}`")).collect();
+        Line::unsure(
+            subject,
+            format!("{} read by nothing now", keys.join(", ")),
+            "`shep kelpie upgrade` deletes them, as `shep kelpie settings migrate` does",
+        )
+    })
 }
 
 // Whether an implementer or a listed reviewer runs on an agent that spends
@@ -463,7 +515,6 @@ fn spends_codex(
     here: Here<'_>,
 ) -> bool {
     let codex = |limit: &Limit| *limit == Limit::Account(Account::Codex);
-    let roles = settings.role_agents(book).ok();
     let lineup = settings
         .lineup(book, gateways, here.home)
         .unwrap_or_default();
@@ -471,7 +522,7 @@ fn spends_codex(
         .iter()
         .filter_map(|r| r.runs.session())
         .any(|(_, limit)| codex(limit));
-    sessions || roles.is_some_and(|roles| roles.implementers.iter().any(|i| codex(&i.limit)))
+    sessions || (settings.allowed_implementers(book).iter()).any(|i| codex(&i.limit))
 }
 
 // Whether an implementer, another role agent or a reviewer runs on `harness`: one listed
@@ -503,10 +554,8 @@ fn spends_on(
         .chain(security.and_then(|a| a.runs.session()))
         .any(|(model, _)| on_it(model));
     reviewers
-        || roles.is_some_and(|roles| {
-            roles.implementers.iter().any(|i| on_it(&i.model))
-                || roles.pm.as_ref().is_some_and(|pm| on_it(&pm.model))
-        })
+        || roles.is_some_and(|roles| roles.pm.as_ref().is_some_and(|pm| on_it(&pm.model)))
+        || (settings.allowed_implementers(book).iter()).any(|i| on_it(&i.model))
 }
 
 // The checkout's line, and the repo on the forge where it is known: from

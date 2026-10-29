@@ -43,9 +43,9 @@ impl Drop for Served {
 fn served() -> Served {
     let (rig, runner, _) = Rig::parked_set("koji", |rig| {
         rig.edit_settings(|s| {
-            let listed = "\nimplementers = [\"sonnet-high\"]\n";
-            assert!(s.contains(listed), "the example's implementers moved");
-            s.replace(listed, "\nimplementers = [\"sonnet-high\"]\npm = \"pm\"\n")
+            let listed = "[app.dogs.kelpie.agents]\n";
+            assert!(s.contains(listed), "the example's agents table moved");
+            s.replace(listed, "[app.dogs.kelpie.agents]\npm = \"pm\"\n")
         });
     });
     let runner = Arc::new(runner);

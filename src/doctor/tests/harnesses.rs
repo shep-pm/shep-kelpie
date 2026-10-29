@@ -2,16 +2,10 @@ use super::*;
 
 #[tokio::test]
 async fn a_project_that_spends_codex_checks_codex_answers_its_usage() {
-    let scene = Scene::new().await;
     let codex = "---\nrole: implementer\nharness: stand-in\nmodel: gpt-5-codex\n\
                  effort: medium\nusage: codex\n---\n";
-    crate::test::write_in(&scene.kelpie_home.join("agents"), "codex.md", codex);
-    scene.runs("golbat", |t| {
-        t.insert(
-            "agents".into(),
-            json!({ "implementers": ["sonnet-high", "codex"] }),
-        );
-    });
+    let scene = Scene::leaving_out_on_koji("codex", codex).await;
+    scene.runs("golbat", |_| {});
     let report = scene.report().await;
     let found = ok(&report, "golbat: codex usage");
     assert_eq!(found, "reads Codex usage: 5-hour window 0%, week 0%");
@@ -45,15 +39,25 @@ const QWEN: &str = "---\nrole: implementer\nharness: pi\nmodel: qwen3.8:27b\neff
                     url: http://box:11434/v1\ncontext: 65536\n---\n";
 
 impl Scene {
-    /// Lists a pi agent for `golbat`, which `koji` does not run
-    fn runs_pi_on_golbat(&self) {
-        crate::test::write_in(&self.kelpie_home.join("agents"), "qwen.md", QWEN);
-        self.runs("golbat", |t| {
-            t.insert(
-                "agents".into(),
-                json!({ "implementers": ["sonnet-high", "qwen"] }),
-            );
-        });
+    /// A flock holding the agent file `text` as `name`, which `koji`'s `agents.allow` leaves out
+    async fn leaving_out_on_koji(name: &str, text: &str) -> Self {
+        Self::with_koji(|scene, t| {
+            let agents = scene.kelpie_home.join("agents");
+            crate::test::write_in(&agents, &format!("{name}.md"), text);
+            let book = crate::agents::Agents::load(&agents).unwrap();
+            let rest: Vec<&str> = (book.iter().map(|(n, _)| n.as_str()))
+                .filter(|n| *n != name)
+                .collect();
+            t["agents"]["allow"] = json!(rest);
+        })
+        .await
+    }
+
+    /// A flock whose `golbat` may run a pi agent, which `koji` does not run
+    async fn pi_on_golbat() -> Self {
+        let scene = Self::leaving_out_on_koji("qwen", QWEN).await;
+        scene.runs("golbat", |_| {});
+        scene
     }
 }
 
@@ -66,8 +70,7 @@ fn unsure(report: &Report, subject: &str) -> (String, String) {
 
 #[tokio::test]
 async fn a_project_with_a_pi_agent_gets_a_pi_line_that_is_ok_at_the_minimum_and_above() {
-    let mut scene = Scene::new().await;
-    scene.runs_pi_on_golbat();
+    let mut scene = Scene::pi_on_golbat().await;
     let report = scene.report().await;
     assert_eq!(
         ok(&report, "golbat: pi"),
@@ -85,8 +88,7 @@ async fn a_project_with_a_pi_agent_gets_a_pi_line_that_is_ok_at_the_minimum_and_
 
 #[tokio::test]
 async fn a_pi_older_than_the_minimum_is_missing_and_says_to_upgrade() {
-    let mut scene = Scene::new().await;
-    scene.runs_pi_on_golbat();
+    let mut scene = Scene::pi_on_golbat().await;
     scene.host.pi_version = Some(Ok("0.85.1"));
     let report = scene.report().await;
     let (what, fix) = missing(&report, "golbat: pi");
@@ -97,8 +99,7 @@ async fn a_pi_older_than_the_minimum_is_missing_and_says_to_upgrade() {
 
 #[tokio::test]
 async fn a_pi_off_the_path_is_missing_and_says_to_install() {
-    let mut scene = Scene::new().await;
-    scene.runs_pi_on_golbat();
+    let mut scene = Scene::pi_on_golbat().await;
     scene.host.off_path = vec!["pi"];
     let report = scene.report().await;
     let (what, fix) = missing(&report, "golbat: pi");
@@ -112,8 +113,7 @@ async fn a_pi_off_the_path_is_missing_and_says_to_install() {
 // downloads them, which the sandbox refuses. `docs/facts/tool-errors.md`.
 #[tokio::test]
 async fn a_pi_tool_off_the_path_is_missing_and_says_to_install() {
-    let mut scene = Scene::new().await;
-    scene.runs_pi_on_golbat();
+    let mut scene = Scene::pi_on_golbat().await;
     scene.host.off_path = vec!["rg"];
     let report = scene.report().await;
     let (what, fix) = missing(&report, "golbat: pi tools");
@@ -131,8 +131,7 @@ async fn a_pi_tool_off_the_path_is_missing_and_says_to_install() {
 
 #[tokio::test]
 async fn each_pi_tool_off_the_path_is_named_by_the_tool_it_breaks() {
-    let mut scene = Scene::new().await;
-    scene.runs_pi_on_golbat();
+    let mut scene = Scene::pi_on_golbat().await;
 
     scene.host.path = Some(vec!["pi", "rg"]);
     let (what, _) = missing(&scene.report().await, "golbat: pi tools");
@@ -155,8 +154,7 @@ async fn each_pi_tool_off_the_path_is_named_by_the_tool_it_breaks() {
 // told it is there when it is not.
 #[tokio::test]
 async fn the_ok_pi_tools_line_names_the_program_it_found_on_the_path() {
-    let mut scene = Scene::new().await;
-    scene.runs_pi_on_golbat();
+    let mut scene = Scene::pi_on_golbat().await;
 
     scene.host.path = Some(vec!["pi", "rg", "fd"]);
     assert_eq!(
@@ -173,9 +171,8 @@ async fn the_ok_pi_tools_line_names_the_program_it_found_on_the_path() {
 
 #[tokio::test]
 async fn a_project_with_no_pi_agent_gets_no_pi_tools_line() {
-    let mut scene = Scene::new().await;
+    let mut scene = Scene::pi_on_golbat().await;
     scene.host.off_path = vec!["rg", "fd"];
-    scene.runs_pi_on_golbat();
     let report = scene.report().await;
     assert!(!subjects(&report).contains(&"koji: pi tools"));
     assert!(subjects(&report).contains(&"golbat: pi tools"));
@@ -183,8 +180,7 @@ async fn a_project_with_no_pi_agent_gets_no_pi_tools_line() {
 
 #[tokio::test]
 async fn a_pi_whose_version_cannot_be_read_is_unsure_and_never_fails_the_run() {
-    let mut scene = Scene::new().await;
-    scene.runs_pi_on_golbat();
+    let mut scene = Scene::pi_on_golbat().await;
     let unreadable = [
         Err("pi --version did not answer in 10s"),
         Ok("1.0.4-beta.1"),
@@ -202,9 +198,8 @@ async fn a_pi_whose_version_cannot_be_read_is_unsure_and_never_fails_the_run() {
 
 #[tokio::test]
 async fn a_project_with_no_pi_agent_gets_no_pi_line() {
-    let mut scene = Scene::new().await;
+    let mut scene = Scene::pi_on_golbat().await;
     scene.host.off_path = vec!["pi"];
-    scene.runs_pi_on_golbat();
     let report = scene.report().await;
     assert!(!subjects(&report).contains(&"koji: pi"));
     assert!(subjects(&report).contains(&"golbat: pi"));

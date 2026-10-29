@@ -192,12 +192,12 @@ impl Rig {
         write_in(&self.paths().agents, &format!("{name}.md"), text);
     }
 
-    /// An implementer file on the Codex account, which the project does not list
-    /// until a test adds it to [`Self::implementers`]
+    /// An implementer file on the Codex account, which the agent board may pick
+    /// once a test writes it
     pub const CODEX_IMPLEMENTER: &str = "---\nrole: implementer\nharness: stand-in\n\
                                          model: gpt-5-codex\neffort: medium\nusage: codex\n---\n";
 
-    /// Writes the `codex` implementer file, which no project lists
+    /// Writes the `codex` implementer file
     pub fn write_codex_implementer(&self) {
         self.write_agent("codex", Self::CODEX_IMPLEMENTER);
     }
@@ -213,24 +213,6 @@ impl Rig {
             week_used_pct: used,
         });
         store.save(&state).unwrap();
-    }
-
-    /// Lists `names` as the project's implementers, read when a runner next opens
-    pub fn implementers(&self, names: &[&str]) {
-        let listed = format!("implementers = {names:?}");
-        self.edit_settings(|s| {
-            assert!(
-                s.contains("\nimplementers = "),
-                "the example's implementers moved"
-            );
-            let lines = s
-                .lines()
-                .map(|line| match line.starts_with("implementers = ") {
-                    true => listed.as_str(),
-                    false => line,
-                });
-            lines.map(|line| format!("{line}\n")).collect()
-        });
     }
 
     /// Lists `names` as the project's reviewers, read when a runner next opens

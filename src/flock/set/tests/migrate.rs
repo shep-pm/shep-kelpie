@@ -136,7 +136,9 @@ async fn the_panels_keys_are_deleted_and_named_and_the_table_loads() {
     let said = scene.migrate().await.unwrap();
 
     assert!(
-        said[1].contains("removed rulings.decide, rulings.full_panel_paths"),
+        said[1].contains(
+            "removed rulings.decide = \"panel\", rulings.full_panel_paths = [\"src/**\"]"
+        ),
         "{said:?}"
     );
     let table = scene.table();
@@ -158,7 +160,10 @@ async fn a_table_whose_map_is_whole_has_the_panels_key_deleted_alone() {
 
     let said = scene.migrate().await.unwrap();
 
-    assert_eq!(said[1], "project koji: removed rulings.decide", "{said:?}");
+    assert_eq!(
+        said[1], "project koji: removed rulings.decide = \"shadow\"",
+        "{said:?}"
+    );
     assert!(scene.table()["rulings"].get("decide").is_none());
 }
 
@@ -176,7 +181,8 @@ async fn the_panels_expert_keys_and_roles_are_deleted_and_named_and_the_table_lo
 
     assert!(
         said[1].contains(
-            "removed agents.advisor, agents.researcher, researcher, \
+            "removed agents.advisor = \"advisor\", agents.researcher = \"researcher\", \
+             researcher = { allowed_domains = [\"docs.rs\"] }, \
              advisor from repo_setup.roles, researcher from repo_setup.roles"
         ),
         "{said:?}"
@@ -189,26 +195,33 @@ async fn the_panels_expert_keys_and_roles_are_deleted_and_named_and_the_table_lo
 }
 
 #[tokio::test]
-async fn the_issue_writers_implementer_choice_is_deleted_and_order_is_left() {
-    let chosen = |value: &str| {
-        TABLE.replace(
-            "[agents]\n",
-            &format!("[agents]\nimplementer_choice = \"{value}\"\n"),
-        )
-    };
-    let scene = Scene::holding(&chosen("issue-writer")).await;
+async fn the_keys_the_agent_board_replaced_are_deleted_and_named_and_the_rest_is_kept() {
+    let old = TABLE.replace(
+        "[agents]\n",
+        "[agents]\nimplementers = [\"sonnet-high\", \"opus-high\"]\n\
+         implementer_choice = \"issue-writer\"\nfallback_after = 15\n",
+    );
+    let scene = Scene::holding_each(&old, TABLE).await;
 
     let said = scene.migrate().await.unwrap();
 
     assert!(
-        said[1].contains("removed agents.implementer_choice = \"issue-writer\""),
+        said[1].contains(
+            "removed agents.implementers = [\"sonnet-high\", \"opus-high\"], \
+             agents.implementer_choice = \"issue-writer\", agents.fallback_after = 15"
+        ),
         "{said:?}"
     );
-    assert!(scene.table()["agents"].get("implementer_choice").is_none());
-
-    let scene = Scene::holding(&chosen("order")).await;
-    scene.migrate().await.unwrap();
-    assert_eq!(scene.table()["agents"]["implementer_choice"], "order");
+    // Only the checkout and the repo tell the two projects apart.
+    let rest = |mut table: Map<String, Value>| {
+        table.remove("git");
+        table
+    };
+    assert_eq!(
+        rest(scene.table()),
+        rest(scene.table_of("eevee")),
+        "every other key is as it was"
+    );
 }
 
 #[tokio::test]
@@ -256,6 +269,9 @@ async fn the_issue_writers_agent_key_is_deleted_and_named_and_the_table_loads() 
 
     let said = scene.migrate().await.unwrap();
 
-    assert!(said[1].contains("removed agents.issue_writer"), "{said:?}");
+    assert!(
+        said[1].contains("removed agents.issue_writer = \"scribe\""),
+        "{said:?}"
+    );
     assert!(scene.table()["agents"].get("issue_writer").is_none());
 }

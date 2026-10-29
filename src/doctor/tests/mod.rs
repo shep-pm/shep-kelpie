@@ -108,6 +108,11 @@ struct Scene {
 
 impl Scene {
     async fn new() -> Self {
+        Self::with_koji(|_, _| {}).await
+    }
+
+    /// The flock as `new` makes it, `koji`'s table as `edit` changes it given the scene
+    async fn with_koji(edit: impl FnOnce(&Self, &mut Map<String, Value>)) -> Self {
         let shepherd = FakeShepherd::new();
         let forge = FakeForge::new(PathBuf::from("/nowhere"));
         forge.set_repo_labels(&[
@@ -147,7 +152,7 @@ impl Scene {
             &scene.kelpie_home.join("agents"),
             "harness: claude-code\nmodel: claude-opus-5-5\neffort: high\n",
         );
-        scene.runs("koji", |_| {});
+        scene.runs("koji", |t| edit(&scene, t));
         scene
     }
 
@@ -315,19 +320,14 @@ async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
     );
     assert_eq!(
         ok(&report, "golbat: implementers"),
-        "an issue with no `agent:` label runs on sonnet-high"
+        "the agent board picks among opus-high, sonnet-high"
     );
 }
 
 #[tokio::test]
 async fn a_listed_implementer_with_no_description_makes_its_line_unsure_naming_it() {
     let scene = Scene::new().await;
-    scene.runs("golbat", |t| {
-        t.insert(
-            "agents".into(),
-            json!({ "implementers": ["sonnet-high", "mine"] }),
-        );
-    });
+    scene.runs("golbat", |_| {});
     let agents = scene.kelpie_home.join("agents");
     let mine = "---\nrole: implementer\nharness: claude-code\nmodel: claude-opus-5-5\n\
                 effort: high\n---\n";
@@ -367,34 +367,22 @@ async fn an_md_file_named_for_no_agent_is_named_and_unsure() {
 }
 
 #[tokio::test]
-async fn an_agent_file_that_cannot_be_used_or_an_implementer_without_one_is_missing() {
+async fn an_allow_that_holds_no_implementer_file_makes_the_implementers_line_missing() {
     let scene = Scene::new().await;
     scene.runs("golbat", |t| {
-        t.insert("agents".into(), json!({ "implementers": ["fable"] }));
+        t["agents"]["allow"] = json!(["defect-hunter"]);
     });
     let (what, fix) = missing(&scene.report().await, "golbat: implementers");
-    assert!(
-        what.contains("names fable, which has no agent file"),
-        "{what}"
+    assert_eq!(
+        what,
+        "no agent file whose role is `implementer` is one `agents.allow` holds"
     );
-    assert!(fix.contains("write or correct the agent file"), "{fix}");
-
-    let agents = scene.kelpie_home.join("agents");
-    crate::test::write_in(&agents, "fable.md", "role: implementer\n");
-    let (what, fix) = missing(&scene.report().await, "golbat: implementers");
-    let file = agents.join("fable.md");
     assert!(
-        what.contains(&format!(
-            "names fable, whose agent file {}: ",
-            file.display()
-        )),
-        "{what}"
+        fix.contains("add an implementer to `agents.allow`"),
+        "{fix}"
     );
-    assert!(fix.contains("correct the agent file"), "{fix}");
 }
 
-// Shep lists a dog that is up and never named itself as silent, then gives
-// up on it, and a dog in either state holds no lease.
 #[tokio::test]
 async fn a_dog_that_never_named_itself_is_missing_and_told_its_fix() {
     let scene = Scene::new().await;
@@ -950,6 +938,7 @@ mod browser;
 mod e2e;
 mod github;
 mod harnesses;
+mod implementers;
 mod plugins;
 mod pm_decides;
 mod registries;
