@@ -1,10 +1,12 @@
 //! The review's reviewers, by name
 //!
-//! A project lists them in `agents.reviewers`, in the order the review runs
-//! them, each once, by agent files whose role is `reviewer`. A project that
-//! lists none runs `iq3-xxs-review` where kelpie's settings hold a gateway
-//! named `paddock`, then `defect-hunter-lite`. A review bot is listed the same way, by
-//! its file, and none is listed unless the project says so.
+//! `agents.reviewers` lists them, by agent files whose role is `reviewer`, and
+//! narrows a review pass's candidates. With none, every reviewer file
+//! `agents.allow` holds is a candidate but the one `contributions.security_reviewer`
+//! names. The agent board picks each round's reviewer, so order does not matter.
+//! A contribution's pass with no `contributions.reviewers` runs `agents.reviewers`,
+//! else `iq3-xxs-review` where a gateway is named `paddock`, then
+//! `defect-hunter-lite`.
 
 use std::path::Path;
 
@@ -57,16 +59,19 @@ impl ListedReviewer {
 }
 
 impl Settings {
-    /// The reviewers the project lists, in order, each once
+    /// The reviewers a pass may pick from
     ///
+    /// The names `agents.reviewers` lists when it is set, in order, each once.
+    /// Otherwise every agent file whose role is `reviewer` that `agents.allow`
+    /// holds and `gateways` can route, but the agent
+    /// `contributions.security_reviewer` names. Their order does not matter.
     /// Agents come from `agents`, and `~/` in a command expands against `home`.
-    /// A project that lists none gets the default lineup for `gateways`.
     ///
     /// # Errors
     ///
-    /// [`SettingsError::Invalid`] naming a reviewer that has no agent file,
-    /// whose file is an implementer's, that `agents.allow` leaves out, or a bot that reviews on ready listed
-    /// after another bot.
+    /// [`SettingsError::Invalid`] naming a reviewer `agents.reviewers` lists that
+    /// has no agent file, whose file is an implementer's, that `agents.allow` leaves
+    /// out, or a bot that reviews on ready listed after another bot.
     pub fn lineup(
         &self,
         agents: &Agents,
@@ -77,45 +82,52 @@ impl Settings {
         match &self.agents.reviewers {
             Some(names) => listed(names.clone(), agents, home, SETTING, allow),
             None => {
-                let names = default_reviewers(gateways);
-                let fix = "list other reviewers in `agents.reviewers`";
-                if let Some(refusal) = (names.iter()).find_map(|n| left_out(allow, n, SETTING, fix))
-                {
-                    return Err(SettingsError::Invalid {
-                        setting: "agents",
-                        reason: refusal,
-                    });
-                }
-                listed(names, agents, home, SETTING, allow)
+                let security = &self.contributions.security_reviewer;
+                let candidates = (agents.iter())
+                    .filter(|(name, agent)| {
+                        agent.role == Role::Reviewer
+                            && *name != security
+                            && allow.is_none_or(|allow| allow.holds(name))
+                            && gateways.check_listed_without_keys(agents, [*name]).is_ok()
+                    })
+                    .map(|(name, _)| name.clone());
+                each(candidates.collect(), agents, home, SETTING, allow)
             }
         }
     }
 
     /// The reviewers a contribution gets, in order, each once
     ///
-    /// The project's `agents.reviewers` when `contributions.reviewers` is
-    /// absent. Otherwise as [`Settings::lineup`], with its refusals naming
-    /// `contributions.reviewers`.
+    /// `contributions.reviewers` when set. Otherwise `agents.reviewers` when
+    /// set, else the default reviewers for `gateways`: a contribution's pass
+    /// runs them all, so it does not take every reviewer file.
     ///
     /// # Errors
     ///
-    /// As [`Settings::lineup`].
+    /// As [`Settings::lineup`], with a refusal of `contributions.reviewers`
+    /// naming it.
     pub fn contribution_lineup(
         &self,
         agents: &Agents,
         gateways: &Gateways,
         home: &Path,
     ) -> Result<Vec<ListedReviewer>, SettingsError> {
-        match &self.contributions.reviewers {
-            Some(names) => listed(
-                names.clone(),
-                agents,
-                home,
-                CONTRIBUTION_SETTING,
-                self.agents.allow.as_ref(),
-            ),
-            None => self.lineup(agents, gateways, home),
+        let allow = self.agents.allow.as_ref();
+        if let Some(names) = &self.contributions.reviewers {
+            return listed(names.clone(), agents, home, CONTRIBUTION_SETTING, allow);
         }
+        if let Some(names) = &self.agents.reviewers {
+            return listed(names.clone(), agents, home, SETTING, allow);
+        }
+        let names = default_reviewers(gateways);
+        let fix = "list other reviewers in `agents.reviewers`";
+        if let Some(refusal) = (names.iter()).find_map(|n| left_out(allow, n, SETTING, fix)) {
+            return Err(SettingsError::Invalid {
+                setting: "agents",
+                reason: refusal,
+            });
+        }
+        listed(names, agents, home, SETTING, allow)
     }
 
     /// The agent that reads a contribution for security
@@ -149,8 +161,22 @@ impl Settings {
     }
 }
 
-// The reviewers `names` lists, each once, as `setting` names the list.
+// The reviewers `names` lists, each once, as `setting` names the list. A
+// bot that reviews on ready must come before another bot.
 fn listed(
+    names: Vec<AgentName>,
+    agents: &Agents,
+    home: &Path,
+    setting: &'static str,
+    allow: Option<&Allow>,
+) -> Result<Vec<ListedReviewer>, SettingsError> {
+    let lineup = each(names, agents, home, setting, allow)?;
+    on_ready_first(&lineup, setting)?;
+    Ok(lineup)
+}
+
+// The reviewers `names` lists, each once, in any order.
+fn each(
     names: Vec<AgentName>,
     agents: &Agents,
     home: &Path,
@@ -177,7 +203,6 @@ fn listed(
             second_look: agent.second_look,
         });
     }
-    on_ready_first(&lineup, setting)?;
     Ok(lineup)
 }
 

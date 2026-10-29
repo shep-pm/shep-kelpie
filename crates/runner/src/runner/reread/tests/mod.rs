@@ -287,7 +287,9 @@ fn agents_naming_a_gateway_added_with_them_wait_with_it_for_the_next_start() {
     let line = runner.reread(rig.settings(), rig.kelpie_settings());
     assert_eq!(
         line.unwrap().as_deref(),
-        Some("settings changed; gateways and agents from the runner's next start")
+        Some(
+            "settings changed: reviews now in effect; gateways and agents from the runner's next start"
+        )
     );
     assert_eq!(
         runner.settings().agents.reviewers.as_ref().map(Vec::len),

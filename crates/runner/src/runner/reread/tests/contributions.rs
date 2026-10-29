@@ -167,6 +167,8 @@ fn reviewers_on_a_gateway_added_with_them_wait_with_the_agents() {
 
     assert_eq!(
         line.as_deref(),
-        Some("settings changed; gateways and agents from the runner's next start")
+        Some(
+            "settings changed: reviews now in effect; gateways and agents from the runner's next start"
+        )
     );
 }

@@ -16,7 +16,7 @@ const PI: &str = "---\nrole: implementer\nharness: pi\nmodel: qwen3.8:27b\neffor
 // Settings that run issue 7 on pi
 fn on_pi(rig: &Rig) {
     rig.write_agent("pi-box", PI);
-    rig.agent_board.ranks(&["pi-box"]);
+    rig.agent_board.ranks_first(&["pi-box"]);
 }
 
 const GOOSE: &str = "---\nrole: implementer\nharness: goose\nmodel: qwen3.8:27b\neffort: low\n\
@@ -25,7 +25,7 @@ const GOOSE: &str = "---\nrole: implementer\nharness: goose\nmodel: qwen3.8:27b\
 // Settings that run issue 7 on goose
 fn on_goose(rig: &Rig) {
     rig.write_agent("goose-box", GOOSE);
-    rig.agent_board.ranks(&["goose-box"]);
+    rig.agent_board.ranks_first(&["goose-box"]);
 }
 
 const CODEX: &str =
@@ -34,7 +34,7 @@ const CODEX: &str =
 // Settings that run issue 7 on Codex
 fn on_codex(rig: &Rig) {
     rig.write_agent("gpt", CODEX);
-    rig.agent_board.ranks(&["gpt"]);
+    rig.agent_board.ranks_first(&["gpt"]);
 }
 
 // A process that lives until dropped, standing in for `shep kelpie attach`
