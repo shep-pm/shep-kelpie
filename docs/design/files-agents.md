@@ -13,6 +13,7 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | skills.md | step skills, copies, wording skill | `core/skills/*.rs` |
 | plugins.md | repo plugins: sources, copies, loading, MCP | `core/skills/repo/`, `adapters/{skills,claude/mcp,pi/skills,codex/skills,goose/skills}.rs` |
 | fence.md | sandbox, guard, hooks | `core/{profile,guard,hooks}/` |
+| fence-git.md | a worker's git: worktree, clone | `core/profile/`, `adapters/harness/policy.rs` |
 | fence-reads.md | reads | `core/dep_sources.rs`, `adapters/harness/`, `runner/turn/` |
 | fence-reach.md | hosts | `core/package_managers/` |
 | browser.md | a worker's browser: bridge, filter, tools | `core/{bridge,browse,settings/browser}.rs`, `adapters/bridge/`, `runner/browser.rs`, `process/tools/` |
