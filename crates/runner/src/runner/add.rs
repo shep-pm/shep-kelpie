@@ -3,11 +3,15 @@
 use std::fmt;
 
 use super::Runner;
+use super::briefing::passed_over;
 use super::pace::{Started, Walked};
 use super::pm::Picked;
 use super::trigger::issue_list;
 use crate::board::check::label_kind;
-use crate::board::{LabelError, agent_label, old_worker_label, pinned};
+use crate::board::{
+    self, LabelError, OpenPullRequest, READY, ReadyIssue, Skip, agent_label, old_worker_label,
+    pinned,
+};
 use crate::lease::door::{Pick, PickAsk};
 use crate::pacer::Scope;
 use crate::ports::{ForgeError, Issue};
@@ -27,6 +31,11 @@ pub enum AddError {
     Forge(ForgeError),
     /// The issue is closed
     Closed(TicketId),
+    /// The issue is open but carries no `ready-for-agent`, so the board would pass it over
+    NotReady(TicketId),
+    /// A queued one: the board would pass it over for a reason of its own, so no slot
+    /// would open for it
+    PassedOver(TicketId, Skip),
     /// The issue's `agent:` label cannot be used
     Label(LabelError),
     /// The agent board named no agent to open it on
@@ -37,6 +46,25 @@ pub enum AddError {
     Session(String),
     /// The work item could not be saved
     State(StateError),
+}
+
+/// What an `add` did with the ticket it was asked for
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Added {
+    /// A work item opened for it at once, on the implementer it runs on
+    Opened(AgentName),
+    /// No slot was free and the issue was one kelpie dropped: it waits for the next
+    /// free slot, which the board takes it into by priority
+    Queued,
+}
+
+/// Where a new `add` may take `ticket`: a free slot, or the queue for the next one
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Room {
+    /// A slot under `concurrency.active_items` is free
+    Opens,
+    /// None is free, and `ticket` is in `dropped`, so it waits for the next one
+    Queues,
 }
 
 /// Why the agent board named no agent for a new work item
@@ -114,6 +142,17 @@ impl fmt::Display for AddError {
             }
             Self::Forge(e) => write!(f, "cannot read the issue: {e}"),
             Self::Closed(ticket) => write!(f, "{} is closed", ticket.shown()),
+            Self::NotReady(ticket) => write!(
+                f,
+                "{} is not labelled {READY}, so the board would not take it",
+                ticket.shown()
+            ),
+            Self::PassedOver(ticket, skip) => write!(
+                f,
+                "the board would pass {} over: {}",
+                ticket.shown(),
+                passed_over(skip, &|text| text).0
+            ),
             Self::Label(e) => e.fmt(f),
             Self::Unpicked(e) => e.fmt(f),
             Self::Finishing => f.write_str(
@@ -129,18 +168,145 @@ impl fmt::Display for AddError {
 impl core::error::Error for AddError {}
 
 impl Runner {
-    /// Opens a work item for `ticket`, and returns the implementer its
-    /// worker runs on. Its first turn runs on a later pass.
+    /// Takes `ticket` back into kelpie's work: at once as [`Added::Opened`], on the
+    /// implementer its worker runs on, or, with no slot free and the issue one kelpie
+    /// dropped, as [`Added::Queued`] for the board to take by priority when one frees.
     ///
     /// # Errors
     ///
     /// [`AddError`] when the runner is finishing, the project has
-    /// `concurrency.active_items` working or one for this issue open
-    /// already, the issue cannot be read or is closed, or its `agent:` label names no
-    /// implementer kelpie has an agent file for, the agent board names no
-    /// implementer, or the change cannot be saved. Nothing changes then.
-    pub fn add(&mut self, ticket: TicketId) -> Result<AgentName, AddError> {
-        self.add_picked(ticket, None, None)
+    /// `concurrency.active_items` working or one for this issue open already with the
+    /// issue no dropped one, the issue cannot be read or is closed, or its `agent:`
+    /// label names no implementer kelpie has an agent file for, the agent board names
+    /// no implementer, or the change cannot be saved. A queued one is refused too where
+    /// its issue carries no `ready-for-agent`, or the board would pass it over for a
+    /// reason of its own and so would take no slot for it. Nothing changes then.
+    pub fn add(&mut self, ticket: TicketId) -> Result<Added, AddError> {
+        match self.add_room(ticket)? {
+            Room::Opens => self.add_picked(ticket, None, None).map(Added::Opened),
+            Room::Queues => {
+                self.looks.poll_reset();
+                let found =
+                    (self.ports.tickets.issue(&self.remote, ticket)).map_err(AddError::Forge)?;
+                let (listed, open) = self.ask_board()?;
+                self.add_read(ticket, found, listed, open)
+            }
+        }
+    }
+
+    // What an `add` of `ticket` may do now, before its issue is read: open a work item
+    // in a free slot, or queue a dropped issue for the next one. A ticket that is no
+    // dropped one is refused exactly as before.
+    pub(super) fn add_room(&self, ticket: TicketId) -> Result<Room, AddError> {
+        if !self.picks() {
+            return Err(AddError::Finishing);
+        }
+        if self.state.item(ticket).is_some() {
+            return Err(AddError::InFlight(vec![ticket]));
+        }
+        if self.slot_free() {
+            return Ok(Room::Opens);
+        }
+        if self.is_dropped(ticket) {
+            return Ok(Room::Queues);
+        }
+        Err(AddError::InFlight(self.slot_issues()))
+    }
+
+    // Applies an `add` of `ticket` on `found`, its issue as read, on `listed` and `open`,
+    // what the board was asked with: a work item in a free slot, or `ticket` queued for
+    // the next one. The guards are checked again, since the runner may have moved while
+    // the issue was read.
+    pub(super) fn add_read(
+        &mut self,
+        ticket: TicketId,
+        found: Issue,
+        listed: Vec<ReadyIssue>,
+        open: Vec<OpenPullRequest>,
+    ) -> Result<Added, AddError> {
+        match self.add_room(ticket)? {
+            Room::Opens => self.add_found(ticket, found, None, None).map(Added::Opened),
+            Room::Queues => self
+                .add_queued(ticket, &found, &listed, &open)
+                .map(|()| Added::Queued),
+        }
+    }
+
+    // What the board is asked with, read where the verb reads: the ready issues, which
+    // show who is assigned, what each is blocked by and how many sub-issues it has, and
+    // the open pull requests. A queued `add` reads them with the lock let go, in
+    // `queued::ask_board_off_lock`.
+    pub(super) fn ask_board(&self) -> Result<(Vec<ReadyIssue>, Vec<OpenPullRequest>), AddError> {
+        let listed = (self.ports.tickets.ready_issues(&self.remote)).map_err(AddError::Forge)?;
+        Ok((listed, self.open_listed().map_err(AddError::Forge)?))
+    }
+
+    // Takes `ticket`, whose issue `found` shows, out of `dropped` so the board can pick
+    // it again, and says so once. No work item opens: the board takes it by priority when
+    // a slot frees, so one the board would pass over is refused first. `trim_dropped`
+    // rebuilds `dropped_text` from what it keeps, so the ticket's digest goes with it.
+    fn add_queued(
+        &mut self,
+        ticket: TicketId,
+        found: &Issue,
+        listed: &[ReadyIssue],
+        open: &[OpenPullRequest],
+    ) -> Result<(), AddError> {
+        if !found.open {
+            return Err(AddError::Closed(ticket));
+        }
+        (agent_label(&found.labels, &self.implementer_files())).map_err(AddError::Label)?;
+        if !found.labels.iter().any(|l| l == READY) {
+            return Err(AddError::NotReady(ticket));
+        }
+        self.board_takes(ticket, listed, open)?;
+        let mut next = self.state.clone();
+        next.dropped.retain(|t| *t != ticket);
+        self.save(next).map_err(AddError::State)?;
+        // The skip is cleared here, so the next pass logs no second `skip-cleared`.
+        self.skipped
+            .retain(|skip| !matches!(skip, Skip::Dropped { issue } if *issue == ticket));
+        self.notes.push(format!(
+            "{} skip-cleared by add: no slot is free, so the board takes it by priority \
+             when one frees",
+            ticket.shown()
+        ));
+        Ok(())
+    }
+
+    // Whether the board would take `ticket` into a free slot, which is what a queued add
+    // promises. `dropped` is read without `ticket`, whose own skip this add clears, and
+    // the order is left out, which only sorts one issue against the others.
+    fn board_takes(
+        &self,
+        ticket: TicketId,
+        listed: &[ReadyIssue],
+        open: &[OpenPullRequest],
+    ) -> Result<(), AddError> {
+        let Some(one) = listed.iter().find(|i| i.ticket == ticket) else {
+            return Err(AddError::NotReady(ticket));
+        };
+        let dropped: Vec<TicketId> = (self.state.dropped.iter())
+            .filter(|t| **t != ticket)
+            .copied()
+            .collect();
+        let pick = board::pick(
+            std::slice::from_ref(one),
+            open,
+            &self.state.finished,
+            &dropped,
+            &self.implementer_files(),
+            &[],
+        );
+        match pick.skipped.into_iter().next() {
+            Some(skip) => Err(AddError::PassedOver(ticket, skip)),
+            None => Ok(()),
+        }
+    }
+
+    // Whether `ticket` is one the board is leaving be
+    fn is_dropped(&self, ticket: TicketId) -> bool {
+        self.state.dropped.contains(&ticket)
     }
 
     // `add`, on what `picked`, the project manager's pick of `ticket`, says,
