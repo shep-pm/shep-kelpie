@@ -223,7 +223,7 @@ shep kelpie rule          # lists the rulings waiting
 shep kelpie rule 427 yes  # the number of the ruling's pull request, or its issue before there is one
 ```
 
-[Rulings](docs/guide/rulings.md#rulings) has the six kinds and every way to answer one, including a reply on GitHub or in an ntfy topic.
+[Rulings](docs/guide/rulings.md#rulings) has the seven kinds and every way to answer one, including a reply on GitHub or in an ntfy topic.
 
 ### 10. Pause, and find the log
 
@@ -253,7 +253,7 @@ One page for each topic, indexed in [docs/guide/README.md](docs/guide/README.md)
 - [CI and the merge](docs/guide/ci-and-merge.md): red runs, the merge gate and what `auto` does
 - [Agents](docs/guide/agents.md): agent files, gateways, pi and Codex
 - [Attaching to a worker](docs/guide/attach.md): steering a work item's worker by hand
-- [Rulings](docs/guide/rulings.md): the six kinds, how to answer them, and answers from GitHub and ntfy
+- [Rulings](docs/guide/rulings.md): the seven kinds, how to answer them, and answers from GitHub and ntfy
 - [The GitHub App](docs/guide/github-app.md): registering kelpie's App, what a worker's token can do, and the tools and login token
 - [Upgrading](docs/guide/upgrading.md): moving the dog and the runners onto a new build
 - [What shep does for it](docs/guide/shep.md): supervision, lambs, triggers, settings and logs

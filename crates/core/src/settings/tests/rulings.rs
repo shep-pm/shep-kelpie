@@ -119,7 +119,8 @@ fn after(kind: RulingName) -> Option<RulingName> {
     match kind {
         Merge => Some(Question),
         Question => Some(AgentFiles),
-        AgentFiles => Some(ForeignChange),
+        AgentFiles => Some(AgentFit),
+        AgentFit => Some(ForeignChange),
         ForeignChange => Some(FollowUp),
         FollowUp => Some(Rebase),
         Rebase => Some(StillRed),
@@ -140,6 +141,21 @@ fn after(kind: RulingName) -> Option<RulingName> {
         ContributionMerge => Some(LocalModelSpilled),
         LocalModelSpilled => None,
     }
+}
+
+// `agent-fit` suggests a change to an agent file, which only the maintainer
+// writes, so its kind starts the maintainer's own.
+#[test]
+fn agent_fit_starts_false_in_the_map() {
+    assert_eq!(RulingName::AgentFit.pm_default(), Some(false));
+    assert_eq!(RulingName::AgentFit.as_str(), "agent-fit");
+    let map = rulings("pm_decides = { agent-fit = true }");
+    assert!(map.pm_decides(RulingName::AgentFit), "the map may give it");
+    assert_eq!(map.refusal(), None, "the project manager may answer it");
+    assert!(
+        !rulings("").pm_decides(RulingName::AgentFit),
+        "an empty map"
+    );
 }
 
 #[test]

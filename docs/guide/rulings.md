@@ -1,6 +1,6 @@
 # Rulings
 
-A ruling is a decision only you make. The worker waiting on one is parked, and the rest of the project goes on: a parked work item gives its slot up, so the board can open another (see [The board](board.md#the-board)). It is one of six kinds:
+A ruling is a decision only you make. The worker waiting on one is parked, and the rest of the project goes on: a parked work item gives its slot up, so the board can open another (see [The board](board.md#the-board)). It is one of seven kinds:
 
 - `merge`: CI is green, and a yes merges the pull request. A `no <note>` sends the worker your note, and its fix goes to CI and back to you with no new pass of the review; a `rework <note>` sends your note for a change the whole review reads again. On a merge ruling that warns of open review bot threads, a pass no reviewer read or a head nothing vouches for, `no` starts a new pass too, since only a pass clears that, and the question says so. The merge ruling after a `no` fix, after the fix for a review bot's late review (see [Review bots](review.md#review-bots)), or after the fix for a person's comment (see [Comments from people](review.md#comments-from-people)), says its head is that fix and that no reviewer read it, and comes back to you even under `auto`. Open review bot nits are named on their own and hold nothing. On someone else's pull request the merge ruling is always yours, `auto` included, offers yes and no only, and a `no <note>` goes to the contributor (see [Contributions](contributions.md))
 - `question`: the worker asks, and your answer is its next turn. A worker that has made commits pushes the branch and opens its draft pull request before it asks, so the question is on the pull request next to the work it is about. A worker with nothing to push asks on the issue
@@ -8,6 +8,7 @@ A ruling is a decision only you make. The worker waiting on one is parked, and t
 - `agent-files`: the pull request changes agents' own files, and a yes accepts them
 - `foreign-change`: someone else changed the pull request, and a yes accepts the change
 - `follow-up`: a merged pull request left findings unfixed, and a yes files them as issues
+- `agent-fit`: the agent board reads the agent that finished an item as clearly worse at its kind of work than another agent that takes that kind. It is raised on that item's pull request once the item has finished, so no work item is parked on it. Its card shows both records side by side and the `kinds` line the board suggests. A yes and a no both change no file: kelpie never writes an agent's `kinds`, so that line is yours to write into `agents/<name>.md` if you want it. The board reads the pair again once the worse agent finishes 10 more items of that kind
 
 A ruling shows in the runner's log, in `shep kelpie status` and in `shep kelpie rule`, and posts to the webhook when kelpie's `[kelpie.webhook]` is set (see [The webhook](#the-webhook)). The pull request gets a comment for every ruling but a merge. Answer it from the terminal:
 
@@ -58,7 +59,7 @@ Nine ready issues are held behind #495.
 
 You answer it in the thread, from the comment itself or a reply:
 
-- A ruling that takes a yes or a no (`stuck`, `agent-files`, `foreign-change`, `follow-up`) takes your 👍 or 👎 on its comment. A merge ruling takes them too, as A and B.
+- A ruling that takes a yes or a no (`stuck`, `agent-files`, `foreign-change`, `follow-up`, `agent-fit`) takes your 👍 or 👎 on its comment. A merge ruling takes them too, as A and B.
 - A merge ruling, and a worker's question that lists options, list them as task-list boxes. Tick one. A worker's question becomes the table from the options it lists, plus an `Other` row for a reply.
 - A 👎, or a ticked `Send back` or `Rework`, carries no note, so the worker is told you gave none. Reply `14 no <note>` to send one.
 - A tick counts only when every edit of the comment was by you or by the App that wrote it, which GraphQL's `userContentEdits` says. Anyone with write access can edit a comment, so one edit by someone else leaves the boxes dead and your 👍 or 👎 or a reply answers instead. A 👍 with a 👎 from you, or two ticked boxes, answers nothing.
@@ -74,7 +75,7 @@ With a project manager, it may answer a `stuck` ruling for you with a retry, or 
 
 ## Rulings the project manager answers
 
-`rulings.pm_decides` maps each kind of ruling to who answers it: `true` for the project manager, or `false` for you. Operational kinds, whose answer turns on facts it reads from the board, start `true`; `question`, `agent-files` and `foreign-change` start `false`. A kind the map leaves out is yours:
+`rulings.pm_decides` maps each kind of ruling to who answers it: `true` for the project manager, or `false` for you. Operational kinds, whose answer turns on facts it reads from the board, start `true`; `question`, `agent-files`, `agent-fit` and `foreign-change` start `false`. A kind the map leaves out is yours:
 
 ```toml
 [app.dogs.kelpie.rulings.pm_decides]
@@ -90,7 +91,7 @@ A ruling of a `true` kind that lists two options or more, on a project that name
 
 The ruling comes to you instead, with the project manager's pick and why on its card, when it flags `design`, when it is a merge on a project under `git.merging = "ask"`, and when its pick is one only you can carry out (`Ask the maintainer`, or an option that begins `You`). A wake that gives no answer, or fails, posts the ruling to you as it stands. Every other ruling comes to you at once, with no pick unless you ask for one (see [Asking the project manager](#asking-the-project-manager)), and so do these, whatever their kind: a question and a follow-up, which wake the project manager on their own (see [The project manager](board.md#the-project-manager)); a contribution's ruling; a turn kelpie could not set up, whose fix is on this machine; a ruling raised while the runner drains; and a turn that fails again the way one the project manager already answered on the same work item did, since its answer did not fix it.
 
-The kinds are `question`, `agent-files`, `foreign-change`, `follow-up`, `rebase`, `still-red`, `check-queued`, `no-checks`, `merge-refused`, `closed`, `fix-not-pushed`, `test-still-fails`, `unpushed`, `push-refused`, `turn-timeout`, `turn-failed`, `adopt-failed` and `over-budget`. `merge`, `contribution-merge`, `security` and `local-model-spilled` set `true` are refused: the runner does not start, naming `rulings.pm_decides` (or `rulings.pm_alone` for the old list), and a change that sets one while the runner runs is refused too, keeping the settings it has.
+The kinds are `question`, `agent-files`, `agent-fit`, `foreign-change`, `follow-up`, `rebase`, `still-red`, `check-queued`, `no-checks`, `merge-refused`, `closed`, `fix-not-pushed`, `test-still-fails`, `unpushed`, `push-refused`, `turn-timeout`, `turn-failed`, `adopt-failed` and `over-budget`. `merge`, `contribution-merge`, `security` and `local-model-spilled` set `true` are refused: the runner does not start, naming `rulings.pm_decides` (or `rulings.pm_alone` for the old list), and a change that sets one while the runner runs is refused too, keeping the settings it has.
 
 `shep kelpie add` writes every kind into a new project's map, and `shep kelpie upgrade` runs `shep kelpie settings migrate`, which writes each kind a project's map is missing at its default and never changes one it has. That is every kind, not only those a list named: the operational kinds go in `true`, so the project manager answers them unless you set them `false`. A kind you delete from the map is written again at its default on the next run; set it `false` instead. `doctor` names a project whose map is missing kinds. The old `rulings.pm_alone` list still loads for one release, as `true` for each kind it names, and the migration turns it into the map. Setting both is refused. The migration also deletes `rulings.decide`, `rulings.full_panel_paths`, `agents.advisor`, `agents.researcher`, the `researcher` table and `advisor` and `researcher` in `repo_setup.roles`, the settings of the ruling panel that voted on rulings before the project manager answered them, which the runner refuses by name.
 

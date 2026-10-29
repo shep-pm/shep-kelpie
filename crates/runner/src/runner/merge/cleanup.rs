@@ -118,7 +118,7 @@ impl Runner {
         next.dropped_text.remove(&item.issue);
         next.record_finished(record);
         self.save(next)?;
-        self.ledger.append(&crate::usage::Line::Finished(line));
+        self.append_finished(line);
         if let Some(text) = friction {
             self.journal_at(now, Entry::Friction { issue, text });
         }

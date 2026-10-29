@@ -35,6 +35,7 @@ use crate::work_item::{ReviewCallState, Seat, WorkItem};
 
 mod add;
 mod adopt;
+mod agent_fit;
 #[cfg(test)]
 mod agents_tests;
 mod alert;

@@ -31,7 +31,7 @@ pub use notices::{MainNotice, MergeNotice, Notice};
 pub use projects::Projects;
 pub use red::{Handled, RedWorkflow};
 pub use removed::OldWorker;
-pub use ruling::{PmAsked, Ruling};
+pub use ruling::{AgentFit, AgentMeasure, PmAsked, Ruling};
 pub use triage::{
     TRIAGE_CALLS_KEPT, TRIAGED_KEPT, TriageAsked, TriageHeld, TriageLocal, TriageQuestions,
     TriageState, TriageStep, Triaged,
@@ -55,7 +55,7 @@ use crate::work_item::{Attached, Known, Phase, Priced, Review, Seconds, Tally, T
 pub const STATE_FILE: &str = "state.json";
 
 /// The state file's format version, bumped when the file gains a field or value an older kelpie refuses
-pub const VERSION: u32 = 92;
+pub const VERSION: u32 = 93;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -534,6 +534,11 @@ pub enum RulingKind {
     /// parks no work item, and it is never posted on the contributor's pull
     /// request nor put to the project manager.
     Contribution(Held),
+    /// The agent board reads the agent that finished an item as clearly worse
+    /// at its kind than another agent that takes it. It parks no work item, and
+    /// neither answer changes a file: the `kinds` it suggests are for the
+    /// maintainer to write into the agent file.
+    AgentFit(AgentFit),
 }
 
 /// Why a work item is stuck, saved in its ruling's kind as `reason`
