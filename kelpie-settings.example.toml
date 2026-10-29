@@ -103,8 +103,8 @@ url = "https://ntfy.sh/your-private-topic"
 # `reviews.need`, once per reviewer, ending sooner when no candidate can run.
 # The count is a project setting, in its Flockfile, not this file:
 #
-# [app.dogs.kelpie.reviews]
-# need = 2
+#   [app.dogs.kelpie.reviews]
+#   need = 2
 #
 # An issue's `agent:<name>!` label
 # runs it on the implementer it names. The
