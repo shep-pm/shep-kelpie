@@ -463,12 +463,7 @@ mod tests {
             .with_install(WindowsInstall {
                 provisioned: false,
                 setup_installed: None,
-                setup_expected: 1,
-                loopback_open: false,
-                seclogon_runs: true,
-                desktop_session: true,
-                profile_exclusions: Default::default(),
-                profile_read_env: Vec::new(),
+                ..WindowsInstall::provisioned(false)
             });
         let settings = dir.path().join("call.srt.json");
         let err = srt
@@ -769,11 +764,7 @@ mod tests {
                 provisioned: false,
                 setup_installed: Some(3),
                 setup_expected: 4,
-                loopback_open: false,
-                seclogon_runs: true,
-                desktop_session: true,
-                profile_exclusions: Default::default(),
-                profile_read_env: Vec::new(),
+                ..WindowsInstall::provisioned(false)
             });
         let err = outdated.clone().check().unwrap_err();
         assert!(matches!(err, SandboxError::Install(_)), "{err:?}");

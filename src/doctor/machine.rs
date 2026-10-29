@@ -292,7 +292,8 @@ pub(super) fn sandbox(host: &dyn Host, listen: bool) -> Line {
 
 // The Windows line, naming each state of the crabpot install that stops a
 // worker: no install or another setup version, the Secondary Logon service
-// off, session 0, and a closed fence a listening policy cannot run on.
+// off, session 0, a runner the sandbox user cannot read, and a closed fence
+// a listening policy cannot run on.
 fn windows_sandbox(host: &dyn Host, listen: bool) -> Line {
     // Opening loopback is the widening it is: a sandboxed worker reaches every
     // service on the machine's own address (`docs/facts/the-second-harness.md`).
@@ -338,6 +339,26 @@ fn windows_sandbox(host: &dyn Host, listen: bool) -> Line {
             "sandbox",
             "kelpie runs in session 0, the services' session, where crabpot refuses to start a sandbox",
             "run kelpie in the desktop session",
+        );
+    }
+    // The name is the one crabpot checked: it reads the access list of
+    // `current_exe`, which is the exe a session runs as its runner.
+    if status.runner_readable == Some(false) {
+        let exe = std::env::current_exe()
+            .map(|exe| exe.display().to_string())
+            .unwrap_or_else(|_| "<kelpie's own exe>".to_owned());
+        return Line::missing(
+            "sandbox",
+            format!(
+                "the sandbox user cannot read kelpie at `{exe}`, which it runs as every \
+                 worker's runner, so no worker starts; a `cargo install` moves the new exe in \
+                 from `%TEMP%`, so it keeps that folder's access list and inherits nothing \
+                 from the folder it lands in",
+            ),
+            format!(
+                "run `icacls \"{exe}\" /reset`, which drops the list the exe carried in and \
+                 re-applies the entries its own folder passes down",
+            ),
         );
     }
     if listen && !status.loopback_open {

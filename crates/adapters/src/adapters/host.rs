@@ -84,7 +84,8 @@ pub const fn sandbox_needs(os: &str) -> &'static [&'static str] {
 
 /// What a Windows machine's crabpot install says about itself, as far as
 /// kelpie reads it: the sandbox user, the setup version, the fence's loopback
-/// mode, the Secondary Logon service and the session this process runs in.
+/// mode, the Secondary Logon service, the session this process runs in, and
+/// whether that user can read this binary.
 ///
 /// The real one is read from `crabpot::windows_status`, which runs this
 /// binary again as srt-win for its queries. None of them needs elevation.
@@ -116,6 +117,10 @@ pub struct WindowsInstall {
     /// grant reaches, each with its value, which nothing sets on a sandboxed
     /// command but the host: empty when there is no current grant.
     pub profile_read_env: Vec<(String, String)>,
+    /// Whether the sandbox user can read this binary, which it runs as every
+    /// worker's runner: the check a crabpot start makes before it grants
+    /// anything. None when the machine could not make it, which refuses nothing.
+    pub runner_readable: Option<bool>,
 }
 
 impl WindowsInstall {
@@ -131,6 +136,7 @@ impl WindowsInstall {
             desktop_session: true,
             profile_exclusions: ProfileExclusions::default(),
             profile_read_env: Vec::new(),
+            runner_readable: Some(true),
         }
     }
 
@@ -215,6 +221,7 @@ pub fn read_windows_status() -> Result<WindowsInstall, String> {
             desktop_session: status.in_desktop_session,
             profile_exclusions: status.profile_exclusions,
             profile_read_env: status.profile_read_env,
+            runner_readable: status.runner_readable,
         })
         .map_err(|e| e.to_string())
 }
