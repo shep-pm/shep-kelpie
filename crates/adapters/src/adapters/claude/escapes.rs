@@ -23,9 +23,27 @@ impl World {
     fn new() -> Self {
         let dir = crate::test::short_tempdir();
         let root = dir.path().canonicalize().unwrap();
-        for folder in ["home", "wt/src", "build", "worker", "outside", "repo/.git"] {
+        for folder in [
+            "home",
+            "wt/src",
+            "build",
+            "worker",
+            "outside",
+            "repo/.git",
+            "wt.git/hooks",
+            "wt.git/info",
+            "wt.git/objects/info",
+            "wt.git/refs/heads",
+        ] {
             std::fs::create_dir_all(root.join(folder)).unwrap();
         }
+        // What a clone's git dir holds that git runs code from or borrows through.
+        std::fs::write(root.join("wt.git/config"), "[core]\n").unwrap();
+        std::fs::write(
+            root.join("wt.git/objects/info/alternates"),
+            "../../../repo/.git/objects\n",
+        )
+        .unwrap();
         Self { _dir: dir, root }
     }
 
@@ -41,7 +59,7 @@ impl World {
             build: &build,
             home: &home,
             git_common_dir: &git,
-            git_dir: &git.join("worktrees/7"),
+            git_dir: &self.path("wt.git"),
             branch: "kelpie/7",
             base: "main",
             kelpie_pushes: false,
@@ -147,6 +165,52 @@ fn the_worktree_the_build_folder_and_the_transcripts_are_written_and_nothing_out
     ));
     assert!(
         !memory.join("MEMORY.md").exists(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+// A clone's git dir is the worker's, less what runs code outside the sandbox
+// and what lends it another repo's objects.
+#[test]
+#[ignore = "runs the real sandbox, after `cargo build`"]
+fn a_worker_cannot_write_its_clones_config_hooks_or_alternates() {
+    let w = World::new();
+    let (config, alternates) = (
+        w.path("wt.git/config"),
+        w.path("wt.git/objects/info/alternates"),
+    );
+    let (config_before, alternates_before) = (
+        std::fs::read_to_string(&config).unwrap(),
+        std::fs::read_to_string(&alternates).unwrap(),
+    );
+    for (script, written) in [
+        (
+            "echo x > ../wt.git/hooks/pre-commit",
+            "wt.git/hooks/pre-commit",
+        ),
+        ("mkdir ../wt.git/hooks/more", "wt.git/hooks/more"),
+        ("echo x > ../wt.git/info/exclude", "wt.git/info/exclude"),
+        (
+            "echo x > ../wt.git/objects/info/packs",
+            "wt.git/objects/info/packs",
+        ),
+        ("echo x > ../repo/.git/refs", "repo/.git/refs"),
+    ] {
+        w.refused(script, written);
+    }
+    w.try_to("echo '[core]' >> ../wt.git/config; echo ../../../outside >> ../wt.git/objects/info/alternates");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), config_before);
+    assert_eq!(
+        std::fs::read_to_string(&alternates).unwrap(),
+        alternates_before
+    );
+
+    // The rest of the git dir is the worker's: a new branch and its folders.
+    let out =
+        w.try_to("mkdir -p ../wt.git/refs/heads/kelpie && echo x > ../wt.git/refs/heads/kelpie/7");
+    assert!(
+        w.path("wt.git/refs/heads/kelpie/7").is_file(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
@@ -339,17 +403,7 @@ fn a_live_worker_turn_runs_inside_the_sandbox_and_resumes() {
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-qm", "probe"]);
     let wt = root.join("wt");
-    git(
-        &repo,
-        &[
-            "worktree",
-            "add",
-            "-q",
-            "-b",
-            "kelpie/7",
-            wt.to_str().unwrap(),
-        ],
-    );
+    crate::worktree::clone::make(&repo, &wt, "kelpie/7", "main").unwrap();
     let (build, worker) = (root.join("build"), root.join("worker"));
     std::fs::create_dir_all(&build).unwrap();
     std::fs::create_dir_all(&worker).unwrap();
@@ -359,7 +413,7 @@ fn a_live_worker_turn_runs_inside_the_sandbox_and_resumes() {
         build: &build,
         home: &root,
         git_common_dir: &git_dir,
-        git_dir: &git_dir.join("worktrees/wt"),
+        git_dir: &crate::worktree::clone::git_dir_of(&wt),
         branch: "kelpie/7",
         base: "main",
         kelpie_pushes: false,

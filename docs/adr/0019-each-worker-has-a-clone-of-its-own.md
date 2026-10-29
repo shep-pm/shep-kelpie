@@ -2,7 +2,7 @@
 
 Part of #241. A worker's worktree stops being a linked worktree of the project's checkout and becomes a clone that borrows the checkout's objects.
 
-A linked worktree writes into the checkout's `.git`: its branch ref, the lock beside it, its reflog and its objects. The fence grants the worker those paths one by one, and `ref_folders::ensure` makes the folders they sit in before each handover, since the fence cannot grant a folder that is not there yet.
+A linked worktree writes into the checkout's `.git`: its branch ref, the lock beside it, its reflog and its objects. The fence grants the worker those paths one by one, and kelpie made the folders they sit in before each handover, since the fence cannot grant a folder that is not there yet.
 
 On Windows that does not hold. srt-win drops a write grant on a path that does not exist yet. A worker cannot make `refs/heads/kelpie/22.lock` without Modify on `refs/heads/kelpie`, and Modify on that folder lets it rewrite `refs/heads/kelpie/23`, another worker's branch. No narrower grant exists. This was measured for #241, and `docs/facts/worker-profile-and-sandbox.md` holds the other srt-win behaviour found there.
 
