@@ -311,14 +311,13 @@ fn every_panel_has_its_own_id() {
     assert_no_problems(&problems);
 }
 
-// The value a field override sets for `id` on the panel's target `ref_id`.
-fn override_property(panel: &Value, ref_id: &str, id: &str) -> Option<Value> {
+// The value a field override sets for `id` on what `matcher` names, which is a
+// target's refId for `byFrameRefID` and a column's name for `byName`.
+fn override_property(panel: &Value, matcher_id: &str, matcher: &str, id: &str) -> Option<Value> {
     panel["fieldConfig"]["overrides"]
         .as_array()?
         .iter()
-        .filter(|over| {
-            over["matcher"]["id"] == "byFrameRefID" && over["matcher"]["options"] == ref_id
-        })
+        .filter(|over| over["matcher"]["id"] == matcher_id && over["matcher"]["options"] == matcher)
         .flat_map(|over| over["properties"].as_array().into_iter().flatten())
         .find(|property| property["id"] == id)
         .map(|property| property["value"].clone())
@@ -343,13 +342,96 @@ fn the_spend_panel_draws_open_work_items_on_a_right_axis_apart_from_the_stack() 
     let ref_id = target["refId"].as_str().expect("the target has no refId");
 
     assert_eq!(
-        override_property(&panel, ref_id, "custom.axisPlacement"),
+        override_property(&panel, "byFrameRefID", ref_id, "custom.axisPlacement"),
         Some(Value::from("right")),
         "target {ref_id} is not on the right axis"
     );
     assert_eq!(
-        override_property(&panel, ref_id, "custom.stacking"),
+        override_property(&panel, "byFrameRefID", ref_id, "custom.stacking"),
         Some(serde_json::json!({ "mode": "none" })),
         "target {ref_id} is stacked with the roles"
     );
+}
+
+#[test]
+fn the_agent_and_kind_table_draws_both_its_queries_as_columns_of_one_table() {
+    let panel = panels()
+        .into_iter()
+        .find(|panel| panel["title"] == "Work items by agent and kind")
+        .expect("the dashboard has no Work items by agent and kind panel");
+    let targets = panel["targets"]
+        .as_array()
+        .expect("Work items by agent and kind has no targets");
+    let refs: Vec<&str> = targets
+        .iter()
+        .map(|target| target["refId"].as_str().expect("a target has no refId"))
+        .collect();
+
+    // Two instant queries reach a table panel as two frames, and the panel draws
+    // one at a time until a transformation joins them.
+    let joined = panel["transformations"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{} holds no transformations", panel["title"]))
+        .iter()
+        .any(|transformation| transformation["id"] == "merge");
+    assert!(
+        joined,
+        "{} draws its two queries as two frames, with a frame picker",
+        panel["title"]
+    );
+
+    // A rename matched to a frame heads every column of that frame, the agent
+    // and kind columns included.
+    let whole_frames: Vec<String> = panel["fieldConfig"]["overrides"]
+        .as_array()
+        .expect("Work items by agent and kind has no overrides")
+        .iter()
+        .filter(|over| over["matcher"]["id"] == "byFrameRefID")
+        .filter(|over| {
+            over["properties"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|property| property["id"] == "displayName")
+        })
+        .map(|over| {
+            format!(
+                "{} renames every column of target {}",
+                panel["title"], over["matcher"]["options"]
+            )
+        })
+        .collect();
+    assert_no_problems(&whole_frames);
+
+    // A Prometheus table query names its value column after its target.
+    let mut headed: Vec<String> = Vec::new();
+    for ref_id in &refs {
+        let column = format!("Value #{ref_id}");
+        let name = override_property(&panel, "byName", &column, "displayName")
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap_or_else(|| panic!("{} names no column for target {ref_id}", panel["title"]));
+        headed.push(name);
+    }
+
+    let problems: Vec<String> = panel["options"]["sortBy"]
+        .as_array()
+        .expect("Work items by agent and kind has no sortBy")
+        .iter()
+        .map(|entry| entry["displayName"].as_str().unwrap_or_default().to_owned())
+        .map(|wanted| {
+            let columns = headed
+                .iter()
+                .filter(|name| name.as_str() == wanted.as_str())
+                .count();
+            (wanted, columns)
+        })
+        .filter(|(_, columns)| *columns != 1)
+        .map(|(wanted, columns)| {
+            format!(
+                "{} sorts on {wanted}, which heads {columns} of its columns",
+                panel["title"]
+            )
+        })
+        .collect();
+    assert_no_problems(&problems);
 }

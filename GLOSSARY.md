@@ -123,6 +123,13 @@ usage ledger. It orders the agents that fit a work item by when each would
 finish and what it costs.
 _Avoid_: board (one project's work items), queue
 
+**Track record**:
+How an agent did at one kind of work, kept by the **agent board** from the
+usage ledger's finished lines: items, merged, closed with no change, median
+hours, review rounds, fix turns, **rulings** and cost. It reaches a pick only
+through the typical time. `status` shows it as `records`.
+_Avoid_: score, rating
+
 **Slack**:
 How far past the soonest finish a work item may finish, so the agent board
 can take a cheaper agent: `agents.slack` minutes (60 when absent), unless
@@ -481,7 +488,7 @@ no one is answered at the terminal only. The first answer, from the thread or
 the terminal, wins.
 
 A ruling's option can name an **action** kelpie carries out in code when the
-option is chosen, by the maintainer or the panel: `rerun` on a `still-red`
+option is chosen, by the maintainer or the project manager: `rerun` on a `still-red`
 ruling, which reruns the head's failed jobs, and `restore` on a `turn-failed`
 one, which puts an uncommitted agent file back before the turn resumes. The
 option's text says what kelpie will do, and the board's events name the option

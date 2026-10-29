@@ -36,6 +36,32 @@ impl View {
         Value::Object(agents.collect())
     }
 
+    /// Each agent's track record per kind of work, from every project's ledger
+    ///
+    /// Keyed by agent and then by kind, `none` for items of no kind. A rate,
+    /// median or cost the ledger cannot say is null.
+    pub fn records(&self) -> Value {
+        let mut agents = serde_json::Map::new();
+        for ((agent, kind), record) in
+            agent_board::records(self.ledgers.iter().flat_map(|l| l.iter()))
+        {
+            let kinds = agents.entry(agent).or_insert_with(|| json!({}));
+            kinds[kind.as_deref().unwrap_or("none")] = json!({
+                "items": record.items,
+                "merged": record.merged,
+                "closed": record.closed,
+                "merge_rate": record.merge_rate(),
+                "median_hours": record.median_hours,
+                "review_rounds": record.review_rounds,
+                "fix_turns": record.fix_turns,
+                "heavy_fix_items": record.heavy_fix_items,
+                "rulings": record.rulings,
+                "median_cost_usd": record.median_cost_usd,
+            });
+        }
+        Value::Object(agents)
+    }
+
     // The ledger's items, each with its agent's tier. A finished line names
     // the implementer that built the item, so a reviewer's name reaches none
     // and its tier counts toward no median.

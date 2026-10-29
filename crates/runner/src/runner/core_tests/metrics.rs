@@ -1,3 +1,4 @@
+use crate::board::check::kinds;
 use crate::forge_ledger::{Ended, Identity, Kind, Line as ForgeLine};
 use crate::metrics::*;
 use crate::ports::{CLEAN, Cost, RateBucket, RateLimits, Usage};
@@ -197,16 +198,138 @@ fn a_work_item_s_calls_spend_and_finish_reach_the_metrics_endpoint() {
        finished,
        Some(StepReport::Finished { issue, .. }) if issue == ticket(7)
     ));
-    let merged = [("outcome", "merged")];
+    // The rig's implementer, and issue 7 with no `kind:` label
+    let merged = [
+        ("agent", "sonnet-high"),
+        ("kind", "none"),
+        ("outcome", "merged"),
+    ];
     assert_eq!(
         rig.samples
             .value("kelpie_work_items_finished_total", &merged),
         Some(1.0)
     );
+    assert!(
+        rig.samples
+            .value("kelpie_work_item_seconds_total", &merged)
+            .is_some(),
+        "the wall seconds carry no agent or kind"
+    );
+    assert!(
+        rig.samples
+            .value(
+                "kelpie_work_item_cost_usd_total",
+                &[("agent", "sonnet-high"), ("kind", "none")]
+            )
+            .is_some(),
+        "the item's cost is not counted by its agent and kind"
+    );
     assert_eq!(
         rig.samples
             .value("kelpie_work_items", &[("phase", "ruling")]),
         Some(0.0)
+    );
+}
+
+// The agent and kind of ADR 0018's track record, on each series of the finished line
+#[test]
+fn a_finished_items_series_carry_its_agent_and_kind() {
+    let (recorder, sink) = recorder();
+    recorder.line(&finished_line(
+        Some("sonnet-high"),
+        Some("fix"),
+        "merged",
+        0,
+    ));
+    let item = [
+        ("agent", "sonnet-high"),
+        ("kind", "fix"),
+        ("outcome", "merged"),
+    ];
+    assert_eq!(
+        sink.value("kelpie_work_items_finished_total", &item),
+        Some(1.0)
+    );
+    assert_eq!(
+        sink.value("kelpie_work_item_seconds_total", &item),
+        Some(900.0)
+    );
+    let who = [("agent", "sonnet-high"), ("kind", "fix")];
+    assert_eq!(sink.value("kelpie_review_rounds_total", &who), Some(2.0));
+    assert_eq!(sink.value("kelpie_fix_turns_total", &who), Some(1.0));
+    assert_eq!(sink.value("kelpie_rulings_total", &who), Some(1.0));
+    assert_eq!(
+        sink.value("kelpie_work_item_cost_usd_total", &who),
+        Some(1.0),
+        "the line's dollar, priced in both roles"
+    );
+    // The findings stay by severity alone
+    assert_eq!(
+        sink.value("kelpie_findings_total", &[("severity", "high")]),
+        Some(1.0)
+    );
+    let split = (sink.sent().iter())
+        .filter(|s| s.name == "kelpie_findings_total")
+        .filter(|s| s.labels.iter().any(|(k, _)| *k == "agent"))
+        .count();
+    assert_eq!(split, 0, "the findings series took an agent label");
+}
+
+#[test]
+fn a_finished_line_with_no_agent_or_kind_reads_unknown_and_none() {
+    let (recorder, sink) = recorder();
+    recorder.line(&finished_line(None, None, "dropped", 0));
+    let item = [
+        ("agent", "unknown"),
+        ("kind", "none"),
+        ("outcome", "dropped"),
+    ];
+    assert_eq!(
+        sink.value("kelpie_work_items_finished_total", &item),
+        Some(1.0)
+    );
+    assert_eq!(
+        sink.value("kelpie_work_item_seconds_total", &item),
+        Some(900.0)
+    );
+    let who = [("agent", "unknown"), ("kind", "none")];
+    assert_eq!(sink.value("kelpie_review_rounds_total", &who), Some(2.0));
+    assert_eq!(sink.value("kelpie_fix_turns_total", &who), Some(1.0));
+    assert_eq!(sink.value("kelpie_rulings_total", &who), Some(1.0));
+    assert_eq!(
+        sink.value("kelpie_work_item_cost_usd_total", &who),
+        Some(1.0)
+    );
+    // A kind kelpie no longer has reads `none` too, so the label set stays bounded (ADR 0012)
+    recorder.line(&finished_line(
+        Some("opus-high"),
+        Some("mechanical"),
+        "merged",
+        0,
+    ));
+    let retired = [
+        ("agent", "opus-high"),
+        ("kind", "none"),
+        ("outcome", "merged"),
+    ];
+    assert_eq!(
+        sink.value("kelpie_work_items_finished_total", &retired),
+        Some(1.0)
+    );
+    // A line with a call whose harness reported no cost holds a lower bound, so it counts nowhere
+    recorder.line(&finished_line(Some("iq3-xxs"), Some("fix"), "merged", 2));
+    let unpriced = [("agent", "iq3-xxs"), ("kind", "fix")];
+    assert_eq!(
+        sink.value("kelpie_work_item_cost_usd_total", &unpriced),
+        None
+    );
+    assert_eq!(
+        sink.value(
+            "kelpie_work_items_finished_total",
+            &[("agent", "iq3-xxs"), ("kind", "fix"), ("outcome", "merged")]
+        ),
+        Some(1.0),
+        "the work item is still counted"
     );
 }
 
@@ -349,6 +472,29 @@ fn a_call_s_requests_are_counted_by_context_size_and_what_came_before() {
     );
 }
 
+// A finished line of `agent` and `kind` that ended `outcome`: 900 wall seconds and a dollar,
+// priced in both roles except for `unpriced` of the worker's calls
+fn finished_line(agent: Option<&str>, kind: Option<&str>, outcome: &str, unpriced: u32) -> Line {
+    let role = |free: u32| {
+        serde_json::json!({
+            "calls": 1, "tokens": { "input": 10, "cache_write": 0, "cache_read": 0, "output": 0 },
+            "units": 10, "cost_usd": 0.5, "unpriced_calls": free,
+        })
+    };
+    Line::Finished(
+        serde_json::from_value(serde_json::json!({
+            "at": 1, "issue": "7", "title": "t", "pull_request": 71,
+            "merged": outcome == "merged", "closed": outcome == "closed",
+            "wall": 900, "units": 20, "cost_usd": 1.0,
+            "worker": role(unpriced), "reviewer": role(0),
+            "qwen": { "rounds": 0, "seconds": 0 },
+            "review_rounds": 2, "fix_turns": 1, "rulings": 1,
+            "agent": agent, "kind": kind, "held": { "high": 1, "medium": 2 },
+        }))
+        .unwrap(),
+    )
+}
+
 // A call line of `role` and `kind` on `harness`, which ended `ended`
 fn call_line(role: &str, kind: &str, harness: &str, ended: &str) -> Line {
     let usage = serde_json::json!({
@@ -482,10 +628,23 @@ fn a_runner_with_every_role_and_harness_in_use_stays_under_the_cap() {
         }
         recorder.tool_error("triager", kind);
     }
-    // The series set from the state and the settings, and the finished work items', which these
-    // lines do not drive: six phases, four features' enabled gauges, the plan gauges of the two
-    // accounts (two windows' two gauges, and two more), and nine of the finished line's.
-    let not_driven = 6 + 4 + 2 * (4 + 2) + 9;
+    // The finished work items: five agents across the ten kind values (the nine an issue's `kind:`
+    // label names, and `none`), each ending each way.
+    let named: Vec<String> = kinds()
+        .map(str::to_owned)
+        .chain(std::iter::once("none".to_owned()))
+        .collect();
+    for agent in ["sonnet-high", "opus-high", "iq3-xxs", "qwen", "codex"] {
+        for kind in &named {
+            for outcome in ["merged", "closed", "dropped"] {
+                recorder.line(&finished_line(Some(agent), Some(kind), outcome, 0));
+            }
+        }
+    }
+    // The series set from the state and the settings, which these lines do not drive: six phases,
+    // four features' enabled gauges, the plan gauges of the two accounts (two windows' two
+    // gauges, and two more), and the four ways a work item's CI can fail.
+    let not_driven = 6 + 4 + 2 * (4 + 2) + 4;
     let held: std::collections::BTreeSet<_> = (sink.sent().iter())
         .map(|s| (s.name, s.labels.clone()))
         .collect();

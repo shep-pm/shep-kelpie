@@ -14,12 +14,17 @@ impl Desk {
     /// Shorthand for <code>[Desk::answer_with]</code> with nothing read of availability or the board
     #[cfg(test)]
     pub fn answer(&mut self, action: &str, params: Option<&str>) -> (String, Vec<Delivery>) {
-        self.answer_with(action, params, &Availability::default(), &json!({}))
+        self.answer_with(
+            action,
+            params,
+            &Availability::default(),
+            (&json!({}), &json!({})),
+        )
     }
 
     /// Answers one of the maintainer's triggers with a JSON body
     ///
-    /// `status` lists every lease, `availability` and the `board` given. `take`
+    /// `status` lists every lease, `availability` and the `board` and `records` given. `take`
     /// and `return` name a book lease and act for the maintainer. Asking
     /// with `take` again is how a waiting maintainer learns of the grant.
     pub fn answer_with(
@@ -27,9 +32,9 @@ impl Desk {
         action: &str,
         params: Option<&str>,
         availability: &Availability,
-        board: &Value,
+        (board, records): (&Value, &Value),
     ) -> (String, Vec<Delivery>) {
-        let answered = self.respond(action, params, availability, board);
+        let answered = self.respond(action, params, availability, (board, records));
         self.look(true);
         answered
     }
@@ -39,13 +44,13 @@ impl Desk {
         action: &str,
         params: Option<&str>,
         availability: &Availability,
-        board: &Value,
+        shown: (&Value, &Value),
     ) -> (String, Vec<Delivery>) {
         let error = |message: String| (json!({ "error": message }).to_string(), Vec::new());
         let params = params.map(str::trim).filter(|p| !p.is_empty());
         let kind = match (action, params) {
             ("status", None) => {
-                return (self.status(availability, board).to_string(), Vec::new());
+                return (self.status(availability, shown).to_string(), Vec::new());
             }
             ("status", Some(_)) => return error("`status` takes no params".into()),
             ("take" | "return", Some(kind)) => match LeaseKind::try_from(kind) {
@@ -68,11 +73,16 @@ impl Desk {
         (body.to_string(), Vec::new())
     }
 
-    fn status(&self, availability: &Availability, board: &Value) -> Value {
+    fn status(&self, availability: &Availability, (board, records): (&Value, &Value)) -> Value {
         let mut leases = vec![json!(self.tests.status())];
         leases.extend(self.e2e.values().map(|l| json!(l.status())));
         leases.extend(self.book.status().iter().map(|l| json!(l)));
-        json!({ "leases": leases, "availability": availability.status(), "board": board })
+        json!({
+            "leases": leases,
+            "availability": availability.status(),
+            "board": board,
+            "records": records,
+        })
     }
 }
 
@@ -131,7 +141,7 @@ mod tests {
                 "since": null,
                 "queue": [],
                 "window": { "quota": 1, "summons": [], "opens": null },
-            }], "availability": { "models": [], "accounts": [] }, "board": {} })
+            }], "availability": { "models": [], "accounts": [] }, "board": {}, "records": {} })
         );
     }
 
@@ -141,7 +151,9 @@ mod tests {
         let agents = crate::agents::Agents::embedded();
         let sources = Sources::of(&agents, &crate::settings::Gateways::default());
         let shown = Availability::new(&sources);
-        let (body, _) = w.desk.answer_with("status", None, &shown, &json!({}));
+        let (body, _) = w
+            .desk
+            .answer_with("status", None, &shown, (&json!({}), &json!({})));
         let body: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(
             body["availability"],
@@ -159,8 +171,10 @@ mod tests {
         let sources = Sources::of(&agents, &crate::settings::Gateways::default());
         let shown = Availability::new(&sources);
         let board = Board::new(&agents).view().status(&shown, Timestamp(EPOCH));
-        let (body, _) = (w.desk).answer_with("status", None, &shown, &board);
+        let records = json!({ "opus-high": { "fix": { "items": 1 } } });
+        let (body, _) = (w.desk).answer_with("status", None, &shown, (&board, &records));
         let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(body["records"], records, "beside the board");
         // No ledger yet, and the Claude plan is unread, so it waits a recheck.
         let unread = json!({ "secs": DEFAULT_SECS, "cost_usd": null, "wait": RECHECK_SECS });
         assert_eq!(

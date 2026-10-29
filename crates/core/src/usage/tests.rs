@@ -435,8 +435,11 @@ fn the_ledger_comes_out_as_the_counters_the_runner_sends_each_at_its_lines_time(
     let calls = r#"kelpie_calls_total{sheep="koji",agent="sonnet-high",effort="high",ended="answered",harness="claude-code",kind="turn",role="worker"}"#;
     assert!(out.contains(&format!("{calls} 1 100")), "{out:#?}");
     assert!(out.contains(&format!("{calls} 2 150")), "{out:#?}");
-    let merged = r#"kelpie_work_items_finished_total{sheep="koji",outcome="merged"} 1 200"#;
+    let merged = r#"kelpie_work_items_finished_total{sheep="koji",agent="unknown",kind="none",outcome="merged"} 1 200"#;
     assert!(out.contains(&merged.to_owned()), "{out:#?}");
+    let dollars =
+        r#"kelpie_work_item_cost_usd_total{sheep="koji",agent="unknown",kind="none"} 0.5 200"#;
+    assert!(out.contains(&dollars.to_owned()), "{out:#?}");
     let high = r#"kelpie_findings_total{sheep="koji",severity="high"} 1 200"#;
     assert!(out.contains(&high.to_owned()), "{out:#?}");
     let moves =

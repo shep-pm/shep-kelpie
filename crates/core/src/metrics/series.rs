@@ -4,6 +4,7 @@
 use serde::Serialize;
 
 use super::{Family, Label, Recorder};
+use crate::board::check::kinds;
 use crate::ports::SeriesKind::{Counter, Gauge};
 use crate::settings::Settings;
 use crate::state::ProjectState;
@@ -48,27 +49,32 @@ const WORK_ITEMS: Family = Family {
 const FINISHED: Family = Family {
     name: "kelpie_work_items_finished_total",
     kind: Counter,
-    help: "Work items finished: merged, closed with no change, or dropped.",
+    help: "Work items finished: merged, closed with no change, or dropped, by the agent that built them and the kind of work.",
 };
 const ITEM_SECONDS: Family = Family {
     name: "kelpie_work_item_seconds_total",
     kind: Counter,
-    help: "Wall seconds of the finished work items, from creation to finish.",
+    help: "Wall seconds of the finished work items, from creation to finish, by the agent that built them and the kind of work.",
+};
+const ITEM_COST: Family = Family {
+    name: "kelpie_work_item_cost_usd_total",
+    kind: Counter,
+    help: "What the finished work items cost, in US dollars, by agent and kind. A work item with a call whose harness reported no cost is left out.",
 };
 const REVIEW_ROUNDS: Family = Family {
     name: "kelpie_review_rounds_total",
     kind: Counter,
-    help: "Reviewers' rounds that came back with an answer, on finished work items.",
+    help: "Reviewers' rounds that came back with an answer, on finished work items, by the agent that built them and the kind of work.",
 };
 const FIX_TURNS: Family = Family {
     name: "kelpie_fix_turns_total",
     kind: Counter,
-    help: "Worker turns sent to fix a round's held findings, on finished work items.",
+    help: "Worker turns sent to fix a round's held findings, on finished work items, by the agent that built them and the kind of work.",
 };
 const RULINGS: Family = Family {
     name: "kelpie_rulings_total",
     kind: Counter,
-    help: "Rulings raised, on finished work items.",
+    help: "Rulings raised, on finished work items, by the agent that built them and the kind of work.",
 };
 const FINDINGS: Family = Family {
     name: "kelpie_findings_total",
@@ -268,20 +274,26 @@ impl Recorder {
             (false, true) => "closed",
             (false, false) => "dropped",
         };
-        let labels = || vec![("outcome", outcome.to_owned())];
+        // The agent and kind the work item's track record is kept under (ADR 0018), on every
+        // series of the finished line but the findings and the red heads, which stay whole.
+        let agent = ("agent", known(finished.agent.as_deref()));
+        let kind = ("kind", item_kind(finished.kind.as_deref()));
+        let labels = || vec![("outcome", outcome.to_owned()), agent.clone(), kind.clone()];
+        let who = || vec![agent.clone(), kind.clone()];
         self.add(&FINISHED, labels(), 1.0);
         #[expect(
             clippy::cast_precision_loss,
             reason = "a work item's seconds stay far below 2^53"
         )]
         self.add(&ITEM_SECONDS, labels(), finished.wall as f64);
-        self.add(
-            &REVIEW_ROUNDS,
-            Vec::new(),
-            f64::from(finished.review_rounds),
-        );
-        self.add(&FIX_TURNS, Vec::new(), f64::from(finished.fix_turns));
-        self.add(&RULINGS, Vec::new(), f64::from(finished.rulings));
+        self.add(&REVIEW_ROUNDS, who(), f64::from(finished.review_rounds));
+        self.add(&FIX_TURNS, who(), f64::from(finished.fix_turns));
+        // A line with a call whose harness reported no cost holds a cost_usd that is a lower
+        // bound, so it counts nowhere in the dollars series.
+        if finished.worker.unpriced_calls == 0 && finished.reviewer.unpriced_calls == 0 {
+            self.add(&ITEM_COST, who(), finished.cost_usd);
+        }
+        self.add(&RULINGS, vec![agent, kind], f64::from(finished.rulings));
         for (severity, n) in [
             ("high", finished.held.high),
             ("medium", finished.held.medium),
@@ -313,6 +325,16 @@ fn phase_name(phase: &Phase) -> &'static str {
 
 fn known(value: Option<&str>) -> String {
     value.unwrap_or("unknown").to_owned()
+}
+
+// The work item's kind as a label: one of the kinds an issue's `kind:` label names, spelled as
+// `kinds` spells it, or `none` where the line has none or names one kelpie no longer has. The
+// nine kinds are the bounded set ADR 0012 asks for, so a retired kind adds no series.
+fn item_kind(kind: Option<&str>) -> String {
+    kinds()
+        .find(|named| kind.is_some_and(|had| had.eq_ignore_ascii_case(named)))
+        .unwrap_or("none")
+        .to_owned()
 }
 
 // The name an enum has in the ledger, so a series and a ledger line agree
