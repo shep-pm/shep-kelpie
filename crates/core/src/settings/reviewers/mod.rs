@@ -11,16 +11,13 @@
 
 use std::path::Path;
 
-use super::agents::{Allow, find};
+use super::agents::{Allow, find, left_out};
 use super::{AgentName, Gateways, NonBlank, Settings, SettingsError};
 use crate::agents::{Agent, Agents, DEFECT_HUNTER_LITE, IQ3_XXS_REVIEW, Role, Runs};
 use crate::review_bot::BotReviewer;
 
 /// Where a project lists the reviewers a contribution reads, as a refusal names it
 const CONTRIBUTION_SETTING: &str = "contributions.reviewers";
-
-/// The reviewers kelpie gives a contribution with no list, as a refusal names them
-const DEFAULT_REVIEWERS: &str = "kelpie's default reviewer";
 
 /// Where a project names the reviewer that reads a contribution for
 /// security, as a refusal names it
@@ -99,10 +96,9 @@ impl Settings {
     /// # Errors
     ///
     /// [`SettingsError::Invalid`] naming a reviewer `contributions.reviewers`
-    /// lists that has no agent file, whose file is an implementer's, that
-    /// `agents.allow` leaves out, or a bot that reviews on ready listed after
-    /// another bot. A default reviewer `agents.allow` leaves out is refused the
-    /// same way, naming it as one of kelpie's own.
+    /// lists, or one of kelpie's default reviewers where it names none, that has
+    /// no agent file, whose file is an implementer's, that `agents.allow` leaves
+    /// out, or a bot that reviews on ready listed after another bot.
     pub fn contribution_lineup(
         &self,
         agents: &Agents,
@@ -114,18 +110,15 @@ impl Settings {
             return listed(names.clone(), agents, home, CONTRIBUTION_SETTING, allow);
         }
         let names = default_reviewers(gateways);
-        let left_out = (names.iter()).find(|n| allow.is_some_and(|allow| !allow.holds(n)));
-        if let Some(name) = left_out {
+        if let Some(refusal) =
+            (names.iter()).find_map(|n| left_out(allow, n, CONTRIBUTION_SETTING, "name another"))
+        {
             return Err(SettingsError::Invalid {
-                setting: "contributions",
-                reason: format!(
-                    "kelpie's default reviewer {name} is one `agents.allow` leaves out: add it \
-                     to `agents.allow`, or list the reviewers a contribution reads in \
-                     `contributions.reviewers`"
-                ),
+                setting: "agents",
+                reason: refusal,
             });
         }
-        listed(names, agents, home, DEFAULT_REVIEWERS, allow)
+        listed(names, agents, home, CONTRIBUTION_SETTING, allow)
     }
 
     /// The reviewers the project named: every reviewer file a non-empty

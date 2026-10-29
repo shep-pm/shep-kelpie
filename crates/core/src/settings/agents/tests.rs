@@ -548,9 +548,8 @@ fn a_reviewer_or_a_contributions_default_allow_leaves_out_is_refused() {
         (only.contribution_lineup(&book(), &Gateways::default(), Path::new("/h"))).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "setting `contributions`: kelpie's default reviewer defect-hunter-lite is one \
-         `agents.allow` leaves out: add it to `agents.allow`, or list the reviewers a \
-         contribution reads in `contributions.reviewers`"
+        "setting `agents`: `contributions.reviewers` names defect-hunter-lite, which \
+         `agents.allow` leaves out: add it to `agents.allow`, or name another"
     );
 
     let own = allowing(

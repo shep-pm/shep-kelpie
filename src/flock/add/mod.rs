@@ -264,7 +264,10 @@ pub async fn add(
     }
 }
 
-// The project's settings: the defaults with what the checkout and the forge say.
+// The project's settings: the defaults with what the checkout and the forge
+// say. `add` names no reviewers: the agent board picks each round's reviewer
+// from the reviewer files `agents.allow` holds, and a project that wants a
+// narrower pass lists them itself.
 fn settings(
     name: &ProjectName,
     place: Place<'_>,
@@ -282,9 +285,6 @@ fn settings(
         let workflows = root.join(".github/workflows").is_dir();
         ci.insert("block".into(), Value::Bool(workflows));
     }
-    // No reviewers and no implementers: a project names no agents. Every agent
-    // file `add` wrote is a candidate, and a contribution with no
-    // `contributions.reviewers` takes kelpie's default pass.
     super::set::migrate::pm_decides(&mut table);
     Settings::from_table(&table, name.as_str(), place.home, place.folder)
         .map_err(|e| e.to_string())?;

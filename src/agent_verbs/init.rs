@@ -5,9 +5,9 @@
 //! what the harness lacks. `init --detect` takes no harness: it finds each CLI
 //! on the `PATH`, asks each gateway in kelpie's settings for the models it
 //! serves, and gives each role the first harness in the models file's `order`
-//! that was found and serves it. Neither writes over a file that is there, and
-//! neither touches a project's settings: every reviewer file it wrote is a
-//! candidate the agent board may pick, with no setting to run.
+//! that was found and serves it. Neither writes over a file that is there nor
+//! touches a project's settings, so neither prints a `shep kelpie set` line:
+//! the agent board picks from the agent files `agents.allow` holds.
 
 use std::path::Path;
 

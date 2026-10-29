@@ -164,10 +164,8 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     let remote = settings.git.remote.as_ref().map(ForgeSlug::as_str);
     assert_eq!(remote, Some("shep-pm/koji-website"));
     assert!(settings.ci.block, "the checkout has workflows");
-    assert!(
-        settings.agents.reviewers.is_none(),
-        "a new project names no reviewers"
-    );
+    assert_eq!(settings.agents.reviewers, None, "add names no reviewers");
+    assert_eq!(settings.agents.allow, None, "nor an allow list");
     assert_eq!(settings.agents.gone_keys(), Vec::<&str>::new());
     for name in ["sonnet-high", "opus-high"] {
         assert_eq!(scene.written(name), stub(name));
@@ -215,13 +213,29 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
 }
 
 #[tokio::test]
-async fn where_the_qwen_review_script_is_installed_its_reviewer_is_a_candidate() {
+async fn add_writes_no_reviewers() {
+    let scene = Scene::new().await;
+    scene.add().await.unwrap();
+
+    let (runner, _) = scene.shepherd.sheep("koji").expect("a runner");
+    let agents = runner.dogs.get(DOG).expect("a kelpie table").as_map()["agents"]
+        .as_object()
+        .unwrap();
+    assert_eq!(agents.get("reviewers"), None, "{agents:?}");
+    assert_eq!(agents.get("allow"), None, "{agents:?}");
+    assert_eq!(scene.settings().agents.reviewers, None);
+}
+
+#[tokio::test]
+async fn where_the_qwen_review_script_is_installed_add_writes_no_reviewers_and_still_the_qwen_stub()
+{
     let scene = Scene::new().await;
     let script = scene.home.join(".claude/scripts/qwen-review.sh");
     std::fs::create_dir_all(script.parent().unwrap()).unwrap();
     crate::test::write_script(&script, "#!/bin/sh\nexit 0\n");
     scene.add().await.unwrap();
 
+    assert_eq!(scene.settings().agents.reviewers, None);
     assert_eq!(scene.written("qwen"), stub("qwen"));
     assert!(
         scene.candidates().contains(&"qwen".to_owned()),
@@ -237,6 +251,7 @@ async fn where_kelpie_holds_a_paddock_gateway_a_contribution_reads_iq3_xxs_revie
     );
     scene.add().await.unwrap();
 
+    assert_eq!(scene.settings().agents.reviewers, None);
     assert_eq!(
         scene.contribution(&paddock()),
         ["iq3-xxs-review", "defect-hunter-lite"],
@@ -313,7 +328,7 @@ async fn a_public_repo_with_no_ci_gets_no_ci_and_lists_no_reviewer() {
     scene.add().await.unwrap();
     let settings = scene.settings();
     assert!(!settings.ci.block);
-    assert!(settings.agents.reviewers.is_none());
+    assert_eq!(settings.agents.reviewers, None);
     assert!(
         scene.candidates().iter().any(|n| n == "coderabbit"),
         "the bot file `add` wrote is a candidate, passed over at its round when the repo cannot run it"
@@ -330,7 +345,7 @@ async fn add_writes_stubs_for_the_whole_agents_and_none_for_a_baseline() {
             "{baseline} is a baseline: its stub comes from `agents new`"
         );
     }
-    assert!(scene.settings().agents.reviewers.is_none());
+    assert_eq!(scene.settings().agents.reviewers, None);
 }
 
 #[tokio::test]

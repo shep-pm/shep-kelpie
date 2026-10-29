@@ -301,15 +301,14 @@ fn a_contribution_with_no_list_gets_the_default_lineup() {
 }
 
 #[test]
-fn a_default_reviewer_that_allow_leaves_out_is_refused_naming_it_as_kelpies_own() {
+fn a_default_reviewer_that_allow_leaves_out_is_refused_naming_the_contribution_key() {
     let (settings, home) = project("allow = [\"opus\"]\n", None);
     let err = (settings.contribution_lineup(&book(), &Gateways::default(), home.path()))
         .unwrap_err()
         .to_string();
     assert_eq!(
         err,
-        "setting `contributions`: kelpie's default reviewer defect-hunter-lite is one \
-         `agents.allow` leaves out: add it to `agents.allow`, or list the reviewers a \
-         contribution reads in `contributions.reviewers`"
+        "setting `agents`: `contributions.reviewers` names defect-hunter-lite, which \
+         `agents.allow` leaves out: add it to `agents.allow`, or name another"
     );
 }
