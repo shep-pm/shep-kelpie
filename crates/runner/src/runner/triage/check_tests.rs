@@ -23,13 +23,14 @@ pub(super) const PASSING: &str = "Touches: `src/start.rs`\n\n## What to build\n\
 pub(super) const PASSING_LABELS: [&str; 2] = ["kind:fix", "priority: P2"];
 
 // A body the check refuses on every part
-const FAILING: &str = "It crashes when I run it.";
+pub(super) const FAILING: &str = "It crashes when I run it.";
 
 // The labels a repo holds, so none is made on the way
-const REPO_LABELS: [&str; 5] = ["bug", "P2", "needs-triage", "ready-for-agent", "kind:fix"];
+pub(super) const REPO_LABELS: [&str; 5] =
+    ["bug", "P2", "needs-triage", "ready-for-agent", "kind:fix"];
 
 // Issue 30 by `author`, with `body` and `labels`, opened after triage was on
-fn filed(rig: &Rig, author: &str, body: &str, labels: &[&str]) -> OpenIssue {
+pub(super) fn filed(rig: &Rig, author: &str, body: &str, labels: &[&str]) -> OpenIssue {
     let mut filed = issue(rig, 30, author, 5);
     filed.title = "Crash on start".to_owned();
     filed.body = body.to_owned();
@@ -39,7 +40,12 @@ fn filed(rig: &Rig, author: &str, body: &str, labels: &[&str]) -> OpenIssue {
 
 // A rig with `[triage]` set to `lines`, the repo holding `REPO_LABELS`, issue
 // 30 listed as `filed` gives it, and a representative that says `WORDS`
-fn checking(lines: &str, author: &str, body: &str, labels: &[&str]) -> (Rig, Mutex<Runner>) {
+pub(super) fn checking(
+    lines: &str,
+    author: &str,
+    body: &str,
+    labels: &[&str],
+) -> (Rig, Mutex<Runner>) {
     let rig = rig_with(lines);
     rig.forge.set_repo_labels(&REPO_LABELS);
     list(&rig, filed(&rig, author, body, labels));
@@ -49,7 +55,7 @@ fn checking(lines: &str, author: &str, body: &str, labels: &[&str]) -> (Rig, Mut
     (rig, runner)
 }
 
-fn checks(rig: &Rig) -> Value {
+pub(super) fn checks(rig: &Rig) -> Value {
     let state = crate::state::StateStore::new(rig.paths().state);
     serde_json::to_value(state.load().unwrap().unwrap()).unwrap()["checks"].clone()
 }
@@ -158,7 +164,7 @@ fn another_persons_issue_that_passes_waits_at_needs_triage_with_no_triage_call()
 }
 
 // A rewrite still short of the format: it names its files and no more
-const STILL: &str = "Touches: `src/start.rs`\n\nIt crashes when I run it.";
+pub(super) const STILL: &str = "Touches: `src/start.rs`\n\nIt crashes when I run it.";
 
 #[test]
 fn a_failing_issue_is_triaged_and_a_rewrite_that_still_fails_gets_one_comment() {
@@ -239,7 +245,7 @@ fn a_later_rewrite_the_check_refuses_replaces_kelpies_section_and_keeps_the_rest
 
 // The issue as `a_failing_issue_is_triaged...` leaves it: triaged, its
 // still-failing rewrite told
-fn told() -> (Rig, Mutex<Runner>) {
+pub(super) fn told() -> (Rig, Mutex<Runner>) {
     let (rig, runner) = checking("pick = \"maintainer\"", MAINTAINER, FAILING, &[]);
     rig.claude.script_for(Role::Triager, [reply(json!({}))]);
     assert_eq!(step(&runner).unwrap(), None);

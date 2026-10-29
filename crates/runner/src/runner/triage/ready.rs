@@ -54,7 +54,7 @@ pub(in crate::runner) enum Ready {
 
 /// Whether kelpie is going to rewrite `issue`, with `labels` the pass puts on,
 /// and whether that makes it ready. Only an issue whose author is
-/// `Runner::maintainer()`, ignoring case, is ever rewritten or made
+/// `Runner::own_author`, the maintainer or the App, is ever rewritten or made
 /// ready. The body is read against the same local guard every App post goes
 /// through: the comment is worded before the body is written, so text the
 /// guard would refuse is dropped here rather than promised there.
@@ -71,10 +71,7 @@ pub(in crate::runner) fn readiness(
     if !found.open.is_empty() {
         return Ready::Not;
     }
-    let Ok(maintainer) = runner.maintainer() else {
-        return Ready::Not;
-    };
-    if !author.eq_ignore_ascii_case(&maintainer) {
+    if !runner.own_author(author) {
         return Ready::Not;
     }
     match runner.local.find(&body, Surface::Prose) {
