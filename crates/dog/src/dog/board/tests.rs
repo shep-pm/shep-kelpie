@@ -235,3 +235,29 @@ fn a_reviewers_finished_line_counts_toward_no_tier_median() {
     );
     assert_eq!(status["build"]["cost_usd"], Value::Null);
 }
+
+#[test]
+fn status_shows_each_agents_records_by_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    finished(home, "koji", ("sonnet-high", "fix"), 2, (7200, 0.5));
+    finished(home, "golbat", ("sonnet-high", "fix"), 1, (3600, 1.5));
+    finished(home, "golbat", ("sonnet-high", "docs"), 1, (900, 1.0));
+    finished(home, "golbat", ("opus-high", "fix"), 1, (600, 2.0));
+    let board = Mutex::new(Board::new(&Agents::embedded()));
+    refresh(&board, home);
+
+    let records = lock(&board).view().records();
+
+    assert_eq!(
+        records["sonnet-high"]["fix"],
+        json!({
+            "items": 3, "merged": 3, "closed": 0, "merge_rate": 1.0,
+            "median_hours": 2.0, "review_rounds": 0, "fix_turns": 0,
+            "heavy_fix_items": 0, "rulings": 0, "median_cost_usd": 0.5,
+        }),
+        "every project's items of the agent and kind, in one record"
+    );
+    assert_eq!(records["sonnet-high"]["docs"]["items"], 1);
+    assert_eq!(records["opus-high"]["fix"]["items"], 1);
+}

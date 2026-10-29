@@ -6,9 +6,11 @@
 //! duration is in seconds but a slack, in minutes.
 
 mod pick;
+mod record;
 mod typical;
 mod wait;
 
 pub use pick::{Candidate, Choice, Item, pick, within_slack};
+pub use record::{HEAVY_FIX_TURNS, Record, records};
 pub use typical::{DEFAULT_SECS, History, SAMPLES, Typical};
 pub use wait::{Availability, wait};
