@@ -280,7 +280,7 @@ mod tests {
         let runner = rig.open_settings(settings.clone()).unwrap();
         let entry = std::fs::read_to_string(rig.settings_file()).unwrap();
         let mut on = project_table(&entry);
-        let named = ["sonnet-high", "claude", "coderabbit"].map(|n| Value::String(n.into()));
+        let named = ["sonnet-high", "claude", "gone"].map(|n| Value::String(n.into()));
         on["agents"]["allow"] = Value::Array(named.to_vec());
         let table = Arc::new(Mutex::new(on));
         let shep_home = tempfile::tempdir().unwrap();
@@ -299,26 +299,27 @@ mod tests {
         let agents = agents::snapshot(&paths.agents);
         look.last = Some((settings, rig.kelpie_settings(), agents));
 
-        rig.forge.set_visibility(crate::ports::Visibility::Private);
-        let coderabbit = |runner: &std::sync::Mutex<crate::runner::Runner>| {
+        // A reviewer the project names whose command is not there refuses the change.
+        let script = rig.home.path().join("bin/gone");
+        let agent_file = format!(
+            "---\nrole: reviewer\nharness: command\ncommand: {}\n---\n",
+            script.display()
+        );
+        rig.write_agent("gone", &agent_file);
+        let allows_gone = |runner: &std::sync::Mutex<crate::runner::Runner>| {
             let settings = runner.lock().unwrap().settings().clone();
-            settings
-                .agents
-                .allow
-                .is_some_and(|allow| allow.holds(&AgentName::kelpies("coderabbit")))
+            (settings.agents.allow).is_some_and(|allow| allow.holds(&AgentName::kelpies("gone")))
         };
         look.again(&runner);
-        assert!(!coderabbit(&runner));
+        assert!(!allows_gone(&runner));
         let failed = look.failed.clone().unwrap();
         assert!(failed.contains("agents.allow"), "{failed}");
-        assert!(
-            failed.contains("free plan reviews public repos only"),
-            "{failed}"
-        );
+        assert!(failed.contains("gone: cannot run"), "{failed}");
 
-        rig.forge.set_visibility(crate::ports::Visibility::Public);
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        crate::test::write_script(&script, "#!/bin/sh\nexit 0\n");
         look.again(&runner);
-        assert!(coderabbit(&runner));
+        assert!(allows_gone(&runner));
         assert_eq!(look.failed, None);
     }
 

@@ -365,23 +365,43 @@ fn a_changed_reviewer_file_is_checked_as_a_start_checks_it_and_named() {
 fn a_coderabbit_the_project_newly_names_on_a_private_repo_is_refused_as_at_a_start() {
     let rig = Rig::new("shep");
     rig.forge.set_visibility(Visibility::Private);
-    // No `agents.allow`: `coderabbit` is already a candidate the project named
-    // no, so a start holds nothing of it and the runner opens on a repo
-    // CodeRabbit's plan cannot review.
+    // The runner opens with no `agents.allow`, so `coderabbit` is a candidate
+    // nothing named, and the start says nothing of it. The repo is not public.
     let runner = rig.open().unwrap();
     rig.allow(&["sonnet-high", "coderabbit"]);
     let mut runner = runner.lock().unwrap();
-    let err = runner
-        .reread(rig.settings(), rig.kelpie_settings())
-        .unwrap_err()
-        .to_string();
-    assert!(
-        err.starts_with("setting `agents.allow`: coderabbit: shep-pm/shep is private"),
-        "{err}: naming a candidate that was already one is held as a start holds it"
+    let left = "reviewer coderabbit is left out of the agent board's ask: shep-pm/shep is \
+                private, and CodeRabbit's free plan reviews public repos only";
+    let take_told = |runner: &mut crate::runner::Runner| {
+        runner.take_notes().iter().filter(|n| *n == left).count()
+    };
+    assert_eq!(
+        take_told(&mut runner),
+        0,
+        "a start that named none says nothing"
     );
+
+    runner
+        .reread(rig.settings(), rig.kelpie_settings())
+        .expect("the reread leaves it out and goes on");
     assert!(
-        runner.settings().agents.allow.is_none(),
-        "the runner keeps the settings it has, which named no agent"
+        runner
+            .settings()
+            .agents
+            .allow
+            .as_ref()
+            .is_some_and(|allow| allow.holds(&crate::settings::AgentName::kelpies("coderabbit"))),
+        "the runner applies the new list"
+    );
+    assert_eq!(take_told(&mut runner), 1, "the reread says it once");
+
+    runner
+        .reread(rig.settings(), rig.kelpie_settings())
+        .unwrap();
+    assert_eq!(
+        take_told(&mut runner),
+        0,
+        "a reread with no change says nothing"
     );
 }
 
@@ -476,9 +496,13 @@ fn a_change_that_does_not_hold_keeps_the_settings_the_runner_has() {
     let rig = Rig::new("shep");
     rig.allow(&["sonnet-high", "qwen", "claude"]);
     let runner = rig.open().unwrap();
-    rig.forge.set_visibility(Visibility::Private);
-    rig.coderabbit_on();
-    rig.allow(&["sonnet-high", "qwen", "claude", "coderabbit"]);
+    let gone = rig.home.path().join("bin/gone");
+    let command = format!(
+        "---\nrole: reviewer\nharness: command\ncommand: {}\n---\n",
+        gone.display()
+    );
+    rig.write_agent("gone", &command);
+    rig.allow(&["sonnet-high", "qwen", "claude", "gone"]);
     let next = rig.settings();
     let mut runner = runner.lock().unwrap();
     let err = runner
@@ -486,12 +510,12 @@ fn a_change_that_does_not_hold_keeps_the_settings_the_runner_has() {
         .unwrap_err()
         .to_string();
     assert!(
-        err.starts_with("setting `agents.allow`: coderabbit"),
+        err.starts_with("setting `agents.allow`: gone: cannot run "),
         "{err}"
     );
     let allowed = runner.settings().agents.allow.clone().unwrap();
     assert!(
-        !allowed.holds(&crate::settings::AgentName::kelpies("coderabbit")),
+        !allowed.holds(&crate::settings::AgentName::kelpies("gone")),
         "the runner keeps the list it has"
     );
     rig.reviewers(crate::test::RIG_REVIEWERS);

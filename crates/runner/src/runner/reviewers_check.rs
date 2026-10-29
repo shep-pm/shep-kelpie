@@ -39,33 +39,31 @@ pub(super) fn check_bots(lineup: &[ListedReviewer], ports: &Ports) -> Result<(),
     Ok(())
 }
 
-// CodeRabbit's free plan reviews public repos only, so naming it for a
-// repo the forge reports otherwise stops the runner.
-pub(super) fn check_coderabbit(
+// CodeRabbit's free plan reviews public repos only, so a project that names it
+// for a repo the forge reports otherwise has it left out of the agent board's
+// ask, as an implementer no turn can run on is. The log line says so.
+pub(super) fn coderabbit_left_out(
     remote: &ForgeSlug,
     lineup: &[ListedReviewer],
     ports: &Ports,
-) -> Result<(), OpenError> {
+) -> Result<Option<String>, OpenError> {
     let listed = lineup
         .iter()
         // parity: review-bot.private-repos
         .find(|r| r.bot().is_some_and(|b| b.bot == Bot::Coderabbit));
     let Some(listed) = listed else {
-        return Ok(());
+        return Ok(None);
     };
     let visibility = match ports.forge.visibility(remote)? {
-        Visibility::Public => return Ok(()),
+        Visibility::Public => return Ok(None),
         Visibility::Private => "private",
         Visibility::Internal => "internal",
     };
-    Err(SettingsError::Invalid {
-        setting: "agents.allow",
-        reason: format!(
-            "{}: {} is {visibility}, and {}'s free plan reviews public repos only",
-            listed.name,
-            remote.as_str(),
-            Bot::Coderabbit.name()
-        ),
-    }
-    .into())
+    Ok(Some(format!(
+        "reviewer {} is left out of the agent board's ask: {} is {visibility}, and {}'s free \
+         plan reviews public repos only",
+        listed.name,
+        remote.as_str(),
+        Bot::Coderabbit.name()
+    )))
 }
