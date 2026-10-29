@@ -626,6 +626,79 @@ fn a_blocked_issue_waits_through_its_blockers_pull_request_until_the_blocker_clo
     assert_eq!(rig.ask(&runner, "status", None)["skipped"], json!([]));
 }
 
+// Ready #8 whose `Blocked by:` line names #7, which the forge has no link to
+fn naming_an_unlinked_blocker() -> (Rig, Mutex<Runner>) {
+    let (rig, runner) = running("ditto");
+    rig.forge.list_ready(8, false);
+    let body = format!("Blocked by: #7\n\n{}", FakeForge::passing_body(8));
+    rig.forge.set_ready_body(8, &body);
+    (rig, runner)
+}
+
+#[test]
+fn an_issue_naming_an_open_blocker_with_no_link_is_linked_and_held() {
+    let (rig, runner) = naming_an_unlinked_blocker();
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(rig.forge.links_added(), [(8, 7)]);
+    assert_eq!(
+        rig.ask(&runner, "status", None)["skipped"],
+        json!([{ "reason": "blocked", "issue": "8", "by": ["7"] }])
+    );
+
+    // The next poll finds the link, and adds none.
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(rig.forge.links_added(), [(8, 7)]);
+}
+
+#[test]
+fn an_issue_naming_a_closed_blocker_is_linked_and_picked() {
+    let (rig, runner) = naming_an_unlinked_blocker();
+    rig.forge.close_issue(7);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Dispatched { issue, .. }) if issue == ticket(8)
+    ));
+    assert_eq!(rig.forge.links_added(), [(8, 7)]);
+}
+
+#[test]
+fn a_link_the_forge_refuses_holds_the_issue_and_is_logged_once() {
+    let (rig, runner) = naming_an_unlinked_blocker();
+    rig.forge.close_issue(7);
+    rig.forge.set_links_refused(true);
+    for _ in 0..3 {
+        assert_eq!(step(&runner).unwrap(), None);
+        rig.next_look();
+    }
+    assert_eq!(rig.forge.links_added(), []);
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["skipped"][0]["reason"], json!("unlinked"));
+    assert_eq!(status["skipped"][0]["by"], json!(["7"]));
+    let notes = runner.lock().unwrap().take_notes();
+    let held = notes.iter().filter(|n| n.starts_with("#8 skipped")).count();
+    assert_eq!(held, 1, "{notes:?}");
+
+    // Linking works again, so the issue is picked.
+    rig.forge.set_links_refused(false);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Dispatched { issue, .. }) if issue == ticket(8)
+    ));
+}
+
+#[test]
+fn a_pull_request_on_the_blocked_by_line_is_no_link_and_holds_nothing() {
+    let (rig, runner) = naming_an_unlinked_blocker();
+    rig.forge.open_pull_request(7, "someone-else", &[]);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Dispatched { issue, .. }) if issue == ticket(8)
+    ));
+    assert_eq!(rig.forge.links_added(), []);
+    assert_eq!(rig.ask(&runner, "status", None)["skipped"], json!([]));
+}
+
 #[test]
 fn the_workers_draft_pull_request_is_recorded_when_its_turn_ends() {
     let (rig, runner) = running("shep");

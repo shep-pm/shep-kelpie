@@ -159,6 +159,7 @@ impl Runner {
         // that may yet change, and one whose paths are unread may be one.
         // One the issue check refused waits for its triage or an edit.
         let mut overlaps = self.check_holds(&ready);
+        overlaps.extend(read.unlinked);
         ready.retain(|issue| !overlaps.iter().any(|s| s.issue() == Some(issue.ticket)));
         overlaps.extend(self.parked_overlap(&ready));
         ready.retain(|issue| !overlaps.iter().any(|s| s.issue() == Some(issue.ticket)));

@@ -96,6 +96,8 @@ pub enum Kind {
     SetLabel,
     /// A label put on an issue or taken off
     SetIssueLabel,
+    /// A blocked-by link added to an issue
+    AddBlockedBy,
     /// A review bot's activity on a pull request
     ReviewBot,
     /// A review thread resolved as the login
@@ -232,6 +234,7 @@ impl Kind {
             | Self::FileText
             | Self::SubIssues
             | Self::CloseIssueAs
+            | Self::AddBlockedBy
             | Self::CreateLabel
             | Self::RateLimitReset
             | Self::RateLimit
