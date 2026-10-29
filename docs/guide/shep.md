@@ -13,4 +13,4 @@ One thing shep-kelpie still does itself, until shep can:
 
 - **Reaching you.** Rulings go to kelpie's own webhook, ntfy or Discord, and ntfy replies are checked with kelpie's own TOTP, until shep can carry a question itself (shep-pm/shep#689)
 
-shep-kelpie refuses a shepherd on another shep minor or major than the pinned one, or on an earlier patch, naming both versions. It needs 0.17.0 or later, the shep it is built with. shep-kelpie's commands talk to the shepherd's socket with the shep client it is built with, never a `shep` on `PATH`. Keep a shepherd's `SHEP_HOME` short: see [shep-kelpie's home](home-and-logs.md#shep-kelpies-home).
+shep-kelpie refuses a shepherd on another shep minor or major than the pinned one, or on an earlier patch, naming both versions. It needs 0.19.0 or later, the shep it is built with. shep-kelpie's commands talk to the shepherd's socket with the shep client it is built with, never a `shep` on `PATH`. Keep a shepherd's `SHEP_HOME` short: see [shep-kelpie's home](home-and-logs.md#shep-kelpies-home).

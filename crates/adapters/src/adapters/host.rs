@@ -112,6 +112,10 @@ pub struct WindowsInstall {
     /// What the profile read grant keeps out of a session's grants, as `profile
     /// status` lists it: empty when there is no grant.
     pub profile_exclusions: ProfileExclusions,
+    /// The variables that name the real user's config files the profile read
+    /// grant reaches, each with its value, which nothing sets on a sandboxed
+    /// command but the host: empty when there is no current grant.
+    pub profile_read_env: Vec<(String, String)>,
 }
 
 impl WindowsInstall {
@@ -126,6 +130,7 @@ impl WindowsInstall {
             seclogon_runs: true,
             desktop_session: true,
             profile_exclusions: ProfileExclusions::default(),
+            profile_read_env: Vec::new(),
         }
     }
 
@@ -136,6 +141,33 @@ impl WindowsInstall {
             profile_exclusions: exclusions,
             ..self
         }
+    }
+
+    /// The same, with `env` as the variables the profile read grant reaches
+    #[must_use]
+    pub fn reading<'a>(self, env: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
+        Self {
+            profile_read_env: env
+                .into_iter()
+                .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                .collect(),
+            ..self
+        }
+    }
+
+    /// The profile read variables a command has not already set, as crabpot's
+    /// `WindowsStatus::profile_read_env_for` picks them: a name in `supplied`
+    /// matches without regard to case, as Windows reads variable names
+    pub fn read_env_for<'a>(
+        &self,
+        supplied: impl IntoIterator<Item = &'a str>,
+    ) -> Vec<(&str, &str)> {
+        let supplied: Vec<String> = supplied.into_iter().map(str::to_uppercase).collect();
+        self.profile_read_env
+            .iter()
+            .filter(|(name, _)| !supplied.contains(&name.to_uppercase()))
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect()
     }
 
     /// Why no session can be opened under this status, in a sentence that
@@ -182,6 +214,7 @@ pub fn read_windows_status() -> Result<WindowsInstall, String> {
             seclogon_runs: status.seclogon_runs,
             desktop_session: status.in_desktop_session,
             profile_exclusions: status.profile_exclusions,
+            profile_read_env: status.profile_read_env,
         })
         .map_err(|e| e.to_string())
 }

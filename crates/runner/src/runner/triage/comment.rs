@@ -218,6 +218,16 @@ impl Runner {
         self.notes.push(line);
     }
 
+    // Whether `login` is the maintainer or the project's own App, whose issues are
+    // checked and triaged alike
+    pub(in crate::runner) fn own_author(&self, login: &str) -> bool {
+        let app = self.app_login();
+        super::is_app(login, app.as_deref())
+            || self
+                .maintainer()
+                .is_ok_and(|maintainer| maintainer.eq_ignore_ascii_case(login))
+    }
+
     // The login of the App that covers the repo, as its comments name it
     pub(super) fn app_login(&self) -> Option<String> {
         self.ports.app_reads.as_ref()?.login(&self.remote)
@@ -508,7 +518,7 @@ impl Runner {
         // The comment that hands an outside issue over mentions the maintainer;
         // the maintainer's own issue and the comment that asks do not.
         let maintainer = self.maintainer();
-        let own = (maintainer.as_ref()).is_ok_and(|login| login.eq_ignore_ascii_case(author));
+        let own = self.own_author(author);
         let mention = match (ask || own, &maintainer) {
             (true, _) => None,
             (false, Ok(login)) => Some(login.clone()),

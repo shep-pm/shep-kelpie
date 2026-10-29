@@ -12,9 +12,9 @@ use std::collections::BTreeSet;
 
 use super::super::Runner;
 use super::super::contributions::post::forge_is_busy;
-use super::TRIAGE_LABELS;
 use super::comment::NEEDS_TRIAGE;
 use super::ready::READY_LABEL;
+use super::{TRIAGE_LABELS, opened_by_us_or_people};
 use crate::board::{READY, ReadyIssue, Skip, TRIAGE, check};
 use crate::ports::{ForgeError, NewLabel, OpenIssue, OpenPull};
 use crate::settings::TriagePick;
@@ -81,7 +81,8 @@ impl Runner {
             maintainer: None,
             pulls,
         };
-        for issue in open.iter().filter(|i| !i.author_is_bot) {
+        let app = self.app_login();
+        for issue in (open.iter()).filter(|i| opened_by_us_or_people(i, app.as_deref())) {
             if poll.busy {
                 break;
             }
@@ -279,7 +280,7 @@ impl Runner {
         let Some(maintainer) = self.poll_maintainer(poll) else {
             return false;
         };
-        let wanted: &[(&str, bool)] = match issue.author.eq_ignore_ascii_case(&maintainer) {
+        let wanted: &[(&str, bool)] = match self.is_own(&issue.author, &maintainer) {
             true => match poll.pulls {
                 Some(Ok(pulls)) if pulls.iter().any(|p| p.closes.contains(&number)) => {
                     return false;
@@ -343,7 +344,7 @@ impl Runner {
         let Some(maintainer) = self.poll_maintainer(poll) else {
             return false;
         };
-        if !issue.author.eq_ignore_ascii_case(&maintainer) {
+        if !self.is_own(&issue.author, &maintainer) {
             return true;
         }
         let marker = check_marker(key);
@@ -383,6 +384,12 @@ impl Runner {
                 self.check_tell_failed(number, &why, forge_is_busy(&e), poll)
             }
         }
+    }
+
+    // Whether `author` is the maintainer, `maintainer` read, or the App
+    fn is_own(&self, author: &str, maintainer: &str) -> bool {
+        author.eq_ignore_ascii_case(maintainer)
+            || super::is_app(author, self.app_login().as_deref())
     }
 
     // The maintainer's login, read at most once a poll

@@ -8,12 +8,12 @@ use super::*;
 #[tokio::test]
 async fn a_build_for_a_later_shep_than_the_shepherd_stops_before_anything_changes() {
     let mut rig = Rig::new().await;
-    let new = rig.build("new", "0.4.0", "0.18.0");
+    let new = rig.build("new", "0.4.0", "0.20.0");
 
     let (ran, said) = rig.install(&new).await;
     let err = ran.unwrap_err();
-    assert!(err.contains("shep 0.18.0"), "{err}");
-    assert!(err.contains("runs shep 0.17.0"), "{err}");
+    assert!(err.contains("shep 0.20.0"), "{err}");
+    assert!(err.contains("runs shep 0.19.0"), "{err}");
     assert!(err.contains("Nothing was installed or restarted"), "{err}");
     assert!(
         err.contains("1. upgrade shep and reload its shepherd"),
@@ -29,7 +29,7 @@ async fn a_build_for_a_later_shep_than_the_shepherd_stops_before_anything_change
     );
     assert_eq!(said, Vec::<String>::new());
     assert_eq!(rig.restarts(), Vec::<String>::new());
-    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.17.0");
+    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.19.0");
     assert!(!rig.previous().exists());
     let beside: Vec<_> = std::fs::read_dir(rig.installed.parent().unwrap())
         .unwrap()
@@ -40,26 +40,26 @@ async fn a_build_for_a_later_shep_than_the_shepherd_stops_before_anything_change
 
 #[tokio::test]
 async fn a_shepherd_on_a_later_patch_or_minor_than_the_build_is_taken() {
-    for running in ["0.17.1", "0.18.0"] {
+    for running in ["0.19.1", "0.20.0"] {
         let rig = Rig::on(running, false).await;
-        let new = rig.build("new", "0.3.0", "0.17.0");
+        let new = rig.build("new", "0.3.0", "0.19.0");
         rig.install(&new).await.0.unwrap();
-        assert_eq!(rig.installed_says(), "0.3.0 for shep 0.17.0", "{running}");
+        assert_eq!(rig.installed_says(), "0.3.0 for shep 0.19.0", "{running}");
     }
 }
 
 #[tokio::test]
 async fn a_build_below_the_shepherd_s_oldest_protocol_says_to_install_another_kelpie() {
-    let rig = Rig::on("0.17.0", false).await;
+    let rig = Rig::on("0.19.0", false).await;
     rig.shepherd.accepts_from(PROTOCOL_VERSION + 1);
-    let new = rig.build("new", "0.3.0", "0.17.0");
+    let new = rig.build("new", "0.3.0", "0.19.0");
     let err = rig.install(&new).await.0.unwrap_err();
     assert!(
-        err.contains("runs shep 0.17.0, which it would refuse"),
+        err.contains("runs shep 0.19.0, which it would refuse"),
         "{err}"
     );
     assert!(err.contains("install a kelpie built for"), "{err}");
-    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.17.0");
+    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.19.0");
 }
 
 #[tokio::test]
@@ -76,7 +76,7 @@ async fn a_build_for_a_later_patch_than_the_shepherd_says_to_move_the_shepherd_f
             err.contains("1. upgrade shep and reload its shepherd"),
             "{err}"
         );
-        assert_eq!(rig.installed_says(), "0.1.0 for shep 0.17.0");
+        assert_eq!(rig.installed_says(), "0.1.0 for shep 0.19.0");
     }
 }
 
@@ -84,23 +84,23 @@ async fn a_build_for_a_later_patch_than_the_shepherd_says_to_move_the_shepherd_f
 async fn a_rollback_to_a_build_the_shepherd_would_refuse_stops_there() {
     // After the upgrade the shepherd stopped accepting the protocol the build
     // kept as the previous speaks.
-    let mut rig = Rig::on("0.18.0", false).await;
+    let mut rig = Rig::on("0.20.0", false).await;
     std::fs::remove_file(&rig.installed).unwrap();
     write_script(
         &rig.installed,
-        &speaking("0.1.0", "0.17.0", PROTOCOL_VERSION - 1),
+        &speaking("0.1.0", "0.19.0", PROTOCOL_VERSION - 1),
     );
-    let new = rig.build("new", "0.4.0", "0.18.0");
+    let new = rig.build("new", "0.4.0", "0.20.0");
     rig.install(&new).await.0.unwrap();
     rig.restarts();
     rig.shepherd.accepts_from(PROTOCOL_VERSION);
 
     let err = rig.upgrade(Action::Rollback).await.0.unwrap_err();
-    assert!(err.contains("shep 0.17.0"), "{err}");
-    assert!(err.contains("runs shep 0.18.0"), "{err}");
+    assert!(err.contains("shep 0.19.0"), "{err}");
+    assert!(err.contains("runs shep 0.20.0"), "{err}");
     assert!(err.contains("install a kelpie built for"), "{err}");
     assert_eq!(rig.restarts(), Vec::<String>::new());
-    assert_eq!(rig.installed_says(), "0.4.0 for shep 0.18.0");
+    assert_eq!(rig.installed_says(), "0.4.0 for shep 0.20.0");
 }
 
 #[tokio::test]
@@ -110,7 +110,7 @@ async fn a_binary_that_does_not_say_its_versions_is_refused_and_not_installed() 
     write_script(&liar, "#!/bin/sh\necho hello\n");
     let err = rig.install(&liar).await.0.unwrap_err();
     assert!(err.contains("did not answer `version --json`"), "{err}");
-    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.17.0");
+    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.19.0");
 
     let err = rig
         .install(&rig.builds.join("missing"))
@@ -124,17 +124,17 @@ async fn a_binary_that_does_not_say_its_versions_is_refused_and_not_installed() 
 async fn a_binary_that_exits_non_zero_is_refused_and_not_installed() {
     let rig = Rig::new().await;
     let sick = rig.builds.join("sick");
-    write_script(&sick, &format!("{}exit 3\n", answering("0.3.0", "0.17.0")));
+    write_script(&sick, &format!("{}exit 3\n", answering("0.3.0", "0.19.0")));
     let err = rig.install(&sick).await.0.unwrap_err();
     assert!(err.contains("exited"), "{err}");
-    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.17.0");
+    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.19.0");
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn a_binary_without_its_executable_bits_is_refused_naming_chmod() {
     let mut rig = Rig::new().await;
-    let flat = rig.build("flat", "0.3.0", "0.17.0");
+    let flat = rig.build("flat", "0.3.0", "0.19.0");
     std::fs::set_permissions(&flat, std::fs::Permissions::from_mode(0o644)).unwrap();
     let err = rig.install(&flat).await.0.unwrap_err();
     assert!(err.contains("not executable"), "{err}");
@@ -143,7 +143,7 @@ async fn a_binary_without_its_executable_bits_is_refused_naming_chmod() {
         "{err}"
     );
     assert_eq!(rig.restarts(), Vec::<String>::new());
-    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.17.0");
+    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.19.0");
 }
 
 #[cfg(windows)]
@@ -156,14 +156,14 @@ async fn a_release_is_refused_on_windows() {
     let err = ran.0.unwrap_err();
     assert!(err.contains("no Windows release asset"), "{err}");
     assert_eq!(rig.restarts(), Vec::<String>::new());
-    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.17.0");
+    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.19.0");
 }
 
 #[tokio::test]
 async fn a_sheep_that_runs_another_program_stops_the_upgrade_before_anything_changes() {
     let mut rig = Rig::new().await;
     rig.runs("old", Path::new("/opt/kelpie/bin/kelpie"), true);
-    let new = rig.build("new", "0.3.0", "0.17.0");
+    let new = rig.build("new", "0.3.0", "0.19.0");
     let err = rig.install(&new).await.0.unwrap_err();
     assert!(
         err.contains("`old` runs /opt/kelpie/bin/kelpie"),
@@ -175,7 +175,7 @@ async fn a_sheep_that_runs_another_program_stops_the_upgrade_before_anything_cha
     );
     assert!(err.contains("Nothing was installed or restarted"), "{err}");
     assert_eq!(rig.restarts(), Vec::<String>::new());
-    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.17.0");
+    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.19.0");
     assert!(!rig.previous().exists());
 }
 
@@ -225,8 +225,8 @@ async fn a_second_upgrade_at_once_is_refused_and_the_first_finishes() {
     let mut looks = vec![MERGING; 40];
     looks.push(IDLE);
     rig.shepherd.says("koji", &looks);
-    let new = rig.build("new", "0.3.0", "0.17.0");
-    let other = rig.build("other", "0.4.0", "0.17.0");
+    let new = rig.build("new", "0.3.0", "0.19.0");
+    let other = rig.build("other", "0.4.0", "0.19.0");
 
     let first = rig.install(&new);
     let second = async {
@@ -237,7 +237,7 @@ async fn a_second_upgrade_at_once_is_refused_and_the_first_finishes() {
     first.unwrap();
     let err = second.unwrap_err();
     assert!(err.contains("another upgrade is running"), "{err}");
-    assert_eq!(rig.installed_says(), "0.3.0 for shep 0.17.0");
+    assert_eq!(rig.installed_says(), "0.3.0 for shep 0.19.0");
     assert_eq!(rig.restarts(), ["kelpie", "koji"]);
     // The lock goes with the upgrade that held it.
     rig.install(&other).await.0.unwrap();
@@ -246,7 +246,7 @@ async fn a_second_upgrade_at_once_is_refused_and_the_first_finishes() {
 #[tokio::test]
 async fn a_rollback_to_a_build_that_cannot_run_is_refused() {
     let mut rig = Rig::new().await;
-    let new = rig.build("new", "0.3.0", "0.17.0");
+    let new = rig.build("new", "0.3.0", "0.19.0");
     rig.install(&new).await.0.unwrap();
     rig.restarts();
     // The kept copy dies on a signal: a badly signed or truncated file, say.
@@ -255,14 +255,14 @@ async fn a_rollback_to_a_build_that_cannot_run_is_refused() {
 
     let err = rig.upgrade(Action::Rollback).await.0.unwrap_err();
     assert!(err.contains("exited"), "{err}");
-    assert_eq!(rig.installed_says(), "0.3.0 for shep 0.17.0");
+    assert_eq!(rig.installed_says(), "0.3.0 for shep 0.19.0");
     assert_eq!(rig.restarts(), Vec::<String>::new());
 }
 
 #[tokio::test]
 async fn a_rollback_to_a_build_from_before_the_verb_goes_ahead_and_says_so() {
     let mut rig = Rig::new().await;
-    let new = rig.build("new", "0.3.0", "0.17.0");
+    let new = rig.build("new", "0.3.0", "0.19.0");
     rig.install(&new).await.0.unwrap();
     rig.restarts();
     // What a kelpie without `version` does: usage, and exit 2.
@@ -285,11 +285,11 @@ async fn a_starting_sheep_counts_as_running() {
     let mut rig = Rig::new().await;
     rig.runs("old", Path::new("/opt/kelpie/bin/kelpie"), true);
     rig.shepherd.starts("old");
-    let new = rig.build("new", "0.3.0", "0.17.0");
+    let new = rig.build("new", "0.3.0", "0.19.0");
     let err = rig.install(&new).await.0.unwrap_err();
     assert!(err.contains("`old` runs /opt/kelpie/bin/kelpie"), "{err}");
     assert_eq!(rig.restarts(), Vec::<String>::new());
-    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.17.0");
+    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.19.0");
 }
 
 // The build can take minutes, and the dog may be pointed elsewhere meanwhile:
@@ -300,7 +300,7 @@ async fn a_dog_that_moved_during_the_build_stops_the_upgrade_before_anything_is_
     let (started, gate) = (rig.builds.join("started"), rig.builds.join("gate"));
     // The build says when it is asked, and answers once the gate is there.
     let slow = rig.builds.join("slow");
-    let answer = answering("0.3.0", "0.17.0");
+    let answer = answering("0.3.0", "0.19.0");
     write_script(
         &slow,
         &format!(
@@ -337,7 +337,7 @@ async fn a_dog_that_moved_during_the_build_stops_the_upgrade_before_anything_is_
     assert!(err.contains("Nothing was installed or restarted"), "{err}");
     assert_eq!(said, Vec::<String>::new());
     assert_eq!(rig.restarts(), Vec::<String>::new());
-    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.17.0");
+    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.19.0");
     assert!(!rig.previous().exists());
 }
 
@@ -345,7 +345,7 @@ async fn a_dog_that_moved_during_the_build_stops_the_upgrade_before_anything_is_
 fn a_release_must_hold_the_kelpie_it_names() {
     let build = Build {
         kelpie: "0.3.0".into(),
-        shep: "0.17.0".into(),
+        shep: "0.19.0".into(),
         protocol: None,
         commit: None,
     };

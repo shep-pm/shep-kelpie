@@ -64,8 +64,7 @@ impl Runner {
     }
 
     fn triage_is_maintainer(&self, login: &str) -> bool {
-        self.maintainer()
-            .is_ok_and(|m| login.eq_ignore_ascii_case(&m))
+        self.own_author(login)
     }
 
     // A record made before the caps existed, or from a triage comment found on the

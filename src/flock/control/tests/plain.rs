@@ -277,7 +277,7 @@ async fn status_names_the_build_of_the_kelpie_the_dog_runs() {
         &installed,
         &format!(
             "#!/bin/sh\necho '{}'\n",
-            r#"{"kelpie":"0.1.0","shep":"0.17.0","commit":"9c8b7a6"}"#
+            r#"{"kelpie":"0.1.0","shep":"0.19.0","commit":"9c8b7a6"}"#
         ),
     );
     shepherd.holds_dog_at("kelpie", &installed.display().to_string(), true);

@@ -73,6 +73,7 @@ async fn a_windows_machine_with_no_install_is_told_to_make_one() {
         seclogon_runs: true,
         desktop_session: true,
         profile_exclusions: Default::default(),
+        profile_read_env: Vec::new(),
     }));
     let report = scene.report().await;
     let (what, fix) = missing(&report, "sandbox");
@@ -93,6 +94,7 @@ async fn a_windows_install_of_another_setup_version_names_both_numbers() {
         seclogon_runs: true,
         desktop_session: true,
         profile_exclusions: Default::default(),
+        profile_read_env: Vec::new(),
     }));
     let (what, fix) = missing(&scene.report().await, "sandbox");
     assert!(
@@ -168,6 +170,7 @@ async fn a_listening_project_on_a_closed_windows_install_is_told_the_widening() 
         seclogon_runs: true,
         desktop_session: true,
         profile_exclusions: Default::default(),
+        profile_read_env: Vec::new(),
     }));
     let (_, fix) = missing(&scene.report().await, "sandbox");
     assert_eq!(fix, "run `crabpot windows-install --allow-loopback`");
