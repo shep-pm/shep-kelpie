@@ -211,12 +211,26 @@ impl Rig {
         store.save(&state).unwrap();
     }
 
-    /// Lists `names` as the project's reviewers, and has each read the pull
-    /// request by setting `reviews.need` to their count, read when a runner next opens
+    /// Restricts the project to `names` through `agents.allow`
+    pub fn allow(&self, names: &[&str]) {
+        self.edit_settings(|s| {
+            let s = s
+                .lines()
+                .filter(|line| !line.starts_with("allow = "))
+                .collect::<Vec<_>>()
+                .join("\n");
+            s.replace(
+                "[app.dogs.kelpie.agents]\n",
+                &format!("[app.dogs.kelpie.agents]\nallow = {names:?}\n"),
+            )
+        });
+    }
+
+    /// Ranks `names` after `sonnet-high` and sets `reviews.need` to their count
     pub fn reviewers(&self, names: &[&str]) {
         self.agent_board
             .ranks_first(&[&["sonnet-high"][..], names].concat());
-        // An empty list reads nobody, and `reviews.need` is at least one.
+        // `reviews.need` is at least one.
         self.reviews_need(Some(names.len().max(1)));
     }
 

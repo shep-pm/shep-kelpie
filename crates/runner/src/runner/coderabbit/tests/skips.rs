@@ -68,6 +68,7 @@ fn a_bot_passed_over_is_journaled_with_its_reason_for_the_retro() {
 fn a_bot_the_list_drops_mid_round_is_never_summoned_again() {
     let (rig, runner, _) = summoned("koji");
     rig.reviewers(crate::test::RIG_REVIEWERS);
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
     rig.ci_on_now(&runner);
     assert_eq!(
         step(&runner).unwrap(),

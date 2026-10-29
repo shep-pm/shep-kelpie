@@ -144,9 +144,9 @@ per_item_usd = 10
 # while its window is closed. Its open threads get the one fix turn. Each
 # file holds its bot's window, and `rounds` there caps its reads of a work
 # item's pull request. CodeRabbit's free plan reviews public repos only, so
-# a repo GitHub marks private cannot use it. Absent, every reviewer file
+# a repo GitHub marks private cannot use it. Every reviewer file
 # `agents.allow` holds but the one `contributions.security_reviewer` names
-# is a candidate; empty, no review at all.
+# is a candidate.
 # The project manager, from a file whose role is `pm`: kelpie's own `pm` is
 # Opus 5.5 at medium. Code wakes it when a slot is free with two or more
 # ready issues, two open branches conflict, a work item is stuck, or you

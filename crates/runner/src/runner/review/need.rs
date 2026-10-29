@@ -19,6 +19,7 @@ use crate::test::{Rig, Scripted, Told, ticket};
 fn three_candidates() -> Rig {
     let rig = two_local();
     rig.reviewers(&["mine", "other", "claude"]);
+    super::several::allow_reviewers(&rig, &["mine", "other", "claude"]);
     rig.reviews_need(None);
     rig
 }
@@ -98,7 +99,7 @@ fn the_ask_carries_the_items_kind_tier_and_slack() {
     assert_eq!(ask.tier, Some(Tier::Heavy));
     assert_eq!(ask.slack, Some(15));
     assert_eq!(ask.pin, None);
-    assert_eq!(ask.agents, names(&["mine", "other", "claude"]));
+    assert_eq!(ask.agents, names(&["claude", "mine", "other"]));
     assert_eq!(ask.leave_out, []);
 }
 
@@ -178,7 +179,7 @@ fn with_no_answer_from_the_board_the_round_asks_again_next_poll() {
     assert!(rig.reviewer.seen().is_empty(), "no fallback reviewer read");
     assert!(reviewer_models(&rig).is_empty());
 
-    rig.agent_board.ranks_listed();
+    rig.agent_board.ranks_first(&["mine", "other", "claude"]);
     reviewers_until_ci(&rig, &runner);
     assert_eq!(rig.reviewer.seen().len(), 2);
 }
@@ -210,7 +211,7 @@ fn a_board_that_ranks_no_candidate_with_nobody_read_marks_the_item_unreviewed() 
 
     let report = step(&runner).unwrap();
 
-    let reason = "the agent board ranked none of mine, other, claude";
+    let reason = "the agent board ranked none of claude, mine, other";
     assert_eq!(
         report,
         Some(StepReport::Unreviewed {

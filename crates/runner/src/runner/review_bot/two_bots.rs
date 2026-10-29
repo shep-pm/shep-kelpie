@@ -35,6 +35,7 @@ pub(in crate::runner) fn listing(project: &str, bots: &[&str]) -> Rig {
         .chain(bots.iter().copied())
         .collect();
     rig.reviewers(&names);
+    rig.allow(&[&["sonnet-high"][..], &names].concat());
     rig
 }
 

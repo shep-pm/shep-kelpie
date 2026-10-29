@@ -103,7 +103,9 @@ fn absent_reviewers_are_the_projects_agents_reviewers() {
         .with("opus", REVIEWER);
     let home = tempfile::tempdir().unwrap();
     let mut settings = parse(EXAMPLE).unwrap();
-    settings.agents.reviewers = Some(vec![crate::settings::AgentName::try_from("opus".to_owned()).unwrap()]);
+    settings.agents.reviewers = Some(vec![
+        crate::settings::AgentName::try_from("opus".to_owned()).unwrap(),
+    ]);
     let lineup = settings
         .contribution_lineup(&book, &Gateways::default(), home.path())
         .unwrap();
