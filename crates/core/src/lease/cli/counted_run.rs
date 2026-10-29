@@ -332,7 +332,8 @@ async fn one_turn(socket: &Path, ask: &Ask, signals: &mut Interrupts) -> Turn {
                 | Answer::Go
                 | Answer::Wait(_)
                 | Answer::Held(_)
-                | Answer::Picks(_)),
+                | Answer::Picks(_)
+                | Answer::Fits(_)),
             )) => {
                 return Turn::Refused(format!("the dog answered {other:?} to {CARGO_TEST}"));
             }
