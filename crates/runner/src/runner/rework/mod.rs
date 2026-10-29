@@ -254,11 +254,9 @@ impl Runner {
                     by,
                 }),
                 Err(ReworkError::State(e)) => return Err(e),
-                // A dog out of reach answers no pull request, so this poll asks for none after it.
-                Err(e @ ReworkError::Agent(AddError::Unpicked(Unpicked::Unreachable))) => {
-                    skipped.push(skip(ticket, number, e));
-                    break;
-                }
+                // A dog out of reach answers no pull request, so this poll asks for none after it
+                // and the pass is idle, as dispatch's is; the next poll asks again.
+                Err(ReworkError::Agent(AddError::Unpicked(Unpicked::Unreachable))) => break,
                 Err(e) if e.settled() => match self.refuse_rework(number, labelled, review, &e)? {
                     Ok(begin) => begin,
                     Err(e) => {

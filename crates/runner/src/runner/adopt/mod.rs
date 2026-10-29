@@ -281,11 +281,9 @@ impl Runner {
                 }
                 // It waits for the work item on its issue to end.
                 Err(AdoptError::InFlight(_)) => continue,
-                // A dog out of reach answers no pull request, so this poll asks for none after it.
-                Err(e @ AdoptError::Agent(AddError::Unpicked(Unpicked::Unreachable))) => {
-                    skipped.push(self.adopt_failed(number, &e)?);
-                    break;
-                }
+                // A dog out of reach answers no pull request, so this poll asks for none after it
+                // and the pass is idle, as dispatch's is; the next poll asks again.
+                Err(AdoptError::Agent(AddError::Unpicked(Unpicked::Unreachable))) => break,
                 Err(e) if e.settled() => match self.refuse_adoption(number, &e)? {
                     Ok(begin) => begin,
                     Err(e) => {

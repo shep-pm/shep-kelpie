@@ -134,19 +134,14 @@ fn an_unreachable_board_starts_no_rework_asks_once_and_the_next_poll_that_reache
     rig.agent_board.unreachable();
     let runner = running(&rig);
 
-    let why = "the agent board, which the dog keeps, cannot be reached";
     assert_eq!(
         step(&runner).unwrap(),
-        Some(StepReport::BoardFailed {
-            reason: format!("cannot rework #70: {why}")
-        })
+        None,
+        "the poll is idle, as dispatch's is"
     );
 
     assert_eq!(rig.agent_board.asks().len(), 1, "the dog is asked once");
-    assert_eq!(
-        rig.ask(&runner, "status", None)["skipped"],
-        json!([{ "reason": "rework", "issue": "6", "pull_request": 70, "error": why }])
-    );
+    assert_eq!(rig.ask(&runner, "status", None)["skipped"], json!([]));
     assert!(runner.lock().unwrap().state.work_items.is_empty());
     assert_eq!(rig.forge.pull_request_labels(70), [READY]);
     assert_eq!(rig.forge.pull_request_labels(71), [READY]);
