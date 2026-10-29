@@ -189,7 +189,9 @@ impl Sandbox for SandboxRuntime {
         {
             return Err(SandboxError::Loopback);
         }
-        let exclusions = install.map(|install| install.profile_exclusions);
+        let exclusions = install
+            .as_ref()
+            .map(|install| install.profile_exclusions.clone());
         let mut wrapped = self.runtime()?;
         let (settings_json, notes) = settings_for(
             policy,
@@ -213,6 +215,13 @@ impl Sandbox for SandboxRuntime {
             .args(command.get_args());
         if let Some(dir) = command.get_current_dir() {
             wrapped.current_dir(dir);
+        }
+        // The real user's config the profile read grant reaches, which only the
+        // embedder sets: what the command sets itself wins.
+        if let Some(install) = &install {
+            let set: Vec<_> = command.get_envs().map(|(name, _)| name).collect();
+            let set: Vec<_> = set.iter().filter_map(|name| name.to_str()).collect();
+            wrapped.envs(install.read_env_for(set));
         }
         for (name, value) in command.get_envs() {
             match value {
@@ -440,6 +449,9 @@ pub(crate) fn built_kelpie() -> Result<PathBuf, String> {
 mod live;
 
 #[cfg(test)]
+mod profile_env;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -456,6 +468,7 @@ mod tests {
                 seclogon_runs: true,
                 desktop_session: true,
                 profile_exclusions: Default::default(),
+                profile_read_env: Vec::new(),
             });
         let settings = dir.path().join("call.srt.json");
         let err = srt
@@ -760,6 +773,7 @@ mod tests {
                 seclogon_runs: true,
                 desktop_session: true,
                 profile_exclusions: Default::default(),
+                profile_read_env: Vec::new(),
             });
         let err = outdated.clone().check().unwrap_err();
         assert!(matches!(err, SandboxError::Install(_)), "{err:?}");
