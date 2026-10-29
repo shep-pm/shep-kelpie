@@ -142,6 +142,26 @@ async fn the_marks_survive_a_restart() {
 }
 
 #[tokio::test]
+async fn two_runners_asking_at_once_raise_one_finding() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = home_in(dir.path());
+    let agents = pair(dir.path());
+    let board = board_of(&agents, &home);
+    let (socket, _desk) = door_in(dir.path(), 3, Availability::default(), Arc::clone(&board));
+
+    let (one, two) = tokio::join!(asked(&socket, "slow", "fix"), asked(&socket, "slow", "fix"),);
+
+    let answers = [one, two];
+    assert_eq!(
+        (answers.iter())
+            .filter(|answer| matches!(answer, Fits::No(_)))
+            .count(),
+        1,
+        "the door marks the pair before it answers, so one runner of many raises it"
+    );
+}
+
+#[tokio::test]
 async fn an_agent_with_no_record_of_the_kind_still_fits_it() {
     let dir = tempfile::tempdir().unwrap();
     let home = home_in(dir.path());

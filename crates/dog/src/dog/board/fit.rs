@@ -3,12 +3,14 @@
 //! The board holds every project's records, so it is the one place that can
 //! read a pair of agents, and the one that decides which runner raises the
 //! ruling. A mark is the worse agent's items of the kind when the dog last
-//! answered a finding for it: the dog writes it before it answers, so only
-//! one project of many raises a finding for the pair.
+//! answered a finding for it: the dog reads the mark, takes it and writes the
+//! file under the board's one lock before it answers, so only one project of
+//! many raises a finding for the pair.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
@@ -142,29 +144,32 @@ fn raises(view: &View, ask: &FitAsk) -> Option<(Finding, u32)> {
         .map(|finding| (finding, items))
 }
 
+// The finding the dog raises for `ask`, having marked the pair and written the
+// marks, all under the board's one lock: two runners asking about one pair
+// cannot both read no mark, and no save can drop another's mark. A save that
+// fails says so, and the mark the dog holds stands until the next one.
+fn raise(board: &Mutex<Board>, kelpie_home: &Path, ask: &FitAsk) -> Option<Finding> {
+    let mut board = lock(board);
+    let (finding, items) = raises(&board.view(), ask)?;
+    board
+        .marks
+        .insert((ask.agent.clone(), ask.kind.clone()), items);
+    if let Err(e) = save(&marks_file(kelpie_home), &board.marks) {
+        println!("{e}: the mark stands until the dog writes the marks file again");
+    }
+    Some(finding)
+}
+
 /// Answers a runner's `fit` ask and ends the visit
 pub(in crate::dog) async fn visit(place: &Place, ask: Ask, write: &mut ServerWriteHalf) {
     let Some(ask) = ask.fit else {
         let why = "a fit ask names the agent and the kind".to_owned();
         return say(write, &Answer::Error(why)).await;
     };
-    let raised = raises(&lock(&place.board).view(), &ask);
-    let Some((finding, items)) = raised else {
-        return say(write, &Answer::Fits(Fits::Yes)).await;
-    };
-    // The mark goes down before the answer, so the next runner to ask about
-    // this pair is the one that raises nothing.
-    let marks = {
-        let mut board = lock(&place.board);
-        board
-            .marks
-            .insert((ask.agent.clone(), ask.kind.clone()), items);
-        board.marks.clone()
-    };
-    if let Err(e) = save(&marks_file(&place.kelpie_home), &marks) {
-        println!("{e}: the mark stands until the dog writes it again");
+    match raise(&place.board, &place.kelpie_home, &ask) {
+        Some(finding) => say(write, &Answer::Fits(Fits::No(finding))).await,
+        None => say(write, &Answer::Fits(Fits::Yes)).await,
     }
-    say(write, &Answer::Fits(Fits::No(finding))).await;
 }
 
 #[cfg(test)]
@@ -172,6 +177,9 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::agents::Agents;
+    use crate::dog::board::{refresh, tests::finished};
+    use crate::test::write_in;
 
     fn name(agent: &str) -> AgentName {
         AgentName::try_from(agent.to_owned()).unwrap()
@@ -182,6 +190,49 @@ mod tests {
             ((name("slow"), "fix".to_owned()), 12),
             ((name("quick"), "docs".to_owned()), 30),
         ])
+    }
+
+    // An implementer on the stand-in harness whose file names `fit`'s lines.
+    fn implementer(fit: &str) -> String {
+        format!(
+            "---\nrole: implementer\nharness: stand-in\nmodel: lite\neffort: low\n\
+             usage: none\n{fit}---\n"
+        )
+    }
+
+    // A test dog's kelpie home, with the `dog` folder a real dog's start makes.
+    fn dog_home(dir: &Path) -> PathBuf {
+        let home = dir.join("kelpie");
+        fs::create_dir_all(home.join("dog")).unwrap();
+        home
+    }
+
+    // `slow`, whose file takes `fix` and `docs`, `quick`, which takes `fix`,
+    // and `bulk`, which takes `docs`.
+    fn trio(dir: &Path) -> Agents {
+        write_in(dir, "slow.md", &implementer("kinds: [fix, docs]\n"));
+        write_in(dir, "quick.md", &implementer("kinds: [fix]\n"));
+        write_in(dir, "bulk.md", &implementer("kinds: [docs]\n"));
+        Agents::load(dir).unwrap()
+    }
+
+    // The board of `agents`: each pair of them has ten items of a kind, the
+    // worse one of each pair taking twelve times as long at it.
+    fn board_of(agents: &Agents, home: &Path) -> Mutex<Board> {
+        finished(home, "koji", ("slow", "fix"), 10, (7200, 0.5));
+        finished(home, "koji", ("quick", "fix"), 10, (600, 0.5));
+        finished(home, "koji", ("slow", "docs"), 10, (600, 0.5));
+        finished(home, "koji", ("bulk", "docs"), 10, (7200, 0.5));
+        let board = Mutex::new(Board::new(agents));
+        refresh(&board, home);
+        board
+    }
+
+    fn asked(agent: &str, kind: &str) -> FitAsk {
+        FitAsk {
+            agent: name(agent),
+            kind: kind.to_owned(),
+        }
     }
 
     #[test]
@@ -264,5 +315,53 @@ mod tests {
         assert_eq!(read, Marks::new());
         let why = why.expect("a line naming the mark it dropped");
         assert!(why.contains("not a name!"), "{why}");
+    }
+
+    #[test]
+    fn two_runners_asking_about_one_pair_at_once_raise_one_finding() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dog_home(dir.path());
+        let agents = trio(dir.path());
+        let board = board_of(&agents, &home);
+
+        let raised = std::thread::scope(|scope| {
+            let one = scope.spawn(|| raise(&board, &home, &asked("slow", "fix")).is_some());
+            let two = scope.spawn(|| raise(&board, &home, &asked("slow", "fix")).is_some());
+            (one.join().unwrap(), two.join().unwrap())
+        });
+
+        assert_eq!(
+            usize::from(raised.0) + usize::from(raised.1),
+            1,
+            "one runner of many raises a finding for the pair"
+        );
+    }
+
+    #[test]
+    fn two_runners_raising_at_once_leave_both_marks_in_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dog_home(dir.path());
+        let agents = trio(dir.path());
+        let board = board_of(&agents, &home);
+
+        let raised = std::thread::scope(|scope| {
+            let fix = scope.spawn(|| raise(&board, &home, &asked("slow", "fix")).is_some());
+            let docs = scope.spawn(|| raise(&board, &home, &asked("bulk", "docs")).is_some());
+            (fix.join().unwrap(), docs.join().unwrap())
+        });
+
+        let (saved, why) = read(&marks_file(&home));
+        assert_eq!(
+            (raised, saved, why),
+            (
+                (true, true),
+                Marks::from([
+                    ((name("slow"), "fix".to_owned()), 10),
+                    ((name("bulk"), "docs".to_owned()), 10),
+                ]),
+                None,
+            ),
+            "the save that lands last holds both pairs, not only the one it raised"
+        );
     }
 }
