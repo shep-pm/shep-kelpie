@@ -30,7 +30,6 @@ mod contribution;
 #[cfg(test)]
 mod line_endings_tests;
 mod push;
-mod ref_folders;
 mod remote;
 mod stale_lock;
 mod workflows;
@@ -180,9 +179,7 @@ pub fn prepare(
     build: &Path,
 ) -> Result<Worktree, WorktreeError> {
     let foreign = || WorktreeError::Foreign(worktree.to_owned());
-    let now = SystemTime::now();
-    stale_lock::clear(&repo.join(".git"), now);
-    stale_lock::clear(&clone::git_dir_of(worktree), now);
+    stale_lock::clear(&clone::git_dir_of(worktree), SystemTime::now());
     let full_ref = format!("refs/heads/{branch}");
     let mut main_fetch_failed = None;
     if worktree.exists() {
@@ -244,7 +241,6 @@ pub fn prepare(
     }
     let git_common_dir = common_dir(repo)?;
     let (git_dir, _) = clone::dirs(&git_common_dir, worktree)?.ok_or_else(foreign)?;
-    ref_folders::ensure(&git_common_dir, branch)?;
     create(build)?;
     Ok(Worktree {
         git_common_dir,
@@ -315,17 +311,9 @@ pub fn remove(
     if git(repo, ["rev-parse", "--verify", "--quiet", &full_ref]).is_ok() {
         git(repo, ["branch", "--quiet", "-D", branch])?;
     }
-    // Deleting the last loose ref in a folder removes the folder, and the
-    // workers still running have no leave to make it again. They must not
-    // wait out the round trips to origin, or an error from them, for it.
-    let common = common_dir(repo)?;
-    ref_folders::ensure(&common, branch)?;
-    let on_remote_deleted = match remote {
-        Some(remote) => delete_on_remote(repo, remote, branch),
-        None => Ok(()),
-    };
-    ref_folders::ensure(&common, branch)?;
-    on_remote_deleted?;
+    if let Some(remote) = remote {
+        delete_on_remote(repo, remote, branch)?;
+    }
     remove_tree_of(build)
 }
 

@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime};
 // Far longer than any git holds it: kelpie's own git waits 5 seconds for it.
 const STALE_AFTER: Duration = Duration::from_secs(60);
 
-/// Removes `packed-refs.lock` from `git_dir` when it is older than a minute at `now`
+/// Removes `packed-refs.lock` from a clone's `git_dir` when it is older than a minute at `now`
 ///
 /// A lock that is a link, a folder or newer is left alone, and so is one that
 /// cannot be removed: git reports that when it needs the lock.
@@ -65,7 +65,7 @@ mod tests {
         clear(tempfile::tempdir().unwrap().path(), SystemTime::now());
     }
 
-    // The worker writes the git dir's lock name, and kelpie writes as the maintainer.
+    // The worker writes the clone's lock name, and kelpie writes as the maintainer.
     #[cfg(unix)]
     #[test]
     fn a_link_in_place_of_the_lock_leaves_what_it_points_to_alone() {

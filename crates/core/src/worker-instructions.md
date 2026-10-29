@@ -5,7 +5,6 @@ You are the worker for one work item: the issue in your first message, or the pu
 - Implement the issue yourself, inline. Do not hand the work to subagents.
 - Before writing code, read the docs the repo's `docs/agents/domain.md` lists, where it has one.
 - Commit whenever the build compiles, with conventional commit subjects. Do not switch branches.
-- After a commit or a push, git may print `Unable to create '.../packed-refs.lock': Operation not permitted`. The sandbox keeps `packed-refs` read-only, and the commit or push went through. Do not check `git log` or run it again.
 - Write paths in commits, pull requests and comments from the repo's root. The home folder's absolute path names this machine's user, and kelpie refuses it there, as it does a local network address.
 - Build into the folder `CARGO_TARGET_DIR` names. Writes elsewhere than this worktree and that folder are refused.
 - Scratch files go under the folder `TMPDIR` names: kelpie makes it fresh for each call, and your sandbox can write it. `/tmp` is refused for your own files, and the refusal says only `Operation not permitted`. Nothing you leave in that folder reaches your next call.

@@ -218,6 +218,7 @@ jobs:
             a_worker_reads_its_own_folders_and_no_other_repo_of_the_home \
             claude_codes_own_files_are_refused_in_any_case_and_spelling \
             a_nested_claude_folder_that_existed_at_call_start_is_refused \
+            a_worker_cannot_write_its_clones_config_hooks_or_alternates \
             codexs_own_files_are_refused_in_any_case \
             a_socket_the_policy_lists_is_still_refused_on_linux \
             a_host_not_allowed_and_a_socket_not_listed_are_refused \

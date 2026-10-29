@@ -7,11 +7,7 @@ test	Run cargo test --locked	test worktree::cache::tests::the_mark_tells_when_th
 test	Run cargo test --locked	test worktree::cache::tests::stale_cache_goes_and_what_the_turn_wrote_or_cargo_does_not_own_stays ... ok
 test	Run cargo test --locked	^[[1m^[[92m   Compiling^[[0m shep-kelpie v0.1.0 (/tmp/.tmp1mi3Q0/work/source)
 test	Run cargo test --locked	^[[1m^[[92m    Finished^[[0m `release` profile [optimized] target(s) in 0.07s
-test	Run cargo test --locked	test worktree::ref_folders::tests::a_commit_in_a_worktree_prepare_creates_updates_its_branch_after_the_folder_was_cleaned_up ... ok
-test	Run cargo test --locked	test worktree::ref_folders::tests::a_commit_in_an_existing_worktree_updates_its_branch_after_the_folder_was_cleaned_up ... ok
-test	Run cargo test --locked	test worktree::ref_folders::tests::removing_a_work_item_leaves_the_folders_other_workers_commit_through ... ok
 test	Run cargo test --locked	^[[1m^[[92m   Compiling^[[0m shep-kelpie v0.1.0 (/tmp/.tmp1mi3Q0/work/source)
-test	Run cargo test --locked	test worktree::ref_folders::tests::a_removal_that_cannot_reach_origin_still_leaves_the_folders ... ok
 test	Run cargo test --locked	^[[1m^[[92m    Finished^[[0m `release` profile [optimized] target(s) in 0.05s
 test	Run cargo test --locked	test worktree::remote::tests::origin_head_on_a_fork_remote_returns_the_forks_head ... ok
 test	Run cargo test --locked	test upgrade::tests::source::a_ref_is_built_where_it_stands_in_the_repo ... ok
