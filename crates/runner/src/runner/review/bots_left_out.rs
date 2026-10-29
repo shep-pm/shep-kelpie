@@ -8,6 +8,7 @@
 use std::sync::Mutex;
 
 use super::super::review_bot::{ANSWER_WAIT, FAR, SETTLE_LEAST};
+use crate::board::briefing::date_time;
 use crate::coderabbit::LABEL;
 use crate::lease::LeaseKind;
 use crate::lease::door::PickAsk;
@@ -17,7 +18,7 @@ use crate::runner::review_bot::two_bots::{bot_reviewed, item_reviewed};
 use crate::runner::{Runner, StepReport, step};
 use crate::settings::AgentName;
 use crate::state::BOT_LEFT_OUT;
-use crate::test::{Rig, ticket};
+use crate::test::{Rig, Scripted, ticket};
 
 const NOT_INSTALLED: &str =
     "it has never posted a review on this repo, so it may not be installed there";
@@ -96,6 +97,27 @@ fn labels(rig: &Rig) -> Vec<(u64, String, bool)> {
 fn next_item(rig: &Rig, runner: &Mutex<Runner>) -> String {
     rig.ask(runner, "drop", None);
     item_reviewed(rig, runner, 8)
+}
+
+// A project whose only reviewer is CodeRabbit, whose worker opened pull
+// request 71, and whose CodeRabbit round is next
+fn coderabbit_only(project: &str) -> (Rig, Mutex<Runner>) {
+    let rig = Rig::new(project);
+    rig.reviewers(&["coderabbit"]);
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+    step(&runner).unwrap(); // the worker's first turn: opens the pull request
+    (rig, runner)
+}
+
+// When the state file says the left-out bot comes back
+fn back_in(rig: &Rig) -> Timestamp {
+    let text = std::fs::read_to_string(rig.paths().state).unwrap();
+    let state: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let at = state["bots_left_out"][0]["at"].as_u64().expect("when");
+    Timestamp(at + BOT_LEFT_OUT)
 }
 
 // The round after the next item's two reviewers read: the board is asked, and
@@ -238,4 +260,48 @@ fn a_bot_passed_over_for_its_window_stays_a_candidate() {
         rig.forge.readied().is_empty(),
         "no round of its own ran for either item"
     );
+}
+
+// CodeRabbit's round on a project that lists it alone: its summon is sent,
+// nothing answers, and the pass goes on without it.
+fn passed_over_alone(project: &str) -> (Rig, Mutex<Runner>) {
+    let (rig, runner) = coderabbit_only(project);
+    rig.forge.set_last_bot_review(None);
+    for _ in 0..4 {
+        rig.clock.advance(ANSWER_WAIT);
+        let report = step(&runner).unwrap();
+        if let Some(StepReport::ReviewerSkipped { reason, round, .. }) = &report {
+            assert_eq!((reason.as_str(), *round), (NOT_INSTALLED, 1), "{report:?}");
+            return (rig, runner);
+        }
+    }
+    panic!("CodeRabbit was never passed over");
+}
+
+#[test]
+fn a_pass_with_nobody_but_a_left_out_bot_says_it_is_left_out_and_when() {
+    let (rig, runner) = passed_over_alone("shep");
+    assert_eq!(left_out(&rig), ["coderabbit"]);
+
+    // The next work item has nobody to read it but the bot left out.
+    rig.ask(&runner, "drop", None);
+    rig.ask(&runner, "add", Some("8"));
+    rig.forge.open_pull_request(81, "kelpie/8", &[8]);
+    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+    step(&runner).unwrap(); // the worker's first turn: opens the pull request
+
+    let until = date_time(back_in(&rig));
+    let reason = format!("coderabbit is left out of every pick until {until}: {NOT_INSTALLED}");
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Unreviewed {
+            issue: ticket(8),
+            pull_request: 81,
+            reason: reason.clone(),
+        }),
+        "not the board refusing a candidate"
+    );
+    let item = &rig.ask(&runner, "status", None)["work_item"];
+    assert_eq!(item["unreviewed"], reason.as_str());
+    assert_eq!(item["phase"]["state"], "ci");
 }

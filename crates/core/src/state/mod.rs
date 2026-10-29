@@ -238,8 +238,8 @@ pub struct ProjectState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub red: Vec<RedWorkflow>,
     /// Review bots each pass left out as one its repo cannot run, each with
-    /// when it was last left out, oldest first. A bot seen reviewing comes
-    /// off, and one left out for any other reason is never on it.
+    /// when and why it was last left out, oldest first. A bot seen reviewing
+    /// comes off, and one left out for any other reason is never on it.
     ///
     /// Left out while empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

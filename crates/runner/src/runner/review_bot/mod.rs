@@ -719,7 +719,7 @@ impl Runner {
         );
         let mut saved = self.state.clone();
         if left_out {
-            saved.leave_bot_out(reviewer.clone(), now);
+            saved.leave_bot_out(reviewer.clone(), now, reason.clone());
         }
         let item = self
             .current_in(&mut saved)
@@ -803,9 +803,7 @@ impl Runner {
                     .listed(name)
                     .is_some_and(|r| r.bot().is_some_and(|b| b.bot == bot))
         };
-        saved
-            .bots_left_out
-            .retain(|left| !names_bot(&left.reviewer));
+        saved.bots_back_in(names_bot);
     }
 
     // Who the round is, as the pass records it, or the bot's own file's name.

@@ -173,7 +173,8 @@ fn a_file_saved_before_bumps_loads_with_none_and_a_bump_round_trips() {
 }
 
 // A version 93 file has no `bots_left_out`: no review bot has been left out
-// of a pick. One a pass left out saves and loads back with when.
+// of a pick. One a pass left out saves and loads back with when and why, and
+// is read as left out only until a week after it was left out.
 #[test]
 fn a_state_file_from_before_reads_with_no_bots_left_out() {
     let dir = tempfile::tempdir().unwrap();
@@ -186,16 +187,35 @@ fn a_state_file_from_before_reads_with_no_bots_left_out() {
     let mut loaded = store.load().unwrap().expect("a saved state");
     assert!(loaded.bots_left_out.is_empty());
 
-    loaded.leave_bot_out(AgentName::kelpies("coderabbit"), Timestamp(1_790_000_000));
+    let (name, at) = (AgentName::kelpies("coderabbit"), Timestamp(1_790_000_000));
+    let why = "it has never posted a review on this repo, so it may not be installed there";
+    loaded.leave_bot_out(name.clone(), at, why.to_owned());
     store.save(&loaded).unwrap();
     let text = fs::read_to_string(dir.path().join(STATE_FILE)).unwrap();
     let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(saved["version"], VERSION);
     assert_eq!(
         saved["bots_left_out"],
-        serde_json::json!([{ "reviewer": "coderabbit", "at": 1_790_000_000 }])
+        serde_json::json!([
+            { "reviewer": "coderabbit", "at": 1_790_000_000, "why": why }
+        ])
     );
     assert_eq!(store.load().unwrap(), Some(loaded));
+
+    let read = store.load().unwrap().expect("a saved state");
+    assert_eq!(
+        read.bot_left_out(&name, at).map(|l| l.why.as_str()),
+        Some(why)
+    );
+    assert_eq!(
+        read.bot_left_out(&name, at).map(BotLeftOut::back_in),
+        Some(Timestamp(at.0 + BOT_LEFT_OUT)),
+        "the pick asks it again then"
+    );
+    assert_eq!(
+        read.bot_left_out(&name, Timestamp(at.0 + BOT_LEFT_OUT)),
+        None
+    );
 }
 
 #[test]

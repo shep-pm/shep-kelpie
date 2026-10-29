@@ -5,9 +5,9 @@
 //! alone, a local one that read nothing twice running, or a bot that has made
 //! its `rounds`. It takes the first ranked one the pacer lets start and, for a
 //! bot, whose window is open now. A bot left out as one the repo cannot run is
-//! in the ask's leave-out until a week after it was last left out. The pass
-//! ends once `reviews.need` reviewers have read, or the board ranks none left.
-//! A kept reviewer resumes its round.
+//! in the ask's leave-out for a week, and no candidate a pass that read nothing
+//! names as refused. The pass ends at `reviews.need` reads or when the board
+//! ranks none left. A kept reviewer resumes its round.
 
 use std::path::Path;
 use std::process::Stdio;
@@ -15,6 +15,7 @@ use std::process::Stdio;
 use super::super::Runner;
 use super::super::pace::Walked;
 use super::super::report::Begin;
+use crate::board::briefing::date_time;
 use crate::lease::door::PickAsk;
 use crate::pacer::Scope;
 use crate::ports::Timestamp;
@@ -28,7 +29,8 @@ pub(super) enum Chosen {
     Reviewer(ListedReviewer),
     /// The pass is over
     Ended,
-    /// The board ranked none of these candidates, which could run
+    /// The board ranked none of the candidates it was asked to rank, which
+    /// could run. One kelpie itself left out is not among them.
     Unranked(Vec<AgentName>),
     /// The step does this instead, and is made again
     Instead(Box<Begin>),
@@ -61,13 +63,14 @@ impl Runner {
         let Some(number) = item.pull_request else {
             return Ok(Chosen::Ended);
         };
+        let left_out = self.left_out_of(review);
         let ask = PickAsk {
             kind: item.kind.clone(),
             tier: item.tier,
             pin: None,
             slack: Some(self.slack(item.slack)),
             agents: due.iter().map(|r| r.name.clone()).collect(),
-            leave_out: self.left_out_of(review),
+            leave_out: left_out.clone(),
         };
         let Ok(picks) = self.board_picks(&ask) else {
             return Ok(Chosen::Instead(Box::new(Begin::Idle)));
@@ -75,7 +78,13 @@ impl Runner {
         let now = self.ports.clock.now();
         let ranked: Vec<AgentName> = picks.into_iter().map(|pick| pick.agent).collect();
         if ranked.is_empty() {
-            return Ok(Chosen::Unranked(ask.agents));
+            // A bot kelpie left out is none the board refused, so it is not a
+            // candidate the maintainer is asked about. `unread` names it.
+            let refused = (ask.agents.iter())
+                .filter(|name| !left_out.contains(name))
+                .cloned()
+                .collect();
+            return Ok(Chosen::Unranked(refused));
         }
         // A bot whose window is closed is passed over, and not waited on.
         if let Some((first, opens)) = ranked
@@ -182,9 +191,8 @@ impl Runner {
         let mut left_out = self.ran_of(review);
         let now = self.ports.clock.now();
         for left in &self.state.bots_left_out {
-            let name = &left.reviewer;
-            if self.state.bot_left_out(name, now) && !left_out.contains(name) {
-                left_out.push(name.clone());
+            if left.holds(now) && !left_out.contains(&left.reviewer) {
+                left_out.push(left.reviewer.clone());
             }
         }
         left_out
@@ -219,25 +227,34 @@ impl Runner {
     }
 
     /// Why no reviewer of `review`'s pass read `item`'s pull request, naming
-    /// each listed one that was down or ran and read nothing, or none when
-    /// every listed one was passed over by its own `paths`
+    /// each listed one that was down, left out as one the repo cannot run, or
+    /// ran and read nothing, or none when every listed one was passed over by
+    /// its own `paths`
     pub(super) fn unread(&self, item: &WorkItem, review: &Review) -> Option<String> {
         let ran = self.ran_of(review);
+        let now = self.ports.clock.now();
         let missed: Vec<String> = (self.lineup.iter())
             .filter_map(|r| {
-                let skipped = item.bots_skipped.iter().find(|s| s.reviewer() == &r.name);
-                let why = if let Some(skipped) = skipped.filter(|_| ran.contains(&r.name)) {
-                    return Some(format!("{} was passed over: {}", r.name, skipped.why()));
-                } else if ran.contains(&r.name) && item.reviewers_skipped.contains(&r.name) {
-                    "was passed over after its calls kept failing"
-                } else if ran.contains(&r.name) {
-                    "reviewed no file"
-                } else if r.is_local() && item.local_reviewer_down(&r.name) {
-                    "is down for this work item"
-                } else {
-                    return None;
-                };
-                Some(format!("{} {why}", r.name))
+                let name = &r.name;
+                let skipped = item.bots_skipped.iter().find(|s| s.reviewer() == name);
+                if let Some(skipped) = skipped.filter(|_| ran.contains(name)) {
+                    return Some(format!("{name} was passed over: {}", skipped.why()));
+                }
+                if ran.contains(name) {
+                    let why = match item.reviewers_skipped.contains(name) {
+                        true => "was passed over after its calls kept failing",
+                        false => "reviewed no file",
+                    };
+                    return Some(format!("{name} {why}"));
+                }
+                if r.is_local() && item.local_reviewer_down(name) {
+                    return Some(format!("{name} is down for this work item"));
+                }
+                let left = self.state.bot_left_out(name, now)?;
+                let (until, why) = (date_time(left.back_in()), &left.why);
+                Some(format!(
+                    "{name} is left out of every pick until {until}: {why}"
+                ))
             })
             .collect();
         (!missed.is_empty()).then(|| missed.join(", "))
