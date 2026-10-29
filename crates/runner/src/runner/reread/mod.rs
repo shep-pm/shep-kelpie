@@ -10,7 +10,8 @@
 //! runner has.
 
 use super::{
-    OpenError, Runner, check_bots, check_coderabbit, check_local, instructions, open_checks, triage,
+    OpenError, Runner, check_bots, check_local, coderabbit_left_out, instructions, open_checks,
+    triage,
 };
 use crate::agents::Agents;
 use crate::review_bot::Bot;
@@ -164,10 +165,14 @@ impl Runner {
         // As a start does, only the reviewers the project named in `agents.allow`
         // are held, and only when the naming changed or a named reviewer's file
         // did: one it named before was held at the reread that named it.
-        let named_new = named != self.settings.named_reviewers(&self.book, &self.home);
-        if listed(&named) && named_new {
-            check_coderabbit(&self.remote, &named, &self.ports)?;
-        }
+        let was_named = self.settings.named_reviewers(&self.book, &self.home);
+        let named_new = named != was_named;
+        // A CodeRabbit that is not public is left out and logged, once, when it is first named.
+        let coderabbit_note = if listed(&named) && !listed(&was_named) {
+            coderabbit_left_out(&self.remote, &named, &self.ports)?
+        } else {
+            None
+        };
         if !named.is_empty() && (named_new || lineup != self.lineup) {
             check_local(&named, &self.ports)?;
         }
@@ -234,6 +239,7 @@ impl Runner {
             self.make_priority_labels();
         }
         self.notes.extend(self.left_out_notes(&was_left_out));
+        self.notes.extend(coderabbit_note);
         self.gpu.point_at(gpu_metrics_url);
         self.extra_instructions = extra_instructions;
         self.webhook = webhook;

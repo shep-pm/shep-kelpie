@@ -180,7 +180,7 @@ pub use report::StepReport;
 pub use representative::{Post, RepresentError};
 pub use reread::check_gateway_shapes;
 pub(crate) use reread::check_gateways;
-use reviewers_check::{check_bots, check_coderabbit, check_local};
+use reviewers_check::{check_bots, check_local, coderabbit_left_out};
 pub use rework::ReworkError;
 pub use ruling::{Action, Answer, RuleError};
 pub use socket::{Handles, Limits, Serving, serve, start as serve_socket};
@@ -579,9 +579,10 @@ impl Runner {
         let plugins_head = crate::skills::default_head(checkout, settings.git.base());
         // Only a reviewer the project named in `agents.allow` is held to these: a
         // candidate it never named is passed over at its round, by the repo's
-        // visibility or as down.
+        // visibility or as down. A CodeRabbit named for a repo that is not public
+        // is left out and logged, not refused.
         if !named.is_empty() {
-            check_coderabbit(&remote, &named, &ports)?;
+            told.extend(coderabbit_left_out(&remote, &named, &ports)?);
             check_local(&named, &ports)?;
         }
         let mut state = store.load()?.unwrap_or_default();

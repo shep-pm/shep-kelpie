@@ -8,7 +8,7 @@ use crate::ports::{RateBucket, RateLimits, Visibility};
 use crate::runner::step;
 use crate::state::VERSION;
 use crate::test::ticket;
-use crate::test::{Rig, git};
+use crate::test::{Rig, Scripted, git};
 use crate::ticket::TicketId;
 
 // A project saved paused by an older kelpie runs once its runner starts.
@@ -183,23 +183,42 @@ fn open_named(rig: &Rig, names: &[&str]) -> Result<Mutex<Runner>, OpenError> {
 }
 
 #[test]
-fn coderabbit_named_for_a_repo_that_is_not_public_stops_the_runner() {
+fn coderabbit_named_for_a_repo_that_is_not_public_is_left_out_and_logged() {
     for (visibility, seen_by) in [
         (Visibility::Private, "private"),
         (Visibility::Internal, "internal"),
     ] {
         let rig = Rig::new("shep");
-        rig.coderabbit_on();
+        rig.reviewers(&["coderabbit"]);
         rig.forge.set_visibility(visibility);
-        assert_eq!(
-            open_named(&rig, crate::test::RIG_REVIEWERS_AND_CODERABBIT)
-                .unwrap_err()
-                .to_string(),
-            format!(
-                "setting `agents.allow`: coderabbit: shep-pm/shep is {seen_by}, \
-                 and CodeRabbit's free plan reviews public repos only"
-            )
+        let runner = open_named(&rig, &["sonnet-high", "coderabbit"]).expect("it opens");
+        let notes = runner.lock().unwrap().take_notes();
+        let left = format!(
+            "reviewer coderabbit is left out of the agent board's ask: shep-pm/shep is \
+             {seen_by}, and CodeRabbit's free plan reviews public repos only"
         );
+        assert_eq!(notes.iter().filter(|n| **n == left).count(), 1, "{notes:?}");
+
+        rig.ask(&runner, "add", Some("7"));
+        rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+        // The pull request is marked ready as it is for an unnamed CodeRabbit on such a
+        // repo, and then its round is passed over: never summoned, never labelled.
+        let reports: Vec<_> = (0..3).map(|_| step(&runner).unwrap()).collect();
+        assert!(
+            reports
+                .iter()
+                .all(|r| !matches!(r, Some(StepReport::Summoned { .. }))),
+            "{seen_by}: {reports:?}"
+        );
+        assert!(
+            reports.iter().any(|r| matches!(
+                r,
+                Some(StepReport::ReviewerSkipped { reason, .. }) if reason.contains("not public")
+            )),
+            "{seen_by}: its round is passed over: {reports:?}"
+        );
+        assert_eq!(rig.forge.coderabbit.label_log(), [], "{seen_by}");
     }
 }
 

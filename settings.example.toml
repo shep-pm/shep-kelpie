@@ -125,8 +125,9 @@ per_item_usd = 10
 # pass may pick from: every reviewer file it holds is a candidate, and a
 # project that holds no reviewer file gets no review. Names are
 # not checked against the agents folder: a missing file is refused where the
-# name is used. Leave it out, or leave it empty (`allow = []`), to allow
-# every agent.
+# name is used. A `coderabbit` it holds on a repo that is not public is left
+# out of the pick and logged, not refused. Leave it out, or leave it empty
+# (`allow = []`), to allow every agent.
 # allow = ["sonnet-high", "iq3-xxs-review", "defect-hunter-lite", "pm", "representative", "security-reviewer", "triager"]
 # Read by nothing, and `shep kelpie upgrade` deletes it, as
 # `shep kelpie settings migrate` does. A pass's candidates are every reviewer
@@ -149,7 +150,7 @@ per_item_usd = 10
 # while its window is closed. Its open threads get the one fix turn. Each
 # file holds its bot's window, and `rounds` there caps its reads of a work
 # item's pull request. CodeRabbit's free plan reviews public repos only, so
-# a repo GitHub marks private cannot use it.
+# on a repo GitHub marks private it is left out and logged.
 # reviewers = ["iq3-xxs-review", "defect-hunter-lite"]
 # The project manager, from a file whose role is `pm`: kelpie's own `pm` is
 # Opus 5.5 at medium. Code wakes it when a slot is free with two or more
