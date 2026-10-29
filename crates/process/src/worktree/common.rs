@@ -51,7 +51,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::worktree::{WorktreeError, trusted};
+    use crate::worktree::{WorktreeError, clone, trusted};
 
     fn init(repo: &Path) {
         std::fs::create_dir_all(repo).unwrap();
@@ -161,6 +161,25 @@ mod tests {
         let own = one.join(".git/worktrees/w");
         std::fs::write(own.join("commondir"), two.join(".git").to_str().unwrap()).unwrap();
 
+        assert!(matches!(trusted(&one, &at), Err(WorktreeError::Foreign(_))));
+    }
+
+    #[test]
+    fn a_clone_whose_alternates_name_another_repo_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (one, two) = (dir.path().join("one"), dir.path().join("two"));
+        init(&one);
+        init(&two);
+        let at = dir.path().join("wt");
+        clone::make(&one, &at, "kelpie/7", "main").unwrap();
+        assert!(trusted(&one, &at).is_ok());
+
+        let alternates = clone::git_dir_of(&at).join("objects/info/alternates");
+        let named = |repo: &Path| format!("{}\n", repo.join(".git/objects").display());
+        std::fs::write(&alternates, named(&two)).unwrap();
+        assert!(matches!(trusted(&one, &at), Err(WorktreeError::Foreign(_))));
+
+        std::fs::write(&alternates, named(&one) + &named(&two)).unwrap();
         assert!(matches!(trusted(&one, &at), Err(WorktreeError::Foreign(_))));
     }
 }

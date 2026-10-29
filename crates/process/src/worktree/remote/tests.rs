@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::worktree::{
-    Base, Rebase, Remote, Start, Worktree, WorktreeError, adopt, base_of, head, origin_head,
+    Base, Rebase, Remote, Start, Worktree, WorktreeError, adopt, base_of, clone, head, origin_head,
     prepare, push_commits, rebase, remove,
 };
 use shep_kelpie_test_support::git;
@@ -448,6 +448,23 @@ fn push_commits_fast_forwards_the_forks_branch() {
         rig.rev("fork.git", "contrib"),
         rig.at_worktree(&["rev-parse", "HEAD"])
     );
+}
+
+// A clone's commits live in its own object folder, so the push has to run
+// from the clone rather than from the checkout.
+#[test]
+fn push_commits_pushes_a_commit_only_the_clone_holds() {
+    let rig = Rig::new();
+    let remote = rig.fork("contrib");
+    let at = rig.rev("repo", "contrib");
+    clone::make(&rig.repo(), &rig.worktree(), "kelpie/7", &at).unwrap();
+    rig.at_worktree(&["commit", "--quiet", "--allow-empty", "-m", "work"]);
+    let work = head(&rig.repo(), &rig.worktree()).unwrap();
+    assert!(crate::worktree::git(&rig.repo(), ["cat-file", "-e", &work]).is_err());
+
+    push_commits(&rig.repo(), &rig.worktree(), &remote).unwrap();
+
+    assert_eq!(rig.rev("fork.git", "contrib"), work);
 }
 
 #[test]
