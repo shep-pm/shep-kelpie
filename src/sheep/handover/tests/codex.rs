@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use super::super::super::{Hooks, JOIN_BOUND, Worker};
+use super::super::super::{Hooks, Worker};
 use super::exec::{FOLDER, read, worker_of, write};
 use super::*;
 use crate::adapters::{Base, CodexCli};
@@ -168,7 +168,7 @@ fn incoming(folder: &Path, carry: Carry) {
     let mut files = std::fs::read_dir(threads).unwrap();
     let thread = files.next().expect("a thread record").unwrap().path();
     write(folder, "thread", &std::fs::read_to_string(thread).unwrap());
-    assert!(worker.stop(JOIN_BOUND, || {}));
+    assert!(worker.stop(CALL_PATIENCE, || {}));
 }
 
 #[test]
@@ -200,5 +200,5 @@ fn a_codex_turn_whose_record_is_gone_refuses_the_handover_and_the_old_image_keep
     assert_eq!(turn_of_7(&rig, &runner), "running");
     write(folder, "go", "");
     eventually("the turn's end", || turn_of_7(&rig, &runner) == "ended");
-    assert!(worker.stop(JOIN_BOUND, || {}));
+    assert!(worker.stop(CALL_PATIENCE, || {}));
 }
