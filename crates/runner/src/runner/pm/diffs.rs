@@ -13,6 +13,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::runner::Runner;
+use crate::runner::briefing::git::Reading;
 use crate::runner::briefing::patch;
 use crate::state::RulingKind;
 use crate::ticket::TicketId;
@@ -114,13 +115,9 @@ impl Runner {
     // diff is read by a wake for a follow-up ruling alone, once, so unlike
     // the board's diffs it runs git as the wake starts.
     fn merged_patch(&self, branch: &str, ticket: TicketId) -> Result<Vec<u8>, String> {
-        let repo = &self.settings.git.checkout;
-        patch::merged(
-            repo,
-            branch,
-            &self.paths.worktree(ticket),
-            self.settings.git.base(),
-        )
+        let worktree = self.paths.worktree(ticket);
+        let repo = Reading::of_clones(&self.settings.git.checkout, [worktree.as_path()]);
+        patch::merged(&repo, branch, &worktree, self.settings.git.base())
     }
 }
 

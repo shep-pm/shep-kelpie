@@ -5,7 +5,8 @@
 //! removes the lock when it is done, and holds it for milliseconds. A worker
 //! killed in that moment leaves it, and every git that deletes a ref in the
 //! repo, kelpie's own included, then waits out its timeout and fails. Kelpie
-//! takes a lock that old away before it makes a worker's worktree ready.
+//! takes a lock that old away before it makes a worker's worktree ready, from
+//! the checkout's git dir and from the worktree's clone.
 
 use std::fs;
 use std::path::Path;

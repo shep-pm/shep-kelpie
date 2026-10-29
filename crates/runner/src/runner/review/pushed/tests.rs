@@ -439,16 +439,14 @@ fn a_worktree_hiding_a_pushed_path_is_brought_to_the_pushed_head_before_the_revi
     ]);
     step(&runner).unwrap(); // the worker's first turn pushes src/lib.rs
     let worktree = rig.worktree_7();
+    let pushed = git(&worktree, &["rev-parse", "HEAD"]);
     git(&worktree, &["reset", "--quiet", "--hard", "HEAD~1"]);
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::Unpushed { .. })
     ));
     // The worker's turn brings its worktree back to the pushed head.
-    git(
-        &worktree,
-        &["reset", "--quiet", "--hard", "origin/kelpie/7"],
-    );
+    git(&worktree, &["reset", "--quiet", "--hard", &pushed]);
     let read = to_ci(&rig, &runner);
     let opus = rig
         .claude

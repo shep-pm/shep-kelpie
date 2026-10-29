@@ -108,8 +108,8 @@ fn a_worktree_git_cannot_be_read_in_ends_the_turn_without_a_follow_up() {
         let turn = scope.spawn(|| step(&runner));
         assert!(hold.entered(Duration::from_secs(30)), "the turn never ran");
         write_in(&worktree, "left.txt", "left\n");
-        // The repo no longer says this worktree is its own.
-        fs::remove_file(rig.repo().join(".git/worktrees/7/gitdir")).unwrap();
+        // The clone no longer says whose objects it borrows.
+        fs::remove_file(rig.git_dir_7().join("objects/info/alternates")).unwrap();
         hold.release();
         turn.join().unwrap().unwrap()
     });

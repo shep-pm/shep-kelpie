@@ -51,8 +51,19 @@ impl Rig {
 
     /// Holds the next push to origin open, and lets every other through, so a test can ask a
     /// trigger of a runner whose pass is in the middle of a rebase's push
+    ///
+    /// A rebase pushes from the work item's clone, which copies no `receivepack` of the
+    /// checkout's, so the clone of issue 7 is given the script too.
     pub fn hold_next_git_push(&self) -> HeldGit {
-        self.hold_git("held-push", "receivepack", "receive-pack", 0)
+        let held = self.hold_git("held-push", "receivepack", "receive-pack", 0);
+        if self.git_dir_7().is_dir() {
+            let script = path(&held.folder.join("hold.sh")).to_owned();
+            git(
+                &self.worktree_7(),
+                &["config", "remote.origin.receivepack", &script],
+            );
+        }
+        held
     }
 
     // Runs `remote.origin.<key>` as a script that holds the call after the next `skipped` open

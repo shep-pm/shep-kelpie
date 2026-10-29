@@ -50,6 +50,12 @@ impl Elsewhere {
         std::fs::write(own.join("commondir"), common).unwrap();
     }
 
+    /// Points the objects the clone at `git_dir` borrows here
+    pub fn as_alternate_of(&self, git_dir: &Path) {
+        let objects = format!("{}\n", self.git_dir.join("objects").display());
+        std::fs::write(git_dir.join("objects/info/alternates"), objects).unwrap();
+    }
+
     /// Asserts plain git on `worktree` runs the program
     pub fn assert_plain_git_starts_it(&self, worktree: &Path) {
         assert!(!self.ran.exists(), "the program ran before plain git");
