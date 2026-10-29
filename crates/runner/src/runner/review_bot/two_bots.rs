@@ -28,7 +28,7 @@ fn cubic() -> LeaseKind {
 }
 
 // A project listing the rig's qwen and Claude rounds, then `bots`.
-pub(super) fn listing(project: &str, bots: &[&str]) -> Rig {
+pub(in crate::runner) fn listing(project: &str, bots: &[&str]) -> Rig {
     let rig = Rig::new(project);
     let names: Vec<&str> = ["qwen", "claude"]
         .into_iter()

@@ -695,7 +695,11 @@ impl Runner {
 
     // The pass goes on without the bot, and says why. A pass no other
     // reviewer reads is marked unreviewed for it as it ends.
-    fn pass_over(&mut self, number: u64, skipped: BotSkipped) -> Result<Begin, StateError> {
+    pub(in crate::runner) fn pass_over(
+        &mut self,
+        number: u64,
+        skipped: BotSkipped,
+    ) -> Result<Begin, StateError> {
         let review = self.pass();
         let round = review.round;
         let next = self.after_round(review, self.ports.clock.now());
@@ -866,7 +870,7 @@ mod codex_bot;
 #[cfg(test)]
 pub(in crate::runner) mod contribution_turns;
 #[cfg(test)]
-mod late_reads;
+pub(in crate::runner) mod late_reads;
 #[cfg(test)]
 mod nit_fixes;
 #[cfg(test)]
@@ -878,4 +882,4 @@ mod tests;
 #[cfg(test)]
 pub(in crate::runner) mod thread_replies;
 #[cfg(test)]
-mod two_bots;
+pub(in crate::runner) mod two_bots;

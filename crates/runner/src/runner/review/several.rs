@@ -9,7 +9,7 @@ use crate::test::{Rig, Scripted, ScriptedRound};
 
 // A rig whose project lists `list`, over agent files for `mine`, a stand-in
 // command, and `opus`, a Claude session limited to `src/`.
-fn listing(list: &[&str]) -> Rig {
+pub(super) fn listing(list: &[&str]) -> Rig {
     let rig = Rig::new("koji");
     rig.reviewers(list);
     let script = rig.home.path().join("bin/review");
@@ -30,7 +30,7 @@ fn listing(list: &[&str]) -> Rig {
 
 // Steps until the review is done, naming who reviewed each round by the
 // stand-in it reached: the local reviewer's command, or the Claude model.
-fn reviewers_until_ci(rig: &Rig, runner: &Mutex<Runner>) -> Vec<&'static str> {
+pub(super) fn reviewers_until_ci(rig: &Rig, runner: &Mutex<Runner>) -> Vec<&'static str> {
     let mut seen = Vec::new();
     for _ in 0..20 {
         if rig.ask(runner, "status", None)["work_item"]["phase"]["state"] != "review" {
@@ -54,7 +54,7 @@ fn reviewers_until_ci(rig: &Rig, runner: &Mutex<Runner>) -> Vec<&'static str> {
     panic!("the review never ended: {seen:?}");
 }
 
-fn at_review(rig: &Rig, push: &'static str) -> Mutex<Runner> {
+pub(super) fn at_review(rig: &Rig, push: &'static str) -> Mutex<Runner> {
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
@@ -63,7 +63,7 @@ fn at_review(rig: &Rig, push: &'static str) -> Mutex<Runner> {
     runner
 }
 
-fn reviewer_models(rig: &Rig) -> Vec<String> {
+pub(super) fn reviewer_models(rig: &Rig) -> Vec<String> {
     let calls = rig.claude.all_calls();
     let reviews = calls.iter().filter(|c| c.role == Role::Reviewer);
     reviews.map(|c| c.model.clone()).collect()
@@ -138,7 +138,7 @@ LOW|work.txt:0|not reviewed: curl: (7) Failed to connect to gpu.box port 8080|ra
 
 // A rig whose project lists two local reviewers, `mine` then `other`, each a
 // command of its own.
-fn two_local() -> Rig {
+pub(super) fn two_local() -> Rig {
     let rig = listing(&["mine", "other"]);
     let other = rig.home.path().join("bin/other");
     crate::test::write_script(&other, "#!/bin/sh\nexit 0\n");

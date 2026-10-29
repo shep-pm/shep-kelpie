@@ -28,9 +28,12 @@ mod foreign;
 #[cfg(test)]
 mod green;
 mod lineup;
+use lineup::Chosen;
 pub(super) use lineup::{changed_files, touches};
 #[cfg(test)]
 mod local;
+#[cfg(test)]
+mod need;
 #[cfg(test)]
 mod nits;
 mod outcomes;
@@ -110,10 +113,11 @@ impl Runner {
                 if let Some(begin) = self.talk_turn(&At::Round(review.clone()))? {
                     return Ok(begin);
                 }
-                let chosen = match self.choose_reviewer(&review, &worktree, &base) {
-                    Ok(Some(chosen)) => chosen,
-                    Ok(None) => return self.pass_ended(&review),
-                    Err(reason) => return Ok(self.gate_failed(reason)),
+                let chosen = match self.choose_reviewer(&review, &worktree, &base)? {
+                    Chosen::Reviewer(chosen) => chosen,
+                    Chosen::Ended => return self.pass_ended(&review),
+                    Chosen::Instead(begin) => return Ok(begin),
+                    Chosen::Failed(reason) => return Ok(self.gate_failed(reason)),
                 };
                 // Before any reader or bot is started on the head.
                 if let Some(begin) = self.before_read(&mut review)? {

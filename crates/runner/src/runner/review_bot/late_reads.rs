@@ -26,7 +26,7 @@ fn status(rig: &Rig, runner: &Mutex<Runner>) -> serde_json::Value {
 
 // cubic, last after qwen and Claude, refuses its summon and is passed over,
 // so the pass ends and the pull request goes to CI on the returned head.
-pub(super) fn passed_over(rig: &Rig) -> (Mutex<Runner>, String) {
+pub(in crate::runner) fn passed_over(rig: &Rig) -> (Mutex<Runner>, String) {
     let (runner, head) = reviewed(rig);
     step(&runner).unwrap(); // marks the draft ready
     assert_eq!(step(&runner).unwrap(), summoned(&head));
