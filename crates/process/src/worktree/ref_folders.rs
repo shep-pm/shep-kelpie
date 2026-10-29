@@ -35,7 +35,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    use crate::worktree::{Remote, Start, prepare, remove};
+    use crate::worktree::{Remote, Start, clone, prepare, remove};
     use shep_kelpie_test_support::git;
 
     // A clone of an origin holding `main`, with `kelpie/` folders to be
@@ -124,8 +124,12 @@ mod tests {
             committed
         }
 
+        // The branch lives in the worktree's clone.
         fn branch_head(&self) -> String {
-            git(&self.repo(), &["rev-parse", "refs/heads/kelpie/7"])
+            git(
+                &clone::git_dir_of(&self.worktree()),
+                &["rev-parse", "refs/heads/kelpie/7"],
+            )
         }
     }
 

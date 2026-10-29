@@ -81,6 +81,19 @@ impl Rig {
         git(&self.worktree(), args)
     }
 
+    // A ref as the worktree's clone holds it
+    fn in_clone(&self, reference: &str) -> String {
+        git(
+            &clone::git_dir_of(&self.worktree()),
+            &["rev-parse", reference],
+        )
+    }
+
+    // What the checkout holds under `refs/heads/kelpie/`
+    fn checkout_branches(&self) -> String {
+        git(&self.repo(), &["for-each-ref", "refs/heads/kelpie"])
+    }
+
     // Take `main` off origin, which is what a fetch of it fails against
     fn drop_main(&self) {
         git(
@@ -110,16 +123,20 @@ fn prepare_on_origin_starts_and_reuses_a_worktree_as_before() {
 
     rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
     assert_eq!(rig.at_worktree(&["rev-parse", "HEAD"]), main);
+    assert_eq!(rig.in_clone("refs/heads/kelpie/7"), main);
     assert_eq!(
         rig.at_worktree(&["symbolic-ref", "HEAD"]),
         "refs/heads/kelpie/7"
     );
+    assert_eq!(rig.checkout_branches(), "");
     assert!(rig.build().is_dir());
 
     rig.at_worktree(&["commit", "--quiet", "--allow-empty", "-m", "work"]);
     let worked = rig.at_worktree(&["rev-parse", "HEAD"]);
     rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
     assert_eq!(rig.at_worktree(&["rev-parse", "HEAD"]), worked);
+    assert_eq!(rig.in_clone("refs/heads/kelpie/7"), worked);
+    assert_eq!(rig.checkout_branches(), "");
 }
 
 // A worker is told to merge `origin/main` and to run no fetch of its own, so
@@ -128,7 +145,7 @@ fn prepare_on_origin_starts_and_reuses_a_worktree_as_before() {
 fn prepare_fetches_main_into_a_worktree_that_already_exists() {
     let rig = Rig::new();
     rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
-    let stale = rig.rev("repo", "refs/remotes/origin/main");
+    let stale = rig.in_clone("refs/remotes/origin/main");
     git(&rig.root, &["clone", "--quiet", "origin.git", "other"]);
     git(
         &rig.root.join("other"),
@@ -138,12 +155,12 @@ fn prepare_fetches_main_into_a_worktree_that_already_exists() {
         &rig.root.join("other"),
         &["push", "--quiet", "origin", "main"],
     );
-    assert_eq!(rig.rev("repo", "refs/remotes/origin/main"), stale);
+    assert_eq!(rig.in_clone("refs/remotes/origin/main"), stale);
 
     rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
 
     assert_eq!(
-        rig.rev("repo", "refs/remotes/origin/main"),
+        rig.in_clone("refs/remotes/origin/main"),
         rig.rev("origin.git", "main")
     );
 }
@@ -174,7 +191,7 @@ fn prepare_on_a_pushed_branch_fetches_main_as_well() {
     rig.prepare("kelpie/7", Start::Pushed, &Remote::Origin);
 
     assert_eq!(
-        rig.rev("repo", "refs/remotes/origin/main"),
+        rig.in_clone("refs/remotes/origin/main"),
         rig.rev("origin.git", "main")
     );
 }
@@ -320,6 +337,218 @@ fn a_fork_remote_cannot_move_origins_main() {
     assert_eq!(base, Base::Current);
     assert_eq!(rig.rev("repo", "refs/remotes/origin/main"), main);
     assert_eq!(rig.rev("origin.git", "main"), main);
+}
+
+// A worktree made before worktrees were clones is a linked one on its branch,
+// holding work the worker has not committed.
+#[test]
+fn prepare_turns_a_linked_worktree_into_a_clone_and_keeps_its_files() {
+    let rig = Rig::new();
+    let at = rig.worktree();
+    git(
+        &rig.repo(),
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "kelpie/7",
+            at.to_str().unwrap(),
+            "origin/main",
+        ],
+    );
+    std::fs::write(at.join("done.txt"), "done\n").unwrap();
+    rig.at_worktree(&["add", "done.txt"]);
+    rig.at_worktree(&["commit", "--quiet", "-m", "work"]);
+    let worked = rig.at_worktree(&["rev-parse", "HEAD"]);
+    std::fs::write(at.join("half.txt"), "half\n").unwrap();
+
+    let prepared = rig.prepared("kelpie/7", Start::Main, &Remote::Origin);
+
+    assert_eq!(prepared.git_common_dir, rig.repo().join(".git"));
+    assert_eq!(prepared.git_dir, clone::git_dir_of(&at));
+    assert!(!rig.repo().join(".git/worktrees").join("wt").exists());
+    assert!(!git(&rig.repo(), &["worktree", "list", "--porcelain"]).contains(at.to_str().unwrap()));
+    assert_eq!(rig.in_clone("refs/heads/kelpie/7"), worked);
+    assert_eq!(rig.at_worktree(&["rev-parse", "HEAD"]), worked);
+    assert_eq!(
+        std::fs::read_to_string(at.join("half.txt")).unwrap(),
+        "half\n"
+    );
+    assert_eq!(rig.at_worktree(&["status", "--porcelain"]), "?? half.txt");
+    assert_eq!(
+        rig.in_clone("refs/remotes/origin/main"),
+        rig.rev("origin.git", "main")
+    );
+    // The checkout keeps the branch, so its gc keeps what the clone borrows.
+    assert_eq!(rig.rev("repo", "refs/heads/kelpie/7"), worked);
+}
+
+#[test]
+fn prepare_names_the_checkouts_git_dir_common_and_the_clones_own() {
+    let rig = Rig::new();
+
+    let prepared = rig.prepared("kelpie/7", Start::Main, &Remote::Origin);
+
+    assert_eq!(prepared.git_common_dir, rig.repo().join(".git"));
+    assert_eq!(prepared.git_dir, clone::git_dir_of(&rig.worktree()));
+}
+
+#[test]
+fn prepare_mirrors_a_pushed_branchs_tracking_ref_into_its_clone() {
+    let rig = Rig::new();
+    git(
+        &rig.repo(),
+        &["push", "--quiet", "origin", "contrib:kelpie/7"],
+    );
+
+    rig.prepare("kelpie/7", Start::Pushed, &Remote::Origin);
+
+    assert_eq!(
+        rig.in_clone("refs/remotes/origin/kelpie/7"),
+        rig.rev("origin.git", "kelpie/7")
+    );
+    assert_eq!(rig.checkout_branches(), "");
+}
+
+#[test]
+fn prepare_refuses_a_clone_on_another_branch() {
+    let rig = Rig::new();
+    rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
+    rig.at_worktree(&["checkout", "--quiet", "-b", "other"]);
+
+    let err = prepare(
+        &rig.repo(),
+        &rig.worktree(),
+        "kelpie/7",
+        Start::Main,
+        "main",
+        &Remote::Origin,
+        &rig.build(),
+    )
+    .unwrap_err();
+
+    assert_eq!(err, WorktreeError::Foreign(rig.worktree()));
+}
+
+#[test]
+fn prepare_refuses_a_clone_that_borrows_another_repos_objects() {
+    let rig = Rig::new();
+    rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
+    let alternates = clone::git_dir_of(&rig.worktree()).join("objects/info/alternates");
+    std::fs::write(&alternates, format!("{}\n", rig.root.display())).unwrap();
+
+    let err = prepare(
+        &rig.repo(),
+        &rig.worktree(),
+        "kelpie/7",
+        Start::Main,
+        "main",
+        &Remote::Origin,
+        &rig.build(),
+    )
+    .unwrap_err();
+
+    assert_eq!(err, WorktreeError::Foreign(rig.worktree()));
+}
+
+#[test]
+fn prepare_refuses_a_folder_that_is_no_worktree() {
+    let rig = Rig::new();
+    std::fs::create_dir(rig.worktree()).unwrap();
+
+    let err = prepare(
+        &rig.repo(),
+        &rig.worktree(),
+        "kelpie/7",
+        Start::Main,
+        "main",
+        &Remote::Origin,
+        &rig.build(),
+    )
+    .unwrap_err();
+
+    assert_eq!(err, WorktreeError::Foreign(rig.worktree()));
+}
+
+#[test]
+fn prepare_reuses_a_rework_branch_the_checkout_kept_at_the_remotes_head() {
+    let rig = Rig::new();
+    git(
+        &rig.repo(),
+        &["push", "--quiet", "origin", "contrib:kelpie/7"],
+    );
+    git(&rig.repo(), &["branch", "kelpie/7", "contrib"]);
+
+    rig.prepare("kelpie/7", Start::Pushed, &Remote::Origin);
+
+    assert_eq!(
+        rig.in_clone("refs/heads/kelpie/7"),
+        rig.rev("origin.git", "kelpie/7")
+    );
+}
+
+#[test]
+fn prepare_clears_a_stale_packed_refs_lock_in_the_clones_git_dir() {
+    let rig = Rig::new();
+    rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
+    let lock = clone::git_dir_of(&rig.worktree()).join("packed-refs.lock");
+    let file = std::fs::File::create(&lock).unwrap();
+    file.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(120))
+        .unwrap();
+
+    rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
+
+    assert!(!lock.exists());
+}
+
+#[test]
+fn remove_takes_the_clones_git_dir_away() {
+    let rig = Rig::new();
+    rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
+    let git_dir = clone::git_dir_of(&rig.worktree());
+    assert!(git_dir.is_dir());
+
+    remove(&rig.repo(), &rig.worktree(), "kelpie/7", &rig.build(), None).unwrap();
+
+    assert!(!rig.worktree().exists());
+    assert!(!git_dir.exists());
+    assert!(!rig.build().exists());
+}
+
+#[test]
+fn remove_takes_a_linked_worktree_and_its_branch_away_as_before() {
+    let rig = Rig::new();
+    let at = rig.worktree();
+    git(
+        &rig.repo(),
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "kelpie/7",
+            at.to_str().unwrap(),
+            "origin/main",
+        ],
+    );
+
+    remove(&rig.repo(), &at, "kelpie/7", &rig.build(), None).unwrap();
+
+    assert!(!at.exists());
+    assert_eq!(rig.checkout_branches(), "");
+    assert!(!git(&rig.repo(), &["worktree", "list", "--porcelain"]).contains(at.to_str().unwrap()));
+}
+
+#[test]
+fn remove_finishes_a_removal_that_took_the_worktree_and_left_the_clones_git_dir() {
+    let rig = Rig::new();
+    rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
+    std::fs::remove_dir_all(rig.worktree()).unwrap();
+
+    remove(&rig.repo(), &rig.worktree(), "kelpie/7", &rig.build(), None).unwrap();
+
+    assert!(!clone::git_dir_of(&rig.worktree()).exists());
 }
 
 #[test]

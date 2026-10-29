@@ -193,7 +193,8 @@ pub fn convert(repo: &Path, worktree: &Path, branch: &str) -> Result<(), Worktre
 }
 
 // Copies what `from` holds into `to` but the two files that tie a linked
-// worktree to its repo.
+// worktree to its repo. A link is left behind: the worker wrote `from`, and
+// copying through one would hand it a file it cannot read.
 fn copy_into(from: &Path, to: &Path) -> Result<(), WorktreeError> {
     let unreadable = |path: &Path, e: std::io::Error| WorktreeError::Unreadable {
         path: path.to_owned(),
@@ -206,10 +207,11 @@ fn copy_into(from: &Path, to: &Path) -> Result<(), WorktreeError> {
             continue;
         }
         let target = to.join(&name);
-        if entry.file_type().map_err(|e| unreadable(from, e))?.is_dir() {
+        let kind = entry.file_type().map_err(|e| unreadable(from, e))?;
+        if kind.is_dir() {
             create(&target)?;
             copy_into(&entry.path(), &target)?;
-        } else {
+        } else if kind.is_file() {
             std::fs::copy(entry.path(), &target).map_err(|e| unreadable(&entry.path(), e))?;
         }
     }
@@ -428,6 +430,30 @@ mod tests {
         let mut files = crate::worktree::uncommitted(&rig.repo, &rig.worktree).unwrap();
         files.sort();
         assert_eq!(files, ["a.txt", "new.txt"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_the_linked_worktrees_git_dir_is_not_copied_into_the_clone() {
+        let rig = Rig::new();
+        let at = rig.worktree.to_str().unwrap();
+        git(
+            &rig.repo,
+            &["worktree", "add", "--quiet", "-b", "kelpie/7", at],
+        );
+        let secret = rig.repo.parent().unwrap().join("secret");
+        std::fs::write(&secret, "secret\n").unwrap();
+        let own = rig.repo.join(".git/worktrees/wt");
+        std::os::unix::fs::symlink(&secret, own.join("loot")).unwrap();
+
+        convert(&rig.repo, &rig.worktree, "kelpie/7").unwrap();
+
+        assert!(
+            git_dir_of(&rig.worktree)
+                .join("loot")
+                .symlink_metadata()
+                .is_err()
+        );
     }
 
     #[test]

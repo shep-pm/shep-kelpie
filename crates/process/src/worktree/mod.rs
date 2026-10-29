@@ -73,9 +73,9 @@ pub struct Linked<'a> {
 /// A prepared worktree, and the git dirs a commit from it writes to
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Worktree {
-    /// The repo's common git dir: objects, refs and config
+    /// The checkout's git dir, whose objects the clone borrows
     pub git_common_dir: PathBuf,
-    /// The worktree's own git dir: its index and HEAD
+    /// The clone's git dir: its refs, index, HEAD and config
     pub git_dir: PathBuf,
     /// What the fetch of `origin/main` failed with, when it failed
     ///
@@ -159,12 +159,15 @@ impl fmt::Display for WorktreeError {
 
 impl core::error::Error for WorktreeError {}
 
-/// Makes sure `worktree` is a worktree of `repo` on `branch`, and `build` exists
+/// Makes sure `worktree` is a clone of `repo` on `branch`, and `build` exists
 ///
-/// A new worktree's branch starts where `start` says, just fetched, and does
-/// not track it. [`Start::Pushed`] reads the branch from `remote`. Every call
-/// fetches `origin/main`. Where that fetch fails the worktree keeps the last
-/// one and [`Worktree::main_fetch_failed`] says why, so the turn goes on. A
+/// A new worktree is a [`clone`] whose branch starts where `start` says, just
+/// fetched, and does not track it. [`Start::Pushed`] reads the branch from
+/// `remote`. A linked worktree on the branch, made before worktrees were
+/// clones, is turned into one and keeps its files. Every call fetches
+/// `origin/main` into the checkout and sets the clone's to it. Where that
+/// fetch fails the worktree keeps the last one and
+/// [`Worktree::main_fetch_failed`] says why, so the turn goes on. A
 /// [`Start::Main`] branch starts on that ref, so there a failed fetch errors.
 ///
 /// # Errors
@@ -180,39 +183,45 @@ pub fn prepare(
     build: &Path,
 ) -> Result<Worktree, WorktreeError> {
     let foreign = || WorktreeError::Foreign(worktree.to_owned());
-    stale_lock::clear(&repo.join(".git"), SystemTime::now());
+    let now = SystemTime::now();
+    stale_lock::clear(&repo.join(".git"), now);
+    stale_lock::clear(&clone::git_dir_of(worktree), now);
     let full_ref = format!("refs/heads/{branch}");
     let mut main_fetch_failed = None;
     if worktree.exists() {
-        if listed_branch(repo, worktree)?.as_deref() != Some(full_ref.as_str()) {
-            return Err(foreign());
+        match listed_branch(repo, worktree)? {
+            Some(listed) if listed == full_ref => {
+                clone::convert(repo, worktree, branch)?;
+                mirror_tracking(repo, worktree, &remote.tracking(branch))?;
+            }
+            Some(_) => return Err(foreign()),
+            // A clone is not in the checkout's list: its own git says
+            // which branch it is on.
+            None => {
+                let on = trusted(repo, worktree)?(&["symbolic-ref", "--quiet", "HEAD"]).ok();
+                if on.as_deref() != Some(full_ref.as_str()) {
+                    return Err(foreign());
+                }
+            }
         }
         // The worker merges `origin/main` and runs no fetch of its own, so
         // kelpie brings main to it before each of its turns.
-        main_fetch_failed = fetch_main(repo, base);
+        main_fetch_failed = fetch_main(repo, worktree, base);
     } else {
         let local = git(repo, ["rev-parse", "--verify", "--quiet", &full_ref]).ok();
         if local.is_some() && start == Start::Main {
             return Err(WorktreeError::BranchTaken(branch.to_owned()));
         }
-        if let Some(parent) = worktree.parent() {
-            create(parent)?;
-        }
-        let start_ref = match start {
+        let (start_ref, tracking) = match start {
             Start::Main => {
                 git(repo, ["fetch", "--quiet", "--", "origin", base])?;
-                format!("origin/{base}")
+                (format!("origin/{base}"), None)
             }
-            // A branch that is already pushed needs main only for the merge
-            // its worker runs, so a failed fetch of it is reported rather
-            // than fatal.
             Start::Pushed => {
                 let tracking = remote.fetch(repo, branch)?;
-                main_fetch_failed = fetch_main(repo, base);
-                tracking
+                (tracking.clone(), Some(tracking))
             }
         };
-        let wt = worktree.as_os_str();
         if let Some(local) = local {
             // A rework's branch left behind by an earlier attempt is reused
             // when it is at the same commit as the remote's. One ahead holds
@@ -221,34 +230,21 @@ pub fn prepare(
             if git(repo, ["rev-parse", "--verify", "--quiet", &start_ref])? != local {
                 return Err(WorktreeError::BranchTaken(branch.to_owned()));
             }
-            checkout_git(
-                repo,
-                [
-                    "worktree".as_ref(),
-                    "add".as_ref(),
-                    "--quiet".as_ref(),
-                    wt,
-                    OsStr::new(branch),
-                ],
-            )?;
-        } else {
-            checkout_git(
-                repo,
-                [
-                    "worktree".as_ref(),
-                    "add".as_ref(),
-                    "--quiet".as_ref(),
-                    "--no-track".as_ref(),
-                    "-b".as_ref(),
-                    OsStr::new(branch),
-                    wt,
-                    start_ref.as_ref(),
-                ],
-            )?;
+        }
+        clone::make(repo, worktree, branch, &start_ref)?;
+        match tracking {
+            // A branch that is already pushed needs main only for the merge
+            // its worker runs, so a failed fetch of it is reported rather
+            // than fatal.
+            Some(tracking) => {
+                mirror_tracking(repo, worktree, &tracking)?;
+                main_fetch_failed = fetch_main(repo, worktree, base);
+            }
+            None => mirror_main(repo, worktree, base)?,
         }
     }
     let git_common_dir = common_dir(repo)?;
-    let git_dir = own_git_dir(&git_common_dir, worktree).ok_or_else(foreign)?;
+    let (git_dir, _) = clone::dirs(&git_common_dir, worktree)?.ok_or_else(foreign)?;
     ref_folders::ensure(&git_common_dir, branch)?;
     create(build)?;
     Ok(Worktree {
@@ -258,16 +254,32 @@ pub fn prepare(
     })
 }
 
-// Fetch `origin/main`, and say what it failed with. A fetch that fails leaves
-// the ref where kelpie last put it, and the gate fetches main again before it
-// reads a head.
-fn fetch_main(repo: &Path, base: &str) -> Option<String> {
-    git(repo, ["fetch", "--quiet", "--", "origin", base])
-        .err()
-        .map(|e| e.to_string())
+// Fetch `origin/main` into the checkout and set the clone's to it, and say
+// what either failed with. A fetch that fails leaves the ref where kelpie last
+// put it, and the gate fetches main again before it reads a head.
+fn fetch_main(repo: &Path, worktree: &Path, base: &str) -> Option<String> {
+    let fetched = git(repo, ["fetch", "--quiet", "--", "origin", base]).err();
+    let mirrored = mirror_main(repo, worktree, base).err();
+    fetched.or(mirrored).map(|e| e.to_string())
+}
+
+// Set the clone's `origin/main` to the checkout's, when the checkout has one.
+fn mirror_main(repo: &Path, worktree: &Path, base: &str) -> Result<(), WorktreeError> {
+    mirror_tracking(repo, worktree, &format!("refs/remotes/origin/{base}"))
+}
+
+// Set the clone's `tracking` ref to the checkout's, when the checkout has one.
+fn mirror_tracking(repo: &Path, worktree: &Path, tracking: &str) -> Result<(), WorktreeError> {
+    if has_ref(repo, tracking)? {
+        clone::mirror(repo, worktree, &[tracking])?;
+    }
+    Ok(())
 }
 
 /// Removes a work item's worktree, its branch and its build folder
+///
+/// A clone's worktree and git dir are removed whole. A linked worktree is
+/// removed through git.
 ///
 /// `remote` also deletes the branch on that [`Remote`]. Whatever is already
 /// gone, a branch the forge deleted first included, is skipped, so a removal
@@ -283,7 +295,13 @@ pub fn remove(
     build: &Path,
     remote: Option<&Remote>,
 ) -> Result<(), WorktreeError> {
-    if worktree.exists() {
+    let git_dir = clone::git_dir_of(worktree);
+    if git_dir.exists() {
+        // The worktree goes first, so a removal cut short between the two
+        // still finds the git dir and takes it.
+        remove_tree_of(worktree)?;
+        remove_tree_of(&git_dir)?;
+    } else if worktree.exists() {
         let wt = worktree.as_os_str();
         git(
             repo,
@@ -311,9 +329,14 @@ pub fn remove(
     };
     ref_folders::ensure(&common, branch)?;
     on_remote_deleted?;
-    match remove_tree(build) {
+    remove_tree_of(build)
+}
+
+// Removes the tree at `path` when it is there.
+fn remove_tree_of(path: &Path) -> Result<(), WorktreeError> {
+    match remove_tree(path) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(WorktreeError::Remove {
-            path: build.to_owned(),
+            path: path.to_owned(),
             kind: e.kind(),
         }),
         _ => Ok(()),
