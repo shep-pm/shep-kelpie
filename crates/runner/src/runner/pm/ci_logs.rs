@@ -4,13 +4,10 @@
 //! each standing line whose ticket end the board cannot answer
 //!
 //! The logs are read as a worker's red prompt reads them, with `failed_run_logs`.
-//! The folder is emptied first, so a log never outlives its ruling. Each
-//! workflow red on `main` has the end of its latest red run's failed log
-//! beside them, as `ci/main-<run>.log`. The forge and the ticket source are
-//! asked with the runner's lock let go: [`wake_off_lock`] names the reads, runs
-//! them as a [`LogsJob`], and tries again over what they found. The files are
-//! written under the lock, and the standing notes are rewritten from the
-//! ticket answers.
+//! The folder is emptied first, so a log never outlives its ruling. The forge
+//! and the ticket source are asked with the runner's lock let go:
+//! [`wake_off_lock`] runs them as a [`LogsJob`], and the files and the standing
+//! notes are written under it from what they found.
 
 use std::collections::BTreeMap;
 use std::path::Path;

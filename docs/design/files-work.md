@@ -8,6 +8,7 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | board.md | board, items, adoption | `core/board/`, `runner/{dispatch,adopt}/` |
 | pm.md | the project manager | `runner/pm/` |
 | pm-board.md | its board | `core/board/briefing/`, `runner/briefing/` |
+| pm-notes.md | its notes files: the log, the archive, the standing notes and their ends | `runner/pm/notes.rs` |
 | workers.md | runner loop, turns | `runner/{turn,flight}/` |
 | runner-lock.md | lock, hold metric | `runner/{lock_hold,off_lock}.rs` |
 | runner-lock-passes.md | queued verbs, threads | `runner/{queued,board_read,trigger}` |
