@@ -46,6 +46,7 @@ fn number(ticket: TicketId) -> u64 {
 impl Tickets for FakeForge {
     fn issue(&self, _repo: &ForgeSlug, id: TicketId) -> Result<Issue, ForgeError> {
         let number = number(id);
+        self.issue_reads.fetch_add(1, Ordering::SeqCst);
         self.ask()?;
         self.wait_if_held(held::At::Issue);
         if self.missing.lock().unwrap().contains(&number) {

@@ -125,6 +125,7 @@ pub struct FakeForge {
     asked: Arc<AtomicUsize>,
     board_reads: Arc<AtomicUsize>,
     issue_listings: Arc<AtomicUsize>,
+    issue_reads: Arc<AtomicUsize>,
     // The reads of pull requests: the listing, one's view, and one's review
     pull_request_reads: Arc<reads::PullRequestReads>,
     // The heads whose held CI runs kelpie approved
@@ -231,6 +232,7 @@ impl FakeForge {
             asked: Arc::default(),
             board_reads: Arc::default(),
             issue_listings: Arc::default(),
+            issue_reads: Arc::default(),
             pull_request_reads: Arc::default(),
             approvals: Arc::default(),
             links: Arc::default(),
