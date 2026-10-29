@@ -125,10 +125,12 @@ pub struct FakeForge {
     asked: Arc<AtomicUsize>,
     board_reads: Arc<AtomicUsize>,
     issue_listings: Arc<AtomicUsize>,
+    issue_reads: Arc<AtomicUsize>,
     // The reads of pull requests: the listing, one's view, and one's review
     pull_request_reads: Arc<reads::PullRequestReads>,
     // The heads whose held CI runs kelpie approved
     approvals: Arc<approvals::Approvals>,
+    links: Arc<links::Links>,
     // Set while the forge is down
     down: Arc<Mutex<Option<down::Down>>>,
     // Set while the test holds the next call open
@@ -230,8 +232,10 @@ impl FakeForge {
             asked: Arc::default(),
             board_reads: Arc::default(),
             issue_listings: Arc::default(),
+            issue_reads: Arc::default(),
             pull_request_reads: Arc::default(),
             approvals: Arc::default(),
+            links: Arc::default(),
             down: Arc::default(),
             hold: Arc::default(),
             limited: Arc::default(),
@@ -901,6 +905,7 @@ mod handed;
 mod held;
 mod images;
 mod issues;
+mod links;
 mod lookup;
 mod pulls;
 mod queue;

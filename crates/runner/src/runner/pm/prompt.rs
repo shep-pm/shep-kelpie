@@ -148,10 +148,15 @@ macro_rules! standing_key {
 /// How the standing notes are kept, shown with the `standing` key
 macro_rules! standing_how {
     () => {
-        "`pm-standing.md` is what a later wake must keep, above all the maintainer's standing \
-         decisions. Kelpie writes it, and you change it only through `standing`, which replaces \
-         the whole file: null leaves it, and empty text clears it. A tell that is a rule for \
-         later wakes belongs in it."
+        "`pm-standing.md` holds what a later wake must keep, above all the maintainer's \
+         standing decisions: the rules that hold across work items, each carrying its end at the \
+         line's end. `(until #12)` ends the line when #12 closes, whichever way it closes, and \
+         `(until 2026-10-05)` at the first wake after that day. A pull request's end names the \
+         issue it was filed from, which kelpie closes when the pull request merges. The state of \
+         one work item goes in `pm-notes.md` instead. Kelpie writes the file and ends each line \
+         whose end has passed, telling you each one it ended; you change it only through \
+         `standing`, which replaces the whole file: null leaves it, and empty text clears it. A \
+         tell that is a rule for later wakes belongs in it."
     };
 }
 
@@ -370,8 +375,12 @@ pub(super) fn wake(
 const NOTES: &str = "\
 Your notes are three files:\n\n\
 - `pm-standing.md`: what a later wake must keep, above all the maintainer's standing \
-decisions. Kelpie writes it; you change it only by giving `standing` in your answer.\n\
-- `pm-notes.md`: your recent log, oldest first. Read it. Kelpie writes one line for every \
+decisions: the rules that hold across work items, each carrying its end at the line's end, \
+`(until #12)` for when #12 closes and `(until 2026-10-05)` for after that day. A pull \
+request's end names the issue it was filed from. Kelpie writes it and ends each line whose \
+end has passed; you change it only by giving `standing` in your answer.\n\
+- `pm-notes.md`: your recent log, oldest first: the state of one work item, not a rule for \
+later ones. Read it. Kelpie writes one line for every \
 wake it answers, with the time, what it woke for, what it did, and your `why`, so add to \
 its end only what a later wake needs and that line does not say.\n\
 - `pm-archive.md`: your older log, which kelpie moves the end of `pm-notes.md` into as it \

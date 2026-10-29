@@ -177,6 +177,16 @@ pub enum Skip {
         #[serde(default, skip_serializing_if = "is_zero")]
         unlisted: u64,
     },
+    /// Its `Blocked by:` line names tickets the source has no link to, and adding
+    /// the link failed, so it waits as if they were open
+    Unlinked {
+        /// The ticket
+        issue: TicketId,
+        /// The tickets the line names that it could not link, lowest first
+        by: Vec<TicketId>,
+        /// Why, as the refusal reads
+        error: String,
+    },
     /// Its `agent:` label names no implementer kelpie has an agent file for
     Label {
         /// The ticket
@@ -270,6 +280,7 @@ impl Skip {
             | Self::InProgress { issue }
             | Self::Split { issue, .. }
             | Self::Blocked { issue, .. }
+            | Self::Unlinked { issue, .. }
             | Self::Label { issue, .. }
             | Self::Failed { issue, .. }
             | Self::Rework { issue, .. }

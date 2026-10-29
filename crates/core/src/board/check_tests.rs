@@ -293,6 +293,27 @@ fn a_blocked_by_line_names_an_issue_or_a_local_ticket() {
     }
 }
 
+#[test]
+fn the_blocked_by_line_names_the_tickets_of_this_repo_once_each() {
+    let ticket = |text: &str| text.parse::<crate::ticket::TicketId>().unwrap();
+    for (line, named) in [
+        ("Blocked by: #7", vec!["7"]),
+        (
+            "- **Blocked by:** #907, #901 and #907 again",
+            vec!["907", "901"],
+        ),
+        ("Blocked by: `#4`, (k12), #3.", vec!["4", "k12", "3"]),
+        ("Blocked by: shep-pm/shep#623, #5", vec!["5"]),
+        ("Blocked by: the workspace, k8s", vec![]),
+        ("Blocked by: #0, #, #007", vec![]),
+    ] {
+        let named: Vec<_> = named.into_iter().map(ticket).collect();
+        assert_eq!(blockers(&format!("{line}\n\n{BODY}")), named, "{line}");
+    }
+    assert_eq!(blockers(BODY), []);
+    assert_eq!(blockers("```\nBlocked by: #7\n```\n"), []);
+}
+
 // BODY with `criterion` as its one acceptance criterion.
 fn criterion(criterion: &str) -> Vec<Failure> {
     let item = format!("- [ ] {criterion}\n");
