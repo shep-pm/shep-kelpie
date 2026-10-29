@@ -102,10 +102,25 @@ fn unfenced_reads(call: &AgentCall, unfenced: &[String], env: &dyn Env) -> Carve
     }
 }
 
-// The object folders `common`'s `objects/info/alternates` lends it. A relative
-// line is read from the `objects` folder, as git reads it.
+// The object folders `common`'s `objects/info/alternates` lends it, and the
+// ones those lend in turn, as deep as git follows. A relative line is read
+// from the `objects` folder it is in, as git reads it.
 fn alternates(common: &Path) -> Vec<PathBuf> {
-    let objects = common.join("objects");
+    const DEPTH: usize = 5;
+    let mut found: Vec<PathBuf> = Vec::new();
+    let mut next = vec![common.join("objects")];
+    for _ in 0..DEPTH {
+        let lent: Vec<PathBuf> = next.iter().flat_map(|objects| lent_by(objects)).collect();
+        next = lent
+            .into_iter()
+            .filter(|own| !found.contains(own))
+            .collect();
+        found.extend(next.iter().cloned());
+    }
+    found
+}
+
+fn lent_by(objects: &Path) -> Vec<PathBuf> {
     let Ok(text) = std::fs::read_to_string(objects.join("info/alternates")) else {
         return Vec::new();
     };
@@ -450,6 +465,33 @@ mod tests {
             "{:?}",
             policy.read
         );
+    }
+
+    #[test]
+    fn an_unfenced_call_in_a_clone_of_a_clone_reads_the_objects_both_lend() {
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, _) = linked_worktree(dir.path());
+        let (middle, clone) = (dir.path().join("middle"), dir.path().join("clone"));
+        for (from, to) in [(&repo, &middle), (&middle, &clone)] {
+            let output = std::process::Command::new("git")
+                .args(["clone", "--quiet", "--shared"])
+                .args([from, to])
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+        }
+        let policy = call_policy(&unfenced_call(&clone), &[glob(dir.path())]);
+        for lender in [&repo, &middle] {
+            let lent = lender.join(".git/objects").canonicalize().unwrap();
+            assert!(
+                policy
+                    .read
+                    .iter()
+                    .any(|own| own.canonicalize().unwrap_or_default() == lent),
+                "{lent:?} in {:?}",
+                policy.read
+            );
+        }
     }
 
     #[test]

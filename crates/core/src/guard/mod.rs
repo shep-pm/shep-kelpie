@@ -44,7 +44,7 @@ use judging::{CallState, Judging};
 /// Where the worker's own git lives
 #[derive(Debug, Clone, Copy)]
 pub struct Checkout<'a> {
-    /// The project repo's common git dir
+    /// The project repo's common git dir, or a clone's own git dir
     pub git_common_dir: &'a Path,
     /// The work item's worktree
     pub worktree: &'a Path,

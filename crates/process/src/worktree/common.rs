@@ -163,4 +163,23 @@ mod tests {
 
         assert!(matches!(trusted(&one, &at), Err(WorktreeError::Foreign(_))));
     }
+
+    #[test]
+    fn a_clone_is_trusted_by_its_own_git_dir_and_no_other_repos() {
+        let dir = tempfile::tempdir().unwrap();
+        let (source, clone) = (dir.path().join("source"), dir.path().join("clone"));
+        init(&source);
+        git(
+            dir.path(),
+            ["clone", "--quiet", source.to_str().unwrap(), "clone"],
+        )
+        .unwrap();
+
+        let in_clone = trusted(&clone.join(".git"), &clone).unwrap();
+        assert!(in_clone(&["rev-parse", "HEAD"]).is_ok());
+        assert!(matches!(
+            trusted(&source.join(".git"), &clone),
+            Err(WorktreeError::Foreign(_))
+        ));
+    }
 }

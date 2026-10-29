@@ -369,7 +369,7 @@ impl WorkerProfile<'_> {
                 kelpie: self.kelpie.to_owned(),
                 worktree: self.worktree.to_owned(),
                 build: self.build.to_owned(),
-                git_common_dir: self.git_common_dir.to_owned(),
+                git_common_dir: self.guarded_git_dir().to_owned(),
                 base: self.base.to_owned(),
                 kelpie_pushes: self.kelpie_pushes,
                 folders: vec![self.kelpie_home.to_owned(), self.repo.to_owned()],
@@ -391,6 +391,15 @@ impl WorkerProfile<'_> {
     // dir is then the project checkout's, and the worker never writes it.
     fn is_clone(&self) -> bool {
         !self.git_dir.starts_with(self.git_common_dir)
+    }
+
+    // The git dir the guard checks a commit and a push in: the common one, or
+    // a clone's own, since the checkout's holds nothing of the clone.
+    fn guarded_git_dir(&self) -> &Path {
+        match self.is_clone() {
+            true => self.git_dir,
+            false => self.git_common_dir,
+        }
     }
 
     // A linked worktree: what a commit and a push need of the common git dir.

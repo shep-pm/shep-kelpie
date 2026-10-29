@@ -694,10 +694,15 @@ const TRUSTED_CONFIG: [(&str, &str); 4] = [
 ];
 
 // The worktree's own git dir and the repo's common one, once the own dir's
-// `commondir` is checked to name the repo's.
+// `commondir` is checked to name the repo's. A clone has the one dir twice.
 fn git_dirs(repo: &Path, worktree: &Path) -> Result<(PathBuf, PathBuf), WorktreeError> {
     let foreign = || WorktreeError::Foreign(worktree.to_owned());
     let common = common_dir(repo)?;
+    // A clone's git dir is its own common dir, in the worktree. `repo` is then
+    // that folder, which kelpie named, so no `commondir` in it is read.
+    if common == canonical(&worktree.join(".git")) && common.is_dir() {
+        return Ok((common.clone(), common));
+    }
     let own = own_git_dir(&common, worktree).ok_or_else(foreign)?;
     let named = std::fs::read_to_string(own.join("commondir")).map_err(|_| foreign())?;
     if canonical(&own.join(named.trim())) != common {
