@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use crate::worktree::{
-    Base, Rebase, Remote, Start, Worktree, WorktreeError, adopt, base_of, clone, head, origin_head,
-    prepare, push_commits, rebase, remove,
+    Base, Rebase, Remote, Start, Worktree, WorktreeError, adopt, base_of, clone, head, holds_work,
+    origin_head, prepare, push_commits, rebase, remove,
 };
 use shep_kelpie_test_support::git;
 
@@ -456,6 +456,80 @@ fn prepare_refuses_a_clone_that_borrows_another_repos_objects() {
 fn prepare_refuses_a_folder_that_is_no_worktree() {
     let rig = Rig::new();
     std::fs::create_dir(rig.worktree()).unwrap();
+
+    let err = prepare(
+        &rig.repo(),
+        &rig.worktree(),
+        "kelpie/7",
+        Start::Main,
+        "main",
+        &Remote::Origin,
+        &rig.build(),
+    )
+    .unwrap_err();
+
+    assert_eq!(err, WorktreeError::Foreign(rig.worktree()));
+}
+
+#[test]
+fn prepare_keeps_the_work_of_a_clone_whose_worktree_folder_is_gone() {
+    let rig = Rig::new();
+    rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
+    rig.at_worktree(&["commit", "--quiet", "--allow-empty", "-m", "work"]);
+    let work = rig.in_clone("refs/heads/kelpie/7");
+    std::fs::remove_dir_all(rig.worktree()).unwrap();
+
+    let err = prepare(
+        &rig.repo(),
+        &rig.worktree(),
+        "kelpie/7",
+        Start::Main,
+        "main",
+        &Remote::Origin,
+        &rig.build(),
+    )
+    .unwrap_err();
+
+    assert_eq!(err, WorktreeError::BranchTaken("kelpie/7".into()));
+    assert_eq!(rig.in_clone("refs/heads/kelpie/7"), work);
+    assert!(holds_work(&rig.repo(), &rig.worktree(), "kelpie/7", "main").unwrap());
+}
+
+#[test]
+fn prepare_remakes_a_clone_whose_worktree_folder_is_gone_and_holds_no_work() {
+    let rig = Rig::new();
+    rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
+    std::fs::remove_dir_all(rig.worktree()).unwrap();
+
+    rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
+
+    assert_eq!(rig.at_worktree(&["status", "--porcelain"]), "");
+}
+
+#[test]
+fn prepare_completes_a_clone_whose_checkout_never_ran() {
+    let rig = Rig::new();
+    std::fs::write(rig.repo().join("a.txt"), "a\n").unwrap();
+    git(&rig.repo(), &["add", "a.txt"]);
+    git(&rig.repo(), &["commit", "--quiet", "-m", "file"]);
+    git(&rig.repo(), &["push", "--quiet", "origin", "main"]);
+    // What a kill inside `clone::make` leaves: the link and no checkout.
+    clone::make(&rig.repo(), &rig.worktree(), "kelpie/7", "main").unwrap();
+    std::fs::remove_file(rig.worktree().join("a.txt")).unwrap();
+    std::fs::remove_file(clone::git_dir_of(&rig.worktree()).join("index")).unwrap();
+
+    rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
+
+    assert_eq!(rig.at_worktree(&["status", "--porcelain"]), "");
+    assert!(rig.worktree().join("a.txt").is_file());
+}
+
+#[test]
+fn prepare_refuses_a_clone_without_an_index_whose_folder_holds_files() {
+    let rig = Rig::new();
+    rig.prepare("kelpie/7", Start::Main, &Remote::Origin);
+    std::fs::remove_file(clone::git_dir_of(&rig.worktree()).join("index")).unwrap();
+    std::fs::write(rig.worktree().join("mine.txt"), "work\n").unwrap();
 
     let err = prepare(
         &rig.repo(),

@@ -199,6 +199,7 @@ pub fn prepare(
                 if on.as_deref() != Some(full_ref.as_str()) {
                     return Err(foreign());
                 }
+                clone::complete(repo, worktree)?;
             }
         }
         // The worker merges `origin/main` and runs no fetch of its own, so
@@ -228,6 +229,7 @@ pub fn prepare(
                 return Err(WorktreeError::BranchTaken(branch.to_owned()));
             }
         }
+        clone::keep_work_at(repo, worktree, branch, &start_ref)?;
         clone::make(repo, worktree, branch, &start_ref)?;
         match tracking {
             // A branch that is already pushed needs main only for the merge
@@ -459,6 +461,13 @@ pub fn holds_work(
         tips.push(in_worktree(&["rev-parse", "HEAD"])?);
         tips.extend(in_worktree(&["rev-parse", "--verify", "--quiet", &full_ref]).ok());
     }
+    // A worktree folder gone leaves the clone's git dir and its commits.
+    let left = if worktree.exists() {
+        None
+    } else {
+        clone::leftover(repo, worktree, branch)?
+    };
+    tips.extend(left.clone());
     if tips.is_empty() {
         return Ok(false);
     }
@@ -468,6 +477,8 @@ pub fn holds_work(
     // A clone's commits are not in the checkout.
     let count = if worktree.exists() {
         trusted(repo, worktree)?(&args)?
+    } else if left.is_some() {
+        clone::in_clone(&clone::git_dir_of(worktree), &args)?
     } else {
         git(repo, args)?
     };

@@ -74,6 +74,77 @@ pub fn branch_head(repo: &Path, worktree: &Path, branch: &str) -> Option<String>
     }
 }
 
+/// The commit `refs/heads/<branch>` is at in the git dir `worktree` left behind, when it left one
+///
+/// A removal cut short, or a worktree folder deleted by hand, leaves the
+/// clone's git dir and the worker's commits in it.
+///
+/// # Errors
+///
+/// [`WorktreeError::Foreign`] when the git dir borrows objects from anywhere but the repo.
+pub(super) fn leftover(
+    repo: &Path,
+    worktree: &Path,
+    branch: &str,
+) -> Result<Option<String>, WorktreeError> {
+    let Some((own, _)) = dirs(&common_dir(repo)?, worktree)? else {
+        return Ok(None);
+    };
+    let full_ref = format!("refs/heads/{branch}");
+    Ok(in_clone(&own, &["rev-parse", "--verify", "--quiet", &full_ref]).ok())
+}
+
+/// Refuses to start over a git dir `worktree` left behind that holds work
+///
+/// [`make`] resets the branch to `start_ref`, so a leftover branch anywhere
+/// else holds commits it would throw away.
+///
+/// # Errors
+///
+/// [`WorktreeError::BranchTaken`] when the leftover branch is not at `start_ref`.
+pub(super) fn keep_work_at(
+    repo: &Path,
+    worktree: &Path,
+    branch: &str,
+    start_ref: &str,
+) -> Result<(), WorktreeError> {
+    let Some(left) = leftover(repo, worktree, branch)? else {
+        return Ok(());
+    };
+    let start = git(
+        repo,
+        ["rev-parse", "--verify", &format!("{start_ref}^{{commit}}")],
+    )?;
+    if start == left {
+        Ok(())
+    } else {
+        Err(WorktreeError::BranchTaken(branch.to_owned()))
+    }
+}
+
+/// Finishes the checkout of a clone that [`make`] was cut short in
+///
+/// A clone has an index once its files are checked out. One without, in a
+/// folder holding only the link, gets its files now. A folder holding more is
+/// not kelpie's to overwrite.
+///
+/// # Errors
+///
+/// [`WorktreeError::Foreign`] for a folder holding files and no index, and
+/// [`WorktreeError`] naming the git command that failed.
+pub(super) fn complete(repo: &Path, worktree: &Path) -> Result<(), WorktreeError> {
+    if git_dir_of(worktree).join("index").is_file() {
+        return Ok(());
+    }
+    let only_the_link = std::fs::read_dir(worktree)
+        .map_err(|_| WorktreeError::Foreign(worktree.to_owned()))?
+        .all(|entry| entry.is_ok_and(|entry| entry.file_name() == ".git"));
+    if !only_the_link {
+        return Err(WorktreeError::Foreign(worktree.to_owned()));
+    }
+    trusted(repo, worktree)?(&["reset", "--quiet", "--hard", "HEAD"]).map(drop)
+}
+
 /// Makes `worktree` a clone of `repo` on `branch`, started at the commit `at`
 ///
 /// `worktree` holds nothing yet. The clone borrows the checkout's objects and
@@ -153,7 +224,7 @@ fn write(path: &Path, text: &str) -> Result<(), WorktreeError> {
 }
 
 // `git` on a clone's git dir before its worktree is linked.
-fn in_clone(git_dir: &Path, args: &[&str]) -> Result<String, WorktreeError> {
+pub(super) fn in_clone(git_dir: &Path, args: &[&str]) -> Result<String, WorktreeError> {
     let mut command = in_repo(git_dir.parent().unwrap_or(git_dir));
     command.arg("--git-dir").arg(git_dir);
     output(command, args)
