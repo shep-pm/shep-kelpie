@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use shep_handover::HandOverError;
 
-use super::super::{Hooks, JOIN_BOUND, Worker};
+use super::super::{Hooks, Worker};
 use super::*;
 use crate::ports::{Adopted, Flying, Kept, KeptServer, SessionId, Timestamp};
 use crate::runner::{CARRY_WAIT, NotCarried, Pass, advance};
@@ -97,7 +97,7 @@ fn a_refused_handover_leaves_the_runner_and_its_calls_as_they_were() {
     assert!(!hold.returned(), "the call was ended");
     hold.release();
     eventually("the turn's end", || turn_of_7(&rig, &runner) == "ended");
-    assert!(worker.stop(JOIN_BOUND, || {}));
+    assert!(worker.stop(CALL_PATIENCE, || {}));
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn a_handover_asked_while_passes_keep_starting_calls_is_tried_at_the_next_quiet_
     assert!(!handing.pending());
     seven.release();
     eight.release();
-    assert!(worker.stop(JOIN_BOUND, || {}));
+    assert!(worker.stop(CALL_PATIENCE, || {}));
 }
 
 #[test]
@@ -162,7 +162,7 @@ fn a_handover_with_nothing_in_flight_carries_nothing() {
     assert_eq!(answer["error"], "handover refused: unused");
     assert_eq!(tried.execs.load(Ordering::SeqCst), 1);
     assert!(tried.carried.lock().unwrap().is_empty());
-    assert!(worker.stop(JOIN_BOUND, || {}));
+    assert!(worker.stop(CALL_PATIENCE, || {}));
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn a_handover_waits_out_a_call_whose_stdin_is_being_fed() {
     });
     assert!(!handing.pending());
     hold.release();
-    assert!(worker.stop(JOIN_BOUND, || {}));
+    assert!(worker.stop(CALL_PATIENCE, || {}));
 }
 
 // A runner whose turn on issue 7 ended in the stand-in, so its record is gone, and
@@ -398,7 +398,7 @@ fn a_withdrawn_handover_is_not_made_when_the_hold_ends() {
     let answer: serde_json::Value = serde_json::from_str(&handing.withdraw()).unwrap();
     assert_eq!(answer["handover"], "none waiting");
     hold.release();
-    assert!(worker.stop(JOIN_BOUND, || {}));
+    assert!(worker.stop(CALL_PATIENCE, || {}));
 }
 
 #[test]
@@ -436,7 +436,7 @@ fn a_handover_waits_out_a_notice_hook_that_is_running() {
     eventually("the handover once the hook ended", || {
         tried.execs.load(Ordering::SeqCst) == 1
     });
-    assert!(worker.stop(JOIN_BOUND, || {}));
+    assert!(worker.stop(CALL_PATIENCE, || {}));
 }
 
 #[test]
@@ -461,7 +461,7 @@ fn a_second_request_while_one_waits_is_refused() {
     feeding.store(false, Ordering::SeqCst);
     first.join().unwrap();
     hold.release();
-    assert!(worker.stop(JOIN_BOUND, || {}));
+    assert!(worker.stop(CALL_PATIENCE, || {}));
 }
 
 // A build to start for the check: a script that runs `body`.

@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::super::super::{Hooks, JOIN_BOUND, Worker};
+use super::super::super::{Hooks, Worker};
 use super::*;
 use crate::adapters::{Base, ClaudeCli, LoginToken};
 use crate::test::{CALL_PATIENCE, OpenSandbox, waits_for, write_script};
@@ -149,5 +149,5 @@ fn incoming(folder: &Path, carry: Carry) {
     let lines = crate::usage::read(&rig.paths().folder.join(crate::usage::FILE)).unwrap();
     let turn = lines.first().expect("a usage line for the turn");
     write(folder, "ledger", &serde_json::to_string(turn).unwrap());
-    assert!(worker.stop(JOIN_BOUND, || {}));
+    assert!(worker.stop(CALL_PATIENCE, || {}));
 }
