@@ -11,6 +11,7 @@ use std::fmt;
 
 use super::is_priority_label;
 use crate::guard::{CONVENTIONAL_TYPES, conventional_type};
+use crate::ticket::TicketId;
 
 /// The line naming the files an issue changes, each path in backticks
 pub const TOUCHES: &str = "Touches:";
@@ -327,6 +328,30 @@ fn names_an_issue(line: &str) -> bool {
     line.split('#').skip(1).any(number)
         || (line.split(|c: char| !c.is_alphanumeric()))
             .any(|w| w.strip_prefix('k').is_some_and(digits))
+}
+
+/// The tickets of this repo the body's `Blocked by:` line names, as `#7` or
+/// `k12`, each once, in the order written
+///
+/// A `#7` that follows a repo's name, as `shep-pm/shep#623`, is another
+/// repo's issue and is left out.
+pub fn blockers(body: &str) -> Vec<TicketId> {
+    let words = labelled_line(body, BLOCKED_BY)
+        .unwrap_or_default()
+        .split_whitespace();
+    let mut named: Vec<TicketId> = Vec::new();
+    for word in words {
+        let word = word.trim_matches(|c: char| ",.;:()`*".contains(c));
+        let digits = word.strip_prefix('#').or_else(|| word.strip_prefix('k'));
+        let local = word.starts_with('k');
+        let id = digits.map(|d| if local { format!("k{d}") } else { d.to_owned() });
+        if let Some(ticket) = id.and_then(|id| id.parse::<TicketId>().ok())
+            && !named.contains(&ticket)
+        {
+            named.push(ticket);
+        }
+    }
+    named
 }
 
 // The checklist items among `lines`, each as its first line without the box

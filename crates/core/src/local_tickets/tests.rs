@@ -329,3 +329,24 @@ fn a_comment_on_a_ticket_the_store_lacks_is_no_issue() {
         Err(ForgeError::NoIssue { .. })
     ));
 }
+
+#[test]
+fn a_blocked_by_link_is_stored_once_and_a_blocker_the_store_lacks_is_refused() {
+    let (_home, tickets) = store();
+    let blocked = file(&tickets, "Blocked", &[READY]);
+    let blocker = file(&tickets, "Blocker", &[]);
+    for _ in 0..2 {
+        tickets.add_blocked_by(&repo(), blocked, blocker).unwrap();
+    }
+    let read = tickets.issue(&repo(), blocked).unwrap();
+    assert_eq!(read.blocked_by, [blocker]);
+    let board = tickets.ready_issues(&repo()).unwrap();
+    assert_eq!(
+        board[0].blocked_by,
+        [crate::board::Blocker {
+            ticket: blocker,
+            open: true
+        }]
+    );
+    assert!(tickets.add_blocked_by(&repo(), blocked, id("k9")).is_err());
+}

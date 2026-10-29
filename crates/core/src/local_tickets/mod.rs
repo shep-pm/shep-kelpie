@@ -521,6 +521,20 @@ impl Tickets for LocalTickets {
         Ok(())
     }
 
+    fn add_blocked_by(
+        &self,
+        _repo: &ForgeSlug,
+        ticket: TicketId,
+        blocker: TicketId,
+    ) -> Result<bool, ForgeError> {
+        self.update(ticket, |s| {
+            if !s.blocked_by.contains(&blocker) {
+                s.blocked_by.push(blocker);
+            }
+        })?;
+        Ok(true)
+    }
+
     fn set_issue_label(
         &self,
         _repo: &ForgeSlug,

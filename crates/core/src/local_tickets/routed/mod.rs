@@ -150,6 +150,15 @@ impl Tickets for Routed {
         self.of(ticket).close_issue_as(repo, ticket, reason)
     }
 
+    fn add_blocked_by(
+        &self,
+        repo: &ForgeSlug,
+        ticket: TicketId,
+        blocker: TicketId,
+    ) -> Result<bool, ForgeError> {
+        self.of(ticket).add_blocked_by(repo, ticket, blocker)
+    }
+
     fn set_issue_label(
         &self,
         repo: &ForgeSlug,

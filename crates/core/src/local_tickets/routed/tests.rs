@@ -81,6 +81,16 @@ impl Tickets for Github {
         Ok(id("900"))
     }
 
+    fn add_blocked_by(
+        &self,
+        _: &ForgeSlug,
+        ticket: TicketId,
+        blocker: TicketId,
+    ) -> Result<bool, ForgeError> {
+        self.called(format!("add_blocked_by {ticket} {blocker}"));
+        Ok(true)
+    }
+
     fn close_issue(&self, _: &ForgeSlug, ticket: TicketId) -> Result<(), ForgeError> {
         self.called(format!("close_issue {ticket}"));
         Ok(())
@@ -148,6 +158,20 @@ fn a_ticket_is_closed_and_labelled_in_the_source_its_id_names() {
         *github.calls.lock().unwrap(),
         ["close_issue 12", "set_issue_label 12 wip"]
     );
+}
+
+#[test]
+fn a_link_goes_to_the_source_of_the_ticket_it_blocks() {
+    let (_home, github, routed, local) = stand_up(TicketSource::Local);
+    local.create("Blocker", "", &[], Links::default()).unwrap();
+    local.create("Blocked", "", &[], Links::default()).unwrap();
+    routed.add_blocked_by(&repo(), id("k2"), id("k1")).unwrap();
+    routed.add_blocked_by(&repo(), id("12"), id("7")).unwrap();
+    assert_eq!(
+        routed.issue(&repo(), id("k2")).unwrap().blocked_by,
+        [id("k1")]
+    );
+    assert_eq!(*github.calls.lock().unwrap(), ["add_blocked_by 12 7"],);
 }
 
 #[test]
