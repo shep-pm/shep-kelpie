@@ -114,7 +114,7 @@ impl Tickets for RateHeld {
         repo: &ForgeSlug,
         ticket: TicketId,
         blocker: TicketId,
-    ) -> Result<(), ForgeError> {
+    ) -> Result<bool, ForgeError> {
         self.call_tickets(Kind::AddBlockedBy, |t| {
             t.add_blocked_by(repo, ticket, blocker)
         })

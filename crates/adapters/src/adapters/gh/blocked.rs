@@ -1,7 +1,8 @@
 //! A blocked-by link added to a GitHub issue
 //!
 //! The endpoint takes the blocker's database id, which is not its number, so
-//! the blocker is read first.
+//! the blocker is read first. That read answers for a pull request too, which
+//! the endpoint refuses, so one is left unlinked.
 
 use serde::Deserialize;
 
@@ -13,11 +14,14 @@ pub(super) fn add_blocked_by(
     repo: &ForgeSlug,
     number: u64,
     blocker: u64,
-) -> Result<(), ForgeError> {
+) -> Result<bool, ForgeError> {
     let path = format!("repos/{}/issues/{blocker}", repo.as_str());
-    let id = parse_id(&gh(&["api", &path])?)?;
+    let Some(id) = parse_id(&gh(&["api", &path])?)? else {
+        return Ok(false);
+    };
     let args = link_args(repo, number, id);
-    gh(&args.iter().map(String::as_str).collect::<Vec<_>>()).map(drop)
+    gh(&args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    Ok(true)
 }
 
 // `-F` sends the id as a number, which the endpoint wants.
@@ -39,13 +43,15 @@ fn link_args(repo: &ForgeSlug, number: u64, id: u64) -> Vec<String> {
     .to_vec()
 }
 
-fn parse_id(stdout: &[u8]) -> Result<u64, ForgeError> {
+// The database id of an issue, or None for a pull request, whose reply carries `pull_request`
+fn parse_id(stdout: &[u8]) -> Result<Option<u64>, ForgeError> {
     #[derive(Deserialize)]
     struct Issue {
         id: u64,
+        pull_request: Option<serde::de::IgnoredAny>,
     }
     let issue: Issue = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
-    Ok(issue.id)
+    Ok(issue.pull_request.is_none().then_some(issue.id))
 }
 
 #[cfg(test)]
@@ -62,7 +68,7 @@ mod tests {
         let out = br#"{"url":"https://api.github.com/repos/shep-pm/koji/issues/7",
             "id":3912345678,"node_id":"I_kwDOAbc","number":7,"title":"The blocker",
             "state":"open"}"#;
-        let id = parse_id(out).unwrap();
+        let id = parse_id(out).unwrap().unwrap();
         assert_eq!(id, 3_912_345_678);
         assert_eq!(
             link_args(&repo(), 12, id),
@@ -75,6 +81,13 @@ mod tests {
                 "issue_id=3912345678",
             ]
         );
+    }
+
+    #[test]
+    fn a_pull_request_has_no_id_to_link() {
+        let out = br#"{"id":3912345679,"number":8,"title":"A change","state":"open",
+            "pull_request":{"url":"https://api.github.com/repos/shep-pm/koji/pulls/8"}}"#;
+        assert_eq!(parse_id(out).unwrap(), None);
     }
 
     #[test]

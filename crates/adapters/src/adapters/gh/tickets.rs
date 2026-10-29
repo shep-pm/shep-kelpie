@@ -84,7 +84,7 @@ impl Tickets for Gh {
         repo: &ForgeSlug,
         ticket: TicketId,
         blocker: TicketId,
-    ) -> Result<(), ForgeError> {
+    ) -> Result<bool, ForgeError> {
         blocked::add_blocked_by(repo, number(ticket)?, number(blocker)?)
     }
 

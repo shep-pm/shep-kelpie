@@ -526,13 +526,13 @@ impl Tickets for LocalTickets {
         _repo: &ForgeSlug,
         ticket: TicketId,
         blocker: TicketId,
-    ) -> Result<(), ForgeError> {
+    ) -> Result<bool, ForgeError> {
         self.update(ticket, |s| {
             if !s.blocked_by.contains(&blocker) {
                 s.blocked_by.push(blocker);
             }
         })?;
-        Ok(())
+        Ok(true)
     }
 
     fn set_issue_label(

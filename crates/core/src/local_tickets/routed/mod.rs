@@ -155,7 +155,7 @@ impl Tickets for Routed {
         repo: &ForgeSlug,
         ticket: TicketId,
         blocker: TicketId,
-    ) -> Result<(), ForgeError> {
+    ) -> Result<bool, ForgeError> {
         self.of(ticket).add_blocked_by(repo, ticket, blocker)
     }
 

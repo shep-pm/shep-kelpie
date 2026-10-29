@@ -109,7 +109,7 @@ impl Tickets for Guarded {
         repo: &ForgeSlug,
         ticket: TicketId,
         blocker: TicketId,
-    ) -> Result<(), ForgeError> {
+    ) -> Result<bool, ForgeError> {
         self.tickets.add_blocked_by(repo, ticket, blocker)
     }
 

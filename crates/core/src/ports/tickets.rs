@@ -192,7 +192,9 @@ pub trait Tickets: Send + Sync {
     /// Links ticket `ticket` as blocked by `blocker`, so the source shows the
     /// block too
     ///
-    /// A link already there stays as it is. No link is ever removed.
+    /// A link already there stays as it is. No link is ever removed. False
+    /// when `blocker` is a pull request, which no link joins to an issue, so
+    /// nothing was added and nothing is wrong.
     ///
     /// # Errors
     ///
@@ -203,7 +205,7 @@ pub trait Tickets: Send + Sync {
         repo: &ForgeSlug,
         ticket: TicketId,
         blocker: TicketId,
-    ) -> Result<(), ForgeError>;
+    ) -> Result<bool, ForgeError>;
 
     /// Adds `label` to ticket `ticket`, or takes it off
     ///

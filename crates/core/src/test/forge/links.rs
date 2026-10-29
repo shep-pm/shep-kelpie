@@ -24,15 +24,19 @@ impl FakeForge {
         self.links.refused.store(refused, Ordering::SeqCst);
     }
 
-    /// Links `number` as blocked by `blocker`, which the issue and the board then show
-    pub fn link(&self, number: u64, blocker: u64) -> Result<(), ForgeError> {
+    /// Links `number` as blocked by `blocker`, which the issue and the board then show,
+    /// unless `blocker` is a pull request
+    pub fn link(&self, number: u64, blocker: u64) -> Result<bool, ForgeError> {
         self.ask()?;
         if self.links.refused.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("linking is refused".to_owned()));
         }
+        if self.opened(blocker).is_ok() {
+            return Ok(false);
+        }
         self.wrote(format!("blocked #{number} by #{blocker}"));
         self.links.added.lock().unwrap().push((number, blocker));
         self.block(number, blocker);
-        Ok(())
+        Ok(true)
     }
 }

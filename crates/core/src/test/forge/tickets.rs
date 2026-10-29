@@ -235,7 +235,7 @@ impl Tickets for FakeForge {
         _repo: &ForgeSlug,
         id: TicketId,
         blocker: TicketId,
-    ) -> Result<(), ForgeError> {
+    ) -> Result<bool, ForgeError> {
         self.link(number(id), number(blocker))
     }
 

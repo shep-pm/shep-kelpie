@@ -688,6 +688,18 @@ fn a_link_the_forge_refuses_holds_the_issue_and_is_logged_once() {
 }
 
 #[test]
+fn a_pull_request_on_the_blocked_by_line_is_no_link_and_holds_nothing() {
+    let (rig, runner) = naming_an_unlinked_blocker();
+    rig.forge.open_pull_request(7, "someone-else", &[]);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Dispatched { issue, .. }) if issue == ticket(8)
+    ));
+    assert_eq!(rig.forge.links_added(), []);
+    assert_eq!(rig.ask(&runner, "status", None)["skipped"], json!([]));
+}
+
+#[test]
 fn the_workers_draft_pull_request_is_recorded_when_its_turn_ends() {
     let (rig, runner) = running("shep");
     rig.forge.list_ready(7, false);

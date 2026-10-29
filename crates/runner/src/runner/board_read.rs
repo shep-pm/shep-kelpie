@@ -141,9 +141,12 @@ impl BoardJob {
                     .tickets
                     .add_blocked_by(&self.repo, issue.ticket, blocker)
                 {
-                    Ok(()) => {
+                    // A pull request is no blocker a link can name, so the line holds nothing.
+                    Ok(false) => {}
+                    Ok(true) => {
                         // A blocker that cannot be read counts as open until the next read.
-                        let open = (self.tickets.issue(&self.repo, blocker)).is_ok_and(|b| b.open);
+                        let open =
+                            (self.tickets.issue(&self.repo, blocker)).map_or(true, |b| b.open);
                         issue.blocked_by.push(Blocker {
                             ticket: blocker,
                             open,

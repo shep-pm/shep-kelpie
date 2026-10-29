@@ -86,9 +86,9 @@ impl Tickets for Github {
         _: &ForgeSlug,
         ticket: TicketId,
         blocker: TicketId,
-    ) -> Result<(), ForgeError> {
+    ) -> Result<bool, ForgeError> {
         self.called(format!("add_blocked_by {ticket} {blocker}"));
-        Ok(())
+        Ok(true)
     }
 
     fn close_issue(&self, _: &ForgeSlug, ticket: TicketId) -> Result<(), ForgeError> {
