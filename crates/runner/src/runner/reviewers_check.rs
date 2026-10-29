@@ -1,5 +1,5 @@
-//! What a runner checks of the reviewers its project lists, when it opens and
-//! when it rereads its settings
+//! What a runner checks of the reviewers its project named in `agents.allow`,
+//! and of every bot among its candidates, when it opens and when it rereads
 
 use crate::ports::{Ports, Visibility};
 use crate::review_bot::Bot;
@@ -16,14 +16,14 @@ pub(super) fn check_local(lineup: &[ListedReviewer], ports: &Ports) -> Result<()
             .reviewer
             .check(&local)
             .map_err(|reason| SettingsError::Invalid {
-                setting: "agents.reviewers",
+                setting: "agents.allow",
                 reason: format!("{}: {reason}", reviewer.name),
             })?;
     }
     Ok(())
 }
 
-// Every listed review bot needs a profile.
+// Every review bot among the candidates needs a profile, which is kelpie's to give.
 pub(super) fn check_bots(lineup: &[ListedReviewer], ports: &Ports) -> Result<(), SettingsError> {
     for reviewer in lineup {
         let Some(bot) = reviewer.bot() else {
@@ -31,7 +31,7 @@ pub(super) fn check_bots(lineup: &[ListedReviewer], ports: &Ports) -> Result<(),
         };
         if !ports.review_bots.iter().any(|p| p.bot() == bot.bot) {
             return Err(SettingsError::Invalid {
-                setting: "agents.reviewers",
+                setting: "agents",
                 reason: format!("{}: kelpie has no profile for {}", reviewer.name, bot.bot),
             });
         }
@@ -39,7 +39,7 @@ pub(super) fn check_bots(lineup: &[ListedReviewer], ports: &Ports) -> Result<(),
     Ok(())
 }
 
-// CodeRabbit's free plan reviews public repos only, so listing it for a
+// CodeRabbit's free plan reviews public repos only, so naming it for a
 // repo the forge reports otherwise stops the runner.
 pub(super) fn check_coderabbit(
     remote: &ForgeSlug,
@@ -59,7 +59,7 @@ pub(super) fn check_coderabbit(
         Visibility::Internal => "internal",
     };
     Err(SettingsError::Invalid {
-        setting: "agents.reviewers",
+        setting: "agents.allow",
         reason: format!(
             "{}: {} is {visibility}, and {}'s free plan reviews public repos only",
             listed.name,

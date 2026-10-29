@@ -411,12 +411,14 @@ impl Rig {
         )
     }
 
-    /// Starts a runner whose settings list `names` in `agents.reviewers`, as
-    /// a project written before the agent board lists them
-    pub fn open_listing(&self, names: &[&str]) -> Result<Mutex<Runner>, OpenError> {
+    /// Starts a runner whose settings name `names` in `agents.allow`, so each
+    /// is a reviewer the project asked for and is held to what a round cannot
+    /// work around
+    pub fn open_allowing(&self, names: &[&str]) -> Result<Mutex<Runner>, OpenError> {
         let mut settings = self.settings();
         let name = |n: &&str| crate::settings::AgentName::try_from((*n).to_owned()).unwrap();
-        settings.agents.reviewers = Some(names.iter().map(name).collect());
+        let names: Vec<_> = names.iter().map(name).collect();
+        settings.agents.allow = Some(names.into());
         self.open_settings(settings)
     }
 

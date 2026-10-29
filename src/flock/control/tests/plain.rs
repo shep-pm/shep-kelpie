@@ -379,7 +379,7 @@ fn a_plain_status_of_an_idle_runner_says_so() {
 #[test]
 fn a_plain_status_shows_a_refused_settings_change_and_when() {
     let refused = r#"{"project":"koji","work_items":[],"rulings":[],
-        "settings_refused":{"reason":"agents.reviewers: free plan reviews public repos only",
+        "settings_refused":{"reason":"agents.allow: coderabbit: free plan reviews public repos only",
         "at":1790000000},
         "pacer":{"enabled":false,"claude":{"reading":null,"holding":null}}}"#;
     assert_eq!(
@@ -389,7 +389,7 @@ fn a_plain_status_shows_a_refused_settings_change_and_when() {
             "  run: running",
             "  build: not recorded",
             "  settings change refused at 2026-09-21 14:13 UTC, so the old settings stay: \
-             agents.reviewers: free plan reviews public repos only",
+             agents.allow: coderabbit: free plan reviews public repos only",
         ]
     );
 }

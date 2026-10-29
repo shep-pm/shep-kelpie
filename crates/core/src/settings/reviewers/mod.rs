@@ -1,25 +1,26 @@
-//! The review's reviewers, by name
+//! The reviewers a review pass may pick from, by name
 //!
-//! `agents.reviewers` lists them, by agent files whose role is `reviewer`, and
-//! narrows a review pass's candidates. With none, every reviewer file
-//! `agents.allow` holds is a candidate but the one `contributions.security_reviewer`
-//! names. The agent board picks each round's reviewer, so order does not matter.
-//! A contribution's pass with no `contributions.reviewers` runs `agents.reviewers`,
-//! else `iq3-xxs-review` where a gateway is named `paddock`, then
-//! `defect-hunter-lite`.
+//! A project names no reviewers. Every agent file whose role is `reviewer` that
+//! `agents.allow` holds is a candidate, but the one `contributions.security_reviewer`
+//! names. The agent board picks each round's reviewer, so the order does not
+//! matter. A project naming no agent is held to none of its candidates, so one
+//! `gateways` cannot route is left out; one naming the agents it may use keeps
+//! every candidate it named, and a start, a reread and `doctor` refuse one
+//! kelpie cannot route. A contribution's pass runs `contributions.reviewers`
+//! when it names them, else `iq3-xxs-review` where a gateway is named `paddock`.
 
 use std::path::Path;
 
-use super::agents::{Allow, find, left_out};
+use super::agents::{Allow, find};
 use super::{AgentName, Gateways, NonBlank, Settings, SettingsError};
 use crate::agents::{Agent, Agents, DEFECT_HUNTER_LITE, IQ3_XXS_REVIEW, Role, Runs};
 use crate::review_bot::BotReviewer;
 
-/// Where a project lists its reviewers, as a refusal names it
-const SETTING: &str = "agents.reviewers";
-
-/// Where a project lists its contributions' reviewers, as a refusal names it
+/// Where a project lists the reviewers a contribution reads, as a refusal names it
 const CONTRIBUTION_SETTING: &str = "contributions.reviewers";
+
+/// The reviewers kelpie gives a contribution with no list, as a refusal names them
+const DEFAULT_REVIEWERS: &str = "kelpie's default reviewer";
 
 /// Where a project names the reviewer that reads a contribution for
 /// security, as a refusal names it
@@ -61,51 +62,47 @@ impl ListedReviewer {
 impl Settings {
     /// The reviewers a pass may pick from
     ///
-    /// The names `agents.reviewers` lists when it is set, in order, each once.
-    /// Otherwise every agent file whose role is `reviewer` that `agents.allow`
-    /// holds and `gateways` can route, but the agent
-    /// `contributions.security_reviewer` names. Their order does not matter.
-    /// Agents come from `agents`, and `~/` in a command expands against `home`.
-    ///
-    /// # Errors
-    ///
-    /// [`SettingsError::Invalid`] naming a reviewer `agents.reviewers` lists that
-    /// has no agent file, whose file is an implementer's, that `agents.allow` leaves
-    /// out, or a bot that reviews on ready listed after another bot.
-    pub fn lineup(
-        &self,
-        agents: &Agents,
-        gateways: &Gateways,
-        home: &Path,
-    ) -> Result<Vec<ListedReviewer>, SettingsError> {
-        let allow = self.agents.allow.as_ref();
-        match &self.agents.reviewers {
-            Some(names) => listed(names.clone(), agents, home, SETTING, allow),
-            None => {
-                let security = &self.contributions.security_reviewer;
-                let candidates = (agents.iter())
-                    .filter(|(name, agent)| {
-                        agent.role == Role::Reviewer
-                            && *name != security
-                            && allow.is_none_or(|allow| allow.holds(name))
-                            && gateways.check_listed_without_keys(agents, [*name]).is_ok()
-                    })
-                    .map(|(name, _)| name.clone());
-                each(candidates.collect(), agents, home, SETTING, allow)
-            }
-        }
+    /// Every agent file whose role is `reviewer` that `agents.allow` holds, but
+    /// the agent `contributions.security_reviewer` names. Their order does not
+    /// matter. Agents come from `agents`, and `~/` in a command expands against
+    /// `home`. A project that names no agent in `agents.allow` takes only the
+    /// candidates `gateways` can route, since it asked for none of them and a
+    /// round passes over one it cannot run.
+    pub fn lineup(&self, agents: &Agents, gateways: &Gateways, home: &Path) -> Vec<ListedReviewer> {
+        let named = self.names_reviewers();
+        (held(
+            self.agents.allow.as_ref(),
+            &self.contributions.security_reviewer,
+            agents,
+        ))
+        .filter(|(name, _)| named || gateways.check_listed_without_keys(agents, [*name]).is_ok())
+        .map(|(name, agent)| reviewer(name.clone(), agent, home))
+        .collect()
+    }
+
+    /// Whether the project named the agents it may use: `agents.allow` holds
+    /// some. A project that names none lets every reviewer file be a candidate
+    /// and is held to none of them.
+    pub fn names_reviewers(&self) -> bool {
+        self.agents
+            .allow
+            .as_ref()
+            .is_some_and(|allow| !allow.is_empty())
     }
 
     /// The reviewers a contribution gets, in order, each once
     ///
-    /// `contributions.reviewers` when set. Otherwise `agents.reviewers` when
-    /// set, else the default reviewers for `gateways`: a contribution's pass
-    /// runs them all, so it does not take every reviewer file.
+    /// `contributions.reviewers` when set, else the default reviewers for
+    /// `gateways`: a contribution's pass runs them all, so it does not take
+    /// every reviewer file.
     ///
     /// # Errors
     ///
-    /// As [`Settings::lineup`], with a refusal of `contributions.reviewers`
-    /// naming it.
+    /// [`SettingsError::Invalid`] naming a reviewer `contributions.reviewers`
+    /// lists that has no agent file, whose file is an implementer's, that
+    /// `agents.allow` leaves out, or a bot that reviews on ready listed after
+    /// another bot. A default reviewer `agents.allow` leaves out is refused the
+    /// same way, naming it as one of kelpie's own.
     pub fn contribution_lineup(
         &self,
         agents: &Agents,
@@ -116,18 +113,36 @@ impl Settings {
         if let Some(names) = &self.contributions.reviewers {
             return listed(names.clone(), agents, home, CONTRIBUTION_SETTING, allow);
         }
-        if let Some(names) = &self.agents.reviewers {
-            return listed(names.clone(), agents, home, SETTING, allow);
-        }
         let names = default_reviewers(gateways);
-        let fix = "list other reviewers in `agents.reviewers`";
-        if let Some(refusal) = (names.iter()).find_map(|n| left_out(allow, n, SETTING, fix)) {
+        let left_out = (names.iter()).find(|n| allow.is_some_and(|allow| !allow.holds(n)));
+        if let Some(name) = left_out {
             return Err(SettingsError::Invalid {
-                setting: "agents",
-                reason: refusal,
+                setting: "contributions",
+                reason: format!(
+                    "kelpie's default reviewer {name} is one `agents.allow` leaves out: add it \
+                     to `agents.allow`, or list the reviewers a contribution reads in \
+                     `contributions.reviewers`"
+                ),
             });
         }
-        listed(names, agents, home, SETTING, allow)
+        listed(names, agents, home, DEFAULT_REVIEWERS, allow)
+    }
+
+    /// The reviewers the project named: every reviewer file a non-empty
+    /// `agents.allow` holds, whether or not a gateway can route them, and none
+    /// when the project names no agent at all. A start, a reread and `doctor`
+    /// hold only these to what a round cannot work around.
+    pub fn named_reviewers(&self, agents: &Agents, home: &Path) -> Vec<ListedReviewer> {
+        match self.names_reviewers() {
+            true => (held(
+                self.agents.allow.as_ref(),
+                &self.contributions.security_reviewer,
+                agents,
+            ))
+            .map(|(name, agent)| reviewer(name.clone(), agent, home))
+            .collect(),
+            false => Vec::new(),
+        }
     }
 
     /// The agent that reads a contribution for security
@@ -161,6 +176,20 @@ impl Settings {
     }
 }
 
+// Every reviewer file `allow` holds, but the one `security` names. An absent or
+// empty `allow` holds every agent with a file.
+fn held<'a>(
+    allow: Option<&'a Allow>,
+    security: &'a AgentName,
+    agents: &'a Agents,
+) -> impl Iterator<Item = (&'a AgentName, &'a Agent)> + 'a {
+    (agents.iter()).filter(move |(name, agent)| {
+        agent.role == Role::Reviewer
+            && *name != security
+            && allow.is_none_or(|allow| allow.holds(name))
+    })
+}
+
 // The reviewers `names` lists, each once, as `setting` names the list. A
 // bot that reviews on ready must come before another bot.
 fn listed(
@@ -189,21 +218,26 @@ fn each(
             continue;
         }
         let agent = find(agents, &name, setting, "agents", Role::Reviewer, allow)?;
-        let mut runs = agent.runs.clone();
-        if let Runs::Command(command) = &mut runs
-            && let Ok(rest) = command.command.strip_prefix("~")
-        {
-            command.command = home.join(rest);
-        }
-        lineup.push(ListedReviewer {
-            name,
-            runs,
-            prompt: agent.prompt.clone(),
-            paths: agent.paths.clone(),
-            second_look: agent.second_look,
-        });
+        lineup.push(reviewer(name, agent, home));
     }
     Ok(lineup)
+}
+
+// `name` as a reviewer, with `~/` in a command's path taken from `home`.
+fn reviewer(name: AgentName, agent: &Agent, home: &Path) -> ListedReviewer {
+    let mut runs = agent.runs.clone();
+    if let Runs::Command(command) = &mut runs
+        && let Ok(rest) = command.command.strip_prefix("~")
+    {
+        command.command = home.join(rest);
+    }
+    ListedReviewer {
+        name,
+        runs,
+        prompt: agent.prompt.clone(),
+        paths: agent.paths.clone(),
+        second_look: agent.second_look,
+    }
 }
 
 // A bot listed earlier marks the draft ready for its own summon, which

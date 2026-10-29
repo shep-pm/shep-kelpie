@@ -645,8 +645,9 @@ fn init_claude_code_binds_every_role_it_serves_and_the_files_load() {
         !said.iter().any(|l| l.contains("agents.implementers")),
         "the agent board picks the implementer with no setting: {said:#?}"
     );
-    has(
-        "shep kelpie set agents.reviewers '[\"defect-hunter\", \"security-reviewer\", \"spec\", \"standards\"]'",
+    assert!(
+        !said.iter().any(|l| l.contains("agents.reviewers")),
+        "every reviewer file init wrote is a candidate with no setting: {said:#?}"
     );
     assert!(
         file(dir.path(), "implementer")

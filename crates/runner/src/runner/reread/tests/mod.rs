@@ -18,15 +18,9 @@ fn settings_with(rig: &Rig, edit: impl FnOnce(String) -> String) -> crate::setti
     rig.settings()
 }
 
-fn listed_settings(rig: &Rig, names: &[&str]) -> crate::settings::Settings {
-    let mut settings = rig.settings();
-    settings.agents.reviewers = Some(
-        names
-            .iter()
-            .map(|n| crate::settings::AgentName::try_from((*n).to_owned()).unwrap())
-            .collect(),
-    );
-    settings
+fn named_settings(rig: &Rig, names: &[&str]) -> crate::settings::Settings {
+    rig.allow(names);
+    rig.settings()
 }
 
 #[test]
@@ -227,7 +221,7 @@ fn paddock_keyed_by_cargo(rig: &Rig) {
 }
 
 #[test]
-fn a_gateway_taken_away_from_a_listed_agent_is_refused_as_a_start_refuses_it() {
+fn a_gateway_taken_away_from_a_named_agent_is_refused_as_a_start_refuses_it() {
     let rig = Rig::new("shep");
     paddock_keyed_by_cargo(&rig);
     list_local(&rig);
@@ -238,10 +232,7 @@ fn a_gateway_taken_away_from_a_listed_agent_is_refused_as_a_start_refuses_it() {
     );
     rig.set_kelpie_settings(&webhook);
     let mut runner = runner.lock().unwrap();
-    let err = runner.reread(
-        listed_settings(&rig, &["qwen", "claude", "local"]),
-        rig.kelpie_settings(),
-    );
+    let err = runner.reread(rig.settings(), rig.kelpie_settings());
     let err = err.unwrap_err().to_string();
     assert!(
         err.contains("local: gateway paddock is not in kelpie's settings"),
@@ -335,51 +326,38 @@ fn a_changed_reviewer_file_is_checked_as_a_start_checks_it_and_named() {
         rig.write_agent("mine", &text);
     };
     define(&script.display().to_string());
+    let named = named_settings(&rig, &["sonnet-high", "mine", "claude"]);
     let runner = rig.open().unwrap();
     let mut runner = runner.lock().unwrap();
-    runner
-        .reread(
-            listed_settings(&rig, &["mine", "claude"]),
-            rig.kelpie_settings(),
-        )
-        .unwrap();
+    runner.reread(named.clone(), rig.kelpie_settings()).unwrap();
 
     define("/nonexistent/review.sh");
     let err = runner
-        .reread(
-            listed_settings(&rig, &["mine", "claude"]),
-            rig.kelpie_settings(),
-        )
+        .reread(named.clone(), rig.kelpie_settings())
         .unwrap_err();
     assert!(
         err.to_string()
-            .starts_with("setting `agents.reviewers`: mine: cannot run /nonexistent"),
+            .starts_with("setting `agents.allow`: mine: cannot run /nonexistent"),
         "{err}"
     );
 
     define("~/review.sh");
-    let line = runner
-        .reread(
-            listed_settings(&rig, &["mine", "claude"]),
-            rig.kelpie_settings(),
-        )
-        .unwrap();
+    let line = runner.reread(named.clone(), rig.kelpie_settings()).unwrap();
     assert_eq!(
         line.as_deref(),
         Some("settings changed: agents now in effect"),
         "the same command, spelt from the home folder, in an edited file"
     );
 
+    // Nothing names a reviewer any more, so a named reviewer whose file is gone
+    // is simply no candidate.
     std::fs::remove_file(rig.paths().agents.join("mine.md")).unwrap();
-    let err = runner
-        .reread(
-            listed_settings(&rig, &["mine", "claude"]),
-            rig.kelpie_settings(),
-        )
-        .unwrap_err();
+    runner.reread(named, rig.kelpie_settings()).unwrap();
     assert!(
-        err.to_string().contains("mine, which has no agent file"),
-        "{err}"
+        runner
+            .listed(&crate::settings::AgentName::kelpies("mine"))
+            .is_none(),
+        "the runner's candidates come from the files it has"
     );
 }
 
@@ -421,23 +399,21 @@ fn a_change_that_does_not_hold_keeps_the_settings_the_runner_has() {
     rig.forge.set_visibility(Visibility::Private);
     rig.coderabbit_on();
     rig.allow(&["sonnet-high", "qwen", "claude", "coderabbit"]);
-    let next = listed_settings(&rig, &["qwen", "claude", "coderabbit"]);
+    let next = rig.settings();
     let mut runner = runner.lock().unwrap();
     let err = runner
         .reread(next, rig.kelpie_settings())
         .unwrap_err()
         .to_string();
     assert!(
-        err.starts_with("setting `agents.reviewers`: coderabbit"),
+        err.starts_with("setting `agents.allow`: coderabbit"),
         "{err}"
     );
-    let listed = runner
-        .settings()
-        .agents
-        .reviewers
-        .clone()
-        .unwrap_or_default();
-    assert!(!listed.iter().any(|name| name.as_str() == "coderabbit"));
+    let allowed = runner.settings().agents.allow.clone().unwrap();
+    assert!(
+        !allowed.holds(&crate::settings::AgentName::kelpies("coderabbit")),
+        "the runner keeps the list it has"
+    );
     rig.reviewers(crate::test::RIG_REVIEWERS);
     rig.allow(&["sonnet-high", "qwen", "claude"]);
     let missing = settings_with(&rig, |s| {

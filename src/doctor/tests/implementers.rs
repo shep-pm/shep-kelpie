@@ -29,7 +29,9 @@ async fn an_implementer_no_turn_can_run_on_is_named_unsure_and_left_out_of_the_p
     let local = "---\nrole: implementer\nharness: pi\nmodel: m\neffort: low\n\
                  gateway: paddock\ncontext: 65536\ndescription: Builds on a local model.\n---\n";
     crate::test::write_in(&scene.kelpie_home.join("agents"), "local.md", local);
-    scene.runs("golbat", |_| {});
+    scene.runs("golbat", |t| {
+        holds(t, &["local"]);
+    });
     let report = scene.report().await;
     let Verdict::Unsure { what, .. } = verdict(&report, "golbat: implementer local") else {
         panic!("{:#?}", report.render());
@@ -58,7 +60,9 @@ async fn an_implementer_on_a_gateway_whose_key_only_the_runner_holds_is_one_the_
     let scene = Scene::new().await;
     scene.shepherd.holds_section(&format!("{WEBHOOK}{PADDOCK}"));
     crate::test::write_in(&scene.kelpie_home.join("agents"), "local.md", ON_PADDOCK);
-    scene.runs("golbat", |_| {});
+    scene.runs("golbat", |t| {
+        holds(t, &["local"]);
+    });
     let report = scene.report().await;
     assert!(
         !subjects(&report).contains(&"golbat: implementer local"),

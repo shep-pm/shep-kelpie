@@ -103,10 +103,12 @@ pub(super) fn listed_reviewers(
         let Ok(settings) = Settings::from_table(table, sheep, here.home, &paths.folder) else {
             continue;
         };
-        let lineup = settings
-            .lineup(book, gateways, here.home)
-            .unwrap_or_default();
-        names.extend(lineup.into_iter().map(|reviewer| reviewer.name));
+        names.extend(
+            settings
+                .lineup(book, gateways, here.home)
+                .into_iter()
+                .map(|r| r.name),
+        );
     }
     names
 }
@@ -515,9 +517,7 @@ fn spends_codex(
     here: Here<'_>,
 ) -> bool {
     let codex = |limit: &Limit| *limit == Limit::Account(Account::Codex);
-    let lineup = settings
-        .lineup(book, gateways, here.home)
-        .unwrap_or_default();
+    let lineup = settings.lineup(book, gateways, here.home);
     let sessions = lineup
         .iter()
         .filter_map(|r| r.runs.session())
@@ -525,8 +525,8 @@ fn spends_codex(
     sessions || (settings.allowed_implementers(book).iter()).any(|i| codex(&i.limit))
 }
 
-// Whether an implementer, another role agent or a reviewer runs on `harness`: one listed
-// in `agents.reviewers`, or, when contributions are picked up, one that reads a
+// Whether an implementer, another role agent or a reviewer runs on `harness`: one among
+// a pass's candidates, or, when contributions are picked up, one that reads a
 // contribution. Settings that do not resolve are another line's to report.
 fn spends_on(
     settings: &Settings,
@@ -536,9 +536,7 @@ fn spends_on(
 ) -> bool {
     let on_it = |model: &RoleModel| model.harness.harness() == harness;
     let roles = settings.role_agents(book).ok();
-    let mut reviewers = settings
-        .lineup(book, gateways, here.home)
-        .unwrap_or_default();
+    let mut reviewers = settings.lineup(book, gateways, here.home);
     let mut security = None;
     if settings.contributions.pick != Pick::Off {
         reviewers.extend(
@@ -645,14 +643,13 @@ fn names(labels: &[NewLabel]) -> String {
     quoted.join(", ")
 }
 
-// The review bots the project lists among its reviewers, in its order. A
-// list that cannot be read is the `reviewers` line's to report.
+// The review bots among the project's candidates, in their order.
 fn bots_listed(
     settings: &Settings,
     (book, gateways): (&Agents, &Gateways),
     home: &std::path::Path,
 ) -> Vec<Bot> {
-    let lineup = settings.lineup(book, gateways, home).unwrap_or_default();
+    let lineup = settings.lineup(book, gateways, home);
     let mut bots: Vec<Bot> = lineup
         .iter()
         .filter_map(|r| r.bot().map(|b| b.bot))
@@ -677,7 +674,7 @@ fn review_bot(subject: &str, repo: &ForgeSlug, bot: Bot, probes: Probes<'_>) -> 
                     format!(
                         "{slug} is not public, and {name}'s free plan reviews public repos only"
                     ),
-                    "take `coderabbit` off this project's `agents.reviewers`, or make the repo public",
+                    "keep `coderabbit` out with this project's `agents.allow`, or make the repo public",
                 );
             }
             Err(e) => {
@@ -700,7 +697,7 @@ fn review_bot(subject: &str, repo: &ForgeSlug, bot: Bot, probes: Probes<'_>) -> 
                 "{name} has never reviewed a pull request of {slug}, so it may not be installed there"
             ),
             format!(
-                "install it on {slug}, or take `{bot}` off `agents.reviewers`; a repo with no reviewed pull request yet reads this way"
+                "install it on {slug}, or keep `{bot}` out with `agents.allow`; a repo with no reviewed pull request yet reads this way"
             ),
         ),
         Err(e) => Line::unsure(
@@ -729,29 +726,19 @@ fn when(at: Timestamp) -> String {
     }
 }
 
-// Every local reviewer the project lists can run.
+// Every reviewer among the candidates can run, and the candidates a pass picks from.
 fn reviewers(
     subject: String,
     settings: &Settings,
     (book, gateways, here): (&Agents, &Gateways, Here<'_>),
     probes: Probes<'_>,
 ) -> Line {
-    let lineup = match settings.lineup(book, gateways, here.home) {
-        Ok(lineup) => lineup,
-        Err(e) => {
-            return Line::missing(
-                subject,
-                e.to_string(),
-                "write the reviewer's file in kelpie's `agents` folder, or take it off \
-                 `agents.reviewers`",
-            );
-        }
-    };
-    // The runner refuses a start whose listed reviewer names a gateway kelpie lacks, and the
-    // gateway checks skip a shipped agent as shipped, so a listed one is looked for here.
+    // A candidate the project named in `agents.allow` names a gateway kelpie's
+    // settings hold: the runner refuses a start without it, and the gateway
+    // lines skip a shipped agent as shipped, so a named one is looked for here.
+    let lineup = settings.lineup(book, gateways, here.home);
     if let Err(e) = gateways.check_listed_without_keys(book, lineup.iter().map(|r| &r.name)) {
-        let fix = "add the gateway to kelpie's settings, or take the reviewer off \
-                   `agents.reviewers`";
+        let fix = "add the gateway to kelpie's settings, or take the reviewer off `agents.allow`";
         return Line::missing(subject, e.to_string(), fix);
     }
     for reviewer in &lineup {
@@ -772,7 +759,7 @@ fn reviewers(
     match names.is_empty() {
         true => Line::ok(
             subject,
-            "none listed, so a pull request goes straight to CI",
+            "no reviewer file is a candidate, so a pull request goes straight to CI",
         ),
         false => Line::ok(
             subject,

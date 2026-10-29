@@ -118,35 +118,38 @@ per_item_usd = 10
 # files, for a private project that keeps its code to the models its owner
 # names. With it set, no other agent is named or chosen: the agent board
 # picks no implementer it leaves out, every setting that names an agent
-# (`reviewers`, `pm`, `representative`, `contributions.reviewers`,
+# (`pm`, `representative`, `contributions.reviewers`,
 # `contributions.security_reviewer` and `triage.agent`) is refused when it
-# names one left out, so is the default `reviewers`, and an `agent:<name>`
-# label naming one is skipped. Names are
+# names one left out, so is one of kelpie's default contribution reviewers,
+# and an `agent:<name>` label naming one is skipped. It is also what a review
+# pass may pick from: every reviewer file it holds is a candidate, and a
+# project that holds no reviewer file gets no review. Names are
 # not checked against the agents folder: a missing file is refused where the
 # name is used. Leave it out, or leave it empty (`allow = []`), to allow
 # every agent.
 # allow = ["sonnet-high", "iq3-xxs-review", "defect-hunter-lite", "pm", "representative", "security-reviewer", "triager"]
-# The agents that may review each pull request, from the same files, whose
-# role is `reviewer`. The agent board picks each round's reviewer from them,
-# the first it ranks that the pacer lets start, and `reviews.need` of them read
-# it. After each one that finds anything above a nit, the worker gets one
-# turn to fix all of that reviewer's findings; a round of nits, or of nothing,
-# goes straight to the next. After the last to read, the pull request goes to CI.
-# A reviewer whose file sets `paths` runs only on a pull request that changes
-# one of them.
+# Read by nothing, and `shep kelpie upgrade` deletes it, as
+# `shep kelpie settings migrate` does. A pass's candidates are every reviewer
+# file `allow` holds, which is every reviewer file in kelpie's `agents` folder
+# when `allow` names none, but never the one `contributions.security_reviewer`
+# names. The agent board picks each round's reviewer from them, the first it
+# ranks that the pacer lets start, and `reviews.need` of them read it. After
+# each one that finds anything above a nit, the worker gets one turn to fix all
+# of that reviewer's findings; a round of nits, or of nothing, goes straight to
+# the next. After the last to read, the pull request goes to CI. A reviewer
+# whose file sets `paths` runs only on a pull request that changes one of them.
 # `defect-hunter-lite` is kelpie's own: Opus 5.5 at medium, reading for
 # defects once. `defect-hunter` is the same prompt at high effort, which then
 # looks again for what it missed, with one fix turn after both.
 # `iq3-xxs-review` is kelpie's own too: a local model, `iq3_xxs`, behind the
-# gateway named `paddock` in kelpie's settings. The review bots `coderabbit`, `cubic` and
+# gateway named `paddock` in kelpie's settings, and no candidate where that
+# gateway is absent. The review bots `coderabbit`, `cubic` and
 # `codex` are reviewers too, on files `add` writes: one the board picks
 # reads the pull request once a pass, and is passed over, not waited on,
 # while its window is closed. Its open threads get the one fix turn. Each
 # file holds its bot's window, and `rounds` there caps its reads of a work
 # item's pull request. CodeRabbit's free plan reviews public repos only, so
-# a repo GitHub marks private cannot use it. Absent, every reviewer file
-# `agents.allow` holds but the one `contributions.security_reviewer` names
-# is a candidate; empty, no review at all.
+# a repo GitHub marks private cannot use it.
 # reviewers = ["iq3-xxs-review", "defect-hunter-lite"]
 # The project manager, from a file whose role is `pm`: kelpie's own `pm` is
 # Opus 5.5 at medium. Code wakes it when a slot is free with two or more
@@ -354,7 +357,7 @@ compact_window = 200000
 # `all`. Anything but `off` needs the GitHub App to cover the repo, or the
 # runner refuses to start: the representative would post as the maintainer.
 # `reviewers` lists agent files, review bots welcome, in the order they run;
-# the project's `agents.reviewers` when absent, else kelpie's default pass. `security_reviewer` is the
+# kelpie's default pass when absent. `security_reviewer` is the
 # reviewer agent that reads a contribution for security. `quiet_days` and
 # `nudge_days` are whole days above 0, and `nudge_days` is below `quiet_days`.
 # The agent files are checked only when `pick` is not `off`.

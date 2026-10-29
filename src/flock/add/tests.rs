@@ -1,12 +1,17 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use shep_client::shep_core::config::AppConfig;
 use shep_client::shep_core::values::UpDuration;
 
 use super::*;
+use crate::agents::Agents;
 use crate::home::ProjectPaths;
 use crate::ports::Visibility;
-use crate::settings::{AgentName, BaseBranch, ForgeSlug, RulingName};
+use crate::settings::{
+    BaseBranch, EndpointUrl, ForgeSlug, Gateway, GatewayKind, GatewayName, Gateways, KeyVar,
+    RulingName,
+};
 use crate::state::STATE_FILE;
 use crate::test::{CALL_PATIENCE, FakeForge, FakeShepherd, ticket};
 
@@ -92,6 +97,39 @@ impl Scene {
         let table = runner.dogs.get(DOG).expect("a kelpie table").as_map();
         Settings::from_table(table, "koji", &self.home, &self.home).unwrap()
     }
+
+    /// The reviewers a review pass may pick from, as the runner reads them from
+    /// the agent files `add` wrote
+    fn candidates(&self) -> Vec<String> {
+        let settings = self.settings();
+        let book = Agents::load(&self.agents()).unwrap();
+        (settings.lineup(&book, &Gateways::default(), &self.home))
+            .iter()
+            .map(|r| r.name.to_string())
+            .collect()
+    }
+
+    /// The reviewers a contribution reads, as the runner reads them
+    fn contribution(&self, gateways: &Gateways) -> Vec<String> {
+        let settings = self.settings();
+        let book = Agents::load(&self.agents()).unwrap();
+        (settings.contribution_lineup(&book, gateways, &self.home))
+            .unwrap()
+            .iter()
+            .map(|r| r.name.to_string())
+            .collect()
+    }
+}
+
+/// Kelpie holding one gateway named `paddock`, as its own settings hold it
+fn paddock() -> Gateways {
+    let gateway = Gateway {
+        kind: GatewayKind::Paddock,
+        url: EndpointUrl::try_from("http://gpu-box:8700".to_owned()).unwrap(),
+        key_env: KeyVar::try_from("PADDOCK_KEY".to_owned()).unwrap(),
+    };
+    let name = GatewayName::try_from("paddock".to_owned()).unwrap();
+    Gateways::new(BTreeMap::from([(name, gateway)]))
 }
 
 fn stub(agent: &str) -> String {
@@ -126,10 +164,9 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     let remote = settings.git.remote.as_ref().map(ForgeSlug::as_str);
     assert_eq!(remote, Some("shep-pm/koji-website"));
     assert!(settings.ci.block, "the checkout has workflows");
-    let reviewers = settings.agents.reviewers.clone().unwrap();
-    assert_eq!(
-        reviewers,
-        [AgentName::try_from("defect-hunter-lite".to_owned()).unwrap()]
+    assert!(
+        settings.agents.reviewers.is_none(),
+        "a new project names no reviewers"
     );
     assert_eq!(settings.agents.gone_keys(), Vec::<&str>::new());
     for name in ["sonnet-high", "opus-high"] {
@@ -178,29 +215,33 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
 }
 
 #[tokio::test]
-async fn where_the_qwen_review_script_is_installed_add_still_lists_defect_hunter_lite_alone() {
+async fn where_the_qwen_review_script_is_installed_its_reviewer_is_a_candidate() {
     let scene = Scene::new().await;
     let script = scene.home.join(".claude/scripts/qwen-review.sh");
     std::fs::create_dir_all(script.parent().unwrap()).unwrap();
     crate::test::write_script(&script, "#!/bin/sh\nexit 0\n");
     scene.add().await.unwrap();
 
-    let listed = scene.settings().agents.reviewers.unwrap();
-    assert_eq!(listed, [AgentName::kelpies("defect-hunter-lite")]);
     assert_eq!(scene.written("qwen"), stub("qwen"));
+    assert!(
+        scene.candidates().contains(&"qwen".to_owned()),
+        "a reviewer file the project holds is a candidate it never named"
+    );
 }
 
 #[tokio::test]
-async fn where_kelpie_holds_a_paddock_gateway_add_lists_iq3_xxs_review_first() {
+async fn where_kelpie_holds_a_paddock_gateway_a_contribution_reads_iq3_xxs_review_first() {
     let scene = Scene::new().await;
     scene.shepherd.holds_section(
         "[gateways.paddock]\nurl = \"http://gpu-box:8700\"\nkey_env = \"PADDOCK_KEY\"\n",
     );
     scene.add().await.unwrap();
 
-    let listed = scene.settings().agents.reviewers.unwrap();
-    let names = ["iq3-xxs-review", "defect-hunter-lite"].map(AgentName::kelpies);
-    assert_eq!(listed, names);
+    assert_eq!(
+        scene.contribution(&paddock()),
+        ["iq3-xxs-review", "defect-hunter-lite"],
+        "a contribution with no list takes kelpie's default pass"
+    );
     for agent in ["iq3-xxs-review", "defect-hunter-lite"] {
         assert_eq!(scene.written(agent), stub(agent));
     }
@@ -265,15 +306,18 @@ async fn add_twice_changes_nothing() {
 }
 
 #[tokio::test]
-async fn a_public_repo_with_no_ci_gets_no_ci_and_still_lists_no_review_bot() {
+async fn a_public_repo_with_no_ci_gets_no_ci_and_lists_no_reviewer() {
     let scene = Scene::new().await;
     scene.forge.set_visibility(Visibility::Public);
     std::fs::remove_dir_all(scene.checkout.root.join(".github")).unwrap();
     scene.add().await.unwrap();
     let settings = scene.settings();
     assert!(!settings.ci.block);
-    let reviewers = settings.agents.reviewers.unwrap();
-    assert_eq!(reviewers, [AgentName::kelpies("defect-hunter-lite")]);
+    assert!(settings.agents.reviewers.is_none());
+    assert!(
+        scene.candidates().iter().any(|n| n == "coderabbit"),
+        "the bot file `add` wrote is a candidate, passed over at its round when the repo cannot run it"
+    );
 }
 
 #[tokio::test]
@@ -286,8 +330,7 @@ async fn add_writes_stubs_for_the_whole_agents_and_none_for_a_baseline() {
             "{baseline} is a baseline: its stub comes from `agents new`"
         );
     }
-    let reviewers = scene.settings().agents.reviewers.unwrap();
-    assert_eq!(reviewers, [AgentName::kelpies("defect-hunter-lite")]);
+    assert!(scene.settings().agents.reviewers.is_none());
 }
 
 #[tokio::test]

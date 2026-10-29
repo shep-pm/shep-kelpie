@@ -74,11 +74,14 @@ impl Runner {
         book.hold_for(self.state.work_items.iter().map(|item| &item.agent))?;
         let mut agents = settings.role_agents(&book)?;
         let gateways = kelpie.gateways();
-        let mut lineup = settings.lineup(&book, &gateways, &self.home)?;
+        let mut lineup = settings.lineup(&book, &gateways, &self.home);
         // The gateways the agents in use were listed under.
         let mut in_use = &gateways;
         // The gateways must hold as a start checks them.
         check_gateways(&gateways, &book, &lineup)?;
+        // As a start does, only a reviewer the project named in `agents.allow`
+        // is held to what a round cannot work around.
+        let named = settings.named_reviewers(&book, &self.home);
         gateways.check_triage_spam(&settings.triage.spam)?;
         // Agents the adapters cannot route yet wait with the gateways they name.
         if check_gateways(&self.gateways, &book, &lineup).is_err() {
@@ -90,7 +93,7 @@ impl Runner {
             // The agents the runner has, under the new settings as a start reads them.
             agents = settings.role_agents(&book)?;
             in_use = &self.gateways;
-            lineup = settings.lineup(&book, in_use, &self.home)?;
+            lineup = settings.lineup(&book, in_use, &self.home);
         }
         // A start refuses a hook that does not resolve, and a change to either table is checked as one.
         if settings.hooks != self.settings.hooks
@@ -157,13 +160,13 @@ impl Runner {
             let coderabbit = |r: &ListedReviewer| r.bot().is_some_and(|b| b.bot == Bot::Coderabbit);
             lineup.iter().any(coderabbit)
         };
-        // As a start does, only the reviewers the project lists are checked.
-        let chosen = settings.agents.reviewers.is_some();
+        // As a start does, only the reviewers the project named are checked.
+        let chosen = !named.is_empty();
         if chosen && listed(&lineup) && !listed(&self.lineup) {
-            check_coderabbit(&self.remote, &lineup, &self.ports)?;
+            check_coderabbit(&self.remote, &named, &self.ports)?;
         }
         if chosen && lineup != self.lineup {
-            check_local(&lineup, &self.ports)?;
+            check_local(&named, &self.ports)?;
         }
         crate::skills::check(&settings.skills, &self.paths.skills)?;
         let skills = (settings.skills != self.settings.skills)

@@ -174,19 +174,16 @@ fn a_repo_that_does_not_exist_stops_the_runner() {
     assert!(err.ends_with("reactmap-gone is not a folder"), "{err}");
 }
 
-fn open_listed(rig: &Rig, names: &[&str]) -> Result<Mutex<Runner>, OpenError> {
+fn open_named(rig: &Rig, names: &[&str]) -> Result<Mutex<Runner>, OpenError> {
     let mut settings = rig.settings();
-    settings.agents.reviewers = Some(
-        names
-            .iter()
-            .map(|n| crate::settings::AgentName::try_from((*n).to_owned()).unwrap())
-            .collect(),
-    );
+    let name = |n: &&str| crate::settings::AgentName::try_from((*n).to_owned()).unwrap();
+    let names: Vec<_> = names.iter().map(name).collect();
+    settings.agents.allow = Some(names.into());
     rig.open_settings(settings)
 }
 
 #[test]
-fn coderabbit_listed_for_a_repo_that_is_not_public_stops_the_runner() {
+fn coderabbit_named_for_a_repo_that_is_not_public_stops_the_runner() {
     for (visibility, seen_by) in [
         (Visibility::Private, "private"),
         (Visibility::Internal, "internal"),
@@ -195,11 +192,11 @@ fn coderabbit_listed_for_a_repo_that_is_not_public_stops_the_runner() {
         rig.coderabbit_on();
         rig.forge.set_visibility(visibility);
         assert_eq!(
-            open_listed(&rig, crate::test::RIG_REVIEWERS_AND_CODERABBIT)
+            open_named(&rig, crate::test::RIG_REVIEWERS_AND_CODERABBIT)
                 .unwrap_err()
                 .to_string(),
             format!(
-                "setting `agents.reviewers`: coderabbit: shep-pm/shep is {seen_by}, \
+                "setting `agents.allow`: coderabbit: shep-pm/shep is {seen_by}, \
                  and CodeRabbit's free plan reviews public repos only"
             )
         );
@@ -207,20 +204,20 @@ fn coderabbit_listed_for_a_repo_that_is_not_public_stops_the_runner() {
 }
 
 #[test]
-fn a_private_repo_with_no_reviewers_list_opens_with_coderabbit_among_the_candidates() {
+fn a_private_repo_that_names_no_reviewer_opens_with_coderabbit_among_the_candidates() {
     let rig = Rig::new("shep");
     rig.write_agent(
         "coderabbit",
         "---\nrole: reviewer\nharness: bot\nbot: coderabbit\nreviews: 1\nhours: 1\n---\n",
     );
     rig.forge.set_visibility(Visibility::Private);
-    let runner = rig.open().expect("a candidate is not a listed reviewer");
+    let runner = rig.open().expect("a candidate is not a named reviewer");
     let bots = runner.lock().unwrap().listed_bots();
     assert!(!bots.is_empty(), "it is still a candidate");
 }
 
 #[test]
-fn a_local_reviewer_that_is_missing_does_not_stop_a_project_with_no_reviewers_list() {
+fn a_local_reviewer_that_is_missing_does_not_stop_a_project_that_names_no_reviewer() {
     let rig = Rig::new("shep");
     let gone = rig.home.path().join("bin/gone");
     rig.write_agent(
@@ -230,11 +227,11 @@ fn a_local_reviewer_that_is_missing_does_not_stop_a_project_with_no_reviewers_li
             gone.display()
         ),
     );
-    rig.open().expect("a candidate is not a listed reviewer");
+    rig.open().expect("a candidate is not a named reviewer");
 }
 
 #[test]
-fn a_local_reviewer_the_project_lists_that_is_missing_stops_the_runner() {
+fn a_local_reviewer_the_project_names_that_is_missing_stops_the_runner() {
     let rig = Rig::new("shep");
     let gone = rig.home.path().join("bin/gone");
     rig.write_agent(
@@ -245,20 +242,18 @@ fn a_local_reviewer_the_project_lists_that_is_missing_stops_the_runner() {
         ),
     );
     rig.reviewers(&["qwen", "gone"]);
-    let err = open_listed(&rig, &["qwen", "gone"])
-        .unwrap_err()
-        .to_string();
+    let err = open_named(&rig, &["qwen", "gone"]).unwrap_err().to_string();
     assert!(
-        err.starts_with("setting `agents.reviewers`: gone: cannot run "),
+        err.starts_with("setting `agents.allow`: gone: cannot run "),
         "{err}"
     );
 }
 
 #[test]
-fn coderabbit_listed_for_a_public_repo_asks_the_forge_once() {
+fn coderabbit_named_for_a_public_repo_asks_the_forge_once() {
     let rig = Rig::new("shep");
     rig.coderabbit_on();
-    open_listed(&rig, crate::test::RIG_REVIEWERS_AND_CODERABBIT).unwrap();
+    open_named(&rig, crate::test::RIG_REVIEWERS_AND_CODERABBIT).unwrap();
     assert_eq!(rig.forge.calls(), 1);
 }
 

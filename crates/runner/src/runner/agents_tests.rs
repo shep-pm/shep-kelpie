@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use crate::ports::{CLEAN, Checks, Finding, Role, Severity};
 use crate::runner::{Runner, StepReport, step};
 use crate::settings::Effort;
-use crate::test::{RIG_REVIEWERS, Rig, Scripted, ScriptedRound};
+use crate::test::{Rig, Scripted, ScriptedRound};
 
 const SONNET_LOW: &str = "---\nrole: reviewer\nharness: claude-code\n\
                           model: claude-sonnet-5\neffort: low\n---\nReview {{DIFF}}.\n";
@@ -167,9 +167,10 @@ fn a_settings_file_that_cannot_be_written_keeps_the_turn_for_its_retry() {
 #[test]
 fn a_role_naming_an_agent_kelpie_lacks_stops_the_runner_naming_it() {
     let rig = Rig::new("shep");
-    let err = rig.open_listing(&["fable"]).unwrap_err().to_string();
+    rig.pm("fable");
+    let err = rig.open().unwrap_err().to_string();
     assert!(
-        err.contains("`agents.reviewers` names fable, which has no agent file"),
+        err.contains("`agents.pm` names fable, which has no agent file"),
         "{err}"
     );
 }
@@ -177,7 +178,7 @@ fn a_role_naming_an_agent_kelpie_lacks_stops_the_runner_naming_it() {
 #[test]
 fn an_agent_file_a_setting_names_that_cannot_be_used_stops_the_runner_naming_it() {
     let rig = Rig::new("shep");
-    let file = rig.paths().agents.join("qwen.md");
+    let file = rig.paths().agents.join("pm.md");
     let cases = [
         ("role: implementer\n", "must start with a `---` line"),
         (
@@ -190,14 +191,12 @@ fn an_agent_file_a_setting_names_that_cannot_be_used_stops_the_runner_naming_it(
              context size as `context`",
         ),
     ];
+    rig.pm("pm");
     for (text, why) in cases {
-        rig.write_agent("qwen", text);
-        let err = rig.open_listing(RIG_REVIEWERS).unwrap_err().to_string();
+        rig.write_agent("pm", text);
+        let err = rig.open().unwrap_err().to_string();
         assert!(
-            err.contains(&format!(
-                "names qwen, whose agent file {}: ",
-                file.display()
-            )),
+            err.contains(&format!("names pm, whose agent file {}: ", file.display())),
             "{err}"
         );
         assert!(err.contains(why), "{err}\nwanted: {why}");
@@ -279,8 +278,8 @@ fn an_agent_on_a_gateway_kelpie_cannot_route_to_stops_the_runner() {
         "---\nrole: reviewer\nharness: pi\nmodel: m\neffort: low\n\
          gateway: paddock\ncontext: 65536\n---\nReview {{DIFF}}.\n",
     );
-    let listed = ["qwen", "claude", "local"];
-    let err = rig.open_listing(&listed).unwrap_err().to_string();
+    let named = ["qwen", "claude", "local"];
+    let err = rig.open_allowing(&named).unwrap_err().to_string();
     assert!(
         err.contains("local: gateway paddock is not in kelpie's settings"),
         "{err}"
@@ -288,7 +287,7 @@ fn an_agent_on_a_gateway_kelpie_cannot_route_to_stops_the_runner() {
     rig.set_kelpie_settings(
         "[gateways.paddock]\nurl = \"http://127.0.0.1:1\"\nkey_env = \"KELPIE_TEST_KEY_NEVER_SET\"\n",
     );
-    let err = rig.open_listing(&listed).unwrap_err().to_string();
+    let err = rig.open_allowing(&named).unwrap_err().to_string();
     assert!(
         err.contains("KELPIE_TEST_KEY_NEVER_SET, which holds"),
         "{err}"

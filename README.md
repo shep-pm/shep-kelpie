@@ -198,8 +198,8 @@ For npm, that is `registry.npmjs.org`. What an entry may be is in [`settings.exa
 `-p` takes a glob of project names for `set` and `get`, to change or read a setting in many projects at once. Quote it, or the shell expands `*` against files:
 
 ```sh
-shep kelpie set -p 'shep*' agents.reviewers '["iq3-xxs-review", "defect-hunter-lite"]'
-shep kelpie get -p '*' agents.reviewers
+shep kelpie set -p 'shep*' agents.allow '["sonnet-high", "defect-hunter"]'
+shep kelpie get -p '*' agents.allow
 ```
 
 `set` checks every matched project first: if one refuses the value, none is written and the error names each that refused. `get` prints `project <name>: <value>` for each, or `not set`.

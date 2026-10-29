@@ -6,9 +6,9 @@
 # the report is kelpie's `SEVERITY|file:line|what|why` line and `CLEAN`, not
 # prose; a smell is LOW unless it breaks a documented standard; and the
 # session reads the standards files itself with Read, since it has no other
-# way to see them. It is not on the default list: it covers the verbose and
-# repeated code `defect-hunter` is told to skip, so a project opts in by
-# listing it under `agents.reviewers`. It reads once, with no `second_look`,
+# way to see them. It is no default for a contribution's pass: it covers the verbose and
+# repeated code `defect-hunter` is told to skip, so a project that names the
+# agents it may use holds it in `agents.allow` to run it. It reads once, with no `second_look`,
 # because a reviewer that always finds something must not loop (ADR 0007).
 # Its sessions read the worktree with Read, Grep and Glob, and run no
 # command. The body below is its prompt: kelpie puts the commit the change is

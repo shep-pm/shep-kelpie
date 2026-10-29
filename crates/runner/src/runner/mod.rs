@@ -476,8 +476,14 @@ impl Runner {
         told.extend(notes);
         let agents = settings.role_agents(&book)?;
         let gateways = kelpie_settings.gateways();
-        let lineup = settings.lineup(&book, &gateways, home)?;
+        // A candidate names a gateway kelpie can route, or none: what a start
+        // looks for is the key it spends there.
+        let lineup = settings.lineup(&book, &gateways, home);
         check_gateways(&gateways, &book, &lineup)?;
+        // A reviewer the project named in `agents.allow` is held to what a
+        // round cannot work around. A candidate it never named is passed over
+        // at its round.
+        let named = settings.named_reviewers(&book, home);
         gateways.check_triage_spam(&settings.triage.spam)?;
         let webhook = kelpie_settings.webhook;
         if webhook.is_none() {
@@ -571,11 +577,12 @@ impl Runner {
             &settings.repo_setup,
         );
         let plugins_head = crate::skills::default_head(checkout, settings.git.base());
-        // Only reviewers the project lists are held to these: a candidate it never
-        // chose is passed over at its round, by the repo's visibility or as down.
-        if settings.agents.reviewers.is_some() {
-            check_coderabbit(&remote, &lineup, &ports)?;
-            check_local(&lineup, &ports)?;
+        // Only a reviewer the project named in `agents.allow` is held to these: a
+        // candidate it never named is passed over at its round, by the repo's
+        // visibility or as down.
+        if !named.is_empty() {
+            check_coderabbit(&remote, &named, &ports)?;
+            check_local(&named, &ports)?;
         }
         let mut state = store.load()?.unwrap_or_default();
         book.hold_for(state.work_items.iter().map(|item| &item.agent))?;

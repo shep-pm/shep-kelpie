@@ -51,11 +51,12 @@ pub const DEFAULT_IMPLEMENTER: &str = "sonnet-high";
 /// The reviewer that reads a pull request twice, Opus 5.5 at high effort
 pub const DEFECT_HUNTER: &str = "defect-hunter";
 
-/// The reviewer every project lists last when it names none
+/// The reviewer a contribution pass runs when it names none, and a candidate
+/// for every project's review rounds
 pub const DEFECT_HUNTER_LITE: &str = "defect-hunter-lite";
 
-/// The reviewer every project lists first when it names none, where paddock is
-/// set up
+/// The reviewer a contribution pass runs first when it names none, where
+/// paddock is set up, and a candidate for every project's review rounds
 pub const IQ3_XXS_REVIEW: &str = "iq3-xxs-review";
 
 /// The reviewer that runs the maintainer's qwen-review script
@@ -138,8 +139,8 @@ const DEFAULTS: [(&str, &str, Written); 8] = [
 pub enum Role {
     /// It builds a work item, once the agent board picks it
     Implementer,
-    /// It reads a pull request once a pass, once a project lists it in
-    /// `agents.reviewers`
+    /// It reads a pull request once a pass, as a candidate the agent board
+    /// picks from for each round
     Reviewer,
     /// It manages the project's board, once a project names it in `agents.pm`
     Pm,

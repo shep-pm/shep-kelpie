@@ -32,8 +32,9 @@ pub struct Contributions {
     #[serde(default)]
     pub pick: Pick,
     /// The reviewers' agent files for a contribution, in the order the
-    /// review runs them, each once. Review bots are welcome. The project's
-    /// `agents.reviewers` when absent, else kelpie's default pass.
+    /// review runs them, each once. Review bots are welcome. Kelpie's default
+    /// pass when absent: `iq3-xxs-review` where kelpie holds a `paddock`
+    /// gateway, then `defect-hunter-lite`.
     #[serde(default)]
     pub reviewers: Option<Vec<AgentName>>,
     /// The agent file whose role is `reviewer` that reads a contribution

@@ -1,8 +1,9 @@
 //! Agents by name: a harness, the model and effort it runs on, and its limit
 //!
-//! Kelpie's agent files define each one (`crate::agents`). The agent board
-//! picks a work item's implementer from the files whose role is `implementer`
-//! that `agents.allow` holds. A project lists its reviewers in `agents.reviewers`.
+//! Kelpie's agent files define each one (`crate::agents`). A project names no
+//! agents: the agent board picks a work item's implementer from the files whose
+//! role is `implementer` that `agents.allow` holds, and each review round's
+//! reviewer from the reviewer files it holds.
 //!
 //! An agent's limit is its account's usage windows, read the way its
 //! `usage` says, or for a local model a lease held for each whole call.
@@ -287,6 +288,12 @@ impl Allow {
     pub fn holds(&self, name: &AgentName) -> bool {
         self.0.is_empty() || self.0.contains(name)
     }
+
+    /// Whether the project named any agent: an empty list names none, and
+    /// every agent with a file is allowed
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl From<Vec<AgentName>> for Allow {
@@ -295,7 +302,7 @@ impl From<Vec<AgentName>> for Allow {
     }
 }
 
-/// The agents a project names, and the ones it may use
+/// The agents a project may use, and the few it names outright
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoleAgentNames {
@@ -327,12 +334,11 @@ pub struct RoleAgentNames {
     /// manager's pick may name its own. Whole minutes, `0` allowed. 60 when absent.
     #[serde(default = "default_slack")]
     pub slack: u32,
-    /// The agents that may review each pull request, from kelpie's agent
-    /// files: the candidates the agent board picks each round's reviewer from.
-    /// When absent, every reviewer file `agents.allow` holds but the one
-    /// `contributions.security_reviewer` names.
+    /// Read by nothing: a pass's candidates are every reviewer file
+    /// `agents.allow` holds, and `shep kelpie upgrade` deletes it
     #[serde(default)]
-    pub reviewers: Option<Vec<AgentName>>,
+    #[schemars(extend("deprecated" = true))]
+    pub reviewers: Option<Gone>,
     /// The project manager, from kelpie's agent files, such as `pm`: woken
     /// on the board's events to pick work, unstick items and answer the
     /// maintainer. When absent, the board's rule picks and stuck items wait
@@ -369,6 +375,7 @@ impl RoleAgentNames {
             ("agents.implementers", self.implementers),
             ("agents.implementer_choice", self.implementer_choice),
             ("agents.fallback_after", self.fallback_after),
+            ("agents.reviewers", self.reviewers),
         ];
         (held.into_iter())
             .filter_map(|(key, gone)| gone.map(|_| key))

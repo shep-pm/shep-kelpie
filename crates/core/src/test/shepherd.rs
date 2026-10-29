@@ -147,6 +147,11 @@ impl FakeShepherd {
         *self.section.lock().unwrap() = toml.to_owned();
     }
 
+    /// The `[kelpie]` section `holds_section` last held
+    pub fn section(&self) -> String {
+        self.section.lock().unwrap().clone()
+    }
+
     /// Has `name`, just started, answer its next trigger as a runner still opening
     pub fn just_started(&self, name: &str) {
         let mut flock = self.flock.lock().unwrap();
