@@ -59,7 +59,10 @@ fn end_of(line: &str) -> Option<End> {
     if !group.ends_with(')') {
         return None;
     }
-    let named = group.get(1..group.len() - 1)?.strip_prefix("until ")?.trim();
+    let named = group
+        .get(1..group.len() - 1)?
+        .strip_prefix("until ")?
+        .trim();
     match named.starts_with('#') || named.starts_with('k') {
         true => TicketId::from_str(named.strip_prefix('#').unwrap_or(named))
             .ok()
@@ -71,10 +74,13 @@ fn end_of(line: &str) -> Option<End> {
 // `YYYY-MM-DD` as a day the calendar has, or None
 fn day(text: &str) -> Option<Date> {
     let shaped = text.len() == 10
-        && text
-            .bytes()
-            .enumerate()
-            .all(|(at, b)| if at == 4 || at == 7 { b == b'-' } else { b.is_ascii_digit() });
+        && text.bytes().enumerate().all(|(at, b)| {
+            if at == 4 || at == 7 {
+                b == b'-'
+            } else {
+                b.is_ascii_digit()
+            }
+        });
     match shaped {
         true => Date::strptime("%Y-%m-%d", text).ok(),
         false => None,
@@ -89,7 +95,13 @@ fn today(now: Timestamp) -> Option<Date> {
 
 // The standing file's lines, or None when it is not there
 fn standing_lines(file: &Path) -> Option<Vec<String>> {
-    Some(std::fs::read_to_string(file).ok()?.lines().map(str::to_owned).collect())
+    Some(
+        std::fs::read_to_string(file)
+            .ok()?
+            .lines()
+            .map(str::to_owned)
+            .collect(),
+    )
 }
 
 // The standing file's lines, each `## ` tell heading kept with the lines under it
@@ -102,7 +114,10 @@ fn blocks(lines: &[String]) -> Vec<(Option<String>, Vec<String>)> {
                 if out.is_empty() {
                     out.push((None, Vec::new()));
                 }
-                out.last_mut().expect("a block was opened").1.push(line.clone());
+                out.last_mut()
+                    .expect("a block was opened")
+                    .1
+                    .push(line.clone());
             }
         }
     }
@@ -531,7 +546,10 @@ mod tests {
             ))),
             "a local ticket is written as `k9`"
         );
-        assert_eq!(end_of("Hold #12 (until 2026-10-05)"), Some(End::Day(day("2026-10-05"))));
+        assert_eq!(
+            end_of("Hold #12 (until 2026-10-05)"),
+            Some(End::Day(day("2026-10-05")))
+        );
         assert_eq!(
             end_of("Hold #12 (until 2026-10-05)  "),
             Some(End::Day(day("2026-10-05"))),
@@ -553,11 +571,23 @@ mod tests {
             "the last group is no end, so the one before it is plain text"
         );
         assert_eq!(end_of("Hold #12 (until 2026-02-30)"), None, "no such day");
-        assert_eq!(end_of("Hold #12 (until 2026-10-5)"), None, "not the written shape");
+        assert_eq!(
+            end_of("Hold #12 (until 2026-10-5)"),
+            None,
+            "not the written shape"
+        );
         assert_eq!(end_of("Hold #12 (until #0)"), None, "no ticket is zero");
-        assert_eq!(end_of("Hold #12 (until 2026-10-05"), None, "no closing bracket");
+        assert_eq!(
+            end_of("Hold #12 (until 2026-10-05"),
+            None,
+            "no closing bracket"
+        );
         assert_eq!(end_of("Hold #12 (until the release)"), None);
-        assert_eq!(end_of("Hold #12 (Until #9)"), None, "the marker is written as `until`");
+        assert_eq!(
+            end_of("Hold #12 (Until #9)"),
+            None,
+            "the marker is written as `until`"
+        );
     }
 
     /// A log of `n` entries, each a `## wake <n>` heading over 20 lines of 64

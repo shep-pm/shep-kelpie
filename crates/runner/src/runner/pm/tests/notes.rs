@@ -53,6 +53,164 @@ fn a_wake_over_the_limit_rolls_the_file_before_its_call() {
 }
 
 #[test]
+fn a_line_with_no_end_or_an_unreadable_end_stands_as_plain_text() {
+    let (rig, runner) = with_pm("koji");
+    rig.forge.list_ready(9, false);
+    rig.forge.block(9, 900);
+    std::fs::create_dir_all(rig.paths().pm).unwrap();
+    let lines = "Hold #12 until the release\n\
+         Hold #12 (until the release)\n\
+         Hold #12 (until soon)\n\
+         Hold #12 (until 2026-13-05)\n\
+         Hold #12 (until #9) until the release\n\
+         Hold #12 (until #0)\n";
+    std::fs::write(rig.paths().pm.join(PM_STANDING), lines).unwrap();
+    rig.claude.script([Scripted::Say("{\"pick\": null}")]);
+    rig.ask(&runner, "tell", Some("first"));
+    let (_, acted, dropped) = answered(step(&runner).unwrap());
+
+    assert_eq!(dropped, Vec::<String>::new(), "no tell is refused for one");
+    assert!(!acted.iter().any(|a| a.contains("standing")), "{acted:?}");
+    assert_eq!(
+        rig.forge.issue_reads(),
+        0,
+        "no line carries an end, so no ticket is read"
+    );
+    let standing = read(&rig, PM_STANDING);
+    assert!(standing.starts_with(lines), "{standing}");
+    let log = read(&rig, "pm-notes.md");
+    assert!(!log.contains("standing ended:"), "{log}");
+}
+
+#[test]
+fn a_removed_line_takes_its_tell_heading_when_it_is_the_only_line_under_it() {
+    let (rig, runner) = with_pm("koji");
+    rig.forge.list_ready(9, false);
+    rig.forge.block(9, 900);
+    std::fs::create_dir_all(rig.paths().pm).unwrap();
+    std::fs::write(
+        rig.paths().pm.join(PM_STANDING),
+        "Never merge a head with CI red\n\
+         ## 2026-09-20 09:00\nHold the release notes (until #41)\n\
+         ## 2026-09-21 14:13\nHold #12 until the release (until #41)\nReview every diff before a merge\n",
+    )
+    .unwrap();
+    rig.forge.close_issue(41);
+    rig.claude.script([Scripted::Say("{\"pick\": null}")]);
+    rig.ask(&runner, "tell", Some("first"));
+    answered(step(&runner).unwrap());
+
+    let standing = read(&rig, PM_STANDING);
+    assert!(
+        standing.starts_with("Never merge a head with CI red\n## 2026-09-21 14:13\nReview every diff before a merge\n"),
+        "the heading with a line left under it stays, the one whose only line went goes: {standing}"
+    );
+    assert!(!standing.contains("## 2026-09-20 09:00"), "{standing}");
+    assert!(!standing.contains("Hold the release notes"), "{standing}");
+    assert!(
+        !standing.contains("Hold #12 until the release"),
+        "{standing}"
+    );
+    let notes = read(&rig, "pm-notes.md");
+    assert_eq!(notes.matches("standing ended:").count(), 2, "{notes}");
+}
+
+#[test]
+fn a_standing_line_whose_ticket_read_fails_stands_and_is_named_as_unsettled() {
+    let (rig, runner) = with_pm("koji");
+    rig.forge.list_ready(9, false);
+    rig.forge.block(9, 900);
+    std::fs::create_dir_all(rig.paths().pm).unwrap();
+    std::fs::write(
+        rig.paths().pm.join(PM_STANDING),
+        "Hold the release notes (until #41)\nNever merge a head with CI red\n",
+    )
+    .unwrap();
+    // The source cannot say how #41 stands
+    rig.forge.remove_issue(41);
+    rig.claude.script([Scripted::Say("{\"pick\": null}")]);
+    rig.ask(&runner, "tell", Some("first"));
+    answered(step(&runner).unwrap());
+
+    let standing = read(&rig, PM_STANDING);
+    assert!(
+        standing.contains("Hold the release notes (until #41)"),
+        "an unanswered end keeps its line: {standing}"
+    );
+    let notes = runner.lock().unwrap().take_notes();
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("kelpie could not read #41")
+                && n.ends_with("a standing line stands")),
+        "{notes:?}"
+    );
+    let [wake] = pm_seen(&rig).try_into().unwrap();
+    let prompt = &wake.call.prompt;
+    assert!(
+        prompt.contains(
+            "standing unsettled: Hold the release notes (until #41): kelpie could not read #41"
+        ),
+        "{prompt}"
+    );
+    let log = read(&rig, "pm-notes.md");
+    assert!(!log.contains("standing ended:"), "{log}");
+}
+
+#[test]
+fn a_standing_line_the_board_cannot_answer_is_read_once_a_wake_through_the_ticket_port() {
+    let (rig, runner) = with_pm("koji");
+    rig.forge.list_ready(9, false);
+    rig.forge.block(9, 900);
+    std::fs::create_dir_all(rig.paths().pm).unwrap();
+    std::fs::write(
+        rig.paths().pm.join(PM_STANDING),
+        "Never merge a head with CI red (until #9)\nHold the release notes (until #41)\nEvery fix carries a changelog line, such as #42\n",
+    )
+    .unwrap();
+    // #41 is open and off the board, so only its source can answer it. The gate
+    // a read waits at is the tickets port's own, so a read reaching it says
+    // which port asked.
+    rig.claude.script([
+        Scripted::Say("{\"pick\": null}"),
+        Scripted::Say("{\"pick\": null}"),
+    ]);
+    rig.ask(&runner, "tell", Some("first"));
+    let before = rig.forge.issue_reads();
+    let held = rig.forge.hold_next_issue_read();
+    let (reply, pass) = rig.asked_while_held(&runner, held, "detach", Some("7 1"));
+    assert!(
+        reply.is_some(),
+        "the trigger waited for the lock the read held"
+    );
+    assert!(matches!(pass, Ok(Pass::Started)), "{pass:?}");
+    answered(Some(step_until(&runner, |r| {
+        matches!(r, StepReport::PmAnswered { .. })
+    })));
+
+    assert_eq!(
+        rig.forge.issue_reads(),
+        before + 1,
+        "one read for #41: the board answers #9, and #42 carries no end"
+    );
+    let standing = read(&rig, PM_STANDING);
+    assert!(
+        standing.contains("Hold the release notes (until #41)"),
+        "#41 is open, so its line stands: {standing}"
+    );
+
+    // The line is read again on the next wake, and as often as the board cannot answer it
+    rig.ask(&runner, "tell", Some("second"));
+    answered(step(&runner).unwrap());
+    assert_eq!(rig.forge.issue_reads(), before + 2);
+    assert!(
+        read(&rig, PM_STANDING).contains("Hold the release notes (until #41)"),
+        "{standing}"
+    );
+    assert_eq!(pm_seen(&rig).len(), 2, "two wakes, two reads");
+}
+
+#[test]
 fn a_standing_line_ended_by_a_closed_ticket_is_removed_at_the_next_wake() {
     let (rig, runner) = with_pm("koji");
     rig.forge.list_ready(9, false);

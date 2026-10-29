@@ -5,7 +5,7 @@
 use super::rulings::{answers, left_to_pm};
 use super::{PICK_12, answered, pm_seen, step_until, with_pm};
 use crate::ports::{AgentError, Role};
-use crate::runner::pm::notes::PM_STANDING;
+use crate::runner::pm::notes::{PM_STANDING, STANDING_MAX};
 use crate::runner::pm::prompt::BOARD_INLINE;
 use crate::runner::{StepReport, step};
 use crate::settings::{Harness, Merging};
@@ -31,6 +31,113 @@ fn head(text: &str, most: usize) -> &str {
     match text.char_indices().nth(most) {
         Some((at, _)) => &text[..at],
         None => text,
+    }
+}
+
+#[test]
+fn the_wake_names_each_ended_standing_line_once() {
+    let (rig, runner) = with_pm("koji");
+    rig.forge.list_ready(9, false);
+    rig.forge.block(9, 900);
+    std::fs::create_dir_all(rig.paths().pm).unwrap();
+    std::fs::write(
+        rig.paths().pm.join(PM_STANDING),
+        "Hold the release notes (until 2026-09-20)\nNever merge a head with CI red (until #41)\nReview every diff before a merge\n",
+    )
+    .unwrap();
+    rig.forge.close_issue(41);
+    rig.claude.script([
+        Scripted::Say("{\"pick\": null}"),
+        Scripted::Say("{\"pick\": null}"),
+    ]);
+
+    rig.ask(&runner, "tell", Some("first"));
+    answered(step(&runner).unwrap());
+    let [first] = pm_seen(&rig).try_into().unwrap();
+    let prompt = &first.call.prompt;
+    assert!(
+        prompt.starts_with("You are the project manager for koji."),
+        "{prompt}"
+    );
+    assert_eq!(prompt.matches("standing ended:").count(), 2, "{prompt}");
+    assert!(
+        prompt.contains("standing ended: Hold the release notes (until 2026-09-20)"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("standing ended: Never merge a head with CI red (until #41)"),
+        "{prompt}"
+    );
+    assert!(
+        !prompt.contains("standing ended: Review every diff"),
+        "a line with no end is named nowhere: {prompt}"
+    );
+
+    // The next wake resumes the session and names what it ended just the same
+    std::fs::write(
+        rig.paths().pm.join(PM_STANDING),
+        "Hold #12 until the release (until 2026-09-21)\n",
+    )
+    .unwrap();
+    rig.clock.advance(24 * 60 * 60);
+    rig.ask(&runner, "tell", Some("second"));
+    answered(step(&runner).unwrap());
+    let [_, second] = pm_seen(&rig).try_into().unwrap();
+    let prompt = &second.call.prompt;
+    assert!(
+        prompt.starts_with("Kelpie woke you again because:"),
+        "{prompt}"
+    );
+    assert_eq!(prompt.matches("standing ended:").count(), 1, "{prompt}");
+    assert!(
+        prompt.contains("standing ended: Hold #12 until the release (until 2026-09-21)"),
+        "{prompt}"
+    );
+}
+
+#[test]
+fn the_wake_says_what_belongs_in_the_standing_notes_and_what_in_the_log() {
+    let (rig, runner) = with_pm("koji");
+    rig.claude.script([
+        Scripted::Say("{\"pick\": null}"),
+        Scripted::Say("{\"pick\": null}"),
+    ]);
+    rig.ask(&runner, "tell", Some("first"));
+    answered(step(&runner).unwrap());
+    let [first] = pm_seen(&rig).try_into().unwrap();
+    let prompt = &first.call.prompt;
+    for said in [
+        "the rules that hold across work items, each carrying its end at the line's end",
+        "`(until #12)` for when #12 closes and `(until 2026-10-05)` for after that day",
+        "A pull request's end names the issue it was filed from",
+        "your recent log, oldest first: the state of one work item, not a rule for later ones",
+    ] {
+        assert!(prompt.contains(said), "{said}: {prompt}");
+    }
+
+    // A resumed wake shown the `standing` key is told the same
+    std::fs::write(
+        rig.paths().pm.join(PM_STANDING),
+        "y".repeat(STANDING_MAX + 1),
+    )
+    .unwrap();
+    rig.ask(&runner, "tell", Some("second"));
+    answered(step(&runner).unwrap());
+    let [_, second] = pm_seen(&rig).try_into().unwrap();
+    let prompt = &second.call.prompt;
+    assert!(
+        prompt.starts_with("Kelpie woke you again because:"),
+        "{prompt}"
+    );
+    assert!(prompt.contains("\"standing\": null or"), "{prompt}");
+    for said in [
+        "the rules that hold across work items, each carrying its end at the",
+        "`(until #12)` ends the line when #12 closes, whichever way it closes",
+        "`(until 2026-10-05)` at the first wake after that day",
+        "names the issue it was filed from",
+        "state of one work item goes in `pm-notes.md` instead",
+    ] {
+        assert!(prompt.contains(said), "{said}: {prompt}");
     }
 }
 
