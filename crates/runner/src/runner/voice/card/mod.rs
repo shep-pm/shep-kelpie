@@ -325,6 +325,19 @@ impl Card {
                 facts: Some(super::said(kind)),
                 choices: yes_no("Accepts the change and kelpie carries on", Some(SENDS_BACK)),
             },
+            RulingKind::AgentFit(fit) => Self {
+                problem: None,
+                board: None,
+                title: format!(
+                    "`{}` does worse at `{}` than `{}`. Change its `kinds`?",
+                    fit.worse, fit.work_kind, fit.better
+                ),
+                facts: Some(super::said(kind)),
+                choices: yes_no(
+                    "Changes no file: the `kinds` line above is yours to write into the agent file",
+                    Some("Changes no file and sends no note: the work item has finished"),
+                ),
+            },
             RulingKind::Contribution(Held::Security { head, lines }) => Self {
                 problem: None,
                 board: None,

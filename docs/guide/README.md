@@ -12,7 +12,7 @@ The operator reference for shep-kelpie, one page for each topic. [Getting starte
 - [CI and the merge](ci-and-merge.md): red runs, the merge gate and what `auto` does
 - [Agents](agents.md): agent files, gateways, pi and Codex
 - [Attaching to a worker](attach.md): steering a work item's worker by hand
-- [Rulings](rulings.md): the six kinds, how to answer them, and answers from GitHub and ntfy
+- [Rulings](rulings.md): the seven kinds, how to answer them, and answers from GitHub and ntfy
 - [The GitHub App](github-app.md): registering kelpie's App, what a worker's token can do, and the tools and login token
 - [Upgrading](upgrading.md): moving the dog and the runners onto a new build
 - [What shep does for it](shep.md): supervision, lambs, triggers, settings and logs

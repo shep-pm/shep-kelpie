@@ -462,9 +462,9 @@ window, which holds new work items, and a stop at 50% of the 5-hour
 window, which holds every turn.
 
 **Ruling**:
-A decision only the maintainer makes, one of six kinds: `merge`,
-`question`, `stuck` (with its reason), `agent-files`, `foreign-change` and
-`follow-up`. A `stuck` ruling's reason is one of `rebase`, `still-red`,
+A decision only the maintainer makes, one of seven kinds: `merge`,
+`question`, `stuck` (with its reason), `agent-files`, `agent-fit`,
+`foreign-change` and `follow-up`. A `stuck` ruling's reason is one of `rebase`, `still-red`,
 `merge-refused`, `closed`, `fix-not-pushed`,
 `unpushed`, `turn-timeout` and `turn-failed`. A worker waiting on one is
 **parked**, and its work item gives up its slot under `concurrency.active_items`, which

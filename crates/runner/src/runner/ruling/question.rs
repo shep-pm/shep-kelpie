@@ -1,7 +1,9 @@
 //! The text of a ruling's question, which says what a yes and a no do
 
 use super::{fix_turns_had, needs_pass};
+use crate::agent_board::FIT_AGAIN;
 use crate::ports::Cost;
+use crate::runner::agent_fit;
 use crate::runner::contributions::flagged_lines;
 use crate::runner::gate::short;
 use crate::runner::review::pushed::off_text;
@@ -299,6 +301,20 @@ pub(in crate::runner) fn question(
                 "{} changed outside kelpie: {description}. {yes} accepts it and kelpie \
                  carries on, and {no} sends the worker your note.",
                 capitalized(&about)
+            );
+        }
+        RulingKind::AgentFit(fit) => {
+            return format!(
+                "{} finished on `{}`.\n\n{}\n\n{yes} and {no} change no file: kelpie never writes \
+                 an agent's `kinds`, so the line above is yours to write into `agents/{}.md`. The \
+                 board reads the pair again once `{}` finishes {} more items of `{}`.",
+                capitalized(&about),
+                fit.worse,
+                agent_fit::said(fit),
+                fit.worse,
+                fit.worse,
+                FIT_AGAIN,
+                fit.work_kind,
             );
         }
         RulingKind::Contribution(Held::Security { head, lines }) => {
