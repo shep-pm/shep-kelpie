@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::{Remote, WorktreeError, git, trusted};
+use super::{Remote, WorktreeError, clone, git, trusted};
 
 /// What a rebase onto `origin/main` came to
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +82,7 @@ pub fn rebase(
     let conflicted =
         || in_worktree(&["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
     let tip = format!("origin/{base}");
+    clone::mirror(repo, worktree, &[&format!("refs/remotes/{tip}")])?;
     // A rebase replays the branch's own commits and drops its merge commits,
     // and with them the worker's hand resolution of an earlier conflict. A
     // branch holding one is caught up by merging instead, and pushed plain.

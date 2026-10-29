@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::time::SystemTime;
 
-use super::{WorktreeError, trusted, uncommitted};
+use super::{WorktreeError, git, trusted, uncommitted};
 
 /// Whether `worktree` holds a commit on its branch that `origin/{base}` lacks,
 /// made at or after `since`, or an uncommitted file written at or after `since`
@@ -26,7 +26,9 @@ pub fn touched_since(
     base: &str,
     since: SystemTime,
 ) -> Result<bool, WorktreeError> {
-    let range = format!("origin/{base}..HEAD");
+    // Read from the checkout: a clone's own `origin/main` is the worker's.
+    let main = git(repo, ["rev-parse", "--verify", &format!("origin/{base}")])?;
+    let range = format!("{main}..HEAD");
     let committed = trusted(repo, worktree)?(&["log", "-1", "--format=%ct", &range])?;
     let at_or_after = |time: SystemTime| time >= since;
     if let Ok(seconds) = committed.trim().parse::<u64>()

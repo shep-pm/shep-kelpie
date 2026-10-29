@@ -24,6 +24,7 @@ mod borrowed_tests;
 mod cache;
 mod catch_up;
 mod changed;
+pub mod clone;
 mod common;
 mod contribution;
 #[cfg(test)]
@@ -102,7 +103,7 @@ pub enum WorktreeError {
     BranchTaken(String),
     /// The worktree is off the head kelpie knew, or has changes not committed
     Unsettled(PathBuf),
-    /// A folder could not be created
+    /// A folder or file could not be created
     Folder {
         /// The folder
         path: PathBuf,
@@ -425,24 +426,34 @@ pub fn holds_work(
     base: &str,
 ) -> Result<bool, WorktreeError> {
     git(repo, ["fetch", "--quiet", "origin", base])?;
+    // Read from the checkout: a clone's own `origin/main` is the worker's.
+    let main = git(repo, ["rev-parse", "--verify", &format!("origin/{base}")])?;
     let mut tips = Vec::new();
     let full_ref = format!("refs/heads/{branch}");
     if has_ref(repo, &full_ref)? {
-        tips.push(full_ref);
+        tips.push(git(repo, ["rev-parse", "--verify", &full_ref])?);
     }
     if worktree.exists() {
         if !uncommitted(repo, worktree)?.is_empty() {
             return Ok(true);
         }
-        tips.push(head(repo, worktree)?);
+        let in_worktree = trusted(repo, worktree)?;
+        tips.push(in_worktree(&["rev-parse", "HEAD"])?);
+        tips.extend(in_worktree(&["rev-parse", "--verify", "--quiet", &full_ref]).ok());
     }
     if tips.is_empty() {
         return Ok(false);
     }
-    let behind = format!("^origin/{base}");
+    let behind = format!("^{main}");
     let mut args = vec!["rev-list", "--count", behind.as_str()];
     args.extend(tips.iter().map(String::as_str));
-    Ok(git(repo, args)? != "0")
+    // A clone's commits are not in the checkout.
+    let count = if worktree.exists() {
+        trusted(repo, worktree)?(&args)?
+    } else {
+        git(repo, args)?
+    };
+    Ok(count != "0")
 }
 
 /// Whether `full_ref` is in `repo`, telling a ref that is not there from a
@@ -694,10 +705,14 @@ const TRUSTED_CONFIG: [(&str, &str); 4] = [
 ];
 
 // The worktree's own git dir and the repo's common one, once the own dir's
-// `commondir` is checked to name the repo's.
+// `commondir` is checked to name the repo's. A clone's are its git dir twice,
+// once its alternates are checked to name the repo's objects alone.
 fn git_dirs(repo: &Path, worktree: &Path) -> Result<(PathBuf, PathBuf), WorktreeError> {
     let foreign = || WorktreeError::Foreign(worktree.to_owned());
     let common = common_dir(repo)?;
+    if let Some(dirs) = clone::dirs(&common, worktree)? {
+        return Ok(dirs);
+    }
     let own = own_git_dir(&common, worktree).ok_or_else(foreign)?;
     let named = std::fs::read_to_string(own.join("commondir")).map_err(|_| foreign())?;
     if canonical(&own.join(named.trim())) != common {

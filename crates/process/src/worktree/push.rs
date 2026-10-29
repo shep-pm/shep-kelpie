@@ -7,15 +7,15 @@
 
 use std::path::Path;
 
-use super::{Remote, WorktreeError, git, head};
+use super::{Remote, WorktreeError, head, trusted};
 
 /// Pushes the commit the worktree has checked out to `remote`'s branch
 ///
 /// The push is by commit, fast-forward only, and never forced, so a branch
 /// that holds anything the commit lacks is refused. A branch that is gone is
 /// not created again: the caller fetches the branch first, and a fetch of a
-/// deleted one fails. Git runs in `repo`, which reads no config or hook from
-/// the worktree.
+/// deleted one fails. Git is the worktree's trusted one, which reads no hook
+/// and no config but the worktree's git dir and the machine's.
 ///
 /// # Errors
 ///
@@ -31,5 +31,6 @@ pub fn push_commits(repo: &Path, worktree: &Path, remote: &Remote) -> Result<(),
     };
     let sha = head(repo, worktree)?;
     let spec = format!("{sha}:refs/heads/{branch}");
-    git(repo, ["push", "--quiet", "--no-verify", "--", url, &spec]).map(drop)
+    // A clone's commits are not in the checkout.
+    trusted(repo, worktree)?(&["push", "--quiet", "--no-verify", "--", url, &spec]).map(drop)
 }
