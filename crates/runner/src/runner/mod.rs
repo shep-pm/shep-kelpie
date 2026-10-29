@@ -153,7 +153,7 @@ mod words;
 mod worker_files;
 mod worktree_jobs;
 
-pub use add::{AddError, Unpicked};
+pub use add::{AddError, Added, Unpicked};
 pub use adopt::AdoptError;
 pub use attach::{AttachError, Attaching};
 pub use drain::{CallRole, CallRunning, Draining};

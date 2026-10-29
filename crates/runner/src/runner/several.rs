@@ -468,6 +468,199 @@ fn an_adoption_goes_before_the_board_into_a_free_slot() {
     assert_eq!(open_items(&rig, &runner), [7, 5], "no slot is left for #3");
 }
 
+// The log lines the runner has left, clearing them
+fn said(runner: &Mutex<Runner>) -> Vec<String> {
+    runner.lock().unwrap().take_notes()
+}
+
+// The issues the board dispatches over the next `turns` steps, in order
+fn dispatched_in(runner: &Mutex<Runner>, turns: usize) -> Vec<TicketId> {
+    (0..turns)
+        .filter_map(|_| match step(runner).unwrap() {
+            Some(StepReport::Dispatched { issue, .. }) => Some(issue),
+            _ => None,
+        })
+        .take(2)
+        .collect()
+}
+
+// Two slots with #7 dropped and #8 and #9 holding both
+//
+// The board has already said #7 is dropped, so the runner's `skipped` holds the skip
+// `add` is asked to clear. #8's worker answers with a question, so #8 stays where it is.
+fn seven_dropped_two_slots_held(project: &str) -> (Rig, Mutex<Runner>) {
+    let (rig, runner) = two_free_slots(project);
+    rig.forge.list_ready(7, false);
+    rig.forge.list_ready(8, false);
+    rig.claude.script([Scripted::Say(ASKS)]);
+    rig.ask(&runner, "add", Some("7"));
+    rig.ask(&runner, "drop", Some("7"));
+    assert!(
+        matches!(
+            step(&runner).unwrap(),
+            Some(StepReport::Dispatched { issue, skipped, .. })
+                if issue == ticket(8) && skipped == [Skip::Dropped { issue: ticket(7) }]
+        ),
+        "the board takes #8 into the freed slot and says #7 is dropped"
+    );
+    rig.ask(&runner, "add", Some("9"));
+    assert_eq!(open_items(&rig, &runner), [8, 9], "every slot is held");
+    (rig, runner)
+}
+
+#[test]
+fn a_dropped_issue_added_with_every_slot_busy_is_queued_and_starts_when_one_frees() {
+    let (rig, runner) = seven_dropped_two_slots_held("mawile");
+    assert_eq!(
+        rig.ask(&runner, "status", None)["skipped"],
+        json!([{ "reason": "dropped", "issue": "7" }])
+    );
+
+    let status = rig.ask(&runner, "add", Some("7"));
+    assert_eq!(open_items(&rig, &runner), [8, 9], "#7 waits for a slot");
+    assert_eq!(
+        status["skipped"],
+        json!([]),
+        "its skip is cleared: {status}"
+    );
+
+    rig.ask(&runner, "drop", Some("9"));
+    assert_eq!(
+        dispatched_in(&runner, 8),
+        [ticket(7)],
+        "#7 takes the freed slot"
+    );
+}
+
+#[test]
+fn a_queued_add_clears_the_dropped_skip_once_in_the_log_and_in_status() {
+    let (rig, runner) = seven_dropped_two_slots_held("numel");
+    rig.ask(&runner, "add", Some("7"));
+
+    let cleared = |lines: &[String]| {
+        lines
+            .iter()
+            .filter(|line| line.starts_with("#7 skip-cleared"))
+            .count()
+    };
+    let lines = said(&runner);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("#7 skipped reason=")),
+        "{lines:?}"
+    );
+    assert_eq!(cleared(&lines), 1, "{lines:?}");
+
+    rig.ask(&runner, "drop", Some("9"));
+    assert_eq!(dispatched_in(&runner, 8), [ticket(7)]);
+    let lines = said(&runner);
+    assert_eq!(cleared(&lines), 0, "the next pass says it again: {lines:?}");
+    assert_eq!(rig.ask(&runner, "status", None)["skipped"], json!([]));
+}
+
+#[test]
+fn queued_dropped_issues_take_a_freed_slot_in_the_boards_order() {
+    let rig = Rig::new("shinx");
+    // The workers here answer with questions, and a parked one gives its slot up, so
+    // the board has to stay open past two of them.
+    rig.edit_settings(|s| {
+        s.replace("active_items = 1", "active_items = 2")
+            .replace("pending_rulings = 2", "pending_rulings = 4")
+    });
+    let (rig, runner) = running(rig);
+    for issue in [7, 8] {
+        rig.forge.list_ready(issue, false);
+    }
+    // #7 outranks #8 on the board, whatever order they were added back in.
+    rig.forge.label(7, "priority: P0");
+    rig.claude.script([
+        Scripted::Say(ASKS),
+        Scripted::Say(ASKS),
+        Scripted::Say(ASKS),
+        Scripted::Say(ASKS),
+    ]);
+    rig.ask(&runner, "add", Some("7"));
+    rig.ask(&runner, "add", Some("8"));
+    rig.ask(&runner, "drop", Some("7"));
+    rig.ask(&runner, "drop", Some("8"));
+    assert_eq!(
+        step(&runner).unwrap(),
+        None,
+        "the board leaves both dropped"
+    );
+
+    rig.ask(&runner, "add", Some("9"));
+    rig.ask(&runner, "add", Some("10"));
+    rig.ask(&runner, "add", Some("8"));
+    rig.ask(&runner, "add", Some("7"));
+    assert_eq!(open_items(&rig, &runner), [9, 10], "both wait for a slot");
+
+    rig.ask(&runner, "drop", Some("9"));
+    assert_eq!(
+        dispatched_in(&runner, 10),
+        [ticket(7), ticket(8)],
+        "the board's own order, not the order they were added in"
+    );
+}
+
+#[test]
+fn add_with_a_free_slot_still_opens_a_dropped_issue_at_once() {
+    let (rig, runner) = two_free_slots("krabby");
+    rig.forge.list_ready(7, false);
+    rig.ask(&runner, "add", Some("7"));
+    rig.ask(&runner, "drop", Some("7"));
+    assert_eq!(step(&runner).unwrap(), None, "the board leaves #7 dropped");
+    assert_eq!(
+        rig.ask(&runner, "status", None)["skipped"],
+        json!([{ "reason": "dropped", "issue": "7" }])
+    );
+
+    assert!(rig.ask(&runner, "add", Some("7"))["work_item"].is_object());
+    assert_eq!(
+        open_items(&rig, &runner),
+        [7],
+        "a free slot opens it at once"
+    );
+    assert_eq!(rig.dropped(), [7], "`add` leaves `dropped` as it is");
+}
+
+#[test]
+fn add_refuses_a_dropped_issue_the_board_would_pass_over_for_its_open_pull_request() {
+    let (rig, runner) = seven_dropped_two_slots_held("tropius");
+    // #7's worker had opened its pull request before the drop, and it is still open
+    rig.forge.open_pull_request(80, "fix/seven", &[7]);
+
+    assert_eq!(
+        rig.ask(&runner, "add", Some("7")),
+        json!({ "error": "the board would pass #7 over: PR #80 is open for it" }),
+        "queueing #7 would promise a slot the board never takes"
+    );
+    assert_eq!(rig.dropped(), [7], "#7 stays dropped");
+    assert_eq!(open_items(&rig, &runner), [8, 9]);
+    assert_eq!(
+        said(&runner)
+            .iter()
+            .filter(|line| line.starts_with("#7 skip-cleared"))
+            .count(),
+        0,
+        "no skip is cleared"
+    );
+}
+
+#[test]
+fn add_refuses_a_dropped_issue_the_board_would_pass_over_as_blocked() {
+    let (rig, runner) = seven_dropped_two_slots_held("carkol");
+    rig.forge.block(7, 32);
+
+    assert_eq!(
+        rig.ask(&runner, "add", Some("7")),
+        json!({ "error": "the board would pass #7 over: blocked by #32" })
+    );
+    assert_eq!(rig.dropped(), [7], "#7 stays dropped");
+    assert_eq!(open_items(&rig, &runner), [8, 9]);
+}
+
 #[test]
 fn an_adoption_for_an_issue_in_flight_waits_for_it_to_end() {
     let (rig, runner) = two_free_slots("rotom");
