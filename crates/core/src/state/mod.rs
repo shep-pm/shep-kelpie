@@ -6,6 +6,7 @@
 //! to a temporary file that is synced and then renamed over the old one, so
 //! a runner killed mid-write leaves the previous state whole.
 
+mod bots;
 mod bumps;
 mod checks;
 mod contributions;
@@ -19,6 +20,7 @@ mod removed;
 mod ruling;
 mod triage;
 
+pub use bots::{BOT_LEFT_OUT, BotLeftOut};
 pub use bumps::{Bump, E2eResult, E2eState, Red, RedStep};
 pub use checks::{CheckTriage, IssueCheck};
 pub use contributions::{
@@ -55,7 +57,7 @@ use crate::work_item::{Attached, Known, Phase, Priced, Review, Seconds, Tally, T
 pub const STATE_FILE: &str = "state.json";
 
 /// The state file's format version, bumped when the file gains a field or value an older kelpie refuses
-pub const VERSION: u32 = 93;
+pub const VERSION: u32 = 94;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -235,6 +237,13 @@ pub struct ProjectState {
     /// they went red
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub red: Vec<RedWorkflow>,
+    /// Review bots each pass left out as one its repo cannot run, each with
+    /// when it was last left out, oldest first. A bot seen reviewing comes
+    /// off, and one left out for any other reason is never on it.
+    ///
+    /// Left out while empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bots_left_out: Vec<BotLeftOut>,
 }
 
 /// How many ids of kelpie's own comments the state file keeps
@@ -302,6 +311,7 @@ impl ProjectState {
             unmentioned: BTreeMap::new(),
             posted: Vec::new(),
             red: Vec::new(),
+            bots_left_out: Vec::new(),
         }
     }
 

@@ -4,8 +4,10 @@
 //! not run that can run: not one limited to paths the pull request leaves
 //! alone, a local one that read nothing twice running, or a bot that has made
 //! its `rounds`. It takes the first ranked one the pacer lets start and, for a
-//! bot, whose window is open now. The pass ends once `reviews.need` reviewers
-//! have read, or the board ranks none left. A kept reviewer resumes its round.
+//! bot, whose window is open now. A bot left out as one the repo cannot run is
+//! in the ask's leave-out until a week after it was last left out. The pass
+//! ends once `reviews.need` reviewers have read, or the board ranks none left.
+//! A kept reviewer resumes its round.
 
 use std::path::Path;
 use std::process::Stdio;
@@ -65,7 +67,7 @@ impl Runner {
             pin: None,
             slack: Some(self.slack(item.slack)),
             agents: due.iter().map(|r| r.name.clone()).collect(),
-            leave_out: self.ran_of(review),
+            leave_out: self.left_out_of(review),
         };
         let Ok(picks) = self.board_picks(&ask) else {
             return Ok(Chosen::Instead(Box::new(Begin::Idle)));
@@ -171,6 +173,21 @@ impl Runner {
             Some(at) => self.lineup[..=at].iter().map(|r| r.name.clone()).collect(),
             None => vec![last.clone()],
         }
+    }
+
+    // Who the board is not to pick for `review`'s pass: the reviewers its pass
+    // has run, and every bot the project has left out as one its repo cannot
+    // run, within [`crate::state::BOT_LEFT_OUT`] of when it was last left out.
+    fn left_out_of(&self, review: &Review) -> Vec<AgentName> {
+        let mut left_out = self.ran_of(review);
+        let now = self.ports.clock.now();
+        for left in &self.state.bots_left_out {
+            let name = &left.reviewer;
+            if self.state.bot_left_out(name, now) && !left_out.contains(name) {
+                left_out.push(name.clone());
+            }
+        }
+        left_out
     }
 
     /// Where the review goes once `review`'s reviewer is done: the next

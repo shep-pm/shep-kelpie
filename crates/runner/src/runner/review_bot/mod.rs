@@ -34,7 +34,7 @@ use crate::lease::wire::WindowFact;
 use crate::ports::{Finding, PullRequestState, Timestamp, Visibility};
 use crate::review_bot::{Activity, Bot, BotReviewer, Reading, ReviewWindow};
 use crate::settings::{AgentName, ListedReviewer};
-use crate::state::{StateError, Stuck};
+use crate::state::{ProjectState, StateError, Stuck};
 use crate::work_item::{BotSkipped, Phase, Review, ReviewStage, WorkItem};
 
 // A summon the bot gave no sign of in fifteen minutes may never have
@@ -485,7 +485,7 @@ impl Runner {
         if reading == Reading::Silent
             && !heard
             && (ANSWER_WAIT..review_wait).contains(&waited)
-            && self.never_reviewed(bot)
+            && self.never_reviewed(bot)?
         {
             return self.not_installed(bot, at);
         }
@@ -676,14 +676,18 @@ impl Runner {
                 ..review
             }),
         };
-        self.update(|item| {
-            item.rebased = false;
-            item.bots_after_ci = false;
-            item.unreviewed = None;
-            *item.bot_reads.entry(bot).or_default() += 1;
-            item.counts.review_rounds = item.counts.review_rounds.saturating_add(1);
-            item.phase = next;
-        })?;
+        let mut saved = self.state.clone();
+        self.bot_back_in(&mut saved, bot);
+        let item = self
+            .current_in(&mut saved)
+            .expect("a review bot round is of a work item");
+        item.rebased = false;
+        item.bots_after_ci = false;
+        item.unreviewed = None;
+        *item.bot_reads.entry(bot).or_default() += 1;
+        item.counts.review_rounds = item.counts.review_rounds.saturating_add(1);
+        item.phase = next;
+        self.save(saved)?;
         Ok(Begin::Report(StepReport::BotReviewed {
             issue: self.item().issue,
             pull_request: number,
@@ -694,7 +698,8 @@ impl Runner {
     }
 
     // The pass goes on without the bot, and says why. A pass no other
-    // reviewer reads is marked unreviewed for it as it ends.
+    // reviewer reads is marked unreviewed for it as it ends. One the repo
+    // cannot run is left out of the project's picks for a week.
     pub(in crate::runner) fn pass_over(
         &mut self,
         number: u64,
@@ -702,15 +707,28 @@ impl Runner {
     ) -> Result<Begin, StateError> {
         let review = self.pass();
         let round = review.round;
-        let next = self.after_round(review, self.ports.clock.now());
+        let now = self.ports.clock.now();
+        let next = self.after_round(review, now);
         let reviewer = skipped.reviewer().clone();
         let reason = skipped.why();
-        self.update(|item| {
-            item.bots_skipped
-                .retain(|s| s.reviewer() != skipped.reviewer());
-            item.bots_skipped.push(skipped);
-            item.phase = next;
-        })?;
+        // Only a bot the repo cannot run is left out for a week: one passed
+        // over for its window, its silence or its settings is asked again.
+        let left_out = matches!(
+            skipped,
+            BotSkipped::NotInstalled { .. } | BotSkipped::NotPublic { .. }
+        );
+        let mut saved = self.state.clone();
+        if left_out {
+            saved.leave_bot_out(reviewer.clone(), now);
+        }
+        let item = self
+            .current_in(&mut saved)
+            .expect("a review bot round is of a work item");
+        item.bots_skipped
+            .retain(|s| s.reviewer() != skipped.reviewer());
+        item.bots_skipped.push(skipped);
+        item.phase = next;
+        self.save(saved)?;
         Ok(Begin::Report(StepReport::ReviewerSkipped {
             issue: self.item().issue,
             pull_request: number,
@@ -774,6 +792,20 @@ impl Runner {
                 rounds: None,
                 review_wait: None,
             })
+    }
+
+    // `bot` was seen reviewing on the repo, so every record of it being left
+    // out comes off `saved` and the next pick asks it again.
+    fn bot_back_in(&self, saved: &mut ProjectState, bot: Bot) {
+        let names_bot = |name: &AgentName| {
+            name == &AgentName::kelpies(bot.as_str())
+                || self
+                    .listed(name)
+                    .is_some_and(|r| r.bot().is_some_and(|b| b.bot == bot))
+        };
+        saved
+            .bots_left_out
+            .retain(|left| !names_bot(&left.reviewer));
     }
 
     // Who the round is, as the pass records it, or the bot's own file's name.
