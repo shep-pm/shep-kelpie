@@ -22,6 +22,7 @@ use crate::settings::{BuildDir, EnvName, GuardHook, NonBlank};
 
 pub mod housekeeping;
 mod login;
+mod login_env;
 mod safe_directory;
 
 pub use login::{config_dir as login_dir, write as write_login};
@@ -434,15 +435,21 @@ impl WorkerProfile<'_> {
             )
         });
         let github = self.token.into_iter().flat_map(|_| login::env(self.build));
+        // Its login is `GH_TOKEN`, which `gh auth git-credential` answers from,
+        // so it needs the helper and no prompts but no `gh` folder.
         let maintainer = (self.login_token.filter(|_| self.token.is_none()))
-            .map(|token| (GH_TOKEN_VAR.to_owned(), token.expose().to_owned()));
+            .into_iter()
+            .flat_map(|token| {
+                let var = (GH_TOKEN_VAR.to_owned(), token.expose().to_owned());
+                std::iter::once(var).chain(login::no_prompt())
+            });
         // One variable, so a covered worker's value carries both lists.
         let trusted =
             windows.then(|| safe_directory::parameters([self.git_common_dir, self.worktree]));
         let git_config = [housekeeping::PARAMETERS]
             .into_iter()
             .chain(trusted.as_deref())
-            .chain(self.token.map(|_| login::GIT_CONFIG))
+            .chain((self.token.or(self.login_token)).map(|_| login::GIT_CONFIG))
             .collect::<Vec<_>>()
             .join(" ");
         [
