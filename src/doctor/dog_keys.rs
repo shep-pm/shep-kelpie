@@ -43,7 +43,7 @@ pub(super) fn checks(gateways: &Gateways, agents: &Agents, shep_home: &Path) -> 
         };
         let next = format!(
             "the dog cannot read this gateway's load without it. Set {var} in the `env` \
-             of {table} in {}, as a `{{{{secret:...}}}}` if you like, then run `shep daemon reload`",
+             of {table} in {}, as a `{{{{secret:...}}}}` if you like, then run `shep daemon reload`, `shep disable {DOG}` and `shep enable {DOG}`",
             shep_toml.display()
         );
         Line::unsure(subject, what, next)
@@ -149,7 +149,12 @@ mod tests {
             "{next}"
         );
         assert!(next.contains("shep.toml"), "{next}");
-        assert!(next.ends_with("then run `shep daemon reload`"), "{next}");
+        assert!(
+            next.ends_with(
+                "then run `shep daemon reload`, `shep disable kelpie` and `shep enable kelpie`"
+            ),
+            "{next}"
+        );
     }
 
     #[test]
