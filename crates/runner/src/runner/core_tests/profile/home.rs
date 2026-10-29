@@ -26,7 +26,7 @@ fn a_kelpie_home_outside_the_shepherds_is_denied_around_the_workers_own() {
         worktree: &worktree,
         build: &build,
         git_common_dir: Path::new("/r/.git"),
-        git_dir: Path::new("/r/.git/worktrees/7"),
+        git_dir: &kelpie.join("koji/worktrees/7.git"),
         branch: "kelpie/7",
         base: "main",
         kelpie_pushes: false,
@@ -85,10 +85,7 @@ fn a_kelpie_home_outside_the_shepherds_is_denied_around_the_workers_own() {
 fn a_worker_reads_its_own_toolchain_and_no_other_repo_of_the_home() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().canonicalize().unwrap();
-    let (common, git_dir) = (
-        home.join("checkouts/shep/.git"),
-        home.join("checkouts/shep/.git/worktrees/7"),
-    );
+    let (common, git_dir) = (home.join("checkouts/shep/.git"), home.join("wt/shep/7.git"));
     let (worktree, build, skills) = (
         home.join("wt/shep/7"),
         home.join("targets/shep/7"),
@@ -140,6 +137,7 @@ fn a_worker_reads_its_own_toolchain_and_no_other_repo_of_the_home() {
         worktree.as_path(),
         build.as_path(),
         common.as_path(),
+        git_dir.as_path(),
         home.join(".cargo").as_path(),
         home.join(".rustup").as_path(),
         home.join(".gitconfig").as_path(),
@@ -228,7 +226,7 @@ fn a_worker_reads_go_s_and_bun_s_homes_and_builds_into_its_own_caches() {
         worktree: &worktree,
         build: &build,
         git_common_dir: &home.join("checkouts/shep/.git"),
-        git_dir: &home.join("checkouts/shep/.git/worktrees/7"),
+        git_dir: &home.join("wt/shep/7.git"),
         branch: "kelpie/7",
         base: "main",
         kelpie_pushes: false,

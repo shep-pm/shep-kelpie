@@ -52,7 +52,7 @@ fn profile<'a>(hooks: &'a [GuardHook], domains: &'a [NonBlank]) -> WorkerProfile
         worktree: Path::new("/k/wt/shep/7"),
         build: Path::new("/k/targets/shep/7"),
         git_common_dir: Path::new("/k/repos/shep/.git"),
-        git_dir: Path::new("/k/repos/shep/.git/worktrees/7"),
+        git_dir: Path::new("/k/wt/shep/7.git"),
         branch: "kelpie/7",
         base: "main",
         kelpie_pushes: false,
@@ -198,32 +198,16 @@ fn writes_go_only_to_the_worktree_the_build_folder_and_what_a_commit_and_push_ne
     let s = settings(&[]);
     assert_eq!(
         strings(&s["sandbox"]["filesystem"]["allowWrite"]),
-        [
-            "/k/wt/shep/7",
-            "/k/targets/shep/7",
-            "/k/repos/shep/.git/objects",
-            "/k/repos/shep/.git/worktrees/7",
-            "/k/repos/shep/.git/logs/refs/heads/kelpie/7",
-            "/k/repos/shep/.git/refs/heads/kelpie/7.lock",
-            "/k/repos/shep/.git/refs/heads/kelpie/7",
-            "/k/repos/shep/.git/logs/refs/remotes/origin/kelpie/7",
-            "/k/repos/shep/.git/refs/remotes/origin/kelpie/7.lock",
-            "/k/repos/shep/.git/refs/remotes/origin/kelpie/7",
-            "/k/repos/shep/.git/packed-refs.lock",
-        ]
+        ["/k/wt/shep/7", "/k/targets/shep/7", "/k/wt/shep/7.git"]
     );
     assert_eq!(
         strings(&s["sandbox"]["filesystem"]["denyWrite"]),
         [
-            "/k/repos/shep/.git/config",
-            "/k/repos/shep/.git/hooks",
-            "/k/repos/shep/.git/info",
-            "/k/repos/shep/.git/modules",
-            "/k/repos/shep/.git/HEAD",
-            "/k/repos/shep/.git/index",
-            "/k/repos/shep/.git/packed-refs",
-            "/k/repos/shep/.git/refs/tags",
-            "/k/repos/shep/.git/refs/heads/main",
+            "/k/wt/shep/7.git/config",
+            "/k/wt/shep/7.git/hooks",
+            "/k/wt/shep/7.git/info",
+            "/k/wt/shep/7.git/modules",
+            "/k/wt/shep/7.git/objects/info",
             "/k/wt/shep/7/.claude",
             "/k/wt/shep/7/**/.claude",
             "/k/wt/shep/7/.mcp.json",
@@ -242,36 +226,18 @@ fn writes_go_only_to_the_worktree_the_build_folder_and_what_a_commit_and_push_ne
     assert_eq!(s["env"]["CARGO_TARGET_DIR"], "/k/targets/shep/7");
 }
 
-// A clone is the worker's own repo: its git dir sits outside the checkout's
-// common git dir, so the checkout's git is not the worker's to write.
-fn clone_settings() -> Value {
-    WorkerProfile {
-        git_dir: Path::new("/k/wt/shep/7/.git"),
-        ..profile(&[], &[])
-    }
-    .settings()
-}
-
 #[test]
-fn a_worker_on_a_clone_writes_its_git_dir_and_not_its_config_hooks_info_or_alternates() {
-    let s = clone_settings();
-    assert_eq!(
-        strings(&s["sandbox"]["filesystem"]["allowWrite"]),
-        ["/k/wt/shep/7", "/k/targets/shep/7", "/k/wt/shep/7/.git"]
-    );
-    let deny = strings(&s["sandbox"]["filesystem"]["denyWrite"]);
-    for own in ["config", "hooks", "info", "modules", "objects/info"] {
-        let path = format!("/k/wt/shep/7/.git/{own}");
-        assert!(deny.contains(&path.as_str()), "{path} in {deny:?}");
-    }
-    assert!(deny.contains(&"/k/wt/shep/7/.claude"), "{deny:?}");
+fn a_worker_reads_its_clones_git_dir_and_the_checkouts() {
+    let s = settings(&[]);
     let read = strings(&s["sandbox"]["filesystem"]["allowRead"]);
-    assert!(read.contains(&"/k/wt/shep/7/.git"), "{read:?}");
+    for path in ["/k/wt/shep/7.git", "/k/repos/shep/.git"] {
+        assert!(read.contains(&path), "{path} in {read:?}");
+    }
 }
 
 #[test]
-fn a_worker_on_a_clone_writes_nothing_of_the_checkouts_git() {
-    let s = clone_settings();
+fn a_worker_writes_nothing_of_the_checkouts_git() {
+    let s = settings(&[]);
     let allow = strings(&s["sandbox"]["filesystem"]["allowWrite"]);
     let deny = strings(&s["sandbox"]["filesystem"]["denyWrite"]);
     assert!(
@@ -280,7 +246,7 @@ fn a_worker_on_a_clone_writes_nothing_of_the_checkouts_git() {
     );
     assert!(
         deny.iter().all(|p| !p.starts_with("/k/repos/shep/.git")),
-        "a clone keeps no deny on the checkout's refs: {deny:?}"
+        "the checkout's refs are not the fence's to deny: {deny:?}"
     );
 }
 
@@ -300,7 +266,7 @@ fn build_env_points_into_the_build_folder_beside_cargo() {
         worktree: Path::new("/k/wt/lab/7"),
         build: Path::new("/k/targets/lab/7"),
         git_common_dir: Path::new("/k/repos/lab/.git"),
-        git_dir: Path::new("/k/repos/lab/.git/worktrees/7"),
+        git_dir: Path::new("/k/wt/lab/7.git"),
         branch: "kelpie/7",
         base: "main",
         kelpie_pushes: false,
@@ -515,7 +481,7 @@ fn a_push_to_the_base_branch_or_with_a_forcing_flag_is_denied() {
 }
 
 #[test]
-fn another_base_branch_is_denied_in_place_of_main() {
+fn another_base_branch_is_denied_to_push_in_place_of_main() {
     let on_v2 = WorkerProfile {
         base: "v2",
         kelpie_pushes: false,
@@ -525,30 +491,9 @@ fn another_base_branch_is_denied_in_place_of_main() {
     let deny = strings(&s["permissions"]["deny"]);
     assert!(deny.contains(&"Bash(git push * v2)"), "{deny:?}");
     assert!(!deny.contains(&"Bash(git push * main)"), "{deny:?}");
-    let no_write = strings(&s["sandbox"]["filesystem"]["denyWrite"]);
-    assert!(
-        no_write.contains(&"/k/repos/shep/.git/refs/heads/v2"),
-        "{no_write:?}"
-    );
-    assert!(
-        !no_write.contains(&"/k/repos/shep/.git/refs/heads/main"),
-        "{no_write:?}"
-    );
     let reach = on_v2.reach();
     let guard = &reach.fence.unwrap().guard;
     assert_eq!(guard.base_flag().as_deref(), Some("--base=v2"));
-}
-
-#[test]
-fn the_clones_base_branch_is_not_writable() {
-    let s = settings(&[]);
-    let deny = strings(&s["sandbox"]["filesystem"]["denyWrite"]);
-    assert!(
-        deny.contains(&"/k/repos/shep/.git/refs/heads/main"),
-        "{deny:?}"
-    );
-    let allow = strings(&s["sandbox"]["filesystem"]["allowWrite"]);
-    assert!(!allow.iter().any(|p| p.ends_with("/main")), "{allow:?}");
 }
 
 // Every other Unix socket stays blocked, kelpie's shepherd socket
@@ -636,13 +581,6 @@ fn the_projects_guard_hooks_are_carried_after_kelpies_own() {
         2,
         "kelpie's pause hook follows the project's"
     );
-}
-
-// A commit locks `packed-refs` on its own, the fence denies the lock, and a
-// worker that took the message for a failure spent turns checking `git log`.
-#[test]
-fn the_instructions_say_the_packed_refs_lock_message_is_no_failure() {
-    assert!(INSTRUCTIONS.contains("packed-refs.lock"), "{INSTRUCTIONS}");
 }
 
 // 29 refused `/tmp` writes in four days of transcripts, 51 of 93 worker
