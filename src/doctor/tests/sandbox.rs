@@ -68,12 +68,7 @@ async fn a_windows_machine_with_no_install_is_told_to_make_one() {
     scene.host.windows = Some(Ok(WindowsInstall {
         provisioned: false,
         setup_installed: None,
-        setup_expected: 1,
-        loopback_open: false,
-        seclogon_runs: true,
-        desktop_session: true,
-        profile_exclusions: Default::default(),
-        profile_read_env: Vec::new(),
+        ..WindowsInstall::provisioned(false)
     }));
     let report = scene.report().await;
     let (what, fix) = missing(&report, "sandbox");
@@ -90,11 +85,7 @@ async fn a_windows_install_of_another_setup_version_names_both_numbers() {
         provisioned: false,
         setup_installed: Some(3),
         setup_expected: 4,
-        loopback_open: false,
-        seclogon_runs: true,
-        desktop_session: true,
-        profile_exclusions: Default::default(),
-        profile_read_env: Vec::new(),
+        ..WindowsInstall::provisioned(false)
     }));
     let (what, fix) = missing(&scene.report().await, "sandbox");
     assert!(
@@ -128,6 +119,52 @@ async fn a_windows_machine_with_seclogon_off_or_in_session_0_is_told_its_fix() {
     let (what, fix) = missing(&scene.report().await, "sandbox");
     assert!(what.contains("cannot be read"), "{what}");
     assert_eq!(fix, "run `crabpot windows-install`");
+}
+
+// A `cargo install` moves the new exe in from `%TEMP%`, so it keeps that
+// folder's access list and inherits nothing from the folder it lands in, where
+// the install's grant sits. A re-grant writes nothing to it, and only a reset
+// re-applies what the folder passes down.
+#[tokio::test]
+async fn a_windows_runner_the_sandbox_cannot_read_names_the_exe_and_its_reset() {
+    let mut scene = Scene::new().await;
+    scene.host.os = "windows";
+    scene.host.windows = Some(Ok(WindowsInstall {
+        runner_readable: Some(false),
+        ..WindowsInstall::provisioned(false)
+    }));
+    let report = scene.report().await;
+    let (what, fix) = missing(&report, "sandbox");
+    let exe = std::env::current_exe().unwrap().display().to_string();
+    assert!(what.contains("cannot read kelpie"), "{what}");
+    assert!(what.contains(&exe), "{what}");
+    assert!(
+        what.contains("cargo install") && what.contains("%TEMP%"),
+        "{what}"
+    );
+    assert!(fix.contains(&format!("`icacls \"{exe}\" /reset`")), "{fix}");
+    assert!(!report.passed());
+}
+
+// A runner the check read as readable is no gap, and one the machine could not
+// check refuses nothing, which is how crabpot's own start leaves it.
+#[tokio::test]
+async fn a_windows_runner_that_is_readable_or_unchecked_leaves_the_sandbox_line_ok() {
+    let mut scene = Scene::new().await;
+    scene.host.os = "windows";
+    for readable in [Some(true), None] {
+        scene.host.windows = Some(Ok(WindowsInstall {
+            runner_readable: readable,
+            ..WindowsInstall::provisioned(false)
+        }));
+        let report = scene.report().await;
+        assert_eq!(
+            ok(&report, "sandbox"),
+            "the crabpot install can run, loopback closed",
+            "{readable:?}: {:#?}",
+            report.render()
+        );
+    }
 }
 
 // A project with the browser on and a launch file on `main` gets a dev server
@@ -165,12 +202,7 @@ async fn a_listening_project_on_a_closed_windows_install_is_told_the_widening() 
     scene.host.windows = Some(Ok(WindowsInstall {
         provisioned: false,
         setup_installed: None,
-        setup_expected: 1,
-        loopback_open: false,
-        seclogon_runs: true,
-        desktop_session: true,
-        profile_exclusions: Default::default(),
-        profile_read_env: Vec::new(),
+        ..WindowsInstall::provisioned(false)
     }));
     let (_, fix) = missing(&scene.report().await, "sandbox");
     assert_eq!(fix, "run `crabpot windows-install --allow-loopback`");
