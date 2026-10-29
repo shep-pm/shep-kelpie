@@ -1,7 +1,7 @@
 use super::*;
 use crate::ports::{Finding, Severity};
 use crate::runner::ruling::question;
-use crate::state::{Resume, Ruling, RulingKind, Stuck};
+use crate::state::{AgentFit, AgentMeasure, Resume, Ruling, RulingKind, Stuck};
 use crate::test::ticket;
 use crate::work_item::{Known, Phase};
 
@@ -273,6 +273,25 @@ fn an_agent_files_ruling_names_the_files() {
     assert_eq!(
         rendered(&ruling(ticket(1), kind)),
         expected!("agent-files.md")
+    );
+}
+
+#[test]
+fn an_agent_fit_ruling_shows_both_records_and_the_suggested_kinds() {
+    let kind = RulingKind::AgentFit(AgentFit {
+        work_kind: "fix".into(),
+        worse: "sonnet-high".into(),
+        better: "opus-high".into(),
+        measure: AgentMeasure::Hours {
+            worse: 210,
+            better: 95,
+        },
+        suggested_kinds: vec!["docs".into(), "mechanical".into()],
+    });
+
+    assert_eq!(
+        rendered(&ruling(ticket(1), kind)),
+        expected!("agent-fit.md")
     );
 }
 

@@ -874,6 +874,9 @@ fn decide(
         | (Answer::Yes, RulingKind::Contribution(Held::OverBudget { .. } | Held::Merge { .. })) => {
             Phase::Implement
         }
+        // No work item is parked on it and the one that raised it has finished,
+        // so an answer only clears it. Neither changes an agent file.
+        (Answer::Yes | Answer::No(_), RulingKind::AgentFit(..)) => Phase::Implement,
         // `trust` has refused these before `decide` is asked.
         (Answer::Trust(_), _) | (Answer::Yes, RulingKind::Contribution(_)) => {
             return Err(RuleError::Head(id, "takes no such yes".to_owned()));

@@ -13,7 +13,7 @@ use super::in_flight::{Open, Stopping, gpu_seconds};
 use super::report::{ReviewResult, Reviewed, Spent as ReviewSpent};
 use crate::ports::{AgentError, AgentReply, Cost, Role};
 use crate::ticket::TicketId;
-use crate::usage::{CallLine, Draft, Ended, Line, PacerLine, Spent, ended};
+use crate::usage::{CallLine, Draft, Ended, FinishedLine, Line, PacerLine, Spent, ended};
 use crate::work_item::Phase;
 
 impl Runner {
@@ -138,6 +138,16 @@ impl Runner {
             line.gpu_seconds = gpu_seconds(open.ran_from, now, line.seconds);
         }
         Some(line)
+    }
+
+    /// Writes `line` as the item's finished line, then asks the agent board
+    /// whether the agent it names still fits the kind it names
+    ///
+    /// The line goes first, so the board reads the item into its records.
+    pub(super) fn append_finished(&mut self, line: FinishedLine) {
+        let (agent, kind, number) = (line.agent.clone(), line.kind.clone(), line.pull_request);
+        self.ledger.append(&Line::Finished(line));
+        self.agent_fit(agent.as_deref(), kind.as_deref(), number);
     }
 
     /// Writes the line for a call no work item records, such as the project

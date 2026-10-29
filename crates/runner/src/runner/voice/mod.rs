@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use self::card::ruling_comment;
 use super::Runner;
+use super::agent_fit;
 use super::gate::short;
 use super::ruling::stuck_comment;
 use crate::ports::{Finding, ForgeError, NewLabel, Severity, Voice};
@@ -417,6 +418,7 @@ pub(super) fn said(kind: &RulingKind) -> String {
         RulingKind::ForeignChange { description, .. } => {
             format!("This pull request was changed: {description}.")
         }
+        RulingKind::AgentFit(fit) => agent_fit::said(fit),
         // Never posted on the pull request, so nothing here names the contributor
         // or what the review found.
         RulingKind::Contribution(_) => "This pull request waits on the maintainer.".to_owned(),

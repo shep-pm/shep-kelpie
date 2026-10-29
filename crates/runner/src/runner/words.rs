@@ -45,6 +45,7 @@ impl Wants {
             RulingKind::Merge { .. } | RulingKind::Contribution(Held::Merge { .. }) => Self::Merge,
             RulingKind::Stuck(..)
             | RulingKind::AgentFiles { .. }
+            | RulingKind::AgentFit(..)
             | RulingKind::ForeignChange { .. }
             | RulingKind::Contribution(..)
             | RulingKind::FollowUp { .. } => Self::YesOrNo,

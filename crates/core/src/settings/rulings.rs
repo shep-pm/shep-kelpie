@@ -111,6 +111,9 @@ pub enum RulingName {
     Question,
     /// A pull request changes agents' own files
     AgentFiles,
+    /// An agent does clearly worse at a kind of work than another agent that
+    /// takes it. Neither answer changes a file.
+    AgentFit,
     /// A pull request's labels or ready state changed outside kelpie
     ForeignChange,
     /// A merged pull request left findings unfixed
@@ -158,10 +161,11 @@ pub enum RulingName {
 
 impl RulingName {
     /// Every kind, in the order the enum lists them
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::Merge,
         Self::Question,
         Self::AgentFiles,
+        Self::AgentFit,
         Self::ForeignChange,
         Self::FollowUp,
         Self::Rebase,
@@ -190,7 +194,7 @@ impl RulingName {
             Self::Merge | Self::Security | Self::ContributionMerge | Self::LocalModelSpilled => {
                 None
             }
-            Self::Question | Self::ForeignChange | Self::AgentFiles => Some(false),
+            Self::Question | Self::ForeignChange | Self::AgentFiles | Self::AgentFit => Some(false),
             Self::FollowUp
             | Self::Rebase
             | Self::StillRed
@@ -259,6 +263,7 @@ impl RulingName {
             RulingKind::Merge { .. } => Self::Merge,
             RulingKind::Question { .. } => Self::Question,
             RulingKind::AgentFiles { .. } => Self::AgentFiles,
+            RulingKind::AgentFit(..) => Self::AgentFit,
             RulingKind::ForeignChange { .. } => Self::ForeignChange,
             RulingKind::FollowUp { .. } => Self::FollowUp,
             RulingKind::Contribution(held) => match held {
@@ -295,6 +300,7 @@ impl RulingName {
             Self::Merge => "merge",
             Self::Question => "question",
             Self::AgentFiles => "agent-files",
+            Self::AgentFit => "agent-fit",
             Self::ForeignChange => "foreign-change",
             Self::FollowUp => "follow-up",
             Self::Rebase => "rebase",

@@ -52,6 +52,54 @@ pub struct Ruling {
     pub asked: Option<PmAsked>,
 }
 
+/// What the agent board says about one agent and one kind of work, as the
+/// `agent-fit` ruling keeps it
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentFit {
+    /// The kind of work both agents are read at. `kind` already names the
+    /// ruling's kind in the state file, so this one is `work_kind`
+    pub work_kind: String,
+    /// The agent that does worse
+    pub worse: String,
+    /// The agent it is read against
+    pub better: String,
+    /// What the two records say
+    pub measure: AgentMeasure,
+    /// The `kinds` the worse agent's file should name instead, empty when the
+    /// board reads it as fitting no kind
+    pub suggested_kinds: Vec<String>,
+}
+
+/// The measure that says one agent does clearly worse, with each agent's figure
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum AgentMeasure {
+    /// Each agent's merge rate, in whole percents
+    MergeRate {
+        /// The worse agent's
+        worse: u32,
+        /// The other agent's
+        better: u32,
+    },
+    /// Each agent's median hours, in whole minutes
+    Hours {
+        /// The worse agent's
+        worse: u32,
+        /// The other agent's
+        better: u32,
+    },
+    /// Each agent's share of its items with 3 or more fix turns, in whole percents
+    HeavyFix {
+        /// The worse agent's
+        worse: u32,
+        /// The other agent's
+        better: u32,
+    },
+}
+
 /// What the maintainer asks the project manager about a ruling
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

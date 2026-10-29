@@ -330,6 +330,7 @@ compact_window = 200000
 # [app.dogs.kelpie.rulings.pm_decides]
 # question = false
 # agent-files = false
+# agent-fit = false
 # foreign-change = false
 # follow-up = true
 # rebase = true
