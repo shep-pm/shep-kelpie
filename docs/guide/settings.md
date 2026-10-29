@@ -21,8 +21,7 @@ A key kelpie no longer reads, such as `review.reviewers`, `coderabbit` or `plann
 - `ci.block` is on when the checkout has `.github/workflows`, and `ci.fix_attempts = -1`. `ci.queued_minutes` is not written and reads 60: how long a check may stay `queued` or `in progress` in the wait for CI before kelpie reruns its workflow run once, and past that asks you with a `check-queued` ruling. The same number is how long a head with no check at all waits: with a workflow on `origin/main` that runs on a pull request it then asks you with a `no-checks` ruling, and with none it goes on as skipped at once
 - `concurrency.active_items = 1` and `concurrency.pending_rulings = 2`
 - `budget.per_item_usd = 10`
-- `agents.implementers = ["sonnet-high"]`
-- no `agents.implementer_choice`, which reads `"order"`, its only choice: the agent board picks the implementer a new work item opens on. `agents.md` says the picking
+- no list of implementers: the agent board picks the implementer a new work item opens on, out of every agent file whose role is `implementer` that the project allows. `agents.md` says the picking. An older table's `agents.implementers`, `agents.implementer_choice` and `agents.fallback_after` are read by nothing: `doctor` names them, and `shep kelpie upgrade` deletes them
 - no `agents.allow`, which allows every agent, and no `agents.slack`, which reads 60 minutes: how far past the soonest finish the agent board lets a work item's agent finish
 - `agents.reviewers = ["defect-hunter-lite"]`, with `iq3-xxs-review` first when kelpie's settings hold a gateway named `paddock`, and no review bot
 - `contributions.pick = "off"`, `contributions.security_reviewer = "security-reviewer"`, `contributions.quiet_days = 7` and `contributions.nudge_days = 3`

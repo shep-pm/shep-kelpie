@@ -162,7 +162,8 @@ async fn a_rollback_does_not_migrate() {
     assert!(said.iter().all(|l| l != WROTE), "{said:?}");
 }
 
-// Settings for koji that load, on a git checkout under `shepherd`'s scratch home.
+// Settings for koji that load, on a git checkout under `shepherd`'s scratch home. Its
+// `agents.implementers` is read by nothing, as an older build wrote it.
 fn loading(shepherd: &FakeShepherd) -> Map<String, Value> {
     let root = shepherd.scratch("koji-checkout");
     let status = crate::flock::git_in(&root).args(["init", "-q"]).status();
@@ -226,6 +227,32 @@ async fn a_bare_upgrade_writes_no_agents_allow_or_slack() {
     let agents = written["agents"].as_object().unwrap();
     assert_eq!(agents.get("allow"), None);
     assert_eq!(agents.get("slack"), None);
+}
+
+#[tokio::test]
+async fn a_bare_upgrade_deletes_the_keys_the_agent_board_replaced_and_names_them() {
+    let shepherd = FakeShepherd::on(crate::shepherd::SHEP_VERSION);
+    let table = loading(&shepherd);
+    let rig = Rig::holding_on(shepherd, false, table).await;
+    crate::agents::write_bound_stubs(
+        &rig.home.join("agents"),
+        "harness: claude-code\nmodel: claude-opus-5-5\neffort: high\n",
+    );
+    rig.cargo_installs("0.3.0", "0.17.0");
+
+    let (ran, said) = rig.upgrade(Action::Installed).await;
+
+    ran.unwrap();
+    assert!(
+        said.iter().any(|l| l.starts_with("project koji: ")
+            && l.contains("removed agents.implementers = [\"sonnet-high\"]")),
+        "{said:?}"
+    );
+    let (koji, _) = rig.shepherd.sheep("koji").unwrap();
+    let written = koji.dogs.get(crate::shepherd::DOG).unwrap().as_map();
+    let agents = written["agents"].as_object().unwrap();
+    assert_eq!(agents.get("implementers"), None);
+    assert_eq!(agents["reviewers"], serde_json::json!(["standards"]));
 }
 
 #[tokio::test]

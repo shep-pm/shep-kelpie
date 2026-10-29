@@ -219,7 +219,7 @@ fn goose_script(folder: &Path) {
 // A runner whose worker is a goose agent behind the gateway at `host`.
 fn rig_for(rig: &Rig, host: &str) {
     rig.write_agent("goose-worker", WORKER);
-    rig.implementers(&["goose-worker"]);
+    rig.agent_board.ranks(&["goose-worker"]);
     let settings = std::fs::read_to_string(rig.kelpie_settings_file()).unwrap();
     let gateway = format!("[gateways.paddock]\nurl = \"{host}\"\nkey_env = \"CARGO_PKG_NAME\"\n");
     rig.set_kelpie_settings(&format!("{settings}{gateway}"));

@@ -1,7 +1,7 @@
 ---
-# Opus 5.5 at high effort, for work that is hard to undo. List it in a
-# project's `agents.implementers` and label an issue `agent:opus-high` to
-# run it here. Anything below the closing line is added to kelpie's own
+# Opus 5.5 at high effort, for work that is hard to undo. The agent board
+# picks it for heavy work, and an `agent:opus-high!` label on an issue pins
+# it there. Anything below the closing line is added to kelpie's own
 # instructions for this agent; it adds nothing here.
 role: implementer
 harness: claude-code

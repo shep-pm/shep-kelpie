@@ -56,7 +56,7 @@ fn pi_agents(rig: &Rig) {
         )
     };
     rig.write_agent("pi-box", &pi("implementer"));
-    rig.implementers(&["pi-box"]);
+    rig.agent_board.ranks(&["pi-box"]);
     rig.write_agent("pi-reviewer", &pi("reviewer"));
     rig.reviewers(&["pi-reviewer"]);
 }
@@ -66,7 +66,7 @@ fn goose_agent(rig: &Rig) {
     let goose = "---\nrole: implementer\nharness: goose\nmodel: qwen3.8:27b\neffort: low\n\
                  url: http://box:11434/v1\ncontext: 65536\n---\n";
     rig.write_agent("goose-box", goose);
-    rig.implementers(&["goose-box"]);
+    rig.agent_board.ranks(&["goose-box"]);
 }
 
 // The rig's Codex worker and reviewer, as their agent files and the project's lists
@@ -79,7 +79,7 @@ fn codex_agents(rig: &Rig) {
         )
     };
     rig.write_agent("codex-box", &codex("implementer"));
-    rig.implementers(&["codex-box"]);
+    rig.agent_board.ranks(&["codex-box"]);
     rig.write_agent("codex-reviewer", &codex("reviewer"));
     rig.reviewers(&["codex-reviewer"]);
 }

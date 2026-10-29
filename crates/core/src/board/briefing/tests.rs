@@ -390,7 +390,6 @@ fn agent(name: &str, role: Role, fit: (Tier, Option<&[&str]>, Option<&str>)) -> 
     AgentLine {
         name: name.into(),
         role,
-        default: false,
         tier,
         kinds: kinds.map(|k| k.iter().map(|&k| k.to_owned()).collect()),
         description: description.map(str::to_owned),
@@ -398,14 +397,12 @@ fn agent(name: &str, role: Role, fit: (Tier, Option<&[&str]>, Option<&str>)) -> 
 }
 
 #[test]
-fn the_agents_section_lists_the_implementers_default_first_then_the_reviewers_with_tier_kinds_and_description()
- {
-    let mut sonnet = agent(
+fn the_agents_section_lists_the_implementers_then_the_reviewers_with_tier_kinds_and_description() {
+    let sonnet = agent(
         "sonnet-high",
         Role::Implementer,
         (Tier::Standard, None, Some("Ordinary feature and fix work.")),
     );
-    sonnet.default = true;
     let opus = agent(
         "opus-high",
         Role::Implementer,
@@ -421,7 +418,7 @@ fn the_agents_section_lists_the_implementers_default_first_then_the_reviewers_wi
         (Tier::Light, None, Some("A quick read for defects.")),
     );
     let board = Briefing {
-        agents: vec![sonnet, opus, lite],
+        agents: vec![opus, sonnet, lite],
         ..briefing(Vec::new())
     };
     let text = render(&board);
@@ -430,13 +427,14 @@ fn the_agents_section_lists_the_implementers_default_first_then_the_reviewers_wi
     assert_eq!(
         section,
         "\n\
-         Implementers, the default first, then reviewers in their order. An `agent:` label \
-         picks a work item's implementer: tier and kinds are shown, nothing picks by them.\n\
+         Implementers by name, then reviewers in their order. The agent board picks a work \
+         item's implementer by its kind, tier and slack, and a pick's agent or an \
+         `agent:<name>!` label pins it.\n\
          \n\
-         - sonnet-high (implementer, default): standard tier, every kind; \
-         Ordinary feature and fix work.\n\
          - opus-high (implementer): heavy tier, kinds design, migration; \
          Work that needs the strongest agent.\n\
+         - sonnet-high (implementer): standard tier, every kind; \
+         Ordinary feature and fix work.\n\
          - defect-hunter-lite (reviewer): light tier, every kind; A quick read for defects.\n"
     );
     let ready = text.find("## Ready queue").unwrap();

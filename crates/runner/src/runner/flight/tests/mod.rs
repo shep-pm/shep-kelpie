@@ -81,7 +81,7 @@ pub(super) const CODER: &str = "---\nrole: implementer\nharness: stand-in\nmodel
 fn seven_queued(project: &str, then: Scripted) -> (Rig, Mutex<Runner>, Hold) {
     let rig = Rig::new(project);
     rig.write_agent("coder", CODER);
-    rig.implementers(&["sonnet-high", "coder"]);
+    rig.agent_board.ranks(&["sonnet-high", "coder"]);
     let (rig, runner) = {
         let runner = rig.open().unwrap();
         rig.agent_board.ranks(&["coder"]);

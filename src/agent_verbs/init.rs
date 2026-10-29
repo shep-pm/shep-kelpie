@@ -199,28 +199,18 @@ fn server(ask: &Ask, harness: Harness) -> Result<Option<ModelHost>, String> {
     }
 }
 
-// The `shep kelpie set` lines that list what `init` wrote, which the operator
-// runs to put it on a project.
+// The `shep kelpie set` line that lists the reviewers `init` wrote, which the
+// operator runs to put them on a project. The agent board picks among its
+// implementers with no setting.
 fn set_lines(report: &Report) -> Vec<String> {
-    let listed = |role: Role, key: &str| {
-        let names = report
-            .names(role)
-            .iter()
-            .map(|name| format!("\"{name}\""))
-            .collect::<Vec<String>>()
-            .join(", ");
-        match names.is_empty() {
-            true => None,
-            false => Some(format!("shep kelpie set {key} '[{names}]'")),
-        }
-    };
-    [
-        listed(Role::Implementer, "agents.implementers"),
-        listed(Role::Reviewer, "agents.reviewers"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
+    let names = (report.names(Role::Reviewer).iter())
+        .map(|name| format!("\"{name}\""))
+        .collect::<Vec<String>>()
+        .join(", ");
+    match names.is_empty() {
+        true => Vec::new(),
+        false => vec![format!("shep kelpie set agents.reviewers '[{names}]'")],
+    }
 }
 
 // What `agents init <args>` was asked for.

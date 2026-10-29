@@ -263,8 +263,8 @@ fn a_yes_that_names_no_head_trusts_nothing() {
 fn the_project_manager_is_not_asked_to_answer_it() {
     let (rig, runner) = picking("all");
     rig.edit_settings(|s| {
-        let listed = "\nimplementers = [\"sonnet-high\"]\n";
-        assert!(s.contains(listed), "the example's implementers moved");
+        let listed = "[app.dogs.kelpie.agents]\n";
+        assert!(s.contains(listed), "the example's agents table moved");
         s.replace(listed, &format!("{listed}pm = \"pm\"\n"))
     });
     drop(runner);

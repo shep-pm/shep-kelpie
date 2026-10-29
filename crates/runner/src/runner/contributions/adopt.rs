@@ -11,7 +11,6 @@
 
 use super::super::Runner;
 use super::ruling::{raise_cannot_adopt, raise_no_edits};
-use crate::board::AgentLabel;
 use crate::ports::Reviewed;
 use crate::state::{Adopting, Held, How, Ruling, RulingKind, StateError, Waiting};
 use crate::ticket::TicketId;
@@ -122,7 +121,7 @@ impl Runner {
         if to_link && !self.link_issue(number, &pr, issue)? {
             return Ok(());
         }
-        // An issue labelled for an implementer the project does not list gives
+        // An issue labelled for an implementer the project may not use gives
         // the work item no agent, and the board would refuse it every poll.
         if let Some(why) = self.issue_label_refuses(issue) {
             return self.ask_adopt(number, why);
@@ -152,37 +151,29 @@ impl Runner {
     }
 
     // Why issue `issue` gives a work item no agent to run on, where it does: an
-    // `agent:` label for an implementer `agents.implementers` does not list, or
-    // more than one. A forge that cannot show the issue is no answer, and the
-    // board tries the adoption and skips it, as it does now.
+    // `agent:` label naming no implementer the project may use, or more than
+    // one. A forge that cannot show the issue is no answer, and the board tries
+    // the adoption and skips it, as it does now.
     fn issue_label_refuses(&self, issue: u64) -> Option<String> {
         let found = self
             .ports
             .tickets
             .issue(&self.remote, TicketId::from_issue(issue)?)
             .ok()?;
-        self.labelled_agent(TicketId::from_issue(issue)?, &found.labels)
-            .err()
-            .map(|why| why.to_string())
+        self.label_refuses(&found.labels).map(|why| why.to_string())
     }
 
     // Files the issue `number`'s work item hangs on, from the pull request's
-    // title and body, under the default implementer's `agent:` label. It is
-    // saved as filed before the body is touched, so a body the forge will not
-    // let kelpie edit costs no second issue.
+    // title and body, with no `agent:` label, so the agent board picks its
+    // implementer. It is saved as filed before the body is touched, so a body
+    // the forge will not let kelpie edit costs no second issue.
     fn file_issue(
         &mut self,
         number: u64,
         pr: &Reviewed,
         how: Option<How>,
     ) -> Result<Option<u64>, StateError> {
-        let label = AgentLabel::of(&self.agents.default_implementer.name);
-        if let Err(why) = self.make_missing_labels([label.new_label()]) {
-            self.adopt_told(number, "make the label it needs", &why);
-            return Ok(None);
-        }
-        let name = label.name().to_owned();
-        let issue = match self.open_issue(&pr.title, &filed_body(number, pr, how), &[&name]) {
+        let issue = match self.open_issue(&pr.title, &filed_body(number, pr, how), &[]) {
             Ok(issue) => issue,
             Err(e) => {
                 self.adopt_told(number, "file its issue", &e);

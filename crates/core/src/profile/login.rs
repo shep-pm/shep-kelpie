@@ -61,11 +61,21 @@ pub fn write(build: &Path, token: &InstallationToken) -> io::Result<()> {
 pub(super) const GIT_CONFIG: &str = "'credential.helper'='' \
      'credential.https://github.com.helper'='!gh auth git-credential'";
 
-/// The variables that point `gh` at that login, and keep git from prompting
+/// The variables that point `gh` at the login in `build`'s `gh` folder, and
+/// keep git from prompting
 pub(super) fn env(build: &Path) -> Vec<(String, String)> {
+    let config = (
+        "GH_CONFIG_DIR".to_owned(),
+        config_dir(build).to_string_lossy().into_owned(),
+    );
+    std::iter::once(config).chain(no_prompt()).collect()
+}
+
+/// The variables that keep `gh` and git from prompting, for a login that
+/// needs no `gh` folder
+pub(super) fn no_prompt() -> [(String, String); 2] {
     let pair = |name: &str, value: &str| (name.to_owned(), value.to_owned());
-    vec![
-        pair("GH_CONFIG_DIR", &config_dir(build).to_string_lossy()),
+    [
         pair("GH_PROMPT_DISABLED", "1"),
         pair("GIT_TERMINAL_PROMPT", "0"),
     ]

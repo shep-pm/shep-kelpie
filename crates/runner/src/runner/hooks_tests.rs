@@ -230,7 +230,7 @@ fn a_pi_implementer_with_a_commit_hook_is_not_refused_at_load_and_its_commit_is_
  {
     let rig = Rig::new("shep");
     rig.write_agent("pi-box", PI);
-    rig.implementers(&["pi-box"]);
+    rig.agent_board.ranks(&["pi-box"]);
     rig.forbid_word(&["commit"], WORD);
     let runner = rig.open().expect("a hook is not a Claude Code hook");
     rig.ask(&runner, "add", Some("7"));

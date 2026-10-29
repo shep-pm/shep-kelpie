@@ -91,7 +91,7 @@ pub(super) fn removed_ruling(value: &Value) -> Option<(u64, String)> {
 
 /// Withdraws each pending `unlabelled` ruling and the place read to in its thread
 ///
-/// Its issue goes back to the board, which opens it on the first implementer listed.
+/// Its issue goes back to the board, which opens it on the agent board's pick.
 pub(super) fn withdraw_unlabelled(value: &mut Value) {
     let Some(state) = value.as_object_mut() else {
         return;
