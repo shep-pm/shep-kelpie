@@ -147,21 +147,22 @@ fn the_branch_is_cut_from_the_latest_origin_main() {
 }
 
 #[test]
-fn the_settings_file_fences_writes_to_this_worktree_and_its_git_paths() {
+fn the_settings_file_fences_writes_to_this_worktree_and_its_clones_git_dir() {
     let (rig, runner) = with_issue_7("koji");
     rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
     step(&runner).unwrap();
     let [seen] = rig.claude.seen().try_into().unwrap();
     let kelpie = rig.home.path().join("shep/kelpie");
     let git_dir = fs::canonicalize(rig.repo().join(".git")).unwrap();
+    let clone = fs::canonicalize(rig.git_dir_7()).unwrap();
     let allow = &seen.sandbox["filesystem"]["allowWrite"];
     assert_eq!(allow[0], json!(kelpie.join("koji/worktrees/7")));
     assert_eq!(allow[1], json!(kelpie.join("koji/builds/7")));
-    assert_eq!(allow[2], json!(git_dir.join("objects")));
-    assert_eq!(allow[3], json!(git_dir.join("worktrees/7")));
+    assert_eq!(allow[2], json!(clone), "its clone's git dir, whole");
+    assert_eq!(allow[3], json!(null), "nothing of the checkout's git");
     assert_eq!(
         seen.sandbox["filesystem"]["denyWrite"][0],
-        json!(git_dir.join("config"))
+        json!(clone.join("config"))
     );
     assert_eq!(
         seen.settings["hooks"]["PreToolUse"][1]["hooks"][0]["command"],
@@ -351,10 +352,9 @@ fn a_worker_that_repoints_its_git_file_cannot_move_its_fence() {
     rig.claude.script([Scripted::Reply(usage(1), Cost(1))]);
     step(&runner).unwrap();
     let [_, seen] = rig.claude.seen().try_into().unwrap();
-    let git_dir = fs::canonicalize(rig.repo().join(".git")).unwrap();
+    let clone = fs::canonicalize(rig.git_dir_7()).unwrap();
     let allow = &seen.sandbox["filesystem"]["allowWrite"];
-    assert_eq!(allow[2], json!(git_dir.join("objects")));
-    assert_eq!(allow[3], json!(git_dir.join("worktrees/7")));
+    assert_eq!(allow[2], json!(clone));
     assert!(!allow.to_string().contains("wanted"), "{allow}");
 }
 

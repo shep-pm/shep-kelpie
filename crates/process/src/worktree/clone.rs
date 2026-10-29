@@ -50,6 +50,30 @@ pub(super) fn dirs(
     Ok(Some((own.clone(), own)))
 }
 
+/// The object folder of `worktree`'s clone, when `worktree` is a clone of `repo`
+///
+/// A reader of the checkout names it as an alternate to see the commits the
+/// worker made, which sit in the clone alone.
+pub fn objects_of(repo: &Path, worktree: &Path) -> Option<PathBuf> {
+    let common = common_dir(repo).ok()?;
+    let (own, _) = dirs(&common, worktree).ok()??;
+    Some(own.join("objects"))
+}
+
+/// The commit `refs/heads/<branch>` is at for the work item whose worktree is `worktree`
+///
+/// Read through the clone's trusted git, since a clone holds its branch and
+/// the checkout does not. A worktree that is no clone, or is gone, is read
+/// in the checkout, which a linked worktree shares its branch with.
+pub fn branch_head(repo: &Path, worktree: &Path, branch: &str) -> Option<String> {
+    let full_ref = format!("refs/heads/{branch}^{{commit}}");
+    let args = ["rev-parse", "--verify", "--quiet", &full_ref];
+    match trusted(repo, worktree) {
+        Ok(in_worktree) => in_worktree(&args).ok(),
+        Err(_) => git(repo, args).ok(),
+    }
+}
+
 /// Makes `worktree` a clone of `repo` on `branch`, started at the commit `at`
 ///
 /// `worktree` holds nothing yet. The clone borrows the checkout's objects and

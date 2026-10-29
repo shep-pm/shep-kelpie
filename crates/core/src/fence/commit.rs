@@ -74,21 +74,16 @@ pub(super) fn main_of(repo: &Path, base: &str) -> Result<String, WorktreeError> 
     git(repo, ["rev-parse", &main_ref(base)])
 }
 
-/// The commits `worktree` is at and `origin/<base>` is at now, from one git call
+/// The commits `worktree` is at and `origin/<base>` is at now
+///
+/// `origin/<base>` is read in `repo`: a clone's own refs are the worker's.
 pub(super) fn head_and_main(
     repo: &Path,
     worktree: &Path,
     base: &str,
 ) -> Result<(String, String), WorktreeError> {
-    let args = ["rev-parse", "HEAD", &main_ref(base)];
-    let ids = worktree::trusted(repo, worktree)?(&args)?;
-    match ids.split_once('\n') {
-        Some((head, main)) => Ok((head.to_owned(), main.to_owned())),
-        None => Err(WorktreeError::Git {
-            args: args.join(" "),
-            stderr: format!("printed {ids:?}, not two commits"),
-        }),
-    }
+    let head = worktree::trusted(repo, worktree)?(&["rev-parse", "HEAD"])?;
+    Ok((head, main_of(repo, base)?))
 }
 
 fn main_ref(base: &str) -> String {
@@ -96,11 +91,18 @@ fn main_ref(base: &str) -> String {
 }
 
 /// The commit `head` left `main` at, where `main` is a commit id
-pub(super) fn cut_at(repo: &Path, head: &str, main: &str) -> Result<String, WorktreeError> {
+///
+/// Asked of `worktree`'s git: a clone's own commits are not in `repo`.
+pub(super) fn cut_at(
+    repo: &Path,
+    worktree: &Path,
+    head: &str,
+    main: &str,
+) -> Result<String, WorktreeError> {
     let key = (repo.to_owned(), head.to_owned(), main.to_owned());
     let read = || {
         asked();
-        git(repo, ["merge-base", head, main])
+        worktree::trusted(repo, worktree)?(&["merge-base", head, main])
     };
     if is_full_id(head) && is_full_id(main) {
         CUT_AT.get_or_read(key, read)

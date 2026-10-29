@@ -262,7 +262,7 @@ pub fn differ(
     let disk = on_disk(worktree)?;
     let hashes = hashed(repo, &disk)?;
     let (head, main) = commit::head_and_main(repo, worktree, base)?;
-    let cut_at = commit::cut_at(repo, &head, &main)?;
+    let cut_at = commit::cut_at(repo, worktree, &head, &main)?;
     let mut first = None;
     for commit in [Some(main.as_str()), Some(cut_at.as_str()), accepted]
         .into_iter()
@@ -446,6 +446,9 @@ fn folder(path: &Path, e: &std::io::Error) -> WorktreeError {
         kind: e.kind(),
     }
 }
+
+#[cfg(test)]
+mod clone_tests;
 
 #[cfg(test)]
 mod tests {

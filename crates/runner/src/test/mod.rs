@@ -643,6 +643,12 @@ impl Rig {
         self.paths().worktree(ticket(7))
     }
 
+    /// The git dir of the clone that is issue 7's worktree: its branch and
+    /// its refs are there, and the checkout holds neither
+    pub fn git_dir_7(&self) -> PathBuf {
+        crate::worktree::clone::git_dir_of(&self.worktree_7())
+    }
+
     /// The build folder kelpie makes for issue 7
     pub fn build_7(&self) -> PathBuf {
         self.paths().build(ticket(7))

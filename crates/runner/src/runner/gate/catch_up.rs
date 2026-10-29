@@ -320,10 +320,10 @@ mod tests {
         assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), pushed);
         assert_eq!(git(&worktree, &["status", "--porcelain"]), "");
         assert_ne!(pushed, head);
-        let merge_head = std::fs::read_dir(rig.repo().join(".git/worktrees"))
-            .unwrap()
-            .any(|dir| dir.unwrap().path().join("MERGE_HEAD").exists());
-        assert!(!merge_head, "the merge was left in progress");
+        assert!(
+            !rig.git_dir_7().join("MERGE_HEAD").exists(),
+            "the merge was left in progress"
+        );
     }
 
     #[test]
@@ -551,12 +551,16 @@ mod tests {
     }
 
     #[test]
-    fn a_worker_that_repoints_its_common_git_dir_gets_no_rebase_run_there() {
+    fn a_worker_that_repoints_its_clones_objects_gets_no_rebase_run_there() {
         let (rig, runner, head) = Rig::with_pull_request("golbat");
         let wanted = rig.home.path().join("wanted");
-        std::fs::create_dir_all(wanted.join("hooks")).unwrap();
-        let own = rig.repo().join(".git/worktrees/7");
-        std::fs::write(own.join("commondir"), format!("{}\n", wanted.display())).unwrap();
+        std::fs::create_dir_all(wanted.join("objects")).unwrap();
+        let alternates = rig.git_dir_7().join("objects/info/alternates");
+        std::fs::write(
+            alternates,
+            format!("{}\n", wanted.join("objects").display()),
+        )
+        .unwrap();
         rig.land_on_origin("landed.txt");
         let Some(StepReport::GateFailed { reason, .. }) = step(&runner).unwrap() else {
             panic!("kelpie ran git in a folder the worker chose");

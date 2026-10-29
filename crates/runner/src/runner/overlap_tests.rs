@@ -113,8 +113,11 @@ fn a_body_edited_after_its_paths_were_read_is_read_again_before_dispatch() {
 #[test]
 fn a_branch_git_cannot_read_keeps_the_files_last_read() {
     let (rig, runner) = seven_parked_on_src_seven("acme");
-    let head = git(&rig.repo(), &["rev-parse", "kelpie/7"]);
-    git(&rig.repo(), &["update-ref", "-d", "refs/heads/kelpie/7"]);
+    let head = git(&rig.worktree_7(), &["rev-parse", "kelpie/7"]);
+    git(
+        &rig.worktree_7(),
+        &["update-ref", "-d", "refs/heads/kelpie/7"],
+    );
     rig.forge.list_ready(9, false);
     rig.forge.set_ready_body(9, &changes("src/seven.rs"));
     assert_eq!(step(&runner).unwrap(), None, "#9's paths are read");
@@ -124,7 +127,7 @@ fn a_branch_git_cannot_read_keeps_the_files_last_read() {
         serde_json::to_value([overlap_9()]).unwrap()
     );
     git(
-        &rig.repo(),
+        &rig.worktree_7(),
         &["update-ref", "refs/heads/kelpie/7", head.trim()],
     );
 }
@@ -132,8 +135,11 @@ fn a_branch_git_cannot_read_keeps_the_files_last_read() {
 #[test]
 fn a_parked_branch_whose_files_are_unknown_holds_every_ready_issue() {
     let (rig, runner) = seven_parked_on_src_seven("acme");
-    let head = git(&rig.repo(), &["rev-parse", "kelpie/7"]);
-    git(&rig.repo(), &["update-ref", "-d", "refs/heads/kelpie/7"]);
+    let head = git(&rig.worktree_7(), &["rev-parse", "kelpie/7"]);
+    git(
+        &rig.worktree_7(),
+        &["update-ref", "-d", "refs/heads/kelpie/7"],
+    );
     // A runner started now has never read #7's branch.
     drop(runner);
     let runner = rig.open().unwrap();
@@ -157,7 +163,7 @@ fn a_parked_branch_whose_files_are_unknown_holds_every_ready_issue() {
     );
 
     git(
-        &rig.repo(),
+        &rig.worktree_7(),
         &["update-ref", "refs/heads/kelpie/7", head.trim()],
     );
     rig.next_look();
