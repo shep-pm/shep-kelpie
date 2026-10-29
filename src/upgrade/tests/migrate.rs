@@ -8,7 +8,7 @@ const WROTE: &str = "pm.md: wrote claude-code claude-opus-5-5 medium";
 // A stand-in build that answers `version --json`, and for `upgrade migrate`
 // appends the homes it was told to `log`, prints `reply`, and exits `exit`.
 fn migrating(kelpie: &str, log: &Path, reply: &str, exit: u8) -> String {
-    let json = format!(r#"{{"kelpie":"{kelpie}","shep":"0.17.0","protocol":{PROTOCOL_VERSION}}}"#);
+    let json = format!(r#"{{"kelpie":"{kelpie}","shep":"0.19.0","protocol":{PROTOCOL_VERSION}}}"#);
     format!(
         "#!/bin/sh\n\
          case \"$1 $2\" in\n\
@@ -77,13 +77,13 @@ async fn an_install_whose_migration_fails_stops_before_the_restarts() {
         "{said:?}"
     );
     assert_eq!(rig.restarts(), Vec::<String>::new());
-    assert_eq!(rig.installed_says(), "0.3.0 for shep 0.17.0");
-    assert_eq!(says(&rig.previous()), "0.1.0 for shep 0.17.0");
+    assert_eq!(rig.installed_says(), "0.3.0 for shep 0.19.0");
+    assert_eq!(says(&rig.previous()), "0.1.0 for shep 0.19.0");
 }
 
 // A stand-in build that answers `version --json`, and anything else with `stderr` and `exit`.
 fn answering_else(stderr: &str, exit: u8) -> String {
-    let json = format!(r#"{{"kelpie":"0.0.9","shep":"0.17.0","protocol":{PROTOCOL_VERSION}}}"#);
+    let json = format!(r#"{{"kelpie":"0.0.9","shep":"0.19.0","protocol":{PROTOCOL_VERSION}}}"#);
     format!(
         "#!/bin/sh\n\
          case \"$1 $2\" in\n\
@@ -133,7 +133,7 @@ async fn an_exit_that_is_not_an_old_build_s_usage_stops_before_the_restarts() {
 async fn a_bare_upgrade_migrates_in_process() {
     let rig = Rig::new().await;
     let stub = stub_in(&rig);
-    rig.cargo_installs("0.3.0", "0.17.0");
+    rig.cargo_installs("0.3.0", "0.19.0");
 
     let (ran, said) = rig.upgrade(Action::Installed).await;
 
@@ -150,7 +150,7 @@ async fn a_rollback_does_not_migrate() {
     let log = rig.builds.join("migrated");
     std::fs::remove_file(&rig.installed).unwrap();
     write_script(&rig.installed, &migrating("0.1.0", &log, WROTE, 0));
-    let new = rig.build("new", "0.3.0", "0.17.0");
+    let new = rig.build("new", "0.3.0", "0.19.0");
     rig.install(&new).await.0.unwrap();
     let stub = stub_in(&rig);
 
@@ -189,7 +189,7 @@ async fn a_bare_upgrade_writes_the_missing_kinds_into_a_table_that_loads() {
         &rig.home.join("agents"),
         "harness: claude-code\nmodel: claude-opus-5-5\neffort: high\n",
     );
-    rig.cargo_installs("0.3.0", "0.17.0");
+    rig.cargo_installs("0.3.0", "0.19.0");
 
     let (ran, said) = rig.upgrade(Action::Installed).await;
 
@@ -217,7 +217,7 @@ async fn a_bare_upgrade_writes_no_agents_allow_or_slack() {
         &rig.home.join("agents"),
         "harness: claude-code\nmodel: claude-opus-5-5\neffort: high\n",
     );
-    rig.cargo_installs("0.3.0", "0.17.0");
+    rig.cargo_installs("0.3.0", "0.19.0");
 
     let (ran, _) = rig.upgrade(Action::Installed).await;
 
@@ -238,7 +238,7 @@ async fn a_bare_upgrade_deletes_the_keys_the_agent_board_replaced_and_names_them
         &rig.home.join("agents"),
         "harness: claude-code\nmodel: claude-opus-5-5\neffort: high\n",
     );
-    rig.cargo_installs("0.3.0", "0.17.0");
+    rig.cargo_installs("0.3.0", "0.19.0");
 
     let (ran, said) = rig.upgrade(Action::Installed).await;
 
@@ -262,7 +262,7 @@ async fn a_bare_upgrade_whose_settings_are_refused_stops_before_the_restarts() {
     table.insert("forge".into(), Value::String("shep-pm/koji".into()));
     let shepherd = FakeShepherd::on(crate::shepherd::SHEP_VERSION);
     let mut rig = Rig::holding_on(shepherd, false, table).await;
-    rig.cargo_installs("0.3.0", "0.17.0");
+    rig.cargo_installs("0.3.0", "0.19.0");
 
     let (ran, said) = rig.upgrade(Action::Installed).await;
 

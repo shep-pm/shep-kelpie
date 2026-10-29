@@ -5,6 +5,7 @@
 //! it can make is a test alert, and only when asked.
 
 mod ci;
+mod dog_keys;
 mod e2e;
 mod gateways;
 mod github;
@@ -327,6 +328,7 @@ async fn projects(
         let gateways = kelpie.gateways();
         let listed = project::listed_reviewers(&tables, here, (&agents, &gateways));
         lines.extend(gateways::checks(&gateways, &agents, &listed));
+        lines.extend(dog_keys::checks(&gateways, &agents, here.shep_home));
         lines.extend(unbound::checks(&agents, &folder));
         lines.extend(ignored::check(&agents));
     }

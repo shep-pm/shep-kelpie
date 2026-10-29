@@ -238,3 +238,74 @@ async fn a_load_read_that_panics_leaves_each_model_unknown() {
         "{status}"
     );
 }
+
+// The paddock's key unset in the dog's environment, as when shep gives the dog none.
+fn keyless() -> Gateways {
+    let table: BTreeMap<GatewayName, Gateway> =
+        toml::from_str("[paddock]\nurl = \"http://gpu:8700\"\nkey_env = \"PADDOCK_KEY\"\n")
+            .unwrap();
+    Gateways::reading(table, |_| None)
+}
+
+fn naming<'a>(lines: &'a [String], model: &str) -> Vec<&'a String> {
+    let model = format!("`{model}`");
+    lines.iter().filter(|l| l.contains(&model)).collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_load_unread_for_an_unset_key_is_logged_once_naming_the_key_s_variable() {
+    let (_dir, agents) = agents(&[("coder.md", on_gateway("paddock", "coder"))]);
+    let sources = Sources::of(&agents, &keyless());
+    let shown = Mutex::new(Availability::new(&sources));
+    let leases = Arc::new(LeaseReads::default());
+    let readers = Readers {
+        leases: leases.clone(),
+        meters: BTreeMap::new(),
+        clock: Arc::new(FakeClock::at(EPOCH)),
+    };
+
+    let logged = read(&shown, &sources, &readers).await;
+    let coder = naming(&logged, "coder");
+    assert_eq!(coder.len(), 1, "{logged:?}");
+    assert!(coder[0].contains("gateway `paddock`"), "{}", coder[0]);
+    assert!(coder[0].contains("PADDOCK_KEY"), "{}", coder[0]);
+    assert_eq!(leases.count(), 0, "a model with no key is never asked");
+
+    let logged = read(&shown, &sources, &readers).await;
+    assert_eq!(
+        logged,
+        Vec::<String>::new(),
+        "the same reason is not logged again"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_load_the_gateway_does_not_give_is_logged_again_only_after_a_good_read() {
+    let (_dir, agents) = agents(&[("coder.md", on_gateway("paddock", "coder"))]);
+    let sources = Sources::of(&agents, &gateways());
+    let shown = Mutex::new(Availability::new(&sources));
+    let leases = Arc::new(LeaseReads::default());
+    let readers = Readers {
+        leases: leases.clone(),
+        meters: BTreeMap::new(),
+        clock: Arc::new(FakeClock::at(EPOCH)),
+    };
+    let free = ModelLoad {
+        slots: 1,
+        held: 0,
+        waiting: 0,
+    };
+
+    let logged = read(&shown, &sources, &readers).await;
+    let coder = naming(&logged, "coder");
+    assert_eq!(coder.len(), 1, "{logged:?}");
+    assert!(coder[0].contains("gateway `paddock`"), "{}", coder[0]);
+    assert!(!coder[0].contains("PADDOCK_KEY"), "{}", coder[0]);
+    assert_eq!(read(&shown, &sources, &readers).await, Vec::<String>::new());
+
+    leases.loaded(Some(free));
+    assert_eq!(read(&shown, &sources, &readers).await, Vec::<String>::new());
+    leases.loaded(None);
+    let logged = read(&shown, &sources, &readers).await;
+    assert_eq!(naming(&logged, "coder").len(), 1, "{logged:?}");
+}

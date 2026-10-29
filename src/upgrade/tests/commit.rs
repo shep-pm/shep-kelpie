@@ -19,7 +19,7 @@ async fn an_install_says_which_commit_the_build_it_installed_was_made_from() {
     ran.unwrap();
     assert!(
         said.iter()
-            .any(|l| l.contains("kelpie 0.3.0 (shep 0.17.0, built from 1f2e3a4)")),
+            .any(|l| l.contains("kelpie 0.3.0 (shep 0.19.0, built from 1f2e3a4)")),
         "{said:?}"
     );
 }
@@ -38,7 +38,7 @@ async fn a_rollback_says_which_commit_the_build_it_put_back_was_made_from() {
     ran.unwrap();
     assert!(
         said.iter()
-            .any(|l| l.contains("put back kelpie 0.2.0 (shep 0.17.0, built from 1f2e3a4)")),
+            .any(|l| l.contains("put back kelpie 0.2.0 (shep 0.19.0, built from 1f2e3a4)")),
         "{said:?}"
     );
 }

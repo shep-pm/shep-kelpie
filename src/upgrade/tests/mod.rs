@@ -71,15 +71,15 @@ impl Rig {
         #[cfg(unix)]
         if linked {
             let real = bin.join("real-kelpie");
-            write_script(&real, &answering("0.1.0", "0.17.0"));
+            write_script(&real, &answering("0.1.0", "0.19.0"));
             std::os::unix::fs::symlink(&real, &installed).unwrap();
         } else {
-            write_script(&installed, &answering("0.1.0", "0.17.0"));
+            write_script(&installed, &answering("0.1.0", "0.19.0"));
         }
         #[cfg(not(unix))]
         {
             assert!(!linked, "a symlinked install is built on Unix only");
-            write_script(&installed, &answering("0.1.0", "0.17.0"));
+            write_script(&installed, &answering("0.1.0", "0.19.0"));
         }
         shepherd.holds_dog_at("kelpie", &installed.display().to_string(), true);
         let rig = Self {
@@ -210,7 +210,7 @@ fn speaking(kelpie: &str, shep: &str, protocol: u32) -> String {
 // A stand-in build that names the commit it was made from.
 fn naming(kelpie: &str, commit: &str) -> String {
     let json = format!(
-        r#"{{"kelpie":"{kelpie}","shep":"0.17.0","protocol":{PROTOCOL_VERSION},"commit":"{commit}"}}"#
+        r#"{{"kelpie":"{kelpie}","shep":"0.19.0","protocol":{PROTOCOL_VERSION},"commit":"{commit}"}}"#
     );
     format!("#!/bin/sh\necho '{json}'\n")
 }

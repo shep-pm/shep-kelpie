@@ -20,7 +20,7 @@ mod connection;
 pub use connection::{Answer, Connection, Dial, Opened, Section, Socket};
 
 /// The shep version kelpie is built with, pinned in the workspace manifest
-pub const SHEP_VERSION: &str = "0.17.0";
+pub const SHEP_VERSION: &str = "0.19.0";
 
 /// The name kelpie's tables are kept under: `[app.dogs.kelpie]` on a
 /// runner sheep, and `[kelpie]` in `dogs.toml`
@@ -284,7 +284,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_runner_reads_its_own_sheep_s_table_and_kelpie_s_section() {
-        let (home, dial, _sent) = shepherd("0.17.1");
+        let (home, dial, _sent) = shepherd("0.19.1");
         let tables = read_in_time(&dial, home.path(), "koji").await.unwrap();
         assert_eq!(tables.project, Some(table("shep-pm/koji")));
         assert_eq!(
@@ -328,23 +328,30 @@ mod tests {
 
     #[tokio::test]
     async fn a_shepherd_on_a_later_minor_or_major_is_taken() {
-        for version in ["0.18.0", "1.0.0"] {
+        for version in ["0.20.0", "1.0.0"] {
             let (home, dial, _sent) = shepherd(version);
             let tables = read_in_time(&dial, home.path(), "koji").await.unwrap();
             assert_eq!(tables.project, Some(table("shep-pm/koji")), "{version}");
         }
     }
 
-    // 0.17.0 is the floor, the shep kelpie is built on. 0.12.4 was the first shep whose
+    // 0.19.0 is the floor, the shep kelpie is built on. 0.12.4 was the first shep whose
     // stop sweeps a sheep's whole lamb tree, so every shepherd kelpie takes has it.
     // A 0.14 shepherd drops a runner's notes as malformed, so it is refused too.
     #[tokio::test]
     async fn a_shepherd_from_before_the_floor_is_refused_naming_the_one_needed() {
-        for version in ["0.12.4", "0.14.0", "0.16.0", "0.16.1", "0.17.0-rc.1"] {
+        for version in [
+            "0.12.4",
+            "0.14.0",
+            "0.16.0",
+            "0.17.0",
+            "0.18.2",
+            "0.19.0-rc.1",
+        ] {
             let (home, dial, mut sent) = shepherd(version);
             let err = read_in_time(&dial, home.path(), "shep").await.unwrap_err();
             assert!(err.contains(&format!("runs shep {version}")), "{err}");
-            assert!(err.contains("takes a shepherd from 0.17.0 on"), "{err}");
+            assert!(err.contains("takes a shepherd from 0.19.0 on"), "{err}");
             assert!(sent.try_recv().is_err(), "{version} was asked for a table");
         }
     }

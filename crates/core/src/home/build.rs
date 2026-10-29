@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn a_build_names_the_commit_it_was_made_from() {
         let dir = tempfile::tempdir().unwrap();
-        let said = r#"{"kelpie":"0.3.0","shep":"0.17.0","commit":"1f2e3a4-dirty"}"#;
+        let said = r#"{"kelpie":"0.3.0","shep":"0.19.0","commit":"1f2e3a4-dirty"}"#;
         let named = crate::test::write_fake(dir.path(), "named", &Fake::new().prints(said));
 
         let build = Build::of(&named).unwrap();
@@ -275,7 +275,7 @@ mod tests {
     #[test]
     fn a_build_from_before_commits_were_recorded_names_none() {
         let dir = tempfile::tempdir().unwrap();
-        let said = r#"{"kelpie":"0.3.0","shep":"0.17.0"}"#;
+        let said = r#"{"kelpie":"0.3.0","shep":"0.19.0"}"#;
         let old = crate::test::write_fake(dir.path(), "old", &Fake::new().prints(said));
 
         let build = Build::of(&old).unwrap();
