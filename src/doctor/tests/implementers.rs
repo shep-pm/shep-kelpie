@@ -88,3 +88,23 @@ async fn implementers_all_left_out_of_the_boards_ask_are_missing() {
     );
     assert_eq!(fix, "correct what each `implementer` line names");
 }
+
+#[tokio::test]
+async fn a_paddock_key_the_dog_s_shep_toml_entry_lacks_is_unsure() {
+    let scene = Scene::new().await;
+    scene.shepherd.holds_section(&format!("{WEBHOOK}{PADDOCK}"));
+    crate::test::write_in(&scene.kelpie_home.join("agents"), "local.md", ON_PADDOCK);
+    crate::test::write_in(
+        scene.shepherd.home(),
+        "shep.toml",
+        "[daemon.adopted_dogs.kelpie]\npath = \"/bin/shep-kelpie\"\n",
+    );
+    let report = scene.report().await;
+    let Verdict::Unsure { what, .. } = verdict(&report, "gateway paddock: the dog's key") else {
+        panic!("{:#?}", report.render());
+    };
+    assert_eq!(
+        what,
+        "`[daemon.adopted_dogs.kelpie]` in shep.toml sets no KELPIE_TEST_KEY_NEVER_SET"
+    );
+}
