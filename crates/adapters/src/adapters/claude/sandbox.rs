@@ -344,12 +344,7 @@ mod tests {
             .with_install(crate::adapters::host::WindowsInstall {
                 provisioned: false,
                 setup_installed: None,
-                setup_expected: 1,
-                loopback_open: false,
-                seclogon_runs: true,
-                desktop_session: true,
-                profile_exclusions: Default::default(),
-                profile_read_env: Vec::new(),
+                ..crate::adapters::host::WindowsInstall::provisioned(false)
             });
         let cli = w.cli(Arc::new(none));
         for call in [w.worker(), w.call(Role::Reviewer)] {
