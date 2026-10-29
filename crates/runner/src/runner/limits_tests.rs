@@ -52,6 +52,9 @@ fn named(project: &str, (ranked, names): Agents) -> (Rig, Mutex<Runner>) {
         assert!(s.contains(LISTED), "the example's agents table moved");
         s.replace(LISTED, &format!("[app.dogs.kelpie.agents]\n{names}"))
     });
+    if !names.contains("allow = ") {
+        rig.allow(&["sonnet-high", "codex", "coder", "qwen", "claude", "pm"]);
+    }
     if !ranked.is_empty() {
         // The reviewers too, which each review round asks the board to rank.
         let candidates = ["qwen", "claude", "codex-review", "coder-review"];

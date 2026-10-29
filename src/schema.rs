@@ -184,6 +184,10 @@ mod tests {
                 "# [app.dogs.kelpie.dependencies]\n# pick = \"off\"\n# bots = [\"dependabot\"]\n# on_red = \"close\"\n# web = [\"web/\", \"package.json\"]\n# wait_hours = 24\n",
                 "[app.dogs.kelpie.dependencies]\npick = \"off\"\nbots = [\"dependabot\"]\non_red = \"close\"\nweb = [\"web/\", \"package.json\"]\nwait_hours = 24\n",
             )
+            .replace(
+                "[app.dogs.kelpie.agents]\n",
+                "[app.dogs.kelpie.agents]\nreviewers = [\"qwen\"]\n",
+            )
             .replace("# allow =", "allow =")
             .replace("# representative =", "representative =")
             .replace("# slack =", "slack =")

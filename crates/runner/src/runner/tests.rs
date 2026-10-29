@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use std::num::NonZeroU64;
+use std::sync::Mutex;
 
 use super::*;
 use crate::ports::{RateBucket, RateLimits, Visibility};
@@ -173,6 +174,27 @@ fn a_repo_that_does_not_exist_stops_the_runner() {
     assert!(err.ends_with("reactmap-gone is not a folder"), "{err}");
 }
 
+fn open_listed(rig: &Rig, names: &[&str]) -> Result<Mutex<Runner>, OpenError> {
+    let mut settings = rig.settings();
+    settings.agents.reviewers = Some(
+        names
+            .iter()
+            .map(|n| crate::settings::AgentName::try_from((*n).to_owned()).unwrap())
+            .collect(),
+    );
+    let ports = rig.open()?.into_inner().unwrap().ports;
+    Runner::open(
+        rig.project.clone(),
+        settings,
+        rig.kelpie_settings(),
+        &rig.paths(),
+        rig.home.path(),
+        Path::new(Rig::KELPIE),
+        ports,
+    )
+    .map(Mutex::new)
+}
+
 #[test]
 fn coderabbit_listed_for_a_repo_that_is_not_public_stops_the_runner() {
     for (visibility, seen_by) in [
@@ -183,7 +205,9 @@ fn coderabbit_listed_for_a_repo_that_is_not_public_stops_the_runner() {
         rig.coderabbit_on();
         rig.forge.set_visibility(visibility);
         assert_eq!(
-            rig.open().unwrap_err().to_string(),
+            open_listed(&rig, crate::test::RIG_REVIEWERS_AND_CODERABBIT)
+                .unwrap_err()
+                .to_string(),
             format!(
                 "setting `agents.reviewers`: coderabbit: shep-pm/shep is {seen_by}, \
                  and CodeRabbit's free plan reviews public repos only"
@@ -231,7 +255,9 @@ fn a_local_reviewer_the_project_lists_that_is_missing_stops_the_runner() {
         ),
     );
     rig.reviewers(&["qwen", "gone"]);
-    let err = rig.open().unwrap_err().to_string();
+    let err = open_listed(&rig, &["qwen", "gone"])
+        .unwrap_err()
+        .to_string();
     assert!(
         err.starts_with("setting `agents.reviewers`: gone: cannot run "),
         "{err}"
@@ -242,7 +268,7 @@ fn a_local_reviewer_the_project_lists_that_is_missing_stops_the_runner() {
 fn coderabbit_listed_for_a_public_repo_asks_the_forge_once() {
     let rig = Rig::new("shep");
     rig.coderabbit_on();
-    rig.open().unwrap();
+    open_listed(&rig, crate::test::RIG_REVIEWERS_AND_CODERABBIT).unwrap();
     assert_eq!(rig.forge.calls(), 1);
 }
 
