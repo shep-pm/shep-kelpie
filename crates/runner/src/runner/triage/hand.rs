@@ -19,19 +19,20 @@ use crate::state::{StateError, TriageStep, Triaged};
 
 // Whether `issue` is the maintainer's or the App's, carries no triage decision
 // other than `ready-for-agent` and `needs-triage`, and is opened since `since`
-// or carries `ready-for-agent`, which the board holds whatever its age
+// or carries `ready-for-agent` or was taken back from it, whatever its age
 fn maintainers_undecided(
     issue: &OpenIssue,
     since: Timestamp,
     pruned_through: u64,
     maintainer: &str,
     app: Option<&str>,
+    taken: bool,
 ) -> bool {
     let decided = (issue.labels.iter())
         .any(|l| l != READY && l != TRIAGE && TRIAGE_LABELS.contains(&l.as_str()));
     !decided
         && issue.number > pruned_through
-        && (carries(&issue.labels, READY) || issue.created > since)
+        && (taken || carries(&issue.labels, READY) || issue.created > since)
         && (issue.author.eq_ignore_ascii_case(maintainer) || is_app(&issue.author, app))
 }
 
@@ -103,7 +104,8 @@ impl Runner {
         let app = self.app_login();
         let candidates: Vec<usize> = (open.iter().enumerate())
             .filter(|(_, i)| {
-                maintainers_undecided(i, since, pruned_through, &maintainer, app.as_deref())
+                let taken = self.taken_seen(i.number).is_some();
+                maintainers_undecided(i, since, pruned_through, &maintainer, app.as_deref(), taken)
                     && self.check_owed(i.number)
                     && self.swap_owed(i)
                     && !self.triage_given_up(i.number)

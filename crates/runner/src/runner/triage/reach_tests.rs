@@ -84,6 +84,24 @@ fn a_held_ready_issue_opened_before_triage_was_on_is_due_under_maintainer_pick()
 }
 
 #[test]
+fn an_old_held_ready_issue_taken_back_under_hand_ready_still_gets_its_pass() {
+    let rig = turned_on_late("pick = \"maintainer\"\nhand_ready = true");
+    list(&rig, old(&rig, 30, MAINTAINER, &["ready-for-agent"]));
+    script_one_pass(&rig);
+    let runner = rig.open().unwrap();
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(
+        rig.github.label_takes(),
+        [(30, "ready-for-agent".to_owned())],
+        "taken back"
+    );
+    assert_eq!(calls(&rig, Role::Triager).len(), 1);
+    assert_eq!(commented(&rig), [30]);
+}
+
+#[test]
 fn a_held_issue_the_projects_app_opened_gets_a_pass_and_another_bots_gets_none() {
     for pick in ["all", "maintainer"] {
         let rig = turned_on_late(&format!("pick = \"{pick}\""));

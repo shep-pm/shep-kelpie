@@ -657,9 +657,9 @@ pub(super) fn opened_by_us_or_people(issue: &OpenIssue, app: Option<&str>) -> bo
 }
 
 // Whether `issue` is untouched, `owed` the triager for a failed check, and opened by
-// no bot but the App, after `since` unless it carries `ready-for-agent`, and by
-// `only` or the App when one is named. `needs-triage` and a refused `ready-for-agent`
-// are no decision: that is kelpie's record, and past `pruned_through` its own label.
+// no bot but the App, after `since` unless it carries `ready-for-agent` or was `taken`
+// back from it, and by `only` or the App when one is named. `needs-triage` and a
+// refused `ready-for-agent` are no decision: kelpie's record is.
 fn untouched(
     issue: &OpenIssue,
     since: Timestamp,
@@ -667,13 +667,14 @@ fn untouched(
     only: Option<&str>,
     owed: bool,
     app: Option<&str>,
+    taken: bool,
 ) -> bool {
     let decided = (issue.labels.iter()).any(|l| {
         TRIAGE_LABELS.contains(&l.as_str())
             && (l != TRIAGE || issue.number <= pruned_through)
             && l != READY
     });
-    let held = issue.labels.iter().any(|l| l == READY);
+    let held = taken || issue.labels.iter().any(|l| l == READY);
     owed && !decided
         && opened_by_us_or_people(issue, app)
         && (held || issue.created > since)

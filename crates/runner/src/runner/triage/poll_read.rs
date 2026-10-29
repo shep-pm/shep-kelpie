@@ -102,7 +102,17 @@ impl PollJob {
         // what the apply lists, which decides it from the state it finds.
         let to_triage = self.research
             || self.triage.is_some_and(|(since, pruned_through)| {
-                (open.iter()).any(|i| untouched(i, since, pruned_through, None, true, app))
+                (open.iter()).any(|i| {
+                    untouched(
+                        i,
+                        since,
+                        pruned_through,
+                        None,
+                        true,
+                        app,
+                        self.taken.contains(&i.number),
+                    )
+                })
             });
         // The check makes the maintainer's passing issue ready only where no
         // open pull request closes it.
@@ -259,6 +269,7 @@ impl Runner {
                     only.as_deref(),
                     self.check_owed(i.number),
                     app.as_deref(),
+                    self.taken_seen(i.number).is_some(),
                 ) && self.first_pass_owed(i.number)
                     && !self.ready_at_work(i, pulls.as_ref())
             })
