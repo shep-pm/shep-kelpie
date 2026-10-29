@@ -70,10 +70,9 @@ struct Carve {
     no_read: Vec<String>,
 }
 
-// Its own folder, the git its `git` runs through, the toolchain it runs, and the
-// config `git` starts on: a tool cannot exec under a deny of its own folder, and
-// a linked worktree's `.git` file names a gitdir outside the worktree. A cargo
-// home read back whole keeps its own credential files denied.
+// Its own folder, the git its `git` runs through (and a clone's borrowed
+// objects), the toolchain and the config `git` starts on: a tool cannot exec
+// under a deny of its own folder. A cargo home read back keeps its credentials denied.
 fn unfenced_reads(call: &AgentCall, unfenced: &[String], env: &dyn Env) -> Carve {
     let homes: Vec<PathBuf> = unfenced
         .iter()
@@ -86,6 +85,7 @@ fn unfenced_reads(call: &AgentCall, unfenced: &[String], env: &dyn Env) -> Carve
     )
     .ok()
     .map(PathBuf::from);
+    let borrowed = common.iter().flat_map(|common| alternates(common));
     let tools: Vec<PathBuf> = homes
         .iter()
         .flat_map(|home| dep_sources::toolchain_homes(home, env))
@@ -93,12 +93,27 @@ fn unfenced_reads(call: &AgentCall, unfenced: &[String], env: &dyn Env) -> Carve
     let config = homes.iter().flat_map(|home| git_config(home));
     Carve {
         read: (std::iter::once(call.cwd.clone()))
-            .chain(common)
+            .chain(common.iter().cloned())
+            .chain(borrowed)
             .chain(tools.iter().cloned())
             .chain(config)
             .collect(),
         no_read: dep_sources::cargo_credentials(&tools),
     }
+}
+
+// The object folders `common`'s `objects/info/alternates` lends it. A relative
+// line is read from the `objects` folder, as git reads it.
+fn alternates(common: &Path) -> Vec<PathBuf> {
+    let objects = common.join("objects");
+    let Ok(text) = std::fs::read_to_string(objects.join("info/alternates")) else {
+        return Vec::new();
+    };
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| objects.join(line))
+        .collect()
 }
 
 /// Where `program` runs, as the files and folders the sandbox must let through
@@ -409,6 +424,29 @@ mod tests {
                 .read
                 .iter()
                 .any(|own| own.canonicalize().unwrap_or_default() == common),
+            "{:?}",
+            policy.read
+        );
+    }
+
+    #[test]
+    fn an_unfenced_call_in_a_clone_reads_the_objects_it_borrows() {
+        let dir = tempfile::tempdir().unwrap();
+        let (repo, _) = linked_worktree(dir.path());
+        let clone = dir.path().join("clone");
+        let output = std::process::Command::new("git")
+            .args(["clone", "--quiet", "--shared"])
+            .args([&repo, &clone])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let lent = repo.join(".git/objects").canonicalize().unwrap();
+        let policy = call_policy(&unfenced_call(&clone), &[glob(dir.path())]);
+        assert!(
+            policy
+                .read
+                .iter()
+                .any(|own| own.canonicalize().unwrap_or_default() == lent),
             "{:?}",
             policy.read
         );

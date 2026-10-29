@@ -41,7 +41,7 @@ mod tests {
             worktree,
             build: Path::new("/k/targets/shep/7"),
             git_common_dir: common,
-            git_dir: Path::new("/k/repos/shep/.git/worktrees/7"),
+            git_dir: Path::new(LINKED),
             branch: "kelpie/7",
             base: "main",
             kelpie_pushes: false,
@@ -66,7 +66,9 @@ mod tests {
     }
 
     const WORKTREE: &str = r"C:\k\wt\shep\7";
-    const COMMON: &str = r"C:\k\repos\shep\.git";
+    // With `/` separators, so a path is inside another on any host the tests run on
+    const COMMON: &str = "C:/k/repos/shep/.git";
+    const LINKED: &str = "C:/k/repos/shep/.git/worktrees/7";
 
     #[test]
     fn on_windows_git_is_told_to_trust_the_common_git_dir_and_the_worktree() {
@@ -76,6 +78,22 @@ mod tests {
             git_config(&profile, true),
             format!(
                 "{} 'safe.directory'='C:/k/repos/shep/.git' 'safe.directory'='C:/k/wt/shep/7'",
+                housekeeping::PARAMETERS
+            )
+        );
+    }
+
+    #[test]
+    fn on_windows_git_is_told_to_trust_a_clones_git_dir() {
+        let clone = WorkerProfile {
+            git_dir: Path::new("C:/k/wt/shep/7/.git"),
+            ..profile(Path::new(WORKTREE), Path::new(COMMON), None)
+        };
+
+        assert_eq!(
+            git_config(&clone, true),
+            format!(
+                "{} 'safe.directory'='C:/k/repos/shep/.git' 'safe.directory'='C:/k/wt/shep/7' 'safe.directory'='C:/k/wt/shep/7/.git'",
                 housekeeping::PARAMETERS
             )
         );

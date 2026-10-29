@@ -1,0 +1,11 @@
+# Fence: a worker's git
+
+What a worker may write of git, for each shape of its folder. The rest of the fence is in fence.md, what it reads in fence-reads.md. `crates/core/src/profile/mod.rs` (`WorkerProfile::reach`)
+
+- A worktree is linked (`git_dir` inside `git_common_dir`) or a clone (`git_dir` outside it, the clone's own). `WorkerProfile::is_clone` tells them by that.
+- Linked worktree: writes are the worktree, the build folder, the common `objects`, its own git dir, and its branch's ref, lock and reflog, its tracking ref and the `packed-refs.lock`. Denied under the common git dir: `config`, `hooks`, `info`, `modules`, `HEAD`, `index`, `packed-refs`, `refs/tags` and `refs/heads/<base>`. Claude Code opens the common dir whole whatever `allowWrite` says, so the deny list is what narrows it (`docs/facts/worker-profile-and-sandbox.md`). `GIT_DENY` stays as it is until D4.
+- Clone: writes are the worktree, the build folder and its git dir whole. Denied under that git dir: `config`, `hooks`, `info`, `modules` and `objects/info`, the folders git runs code from or borrows objects through (`objects/info/alternates`). It writes nothing of the checkout's git, which `git_common_dir` then names. It reads that and its own git dir.
+- Why whole and not by ref: a grant on a path that does not exist yet is dropped on Windows, a grant on the folder alone leaves the new lock with no session ACE, and an inheritable one reaches a sibling ref (`docs/facts/worker-profile-and-sandbox.md`). A clone's refs are the worker's own, so nothing is lost by opening them.
+- A clone keeps no deny on `refs/heads/<base>` or `refs/tags`: kelpie reads neither from a clone, and the push guard and `push_to_base` still refuse a push to the base branch from any shape.
+- On Windows git trusts the common git dir and the worktree through `safe.directory`, and the clone's git dir beside them (`profile/safe_directory.rs`).
+- A call with no fence has no profile. `harness::policy::unfenced_reads` asks git for the common dir, which in a clone answers the clone, and also reads each folder its `objects/info/alternates` names, so a clone that borrows another repo's objects still runs. `crates/adapters/src/adapters/harness/policy.rs`
