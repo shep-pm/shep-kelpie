@@ -28,7 +28,7 @@ Import `assets/grafana/kelpie.json` into Grafana for the dashboard. Shep's own d
 
 ## The series
 
-`agent` is the name the project's settings give the agent (`codex`, `coderabbit`, `qwen`), and `effort` how hard the model was set to think. Either reads `unknown` where the ledger has none, as on an imported call. The plan gauges are set each time the pacer reads usage, which it does before a call on the account starts, so they hold the last reading until the next.
+`agent` is the name the project's settings give the agent (`codex`, `coderabbit`, `qwen`), and `effort` how hard the model was set to think. Either reads `unknown` where the ledger has none, as on an imported call. `kind` on a work item series is the kind its issue's `kind:` label named, one of the nine an issue may have (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `ci`, `chore`), or `none` where the item has none or its label named one kelpie no longer has; on a call series it is what the call was (`turn`, `review`, `wake`, and the rest). The plan gauges are set each time the pacer reads usage, which it does before a call on the account starts, so they hold the last reading until the next.
 
 Every runner series carries `sheep`, the project's name, as well as `id` and `fold`, which shep's metrics dog adds. The dog's series, last in the table, carry `dog` and `source` instead, and no `sheep`.
 
@@ -44,10 +44,11 @@ Every runner series carries `sheep`, the project's name, as well as `id` and `fo
 | `kelpie_plan_resets_at_seconds` | `account`, `window` | When that window resets, in Unix seconds |
 | `kelpie_plan_allowance_ratio`, `kelpie_plan_spent_today_ratio` | `account` | The share of the week today may spend, and the share spent since the day began by anyone on the account, 0 to 1 |
 | `kelpie_work_items` | `phase` | Open work items: `implement`, `review`, `ci`, `ruling`, `merge`, `done` |
-| `kelpie_work_items_finished_total` | `outcome` | Work items finished: `merged`, `closed` (no change), `dropped` |
-| `kelpie_work_item_seconds_total` | `outcome` | Wall seconds of the finished work items |
+| `kelpie_work_items_finished_total` | `outcome`, `agent`, `kind` | Work items finished: `merged`, `closed` (no change), `dropped`. `agent` is the one that built it and `kind` the kind of work its issue's `kind:` label named |
+| `kelpie_work_item_seconds_total` | `outcome`, `agent`, `kind` | Wall seconds of the finished work items; over `kelpie_work_items_finished_total` for a mean |
+| `kelpie_work_item_cost_usd_total` | `agent`, `kind` | US dollars the finished work items cost, from each finished line's `cost_usd`. A work item with a call whose harness reported no cost is left out, since its dollars are only a lower bound |
 | `kelpie_ci_failures_total` | `tests` | Each head of a work item's pull request that CI read red, counted once per head, by whether the worker could have caught it. `sandbox-only`: every test that failed is in a module `docs/agents/sandbox-red-tests.md` lists whole, so no worker could have run it. `runnable`: at least one is a test the worker could have run, or is in a module that doc lists only in part, or is a test failure in a runner kelpie cannot read, or the log kelpie read was cut before its failing names, or more runs failed than kelpie reads logs of. `none`: no test failed, as on lint, docs, fmt, or a build that never got as far as running one, which is what a compile failure inside a test job is. `timed-out`: a job's `timeout-minutes` ended a run kelpie read, and no log names a failing test, so a test is slow and none failed; it needs every failed run read, and a log that names a failing test keeps that test's class. That list of modules is of kelpie's own repo, so on any other project every failing test is `runnable`. A head is counted once even when a still-red ruling answered `yes` sends the same head back to CI. A red head whose logs kelpie could not read counts nothing |
-| `kelpie_review_rounds_total`, `kelpie_fix_turns_total`, `kelpie_rulings_total` | | Review rounds, fix turns and rulings of the finished work items |
+| `kelpie_review_rounds_total`, `kelpie_fix_turns_total`, `kelpie_rulings_total` | `agent`, `kind` | Review rounds, fix turns and rulings of the finished work items |
 | `kelpie_findings_total` | `severity` | Findings above a nit sent to the worker of a finished work item, each counted once across rounds: `high`, `medium` |
 | `kelpie_feature_enabled` | `feature` | 1 when the project's settings turn the feature on: `code_graph`, `browser`, `dev_server` (the browser is on and `main`'s launch file selects a configuration), `hooks` |
 | `kelpie_feature_runs_total` | `feature`, `outcome` | Times a feature ran, by `feature`: `code_graph`, `browser`, `dev_server` or `hooks`. The code graph's index: `ok`, `failed`, `skipped` (no server installed), `ended` (the call ended first). The browser's bridge opened for a turn: `ok`, `failed`, `skipped` (its tools are not installed). The dev server started for a turn's browser: `ok` (it answered in time), `failed` (it could not be planned or started, or did not answer within 60 seconds), `skipped` (`main` has no launch file, or one that selects no configuration). Each hook the runner runs: `ok` (it exited 0, or refused with 2 on purpose) or `failed` (any other exit, a timeout), one series per outcome and not per hook. Hooks run inside a worker's sandbox by `kelpie guard` are not counted |
@@ -91,6 +92,8 @@ What is left is spent outside kelpie: your own `gh`, scripts and tools on the sa
 ## The dashboard
 
 **Tool errors by kind and role** counts each kind over the dashboard's own time range, per role and project, sorted by the count, so the row at the top is the friction to fix. `other` is usually the largest, and is the worker's own command failing rather than anything around it.
+
+**Work items by agent and kind** is the track record on the endpoint: for each agent and kind of work finished in the dashboard's own time range, the share that merged and the mean hours an item took. These are what the agent board's pick reads and what an `agent-fit` ruling is raised from. Read it over a week or more, since an agent's record means little over a few items. The median hours the board uses for its estimate stay in the board's own record: kelpie sends the seconds totals, not `le` counters, which would multiply the series for a number a mean already gives.
 
 ## The alerts
 

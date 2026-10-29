@@ -1014,6 +1014,93 @@
         "overrides": []
       },
       "options": {}
+    },
+    {
+      "id": 25,
+      "type": "table",
+      "title": "Work items by agent and kind",
+      "description": "Each agent and kind of work the project finished in the dashboard's time range: the share that merged and the mean hours an item took, which is what the agent board's pick reads and what an agent-fit ruling is raised from. Read it over a week or more, since an agent's record means little over a few items. A pair with no merged item has no row, since the share has no series to divide.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 96
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (agent, kind) (increase(kelpie_work_items_finished_total{outcome=\"merged\",sheep=~\"$sheep\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_finished_total{sheep=~\"$sheep\"}[$__range]))",
+          "legendFormat": "",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (agent, kind) (increase(kelpie_work_item_seconds_total{sheep=~\"$sheep\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_finished_total{sheep=~\"$sheep\"}[$__range])) / 3600",
+          "legendFormat": "",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "merged share"
+              },
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "mean hours"
+              },
+              {
+                "id": "unit",
+                "value": "h"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "merged share",
+            "desc": true
+          }
+        ]
+      }
     }
   ],
   "refresh": "30s",
