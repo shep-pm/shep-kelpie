@@ -647,6 +647,29 @@ impl Rig {
     pub fn build_7(&self) -> PathBuf {
         self.paths().build(ticket(7))
     }
+
+    /// The tickets the project's state file lists as dropped, oldest first
+    pub fn dropped(&self) -> Vec<u64> {
+        let text = std::fs::read_to_string(self.paths().state).unwrap_or_default();
+        serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .map(|state| {
+                state["dropped"]
+                    .as_array()
+                    .map(|list| {
+                        list.iter()
+                            .map(|t| {
+                                let shown = t.as_str().unwrap_or_default();
+                                shown
+                                    .parse::<u64>()
+                                    .unwrap_or_else(|e| panic!("{t} is no ticket id: {e}"))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default()
+    }
 }
 
 // Whether a `Read(...)` deny rule covers `path`, written as the rule writes it

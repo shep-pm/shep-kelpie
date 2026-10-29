@@ -8,7 +8,7 @@
 
 use std::sync::Mutex;
 
-use super::add::AddError;
+use super::add::{AddError, Added};
 use super::adopt::AdoptError;
 use super::posted::Queued;
 use super::rework::ReworkError;
@@ -42,19 +42,19 @@ fn add(runner: &Mutex<Runner>, ticket: TicketId) -> Result<(), String> {
     match read_and_add(runner, ticket) {
         // A work item for the ticket is open, whoever opened it: the add is done.
         Err(AddError::InFlight(_)) if lock(runner).state.item(ticket).is_some() => Ok(()),
-        applied => applied.map_err(|e| e.to_string()),
+        applied => applied.map(drop).map_err(|e| e.to_string()),
     }
 }
 
-fn read_and_add(runner: &Mutex<Runner>, ticket: TicketId) -> Result<(), AddError> {
+fn read_and_add(runner: &Mutex<Runner>, ticket: TicketId) -> Result<Added, AddError> {
     let (tickets, remote) = {
         let mut held = lock(runner);
         held.looks.poll_reset();
-        held.add_allowed(ticket)?;
+        held.add_room(ticket)?;
         (held.ports.tickets.clone(), held.remote.clone())
     };
     let found = (tickets.issue(&remote, ticket)).map_err(AddError::Forge)?;
-    lock(runner).add_found(ticket, found, None, None).map(drop)
+    lock(runner).add_read(ticket, found)
 }
 
 fn rework(runner: &Mutex<Runner>, number: u64) -> Result<(), String> {
@@ -181,6 +181,83 @@ mod tests {
         assert!(lock(&runner).notes.take().is_empty());
         let status = rig.ask(&runner, "status", None);
         assert!(status["work_item"].is_object(), "{status}");
+        assert_eq!(status["standing"], json!(null), "nothing stands");
+    }
+
+    // One slot, #7 dropped, and #8 holding it, so an `add` of #7 has nowhere to open
+    fn seven_dropped_one_slot_held() -> (Rig, Mutex<Runner>) {
+        let rig = Rig::new("koji");
+        let runner = rig.open().unwrap();
+        rig.forge.list_ready(7, false);
+        rig.ask(&runner, "add", Some("7"));
+        rig.ask(&runner, "drop", Some("7"));
+        rig.ask(&runner, "add", Some("8"));
+        (rig, runner)
+    }
+
+    #[test]
+    fn a_queued_add_for_a_dropped_closed_issue_is_refused() {
+        let (rig, runner) = seven_dropped_one_slot_held();
+        rig.forge.close_issue(7);
+        ask(&runner, Queued::Add(ticket(7)));
+
+        take_up(&runner);
+
+        let refused = "queued `add 7` refused: #7 is closed";
+        assert_eq!(lock(&runner).notes.take(), [refused]);
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["work_item"]["issue"], "8");
+        assert_eq!(status["standing"], json!([refused]));
+    }
+
+    #[test]
+    fn a_queued_add_for_a_dropped_issue_with_a_bad_agent_label_is_refused() {
+        let (rig, runner) = seven_dropped_one_slot_held();
+        rig.forge.label(7, "agent:sonnet-high");
+        rig.forge.label(7, "agent:opus-high");
+        ask(&runner, Queued::Add(ticket(7)));
+
+        take_up(&runner);
+
+        let refused = "queued `add 7` refused: the issue has more than one `agent:` label";
+        assert_eq!(lock(&runner).notes.take(), [refused]);
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["standing"], json!([refused]));
+    }
+
+    #[test]
+    fn a_queued_add_for_a_dropped_issue_that_lost_the_ready_label_is_refused() {
+        let (rig, runner) = seven_dropped_one_slot_held();
+        rig.forge.unlist_ready(7);
+        ask(&runner, Queued::Add(ticket(7)));
+
+        take_up(&runner);
+
+        let refused = "queued `add 7` refused: #7 is not labelled ready-for-agent, \
+                       so the board would not take it";
+        assert_eq!(lock(&runner).notes.take(), [refused]);
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["standing"], json!([refused]));
+        assert_eq!(rig.dropped(), [7], "#7 stays dropped");
+    }
+
+    #[test]
+    fn a_queued_add_for_a_dropped_issue_with_no_free_slot_queues_it() {
+        let (rig, runner) = seven_dropped_one_slot_held();
+        ask(&runner, Queued::Add(ticket(7)));
+
+        take_up(&runner);
+
+        let cleared = "#7 skip-cleared by add: no slot is free, so the board takes it \
+                       by priority when one frees";
+        assert_eq!(lock(&runner).notes.take(), [cleared]);
+        assert_eq!(
+            rig.dropped(),
+            Vec::<u64>::new(),
+            "the cleared skip is saved"
+        );
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["work_item"]["issue"], "8");
         assert_eq!(status["standing"], json!(null), "nothing stands");
     }
 
