@@ -295,11 +295,13 @@ fn read_denials(no_read: &[String], read: &[PathBuf]) -> Vec<String> {
                 Some(dir) => (Path::new(dir), true),
                 None => (Path::new(rule.as_str()), false),
             };
-            if folder && holds_one(path) {
+            let resolved = crate::canonical(path).ok().filter(|c| c != path);
+            let holds = |dir: &Path| folder && holds_one(dir);
+            if holds(path) || resolved.as_deref().is_some_and(holds) {
                 return around_in_both(path, &spelled);
             }
             let mut rules = vec![rule.clone()];
-            if let Some(resolved) = crate::canonical(path).ok().filter(|c| c != path) {
+            if let Some(resolved) = resolved {
                 let suffix = if folder { "/**" } else { "" };
                 rules.push(format!("{}{suffix}", resolved.display()));
             }

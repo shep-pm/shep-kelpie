@@ -223,6 +223,27 @@ fn the_settings_deny_a_credential_behind_a_link_in_both_spellings() {
     assert_eq!(spellings(&given).len(), 2);
 }
 
+#[cfg(unix)]
+#[test]
+fn a_readable_folder_spelled_only_as_the_real_one_carves_a_folder_denied_through_the_link() {
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("real");
+    for folder in ["a", "b"] {
+        std::fs::create_dir_all(real.join(folder)).unwrap();
+    }
+    let link = dir.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let no_read = [format!("{}/**", link.display())];
+
+    let rules = read_denials(&no_read, &[real.join("a")]);
+
+    let expected: Vec<String> = spellings(&link.join("b"))
+        .into_iter()
+        .map(|s| format!("{s}/**"))
+        .collect();
+    assert_eq!(rules, expected);
+}
+
 #[test]
 fn a_review_round_keeps_its_read_tools_and_reads_its_folders() {
     let bare = settings(Tools::Review, &Reach::default());
