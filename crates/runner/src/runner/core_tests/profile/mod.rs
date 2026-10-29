@@ -242,6 +242,48 @@ fn writes_go_only_to_the_worktree_the_build_folder_and_what_a_commit_and_push_ne
     assert_eq!(s["env"]["CARGO_TARGET_DIR"], "/k/targets/shep/7");
 }
 
+// A clone is the worker's own repo: its git dir sits outside the checkout's
+// common git dir, so the checkout's git is not the worker's to write.
+fn clone_settings() -> Value {
+    WorkerProfile {
+        git_dir: Path::new("/k/wt/shep/7/.git"),
+        ..profile(&[], &[])
+    }
+    .settings()
+}
+
+#[test]
+fn a_worker_on_a_clone_writes_its_git_dir_and_not_its_config_hooks_info_or_alternates() {
+    let s = clone_settings();
+    assert_eq!(
+        strings(&s["sandbox"]["filesystem"]["allowWrite"]),
+        ["/k/wt/shep/7", "/k/targets/shep/7", "/k/wt/shep/7/.git"]
+    );
+    let deny = strings(&s["sandbox"]["filesystem"]["denyWrite"]);
+    for own in ["config", "hooks", "info", "modules", "objects/info"] {
+        let path = format!("/k/wt/shep/7/.git/{own}");
+        assert!(deny.contains(&path.as_str()), "{path} in {deny:?}");
+    }
+    assert!(deny.contains(&"/k/wt/shep/7/.claude"), "{deny:?}");
+    let read = strings(&s["sandbox"]["filesystem"]["allowRead"]);
+    assert!(read.contains(&"/k/wt/shep/7/.git"), "{read:?}");
+}
+
+#[test]
+fn a_worker_on_a_clone_writes_nothing_of_the_checkouts_git() {
+    let s = clone_settings();
+    let allow = strings(&s["sandbox"]["filesystem"]["allowWrite"]);
+    let deny = strings(&s["sandbox"]["filesystem"]["denyWrite"]);
+    assert!(
+        allow.iter().all(|p| !p.starts_with("/k/repos/shep/.git")),
+        "{allow:?}"
+    );
+    assert!(
+        deny.iter().all(|p| !p.starts_with("/k/repos/shep/.git")),
+        "a clone keeps no deny on the checkout's refs: {deny:?}"
+    );
+}
+
 #[test]
 fn build_env_points_into_the_build_folder_beside_cargo() {
     let build_env = BTreeMap::from([
