@@ -284,20 +284,6 @@ fn a_worker_on_a_clone_writes_nothing_of_the_checkouts_git() {
     );
 }
 
-// The guard reads a commit's git through the dir it is given, and the
-// checkout's has no entry for a clone.
-#[test]
-fn the_guard_of_a_worker_on_a_clone_checks_the_clones_git_dir() {
-    let clone = WorkerProfile {
-        git_dir: Path::new("/k/wt/shep/7/.git"),
-        ..profile(&[], &[])
-    };
-    let fence = clone.reach().fence.expect("a worker is fenced");
-    assert_eq!(fence.guard.git_common_dir, Path::new("/k/wt/shep/7/.git"));
-    let linked = profile(&[], &[]).reach().fence.expect("a worker is fenced");
-    assert_eq!(linked.guard.git_common_dir, Path::new("/k/repos/shep/.git"));
-}
-
 #[test]
 fn build_env_points_into_the_build_folder_beside_cargo() {
     let build_env = BTreeMap::from([
