@@ -344,12 +344,14 @@ mod tests {
                 fit: &any,
                 wait: Some(0),
                 typical: unpriced,
+                local: false,
             },
             Candidate {
                 agent: &opus,
                 fit: &any,
                 wait: Some(0),
                 typical: history.item("opus", Tier::Standard, Some("fix")),
+                local: false,
             },
         ];
         let order: Vec<&str> = pick(&Item::default(), &candidates)

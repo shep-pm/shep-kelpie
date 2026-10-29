@@ -171,9 +171,9 @@ fn a_reviewer_gets_the_plugin_as_well() {
 fn the_project_manager_gets_the_plugin_as_well() {
     let rig = Rig::new("koji");
     rig.edit_settings(|s| {
-        let listed = "\nimplementers = [\"sonnet-high\"]\n";
-        assert!(s.contains(listed), "the example's implementers moved");
-        s.replace(listed, "\nimplementers = [\"sonnet-high\"]\npm = \"pm\"\n")
+        let listed = "[app.dogs.kelpie.agents]\n";
+        assert!(s.contains(listed), "the example's agents table moved");
+        s.replace(listed, "[app.dogs.kelpie.agents]\npm = \"pm\"\n")
     });
     let dir = marketplace(&rig, "house", &[("style", "style")]);
     land_settings(

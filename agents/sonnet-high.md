@@ -1,5 +1,5 @@
 ---
-# Kelpie's default implementer: Sonnet 5.5 at high effort, which builds as
+# Kelpie's everyday implementer: Sonnet 5.5 at high effort, which builds as
 # well as Opus 5.5 at less of the cost. Anything below the closing line is
 # added to kelpie's own instructions for this agent; it adds nothing here.
 role: implementer

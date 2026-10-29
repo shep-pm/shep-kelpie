@@ -1,17 +1,16 @@
 //! Agents by name: a harness, the model and effort it runs on, and its limit
 //!
-//! Kelpie's agent files define each one (`crate::agents`). A project lists
-//! its implementers in `agents.implementers` and its reviewers in
-//! `agents.reviewers`, each by an agent file whose role is that one.
+//! Kelpie's agent files define each one (`crate::agents`). The agent board
+//! picks a work item's implementer from the files whose role is `implementer`
+//! that `agents.allow` holds. A project lists its reviewers in `agents.reviewers`.
 //!
 //! An agent's limit is its account's usage windows, read the way its
 //! `usage` says, or for a local model a lease held for each whole call.
 
 use std::fmt;
-use std::num::NonZeroU32;
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 mod facts;
 
@@ -20,7 +19,7 @@ pub use facts::{DoctorProbe, HarnessFacts, SessionIds};
 use super::gateway::ModelHost;
 use super::local::ContextSize;
 use super::reviewers::lowercase_name;
-use super::{HookPoint, RoleModel, Settings, SettingsError};
+use super::{Gateways, HookPoint, RoleModel, Settings, SettingsError};
 use crate::agents::{Agent, Agents, FOLDER, Role, Runs};
 use crate::forwarder::Upstream;
 
@@ -230,44 +229,51 @@ pub enum Limit {
     Gateway,
 }
 
+/// Whether this process holds the gateways' keys, for [`Settings::refused_implementers`]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GatewayKeys {
+    /// It does, as the runner does from its sheep's `env`, so a key it lacks refuses
+    Held,
+    /// It may not, as `doctor` in a shell may not, so the key is left to the runner
+    Unheld,
+}
+
+impl Limit {
+    /// Whether it is an account's windows, which the pacer reads: an agent on
+    /// any other runs on a local model
+    pub fn is_account(&self) -> bool {
+        matches!(self, Self::Account(_))
+    }
+}
+
 impl Default for Limit {
     fn default() -> Self {
         Self::Account(Account::Claude)
     }
 }
 
-/// How an issue with no `agent:` label gets its implementer
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
-#[serde(try_from = "String")]
-// schemars describes a `try_from` type by its source, so the bound goes here.
-#[schemars(extend("enum" = ["order"]))]
-pub enum ImplementerChoice {
-    /// The first implementer listed, with no call
-    #[default]
-    Order,
-}
+/// A key kelpie reads no longer, which a settings file may still hold
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Gone;
 
-impl ImplementerChoice {
-    /// The word the setting holds
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Order => "order",
-        }
+impl<'de> Deserialize<'de> for Gone {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        serde::de::IgnoredAny::deserialize(deserializer).map(|_| Self)
     }
 }
 
-impl TryFrom<String> for ImplementerChoice {
-    type Error = String;
+// Any value, as an older build may have written one.
+impl JsonSchema for Gone {
+    fn inline_schema() -> bool {
+        true
+    }
 
-    fn try_from(value: String) -> Result<Self, String> {
-        match value.as_str() {
-            "order" => Ok(Self::Order),
-            "issue-writer" => Err("`issue-writer` is gone with the issue writer, so an issue \
-                 with no `agent:` label runs on the first implementer listed: delete the key, \
-                 or run `shep kelpie settings migrate`, which does"
-                .to_owned()),
-            other => Err(format!("unknown variant `{other}`, expected `order`")),
-        }
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Gone".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "deprecated": true })
     }
 }
 
@@ -289,29 +295,32 @@ impl From<Vec<AgentName>> for Allow {
     }
 }
 
-/// The agents a project names: its implementers and its reviewers
+/// The agents a project names, and the ones it may use
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoleAgentNames {
     /// The only agents the project may use, by the names of kelpie's agent
-    /// files: any other is refused wherever the project names it, and no
-    /// `agent:` label may pick it. Not checked against the agents folder,
-    /// since the files are reread each wake. Every agent with a file when
-    /// absent or empty.
+    /// files: any other is refused wherever the project names it, the agent
+    /// board never picks it, and no `agent:` label may pin it. Not checked
+    /// against the agents folder, since the files are reread each wake.
+    /// Every agent with a file when absent or empty.
     #[serde(default)]
     pub allow: Option<Allow>,
-    /// The agents that build its work items, from kelpie's agent files. An
-    /// issue labelled `agent:<name>` runs on that one, and any other on the
-    /// first listed. `["sonnet-high"]` when absent.
-    #[serde(default = "default_implementers")]
-    pub implementers: Vec<AgentName>,
-    /// How an issue with no `agent:` label gets its implementer: `order`,
-    /// where it runs on the first implementer listed, which is the default.
+    /// Read by nothing: the agent board picks each work item's implementer,
+    /// and `shep kelpie upgrade` deletes it
     #[serde(default)]
-    pub implementer_choice: ImplementerChoice,
-    /// Read by nothing: the agent board's handoff moves a work item now
+    #[schemars(extend("deprecated" = true))]
+    pub implementers: Option<Gone>,
+    /// Read by nothing: the agent board picks each work item's implementer,
+    /// and `shep kelpie upgrade` deletes it
     #[serde(default)]
-    pub fallback_after: Option<NonZeroU32>,
+    #[schemars(extend("deprecated" = true))]
+    pub implementer_choice: Option<Gone>,
+    /// Read by nothing: the agent board's handoff moves a work item, and
+    /// `shep kelpie upgrade` deletes it
+    #[serde(default)]
+    #[schemars(extend("deprecated" = true))]
+    pub fallback_after: Option<Gone>,
     /// Minutes past the soonest finish the agent board lets a work item's agent
     /// take: a new item opens on the cheapest agent finishing within it, and a
     /// later turn moves on when its own agent finishes past it. The project
@@ -341,8 +350,8 @@ impl Default for RoleAgentNames {
     fn default() -> Self {
         Self {
             allow: None,
-            implementers: default_implementers(),
-            implementer_choice: ImplementerChoice::default(),
+            implementers: None,
+            implementer_choice: None,
             fallback_after: None,
             slack: DEFAULT_SLACK_MINUTES,
             reviewers: None,
@@ -352,19 +361,29 @@ impl Default for RoleAgentNames {
     }
 }
 
-fn default_slack() -> u32 {
-    DEFAULT_SLACK_MINUTES
+impl RoleAgentNames {
+    /// Each key kelpie reads no longer that the table still holds, by its setting's name
+    pub fn gone_keys(&self) -> Vec<&'static str> {
+        let held = [
+            ("agents.implementers", self.implementers),
+            ("agents.implementer_choice", self.implementer_choice),
+            ("agents.fallback_after", self.fallback_after),
+        ];
+        (held.into_iter())
+            .filter_map(|(key, gone)| gone.map(|_| key))
+            .collect()
+    }
 }
 
-fn default_implementers() -> Vec<AgentName> {
-    vec![AgentName::kelpies(crate::agents::DEFAULT_IMPLEMENTER)]
+fn default_slack() -> u32 {
+    DEFAULT_SLACK_MINUTES
 }
 
 fn default_representative() -> AgentName {
     AgentName::kelpies(crate::agents::REPRESENTATIVE)
 }
 
-/// One agent a project lists in `agents.implementers`
+/// An implementer the agent board may pick for a project
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Implementer {
     /// Its name, which an `agent:<name>` label gives
@@ -380,7 +399,7 @@ pub struct Implementer {
 impl Implementer {
     /// Whether it runs on a local model, behind a gateway or not, and never paced
     pub fn is_local(&self) -> bool {
-        !matches!(self.limit, Limit::Account(_))
+        !self.limit.is_account()
     }
 }
 
@@ -410,73 +429,74 @@ pub struct ExpertAgent {
     pub prompt: Option<String>,
 }
 
-/// The project's implementers and project manager, from the agents it names
+/// The project's project manager, from the agent it names
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoleAgents {
-    /// The project's implementers, in its order, each once
-    pub implementers: Vec<Implementer>,
-    /// The implementer listed first, which an issue with no `agent:` label
-    /// runs on
-    pub default_implementer: Implementer,
     /// The project manager, when the project names one
     pub pm: Option<PmAgent>,
 }
 
-impl RoleAgents {
-    /// The listed implementer `name`, if the project lists it
-    pub fn implementer(&self, name: &AgentName) -> Option<&Implementer> {
-        self.implementers.iter().find(|i| &i.name == name)
-    }
-
-    /// The listed implementers' names, in the project's order
-    pub fn implementer_names(&self) -> Vec<AgentName> {
-        self.implementers.iter().map(|i| i.name.clone()).collect()
-    }
-}
-
-/// The setting a refusal about the implementers names
-const IMPLEMENTERS: &str = "agents.implementers";
-
 impl Settings {
-    /// The implementers and project manager the project names, from `agents`
-    ///
-    /// # Errors
-    ///
-    /// [`SettingsError::Invalid`] naming an agent `agents` lacks or whose
-    /// file is another role's, one `agents.allow` leaves out, an implementer
-    /// the worker's fence cannot hold, or an empty list.
-    pub fn role_agents(&self, agents: &Agents) -> Result<RoleAgents, SettingsError> {
+    /// The implementers the agent board may pick for this project, by name:
+    /// each agent file whose role is `implementer` that `agents.allow` holds
+    pub fn allowed_implementers(&self, agents: &Agents) -> Vec<Implementer> {
         let allow = self.agents.allow.as_ref();
-        let mut implementers: Vec<Implementer> = Vec::new();
-        for name in &self.agents.implementers {
-            if implementers.iter().any(|i| &i.name == name) {
-                continue;
-            }
-            let agent = find(
-                agents,
-                name,
-                IMPLEMENTERS,
-                "agents",
-                Role::Implementer,
-                allow,
-            )?;
-            let Runs::Session { model, limit } = &agent.runs else {
-                unreachable!("an implementer's file only parses to a session")
-            };
-            self.under_worker_fence(name, model)?;
-            implementers.push(Implementer {
+        let allowed = (agents.iter()).filter(|(name, agent)| {
+            agent.role == Role::Implementer && allow.is_none_or(|a| a.holds(name))
+        });
+        let implementer = |(name, agent): (&AgentName, &Agent)| {
+            let (model, limit) = agent.runs.session()?;
+            Some(Implementer {
                 name: name.clone(),
                 model: model.clone(),
                 limit: limit.clone(),
                 prompt: agent.prompt.clone(),
-            });
-        }
-        let Some(default_implementer) = implementers.first().cloned() else {
-            return Err(SettingsError::Invalid {
-                setting: IMPLEMENTERS,
-                reason: "lists no implementer: list one, such as `sonnet-high`".into(),
-            });
+            })
         };
+        allowed.filter_map(implementer).collect()
+    }
+
+    /// The implementers [`Settings::allowed_implementers`] holds that no turn can
+    /// run on, by name, each with why: the worker's fence would not hold on it, or
+    /// kelpie's `gateways` cannot route to it, the gateway's key counting as `keys`
+    /// says. The agent board is never asked about them.
+    pub fn refused_implementers(
+        &self,
+        agents: &Agents,
+        gateways: &Gateways,
+        keys: GatewayKeys,
+    ) -> Vec<(AgentName, String)> {
+        let why = |i: &Implementer| {
+            let fenced = self.under_worker_fence(&i.name, &i.model);
+            let routed = || match keys {
+                GatewayKeys::Held => gateways.check_listed(agents, [&i.name]),
+                GatewayKeys::Unheld => gateways.check_listed_without_keys(agents, [&i.name]),
+            };
+            let refused = fenced.and_then(|()| routed()).err()?;
+            Some(match refused {
+                SettingsError::Invalid { reason, .. } => {
+                    let named = format!("{}: ", i.name);
+                    reason
+                        .strip_prefix(&named)
+                        .map_or(reason.clone(), str::to_owned)
+                }
+                other => other.to_string(),
+            })
+        };
+        let allowed = self.allowed_implementers(agents);
+        (allowed.iter())
+            .filter_map(|i| Some((i.name.clone(), why(i)?)))
+            .collect()
+    }
+
+    /// The project manager the project names, from `agents`
+    ///
+    /// # Errors
+    ///
+    /// [`SettingsError::Invalid`] naming `agents.pm` when it has no agent
+    /// file, its file is another role's, or `agents.allow` leaves it out.
+    pub fn role_agents(&self, agents: &Agents) -> Result<RoleAgents, SettingsError> {
+        let allow = self.agents.allow.as_ref();
         let pm = match &self.agents.pm {
             Some(name) => {
                 let agent = find(agents, name, "agents.pm", "agents", Role::Pm, allow)?;
@@ -492,11 +512,7 @@ impl Settings {
             }
             None => None,
         };
-        Ok(RoleAgents {
-            implementers,
-            default_implementer,
-            pm,
-        })
+        Ok(RoleAgents { pm })
     }
 
     /// The representative the project names in `agents.representative`
@@ -545,7 +561,7 @@ impl Settings {
         if !facts.runs_guard_hooks && !self.worker.guard_hooks.is_empty() {
             let what = "`worker.guard_hooks`, which are Claude Code hooks";
             return Err(SettingsError::Invalid {
-                setting: IMPLEMENTERS,
+                setting: "worker.guard_hooks",
                 reason: format!(
                     "implementer {name} runs on {}, which cannot run {what}: \
                      turn those off, move the check to a `command` or `write` hook in \
@@ -562,7 +578,7 @@ impl Settings {
                 .any(|h| h.point == HookPoint::AfterCommand)
         {
             return Err(SettingsError::Invalid {
-                setting: IMPLEMENTERS,
+                setting: "hooks",
                 reason: format!(
                     "implementer {name} runs on {}, which cannot run an `after_command` hook: \
                      {why}. Move the check to a `command` or `write` \

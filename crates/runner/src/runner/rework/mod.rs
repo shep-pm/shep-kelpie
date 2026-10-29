@@ -12,11 +12,12 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::Runner;
+use super::add::{AddError, Opening, Ranked, Unpicked};
 use super::pace::{Passed, Started};
 use super::report::{Begin, ReworkBy, StepReport};
 use super::trigger::{self, issue_list};
 use super::turn;
-use crate::board::{HUMAN, LabelError, OpenPullRequest, READY, Skip};
+use crate::board::{HUMAN, OpenPullRequest, READY, Skip};
 use crate::ports::{ForgeError, MaintainerReview, PullRequestState, Reviewed};
 use crate::settings::AgentName;
 use crate::state::StateError;
@@ -24,14 +25,12 @@ use crate::ticket::TicketId;
 use crate::work_item::{Known, Phase, Review, WorkItem, new_session_id};
 use crate::worktree::{self, Remote};
 
-// A pull request that can be reworked, and the agent its issue runs it on
+// A pull request that can be reworked
 struct Target {
     pr: Reviewed,
     ticket: TicketId,
     review: MaintainerReview,
     title: String,
-    agent: AgentName,
-    note: Option<String>,
 }
 
 /// The file in the build folder that carries the review
@@ -57,8 +56,8 @@ pub enum ReworkError {
     NothingToRework(u64),
     /// The forge could not show the pull request's issue
     Issue(u64, ForgeError),
-    /// The issue's `agent:` label cannot be used
-    Label(LabelError),
+    /// The issue's `agent:` label cannot be used, or the agent board named no agent
+    Agent(AddError),
     /// No random session id could be drawn, with the OS's reason
     Session(String),
     /// The review could not be written for the worker, with the reason
@@ -96,7 +95,7 @@ impl fmt::Display for ReworkError {
             ),
             Self::Viewer(e) => write!(f, "cannot read the account kelpie acts as: {e}"),
             Self::Issue(issue, e) => write!(f, "cannot read issue #{issue}: {e}"),
-            Self::Label(e) => e.fmt(f),
+            Self::Agent(e) => e.fmt(f),
             Self::Session(e) => write!(f, "cannot draw a session id: {e}"),
             Self::ReviewFile(e) => f.write_str(e),
             Self::Unlabel(number, label, e) => {
@@ -120,7 +119,10 @@ impl ReworkError {
     fn settled(&self) -> bool {
         matches!(
             self,
-            Self::NotOpen(..) | Self::NotKelpies(_) | Self::NothingToRework(_) | Self::Label(_)
+            Self::NotOpen(..)
+                | Self::NotKelpies(_)
+                | Self::NothingToRework(_)
+                | Self::Agent(AddError::Label(_))
         )
     }
 }
@@ -252,6 +254,9 @@ impl Runner {
                     by,
                 }),
                 Err(ReworkError::State(e)) => return Err(e),
+                // A dog out of reach answers no pull request, so this poll asks for none after it
+                // and the pass is idle, as dispatch's is; the next poll asks again.
+                Err(ReworkError::Agent(AddError::Unpicked(Unpicked::Unreachable))) => break,
                 Err(e) if e.settled() => match self.refuse_rework(number, labelled, review, &e)? {
                     Ok(begin) => begin,
                     Err(e) => {
@@ -339,27 +344,33 @@ impl Runner {
     // Checks `pr` can be reworked, then writes its review for the worker,
     // takes the triage labels off and saves the work item, in that order.
     fn start_rework(&mut self, number: u64, pr: Reviewed) -> Result<AgentName, ReworkError> {
-        let target = self.rework_target(number, pr)?;
-        self.open_rework(number, target)
+        let (target, ranked) = self.rework_target(number, pr)?;
+        self.open_rework(number, target, ranked.first())
     }
 
-    // As `start_rework`, unless the pacer holds the account of the agent the
-    // issue's label names, which no listed role may spend. Nothing changes then.
+    // As `start_rework`, on the first agent the board ranks that the pacer lets
+    // start. Nothing changes while it holds them all.
     fn start_rework_paced(
         &mut self,
         number: u64,
         pr: Reviewed,
     ) -> Result<Started<AgentName>, ReworkError> {
-        let target = self.rework_target(number, pr)?;
-        let pace = self.pace_agent(&target.agent);
-        if let Some(held) = pace.map_err(ReworkError::State)?.holds() {
-            return Ok(Started::Held(Box::new(held)));
+        let (target, ranked) = self.rework_target(number, pr)?;
+        match self.paced_opening(ranked).map_err(ReworkError::State)? {
+            Started::Opened(opening) => self
+                .open_rework(number, target, opening)
+                .map(Started::Opened),
+            Started::Held(held) => Ok(Started::Held(held)),
         }
-        self.open_rework(number, target).map(Started::Opened)
     }
 
-    // Checks `pr` can be reworked, and reads the issue for the agent it runs on.
-    fn rework_target(&mut self, number: u64, mut pr: Reviewed) -> Result<Target, ReworkError> {
+    // Checks `pr` can be reworked, and asks the board for the agents its issue
+    // may run on.
+    fn rework_target(
+        &mut self,
+        number: u64,
+        mut pr: Reviewed,
+    ) -> Result<(Target, Ranked), ReworkError> {
         match pr.state {
             PullRequestState::Open => {}
             PullRequestState::Merged => return Err(ReworkError::NotOpen(number, "merged")),
@@ -390,36 +401,44 @@ impl Runner {
             .tickets
             .issue(repo, ticket)
             .map_err(|e| ReworkError::Issue(issue, e))?;
-        let (agent, note) = self
-            .labelled_agent(ticket, &found.labels)
-            .map_err(ReworkError::Label)?;
-        Ok(Target {
+        let ranked = self
+            .board_ranked(ticket, &found.labels)
+            .map_err(ReworkError::Agent)?;
+        let target = Target {
             pr,
             ticket,
             review,
             title: found.title,
-            agent,
-            note,
-        })
+        };
+        Ok((target, ranked))
     }
 
     // Writes the review for the worker, takes the triage labels off and saves
     // the work item, in that order.
-    fn open_rework(&mut self, number: u64, target: Target) -> Result<AgentName, ReworkError> {
+    fn open_rework(
+        &mut self,
+        number: u64,
+        target: Target,
+        opening: Opening,
+    ) -> Result<AgentName, ReworkError> {
         let Target {
             pr,
             ticket,
             review,
             title,
-            agent,
-            note,
         } = target;
+        let Opening {
+            agent,
+            pinned,
+            note,
+        } = opening;
         let repo = &self.remote;
         let session = new_session_id().map_err(|e| ReworkError::Session(e.to_string()))?;
         // The pull request merges into the branch it was opened against, whatever
         // `git.base` says now.
         let fresh = WorkItem {
             base: Some(pr.base.clone()),
+            pinned,
             ..self.fresh(ticket, title, agent.clone(), session)
         };
         // A rework stays on its pull request, so a listed bot's `rounds`

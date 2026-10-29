@@ -3,13 +3,15 @@
 use std::fmt;
 
 use super::Runner;
+use super::pace::{Started, Walked};
 use super::pm::Picked;
 use super::trigger::issue_list;
 use crate::board::check::label_kind;
 use crate::board::{LabelError, agent_label, old_worker_label, pinned};
 use crate::lease::door::{Pick, PickAsk};
+use crate::pacer::Scope;
 use crate::ports::{ForgeError, Issue};
-use crate::settings::AgentName;
+use crate::settings::{AgentName, GatewayKeys};
 use crate::state::StateError;
 use crate::ticket::TicketId;
 use crate::work_item::new_session_id;
@@ -74,9 +76,9 @@ pub(super) struct Ranked {
 
 /// The implementer a new work item opens on, out of a [`Ranked`]
 pub(super) struct Opening {
-    agent: AgentName,
-    pinned: bool,
-    note: Option<String>,
+    pub(super) agent: AgentName,
+    pub(super) pinned: bool,
+    pub(super) note: Option<String>,
 }
 
 impl Ranked {
@@ -211,11 +213,12 @@ impl Runner {
         labels: &[String],
         picked: Option<&Picked>,
     ) -> Result<Ranked, AddError> {
-        let (pin, note) = self.pin(ticket, picked);
+        let files = self.implementer_files();
+        let (pin, note) = pin(ticket, picked, &files);
         let pin = match pin {
             Some(pin) => Some(pin),
             // A label naming no implementer is refused, pinned or not.
-            None => (agent_label(labels, &self.implementer_files()))
+            None => (agent_label(labels, &files))
                 .map_err(AddError::Label)?
                 .filter(|_| pinned(labels)),
         };
@@ -224,7 +227,7 @@ impl Runner {
             tier: picked.and_then(|p| p.tier),
             pin: pin.clone(),
             slack: Some(self.slack(picked.and_then(|p| p.slack))),
-            agents: self.board_agents(),
+            agents: self.board_agents_of(files),
             leave_out: Vec::new(),
         };
         let picks = self.board_picks(&ask).map_err(AddError::Unpicked)?;
@@ -257,81 +260,117 @@ impl Runner {
         Ok(allowed.collect())
     }
 
-    // The agent `picked` pins its work item to, while it is an implementer
-    // `agents.allow` holds.
-    pub(super) fn pinned_agent(&self, picked: &Picked) -> Option<AgentName> {
-        let agent = picked.agent.as_ref()?;
-        self.implementer_files()
-            .contains(agent)
-            .then(|| agent.clone())
-    }
-
-    // `pinned_agent` of `picked`, and the note for an agent it names that is
-    // no implementer now.
-    fn pin(
-        &self,
-        ticket: TicketId,
-        picked: Option<&Picked>,
-    ) -> (Option<AgentName>, Option<String>) {
-        let Some(picked) = picked else {
-            return (None, None);
-        };
-        let pin = self.pinned_agent(picked);
-        let lapsed = picked.agent.as_ref().filter(|_| pin.is_none());
-        let note = lapsed.map(|agent| {
-            format!(
-                "{}: the project manager picked it for {agent}, which is no longer an \
-                 implementer `agents.allow` holds, so the agent board picks",
-                ticket.shown()
-            )
-        });
-        (pin, note)
-    }
-
-    // The implementer a ticket with `labels` runs on: the one its `agent:`
-    // label names, or the default. Beside it, the log line an old `worker:`
-    // label gets once the work item opens, since it no longer picks anything.
-    pub(super) fn labelled_agent(
+    // What the agent board ranks for a work item no project manager picked, a
+    // rework or an adoption, for `ticket`, whose issue has `labels`. Its note is
+    // the log line an old `worker:` label gets once the work item opens, since it
+    // no longer picks anything.
+    pub(super) fn board_ranked(
         &self,
         ticket: TicketId,
         labels: &[String],
-    ) -> Result<(AgentName, Option<String>), LabelError> {
-        if let Some(agent) = agent_label(labels, &self.implementer_files())? {
-            return Ok((agent, None));
-        }
-        let agent = self.agents.default_implementer.name.clone();
-        let note = old_worker_label(labels).map(|old| {
+    ) -> Result<Ranked, AddError> {
+        let mut ranked = self.ranked(ticket, labels, None)?;
+        ranked.note = old_worker_label(labels).map(|old| {
             format!(
-                "{} is labelled `{old}`, which kelpie no longer reads, so it runs on the \
-                 default implementer, {agent}: an `agent:<name>` label picks another \
-                 implementer",
+                "{} is labelled `{old}`, which kelpie no longer reads, so the agent board \
+                 picks its implementer: an `agent:<name>!` label pins one",
                 ticket.named().to_lowercase()
             )
         });
-        Ok((agent, note))
+        Ok(ranked)
     }
 
-    // The implementers the agent board may rank: `implementer_files`, those
-    // the project lists first, in its order.
+    // The opening on the first agent of `ranked` the pacer lets start, walked as
+    // dispatch walks it, or what the runner does instead: read a usage first, or
+    // the first hold's step.
+    pub(super) fn paced_opening(&mut self, ranked: Ranked) -> Result<Started<Opening>, StateError> {
+        let walked = self.first_unpaced(ranked.agents(), Scope::Dispatch)?;
+        Ok(match walked {
+            Walked::Opens(agent) => Started::Opened(ranked.opening(agent)),
+            Walked::Reads(reads) => Started::Held(Box::new(reads)),
+            Walked::Held {
+                first: Some(held), ..
+            } => Started::Held(Box::new(held)),
+            // A ranking holds an agent, so a walk that opened none held one.
+            Walked::Held { first: None, .. } => Started::Opened(ranked.first()),
+        })
+    }
+
+    // Why a work item whose issue has `labels` has no agent to run on, where it
+    // has none: its `agent:` label names no implementer, or more than one.
+    pub(super) fn label_refuses(&self, labels: &[String]) -> Option<LabelError> {
+        agent_label(labels, &self.implementer_files()).err()
+    }
+
+    // The implementers the agent board may rank, by name: `implementer_files`
+    // but those no turn can run on (`left_out`).
     pub(super) fn board_agents(&self) -> Vec<AgentName> {
-        let listed = self.agents.implementer_names();
-        let mut files = self.implementer_files();
-        files.sort_by_key(|n| listed.iter().position(|l| l == n).unwrap_or(listed.len()));
-        files
+        self.board_agents_of(self.implementer_files())
     }
 
-    // Every agent an `agent:` label may name for this project: each agent
-    // file whose role is `implementer`, listed in `agents.implementers` or
-    // not, that `agents.allow` holds. A listed one always has such a file and
-    // passed that check at load, so this holds them all.
-    pub(super) fn implementer_files(&self) -> Vec<AgentName> {
-        let allow = self.settings.agents.allow.as_ref();
-        let files = self.book.implementer_files();
-        let allowed = files
-            .into_iter()
-            .filter(|n| allow.is_none_or(|a| a.holds(n)));
-        allowed.collect()
+    // `files`, the project's `implementer_files`, but those `left_out`.
+    fn board_agents_of(&self, files: Vec<AgentName>) -> Vec<AgentName> {
+        let refused = self.left_out();
+        let refused: Vec<&AgentName> = refused.iter().map(|(name, _)| name).collect();
+        (files.into_iter())
+            .filter(|name| !refused.contains(&name))
+            .collect()
     }
+
+    // The implementers the agent board is never asked about, each with why: the
+    // worker's fence would not hold on it, or the gateways cannot route to it.
+    fn left_out(&self) -> Vec<(AgentName, String)> {
+        (self.settings).refused_implementers(&self.book, &self.gateways, GatewayKeys::Held)
+    }
+
+    // The names `left_out` holds now
+    pub(super) fn left_out_names(&self) -> Vec<AgentName> {
+        self.left_out().into_iter().map(|(name, _)| name).collect()
+    }
+
+    // A log line for each implementer `left_out` that `before` does not name, so
+    // a reread tells only the ones it newly leaves out.
+    pub(super) fn left_out_notes(&self, before: &[AgentName]) -> Vec<String> {
+        let line = |(name, why): (AgentName, String)| {
+            format!("implementer {name} is left out of the agent board's ask: {why}")
+        };
+        (self.left_out().into_iter())
+            .filter(|(name, _)| !before.contains(name))
+            .map(line)
+            .collect()
+    }
+
+    // Every agent an `agent:` label may name for this project, by name: each
+    // agent file whose role is `implementer` that `agents.allow` holds.
+    pub(super) fn implementer_files(&self) -> Vec<AgentName> {
+        let allowed = self.settings.allowed_implementers(&self.book).into_iter();
+        allowed.map(|i| i.name).collect()
+    }
+}
+
+// The agent `picked` pins its work item to, while it is one of `files`, the
+// implementers `agents.allow` holds, and the note for an agent it names that
+// is no implementer now.
+fn pin(
+    ticket: TicketId,
+    picked: Option<&Picked>,
+    files: &[AgentName],
+) -> (Option<AgentName>, Option<String>) {
+    let Some(picked) = picked else {
+        return (None, None);
+    };
+    let pin = (picked.agent.as_ref())
+        .filter(|agent| files.contains(agent))
+        .cloned();
+    let lapsed = picked.agent.as_ref().filter(|_| pin.is_none());
+    let note = lapsed.map(|agent| {
+        format!(
+            "{}: the project manager picked it for {agent}, which is no longer an \
+             implementer `agents.allow` holds, so the agent board picks",
+            ticket.shown()
+        )
+    });
+    (pin, note)
 }
 
 // What `ask` wanted, in words: its kind, its least tier and its pin.

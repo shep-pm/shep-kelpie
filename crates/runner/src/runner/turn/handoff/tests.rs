@@ -29,8 +29,8 @@ fn later_turn_due(labels: &[&str]) -> (Rig, Mutex<Runner>) {
 // ... in a project whose settings hold `minutes` of slack
 fn later_turn_slacking(minutes: u32) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new("acme");
-    let slack = format!("\nslack = {minutes}\nimplementers = ");
-    rig.edit_settings(|s| s.replace("\nimplementers = ", &slack));
+    let slack = format!("[app.dogs.kelpie.agents]\nslack = {minutes}\n");
+    rig.edit_settings(|s| s.replace("[app.dogs.kelpie.agents]\n", &slack));
     later_turn_in(rig, &[])
 }
 
@@ -38,7 +38,7 @@ fn later_turn_slacking(minutes: u32) -> (Rig, Mutex<Runner>) {
 fn later_turn_in(rig: Rig, labels: &[&str]) -> (Rig, Mutex<Runner>) {
     rig.write_agent("coder", CODER);
     rig.write_codex_implementer();
-    rig.implementers(&["sonnet-high", "coder"]);
+    rig.agent_board.ranks(&["sonnet-high", "coder"]);
     for label in labels {
         rig.forge.label(7, label);
     }
@@ -330,7 +330,7 @@ fn a_pick_whose_usage_is_unread_is_read_once_then_takes_the_item() {
 fn a_first_turn_handed_off_before_its_worktree_exists_names_no_commits() {
     let rig = Rig::new("acme");
     rig.write_agent("coder", CODER);
-    rig.implementers(&["sonnet-high", "coder"]);
+    rig.agent_board.ranks(&["sonnet-high", "coder"]);
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     let own = SOON + SLACK + 1;

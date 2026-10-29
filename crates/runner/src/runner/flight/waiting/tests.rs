@@ -21,7 +21,7 @@ fn clock(at: u64) -> String {
 fn rig(project: &str, listed: &[&str]) -> Rig {
     let rig = Rig::new(project);
     rig.write_agent("coder", CODER);
-    rig.implementers(listed);
+    rig.agent_board.ranks(listed);
     rig
 }
 
@@ -158,7 +158,7 @@ const CODER_MODEL: [(&str, &str); 1] = [("model", "coder")];
 fn behind_gateway(items: u32) -> Rig {
     let rig = Rig::new("acme");
     rig.write_agent("mine", BEHIND_PADDOCK);
-    rig.implementers(&["sonnet-high", "mine"]);
+    rig.agent_board.ranks(&["sonnet-high", "mine"]);
     rig.edit_settings(|s| s.replace("active_items = 1", &format!("active_items = {items}")));
     let settings = std::fs::read_to_string(rig.kelpie_settings_file()).unwrap();
     let gateway =

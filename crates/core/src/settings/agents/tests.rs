@@ -3,12 +3,12 @@ use std::path::Path;
 use super::*;
 use crate::agents::baseline::Baseline;
 use crate::settings::{AgentName, Effort, Gateways, GuardHook, HookEvent};
-use crate::test::{project_table, with_tables};
+use crate::test::project_table;
 
 const EXAMPLE: &str = include_str!("../../../../../settings.example.toml");
 
 /// The example's own `[agents]` table, which a test's table replaces
-const LISTED: &str = "[app.dogs.kelpie.agents]\nimplementers = [\"sonnet-high\"]\n";
+const LISTED: &str = "[app.dogs.kelpie.agents]\n";
 
 const HAIKU: &str = "---\nrole: implementer\nharness: claude-code\nmodel: claude-haiku-4-5-20251001\n\
      effort: low\n---\n";
@@ -63,12 +63,26 @@ fn pair(model: &RoleModel) -> (&str, Effort) {
     (model.model.as_str(), model.effort)
 }
 
-fn names(agents: &RoleAgents) -> Vec<&str> {
-    agents
-        .implementers
-        .iter()
-        .map(|i| i.name.as_str())
-        .collect()
+// The implementers `settings` lets the agent board pick from `book()`, by name.
+fn names(settings: &Settings) -> Vec<String> {
+    let allowed = settings.allowed_implementers(&book());
+    allowed.into_iter().map(|i| i.name.to_string()).collect()
+}
+
+// The implementer `name` of `book()`, which `settings` allows.
+fn implementer(settings: &Settings, name: &str) -> Implementer {
+    let allowed = settings.allowed_implementers(&book());
+    allowed
+        .into_iter()
+        .find(|i| i.name.as_str() == name)
+        .unwrap()
+}
+
+// Whether the worker's fence holds on `book()`'s implementer `name` under `settings`.
+fn fenced(settings: &Settings, name: &str) -> Result<(), String> {
+    let agent = implementer(settings, name);
+    let held = settings.under_worker_fence(&agent.name, &agent.model);
+    held.map_err(|e| e.to_string())
 }
 
 fn hooked(mut settings: Settings) -> Settings {
@@ -81,66 +95,27 @@ fn hooked(mut settings: Settings) -> Settings {
 }
 
 #[test]
-fn a_project_that_names_nothing_builds_on_sonnet_high() {
-    let table = with_tables(&EXAMPLE.replace(LISTED, ""), "");
-    let settings = Settings::from_table(
-        &project_table(&table),
-        "shep",
-        Path::new("/h"),
-        Path::new("/p"),
-    )
-    .unwrap();
-    let agents = settings.role_agents(&bound(Agents::embedded())).unwrap();
-    assert_eq!(names(&agents), ["sonnet-high"]);
-    let sonnet = &agents.default_implementer;
-    assert_eq!(sonnet.name.as_str(), "sonnet-high");
+fn the_board_may_pick_each_implementer_file_allow_holds_by_name() {
+    let every = project("");
+    let all = names(&every);
+    assert!(all.is_sorted(), "{all:?}");
+    for name in ["box", "gpt", "haiku", "opus-high", "qwen", "sonnet-high"] {
+        assert!(all.iter().any(|n| n == name), "{name}: {all:?}");
+    }
+    assert!(!all.iter().any(|n| n == "defect-hunter"), "{all:?}");
+
+    let some = project("allow = [\"sonnet-high\", \"qwen\", \"defect-hunter-lite\"]\n");
+    assert_eq!(names(&some), ["qwen", "sonnet-high"]);
+    let sonnet = implementer(&some, "sonnet-high");
     assert_eq!(pair(&sonnet.model), ("claude-sonnet-5-5", Effort::High));
     assert_eq!(sonnet.limit, Limit::Account(Account::Claude));
-}
-
-#[test]
-fn the_implementers_keep_the_projects_order_once_each_and_the_first_is_the_default() {
-    let settings = project("implementers = [\"opus-high\", \"haiku\", \"opus-high\"]\n");
-    let agents = settings.role_agents(&book()).unwrap();
-    assert_eq!(names(&agents), ["opus-high", "haiku"]);
-    assert_eq!(agents.default_implementer.name.as_str(), "opus-high");
-    let haiku = agents.implementer(&"haiku".to_owned().try_into().unwrap());
-    assert_eq!(
-        pair(&haiku.unwrap().model),
-        ("claude-haiku-4-5-20251001", Effort::Low)
-    );
-    assert!(
-        agents
-            .implementer(&"sonnet-high".to_owned().try_into().unwrap())
-            .is_none()
-    );
-}
-
-#[test]
-fn a_local_implementer_listed_first_is_the_default_and_may_be_the_only_one() {
-    let settings = project("implementers = [\"qwen\", \"sonnet-high\"]\n");
-    let agents = settings.role_agents(&book()).unwrap();
-    assert_eq!(names(&agents), ["qwen", "sonnet-high"]);
-    assert_eq!(agents.default_implementer.name.as_str(), "qwen");
-    assert!(agents.default_implementer.is_local());
-
-    let only = project("implementers = [\"qwen\", \"box\"]\n");
-    let agents = only.role_agents(&book()).unwrap();
-    assert_eq!(names(&agents), ["qwen", "box"]);
-
-    let err = project("implementers = []\n")
-        .role_agents(&book())
-        .unwrap_err()
-        .to_string();
-    assert_eq!(
-        err,
-        "setting `agents.implementers`: lists no implementer: list one, such as `sonnet-high`"
-    );
+    assert!(!sonnet.is_local());
+    assert!(implementer(&some, "qwen").is_local());
 }
 
 #[test]
 fn agents_issue_writer_is_refused_naming_the_skill_and_the_migration() {
-    let err = try_project("implementers = [\"sonnet-high\"]\nissue_writer = \"scribe\"\n")
+    let err = try_project("issue_writer = \"scribe\"\n")
         .unwrap_err()
         .to_string();
     assert!(err.contains("agents.issue_writer"), "{err}");
@@ -150,91 +125,21 @@ fn agents_issue_writer_is_refused_naming_the_skill_and_the_migration() {
 }
 
 #[test]
-fn fallback_after_is_off_when_absent_and_read_in_minutes() {
-    let settings = project("implementers = [\"sonnet-high\"]\n");
-    assert_eq!(settings.agents.fallback_after, None);
-
-    let timed = project("implementers = [\"sonnet-high\"]\nfallback_after = 15\n");
-    assert_eq!(timed.agents.fallback_after.map(|m| m.get()), Some(15));
-}
-
-#[test]
-fn implementer_choice_is_order_when_absent_and_refuses_the_issue_writer_by_name() {
-    let absent = project("implementers = [\"sonnet-high\", \"opus-high\"]\n");
-    assert_eq!(absent.agents.implementer_choice, ImplementerChoice::Order);
-
-    let ordered = project(
-        "implementers = [\"sonnet-high\", \"opus-high\"]\nimplementer_choice = \"order\"\n",
-    );
-    assert_eq!(ordered.agents.implementer_choice, ImplementerChoice::Order);
-    assert_eq!(ImplementerChoice::Order.as_str(), "order");
-
-    let err = try_project("implementers = [\"sonnet-high\"]\nimplementer_choice = \"first\"\n")
-        .unwrap_err()
-        .to_string();
-    assert!(
-        err.contains("agents.implementer_choice") && err.contains("unknown variant `first`"),
-        "{err}"
-    );
-
-    let written = "implementers = [\"sonnet-high\"]\nimplementer_choice = \"issue-writer\"\n";
-    let err = try_project(written).unwrap_err().to_string();
-    assert!(err.contains("agents.implementer_choice"), "{err}");
-    assert!(err.contains("`issue-writer` is gone"), "{err}");
-    assert!(err.contains("shep kelpie settings migrate"), "{err}");
-}
-
-#[test]
-fn an_implementer_with_no_agent_file_is_refused_naming_it() {
-    let err = project("implementers = [\"sonnet-high\", \"fable\"]\n")
-        .role_agents(&book())
-        .unwrap_err()
-        .to_string();
-    assert_eq!(
-        err,
-        "setting `agents`: `agents.implementers` names fable, which has no \
-         agent file: write `agents/fable.md` in kelpie's home"
-    );
-}
-
-#[test]
-fn an_implementer_whose_file_is_a_reviewers_is_refused_naming_its_role() {
-    let err = project("implementers = [\"defect-hunter\"]\n")
-        .role_agents(&book())
-        .unwrap_err()
-        .to_string();
-    assert_eq!(
-        err,
-        "setting `agents`: `agents.implementers` names defect-hunter, whose agent file's \
-         role is `reviewer`: list it where that role goes, or name an agent whose role is \
-         `implementer`"
-    );
-}
-
-#[test]
 fn a_codex_implementer_builds_on_the_codex_account() {
-    let agents = project("implementers = [\"gpt\"]\n")
-        .role_agents(&book())
-        .unwrap();
-    let gpt = &agents.default_implementer;
+    let gpt = implementer(&project(""), "gpt");
     assert_eq!(gpt.model.harness, AgentHarness::Codex);
     assert_eq!(pair(&gpt.model), ("gpt-6-sol", Effort::Medium));
     assert_eq!(gpt.limit, Limit::Account(Account::Codex));
 }
 
 #[test]
-fn an_implementer_off_claude_code_beside_guard_hooks_is_refused_at_load() {
+fn an_implementer_off_claude_code_beside_guard_hooks_is_fenced_out() {
     for (name, harness) in [("qwen", "pi"), ("gpt", "codex")] {
-        let names = format!("implementers = [\"sonnet-high\", \"{name}\"]\n");
-        assert!(project(&names).role_agents(&book()).is_ok());
-        let err = hooked(project(&names))
-            .role_agents(&book())
-            .unwrap_err()
-            .to_string();
+        assert!(fenced(&project(""), name).is_ok());
         assert_eq!(
-            err,
+            fenced(&hooked(project("")), name).unwrap_err(),
             format!(
-                "setting `agents.implementers`: implementer {name} runs on {harness}, which \
+                "setting `worker.guard_hooks`: implementer {name} runs on {harness}, which \
                  cannot run `worker.guard_hooks`, which are Claude Code hooks: turn those \
                  off, move the check to a `command` or `write` hook in `hooks`, which runs \
                  on every harness, or build on Claude Code"
@@ -245,33 +150,31 @@ fn an_implementer_off_claude_code_beside_guard_hooks_is_refused_at_load() {
 
 // The project's own `hooks` are kelpie's to run, so no harness is asked to run them.
 #[test]
-fn an_implementer_off_claude_code_beside_project_hooks_loads() {
+fn an_implementer_off_claude_code_beside_project_hooks_is_fenced_in() {
     for name in ["qwen", "gpt"] {
-        let names = format!("implementers = [\"sonnet-high\", \"{name}\"]\n");
-        let mut settings = project(&names);
+        let mut settings = project("");
         settings.hooks = vec![crate::settings::ProjectHook {
             point: crate::settings::HookPoint::Commit,
             command: "true".to_owned().try_into().unwrap(),
         }];
-        assert!(settings.role_agents(&book()).is_ok(), "{name}");
+        assert!(fenced(&settings, name).is_ok(), "{name}");
     }
 }
 
 #[test]
 fn a_pi_implementer_may_not_be_allowed_the_model_host_or_the_loopback() {
-    let names = "implementers = [\"sonnet-high\", \"qwen\"]\n";
     for domain in ["box", "BOX", "localhost", "127.0.0.1", "*.localhost"] {
-        let mut settings = project(names);
+        let mut settings = project("");
         settings.worker.allowed_domains = vec![domain.to_owned().try_into().unwrap()];
-        let err = settings.role_agents(&book()).unwrap_err().to_string();
+        let err = fenced(&settings, "qwen").unwrap_err();
         assert!(
             err.contains("worker.allowed_domains") && err.contains(domain),
             "{err}"
         );
     }
-    let mut settings = project(names);
+    let mut settings = project("");
     settings.worker.allowed_domains = vec!["github.com".to_owned().try_into().unwrap()];
-    assert!(settings.role_agents(&book()).is_ok());
+    assert!(fenced(&settings, "qwen").is_ok());
 }
 
 #[test]
@@ -303,10 +206,10 @@ fn a_goose_implementer_beside_guard_hooks_or_the_model_hosts_domain_is_refused()
         tools: None,
     };
     let name = AgentName::kelpies("goosey");
-    let settings = project("implementers = [\"sonnet-high\"]\n");
+    let settings = project("");
     assert!(settings.under_worker_fence(&name, &goose).is_ok());
 
-    let err = hooked(project("implementers = [\"sonnet-high\"]\n"))
+    let err = hooked(project(""))
         .under_worker_fence(&name, &goose)
         .unwrap_err()
         .to_string();
@@ -316,7 +219,7 @@ fn a_goose_implementer_beside_guard_hooks_or_the_model_hosts_domain_is_refused()
     );
 
     for domain in ["box", "BOX", "localhost", "127.0.0.1", "*.localhost"] {
-        let mut settings = project("implementers = [\"sonnet-high\"]\n");
+        let mut settings = project("");
         settings.worker.allowed_domains = vec![domain.to_owned().try_into().unwrap()];
         let err = settings
             .under_worker_fence(&name, &goose)
@@ -327,7 +230,7 @@ fn a_goose_implementer_beside_guard_hooks_or_the_model_hosts_domain_is_refused()
             "{err}"
         );
     }
-    let mut settings = project("implementers = [\"sonnet-high\"]\n");
+    let mut settings = project("");
     settings.worker.allowed_domains = vec!["github.com".to_owned().try_into().unwrap()];
     assert!(settings.under_worker_fence(&name, &goose).is_ok());
 }
@@ -348,7 +251,7 @@ fn a_goose_worker_beside_an_after_command_hook_is_refused_at_load_naming_the_rea
         point,
         command: "true".to_owned().try_into().unwrap(),
     };
-    let mut settings = project("implementers = [\"sonnet-high\"]\n");
+    let mut settings = project("");
     settings.hooks = vec![
         hook(crate::settings::HookPoint::Command),
         hook(crate::settings::HookPoint::Write),
@@ -388,16 +291,16 @@ fn an_agents_name_is_lowercase_letters_digits_and_dashes() {
 
 #[test]
 fn a_project_manager_is_named_by_its_file_and_none_is_the_default() {
-    let none = project("implementers = [\"sonnet-high\"]\n");
+    let none = project("");
     assert_eq!(none.role_agents(&book()).unwrap().pm, None);
 
-    let named = project("implementers = [\"sonnet-high\"]\npm = \"pm\"\n");
+    let named = project("pm = \"pm\"\n");
     let pm = named.role_agents(&book()).unwrap().pm.unwrap();
     assert_eq!(pm.name.as_str(), "pm");
     assert_eq!(pair(&pm.model), ("claude-opus-5-5", Effort::Medium));
     assert_eq!(pm.limit, Limit::Account(Account::Claude));
 
-    let err = project("implementers = [\"sonnet-high\"]\npm = \"opus-high\"\n")
+    let err = project("pm = \"opus-high\"\n")
         .role_agents(&book())
         .unwrap_err()
         .to_string();
@@ -409,7 +312,7 @@ fn a_project_manager_is_named_by_its_file_and_none_is_the_default() {
 
 #[test]
 fn agents_representative_defaults_to_representative() {
-    let unset = project("implementers = [\"sonnet-high\"]\n");
+    let unset = project("");
 
     assert_eq!(unset.agents.representative.as_str(), "representative");
     let agent = unset.representative(&book()).unwrap();
@@ -420,14 +323,14 @@ fn agents_representative_defaults_to_representative() {
 
 #[test]
 fn a_representative_named_with_no_file_or_a_file_of_another_role_is_refused_naming_the_key() {
-    let missing = project("implementers = [\"sonnet-high\"]\nrepresentative = \"herald\"\n");
+    let missing = project("representative = \"herald\"\n");
     let err = missing.representative(&book()).unwrap_err().to_string();
     assert!(
         err.contains("`agents.representative` names herald"),
         "{err}"
     );
 
-    let wrong = project("implementers = [\"sonnet-high\"]\nrepresentative = \"pm\"\n");
+    let wrong = project("representative = \"pm\"\n");
     let err = wrong.representative(&book()).unwrap_err().to_string();
     assert!(
         err.contains("`agents.representative` names pm, whose agent file's role is `pm`"),
@@ -438,33 +341,33 @@ fn a_representative_named_with_no_file_or_a_file_of_another_role_is_refused_nami
 #[test]
 fn naming_an_unbound_agent_is_refused_with_the_command_that_binds_it() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("mine.md"), "---\nrole: implementer\n---\n").unwrap();
+    std::fs::write(dir.path().join("mine.md"), "---\nrole: pm\n---\n").unwrap();
     let agents = Agents::load(dir.path()).unwrap();
-    let err = project("implementers = [\"mine\"]\n")
+    let err = project("pm = \"mine\"\n")
         .role_agents(&agents)
         .unwrap_err()
         .to_string();
     assert_eq!(
         err,
-        "setting `agents`: `agents.implementers` names mine, which is unbound: run \
-         `shep kelpie agents new implementer --name mine`"
+        "setting `agents`: `agents.pm` names mine, which is unbound: run \
+         `shep kelpie agents new pm --name mine`"
     );
 }
 
 #[test]
 fn naming_an_agent_whose_file_cannot_be_used_is_refused_and_never_given_kelpies_own() {
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("sonnet-high.md");
-    std::fs::write(&file, "role: implementer\n").unwrap();
+    let file = dir.path().join("pm.md");
+    std::fs::write(&file, "role: pm\n").unwrap();
     let agents = Agents::load(dir.path()).unwrap();
-    let err = project("implementers = [\"sonnet-high\"]\n")
+    let err = project("pm = \"pm\"\n")
         .role_agents(&agents)
         .unwrap_err()
         .to_string();
     assert_eq!(
         err,
         format!(
-            "setting `agents`: `agents.implementers` names sonnet-high, whose agent file {}: \
+            "setting `agents`: `agents.pm` names pm, whose agent file {}: \
              must start with a `---` line, then the YAML frontmatter, then a `---` line of \
              its own",
             file.display()
@@ -489,7 +392,7 @@ fn naming_a_baseline_that_binds_nothing_and_has_no_file_is_refused_with_the_comm
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("box.md"), BOX).unwrap();
     let bare = Agents::load_over(dir.path(), &BARE).unwrap();
-    let err = project("implementers = [\"box\"]\npm = \"pm\"\n")
+    let err = project("pm = \"pm\"\n")
         .role_agents(&bare)
         .unwrap_err()
         .to_string();
@@ -498,7 +401,7 @@ fn naming_a_baseline_that_binds_nothing_and_has_no_file_is_refused_with_the_comm
         "setting `agents`: `agents.pm` names pm, which is unbound: run \
          `shep kelpie agents new pm`"
     );
-    let err = project("implementers = [\"defect-hunter\"]\n")
+    let err = project("pm = \"defect-hunter\"\n")
         .role_agents(&bare)
         .unwrap_err()
         .to_string();
@@ -536,10 +439,10 @@ fn lineup(settings: &Settings) -> Result<Vec<String>, String> {
 
 #[test]
 fn an_absent_allow_lets_every_agent_through_as_before() {
-    let settings = project("implementers = [\"opus-high\", \"qwen\"]\npm = \"pm\"\n");
+    let settings = project("pm = \"pm\"\n");
     assert_eq!(settings.agents.allow, None);
     let agents = settings.role_agents(&book()).unwrap();
-    assert_eq!(names(&agents), ["opus-high", "qwen"]);
+    assert!(names(&settings).len() > 2);
     assert!(agents.pm.is_some());
     settings.representative(&book()).unwrap();
     settings.triager(&book()).unwrap();
@@ -549,9 +452,9 @@ fn an_absent_allow_lets_every_agent_through_as_before() {
 
 #[test]
 fn an_empty_allow_allows_every_agent_as_an_absent_one_does() {
-    let settings = project("allow = []\nimplementers = [\"opus-high\", \"qwen\"]\npm = \"pm\"\n");
+    let settings = project("allow = []\npm = \"pm\"\n");
     let agents = settings.role_agents(&book()).unwrap();
-    assert_eq!(names(&agents), ["opus-high", "qwen"]);
+    assert_eq!(names(&settings), names(&project("")));
     assert!(agents.pm.is_some());
     settings.representative(&book()).unwrap();
     settings.triager(&book()).unwrap();
@@ -562,14 +465,32 @@ fn an_empty_allow_allows_every_agent_as_an_absent_one_does() {
 }
 
 #[test]
+fn the_keys_the_agent_board_replaced_load_read_by_nothing_and_are_named() {
+    let old = project(
+        "implementers = [\"opus-high\", \"fable\"]\nimplementer_choice = \"issue-writer\"\n\
+         fallback_after = 15\n",
+    );
+    assert_eq!(
+        old.agents.gone_keys(),
+        [
+            "agents.implementers",
+            "agents.implementer_choice",
+            "agents.fallback_after"
+        ]
+    );
+    old.role_agents(&book()).unwrap();
+    assert_eq!(project("").agents.gone_keys(), Vec::<&str>::new());
+}
+
+#[test]
 fn slack_is_an_hour_when_absent_and_read_in_minutes_with_zero_allowed() {
-    let absent = project("implementers = [\"sonnet-high\"]\n");
+    let absent = project("");
     assert_eq!(absent.agents.slack, 60);
 
-    let none = project("implementers = [\"sonnet-high\"]\nslack = 0\n");
+    let none = project("slack = 0\n");
     assert_eq!(none.agents.slack, 0);
 
-    let long = project("implementers = [\"sonnet-high\"]\nslack = 240\n");
+    let long = project("slack = 240\n");
     assert_eq!(long.agents.slack, 240);
 }
 
@@ -584,19 +505,9 @@ fn a_slack_that_is_not_whole_minutes_is_refused_naming_the_key() {
 }
 
 #[test]
-fn an_implementer_allow_leaves_out_is_refused_naming_both_settings() {
-    let settings =
-        project("allow = [\"sonnet-high\"]\nimplementers = [\"sonnet-high\", \"opus-high\"]\n");
-    let err = settings.role_agents(&book()).unwrap_err().to_string();
-    assert_eq!(
-        err,
-        "setting `agents`: `agents.implementers` names opus-high, which `agents.allow` leaves \
-         out: add it to `agents.allow`, or name another"
-    );
-
-    let held =
-        project("allow = [\"sonnet-high\", \"opus-high\"]\nimplementers = [\"opus-high\"]\n");
-    assert_eq!(names(&held.role_agents(&book()).unwrap()), ["opus-high"]);
+fn an_implementer_allow_leaves_out_is_no_pick_for_the_board() {
+    let settings = project("allow = [\"sonnet-high\", \"defect-hunter-lite\"]\n");
+    assert_eq!(names(&settings), ["sonnet-high"]);
 }
 
 #[test]
@@ -636,11 +547,7 @@ fn a_listed_or_default_reviewer_allow_leaves_out_is_refused() {
 
 #[test]
 fn the_project_manager_representative_triager_and_security_reviewer_are_held_to_allow() {
-    let holds = |allow: &str| {
-        project(&format!(
-            "allow = [{allow}]\nimplementers = [\"sonnet-high\"]\npm = \"pm\"\n"
-        ))
-    };
+    let holds = |allow: &str| project(&format!("allow = [{allow}]\npm = \"pm\"\n"));
     let only = holds("\"sonnet-high\"");
     let left_out = |at: &str, name: &str, err: String| {
         let said = format!("`{at}` names {name}, which `agents.allow` leaves out");
@@ -676,19 +583,45 @@ fn the_project_manager_representative_triager_and_security_reviewer_are_held_to_
 }
 
 #[test]
-fn a_name_in_allow_with_no_file_loads_and_is_refused_where_used() {
-    let settings =
-        project("allow = [\"sonnet-high\", \"fable\"]\nimplementers = [\"sonnet-high\"]\n");
-    assert_eq!(
-        names(&settings.role_agents(&book()).unwrap()),
-        ["sonnet-high"]
-    );
+fn a_name_in_allow_with_no_file_loads_and_is_no_pick_for_the_board() {
+    let settings = project("allow = [\"sonnet-high\", \"fable\"]\n");
+    settings.role_agents(&book()).unwrap();
+    assert_eq!(names(&settings), ["sonnet-high"]);
 
-    let used = project("allow = [\"sonnet-high\", \"fable\"]\nimplementers = [\"fable\"]\n");
+    let used = project("allow = [\"sonnet-high\", \"fable\"]\npm = \"fable\"\n");
     let err = used.role_agents(&book()).unwrap_err().to_string();
     assert_eq!(
         err,
-        "setting `agents`: `agents.implementers` names fable, which has no agent file: write \
+        "setting `agents`: `agents.pm` names fable, which has no agent file: write \
          `agents/fable.md` in kelpie's home"
+    );
+}
+
+// A pi implementer on the gateway `paddock`, which no gateway in `Gateways::default()` names
+const ON_PADDOCK: &str = "---\nrole: implementer\nharness: pi\nmodel: m\neffort: low\n\
+                          gateway: paddock\ncontext: 65536\n---\n";
+
+#[test]
+fn an_implementer_no_turn_can_run_on_is_refused_with_why_and_the_rest_are_not() {
+    let book = book().with("local", ON_PADDOCK);
+    let settings = project("");
+    let refused = settings.refused_implementers(&book, &Gateways::default(), GatewayKeys::Held);
+    let [(name, why)] = refused.as_slice() else {
+        panic!("{refused:?}");
+    };
+    assert_eq!(name.as_str(), "local");
+    assert!(
+        why.starts_with("gateway paddock is not in kelpie's settings"),
+        "{why}"
+    );
+
+    let hooked = hooked(project(""));
+    let refused = hooked.refused_implementers(&book, &Gateways::default(), GatewayKeys::Held);
+    let names: Vec<&str> = refused.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["gpt", "local", "qwen"]);
+    let (_, why) = &refused[1];
+    assert!(
+        why.starts_with("implementer local runs on pi, which cannot run"),
+        "{why}"
     );
 }

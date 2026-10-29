@@ -29,7 +29,6 @@ pending_rulings = 2
 per_item_usd = 10
 
 [agents]
-implementers = ["sonnet-high"]
 reviewers = ["standards"]
 
 [pacing]
@@ -54,11 +53,11 @@ struct Scene {
 const GATEWAY: &str = "[gateways.paddock]\nurl = \"http://gpu-box:8700\"\n\
                         key_env = \"KELPIE_TEST_KEY_NEVER_SET\"\n";
 
-// An implementer that runs on the gateway `paddock`, and one on `elsewhere`
-const ON_GATEWAY: &str = "---\nrole: implementer\nharness: pi\nmodel: qwen3.8:27b\n\
-                          effort: medium\ngateway: paddock\ncontext: 65536\n---\n";
-const ON_ELSEWHERE: &str = "---\nrole: implementer\nharness: pi\nmodel: qwen3.8:27b\n\
-                            effort: medium\ngateway: elsewhere\ncontext: 65536\n---\n";
+// A reviewer that runs on the gateway `paddock`, and one on `elsewhere`
+const ON_GATEWAY: &str = "---\nrole: reviewer\nharness: pi\nmodel: qwen3.8:27b\n\
+                          effort: medium\ngateway: paddock\ncontext: 65536\n---\nReview {{DIFF}}.\n";
+const ON_ELSEWHERE: &str = "---\nrole: reviewer\nharness: pi\nmodel: qwen3.8:27b\n\
+                            effort: medium\ngateway: elsewhere\ncontext: 65536\n---\nReview {{DIFF}}.\n";
 
 // Writes `files` into the agent folder every project's settings are checked against.
 fn write_agents(shepherd: &FakeShepherd, files: &[(&str, &str)]) {
@@ -161,13 +160,13 @@ impl Scene {
         }
     }
 
-    /// A flock whose `koji` lists `local`, an implementer on the gateway in
-    /// kelpie's own settings, and holds `box`, an implementer on a gateway of
+    /// A flock whose `koji` lists `local`, a reviewer on the gateway in
+    /// kelpie's own settings, and holds `box`, a reviewer on a gateway of
     /// kelpie has none of
     async fn keyed_gateway() -> Self {
         let table = TABLE.replace(
-            "implementers = [\"sonnet-high\"]",
-            "implementers = [\"local\"]",
+            "reviewers = [\"standards\"]",
+            "reviewers = [\"standards\", \"local\"]",
         );
         let scene = Self::holding(&table).await;
         scene.shepherd.holds_section(GATEWAY);
@@ -378,7 +377,6 @@ async fn a_table_the_runner_would_refuse_to_run_is_refused_and_nothing_is_writte
     for (key, value, reason) in [
         ("rulings.pm_alone", r#"["merge"]"#, "pm_alone"),
         ("agents.reviewers", r#"["no-such-agent"]"#, "no-such-agent"),
-        ("agents.implementers", "[]", "implementers"),
     ] {
         let refused = scene.set(key, value).await.unwrap_err();
         assert!(refused.contains(reason), "{key}: {refused}");
@@ -453,7 +451,7 @@ async fn an_agent_on_a_gateway_kelpie_has_none_of_is_refused_naming_it_and_nothi
     let mut scene = Scene::keyed_gateway().await;
     let before = scene.table();
     let refused = scene
-        .set("agents.implementers", r#"["box"]"#)
+        .set("agents.reviewers", r#"["standards", "box"]"#)
         .await
         .unwrap_err();
     assert!(refused.contains("box"), "{refused}");

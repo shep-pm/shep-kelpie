@@ -474,7 +474,7 @@ mod tests {
     fn a_pass_asks_the_gateway_for_its_leases_no_more_than_status_does() {
         let rig = Rig::new("rotom");
         rig.write_agent("mine", BEHIND_PADDOCK);
-        rig.implementers(&["mine"]);
+        rig.agent_board.ranks(&["mine"]);
         let settings = std::fs::read_to_string(rig.kelpie_settings_file()).unwrap();
         let gateway =
             "[gateways.paddock]\nurl = \"http://127.0.0.1:1/\"\nkey_env = \"CARGO_PKG_NAME\"\n";

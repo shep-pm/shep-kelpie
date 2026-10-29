@@ -46,13 +46,13 @@ fn ready_for_agent_on_a_pull_request_kelpie_opened_starts_its_rework_and_comes_o
 }
 
 #[test]
-fn a_rework_on_an_unlisted_labelled_implementer_is_held_by_its_account() {
+fn a_rework_pinned_to_an_implementer_is_held_by_its_account() {
     let rig = Rig::new("webapp");
     reviewed_71(&rig);
     rig.forge.label_pull_request(71, READY);
     rig.forge.label_pull_request(71, HUMAN);
     rig.write_codex_implementer();
-    rig.forge.label(7, "agent:codex");
+    rig.forge.label(7, "agent:codex!");
     rig.codex_day_began(0);
     // 15% of Codex's week since the day began, past its allowance of 100 / 7.
     rig.codex_meter.set(Rig::utilization(15, 0));
@@ -69,6 +69,34 @@ fn a_rework_on_an_unlisted_labelled_implementer_is_held_by_its_account() {
 }
 
 #[test]
+fn a_rework_whose_top_pick_has_spent_its_day_opens_on_the_next_the_pacer_lets_start() {
+    let rig = Rig::new("webapp");
+    reviewed_71(&rig);
+    rig.forge.label_pull_request(71, READY);
+    rig.write_codex_implementer();
+    rig.agent_board.ranks(&["codex", "sonnet-high"]);
+    rig.codex_day_began(0);
+    // 15% of Codex's week since the day began, past its allowance of 100 / 7.
+    rig.codex_meter.set(Rig::utilization(15, 0));
+    let runner = running(&rig);
+
+    let report = step(&runner).unwrap();
+
+    assert!(
+        matches!(
+            &report,
+            Some(StepReport::Reworked {
+                pull_request: 71,
+                ..
+            })
+        ),
+        "{report:?}"
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["agent"], "sonnet-high");
+}
+
+#[test]
 fn a_rework_held_by_its_labelled_account_leaves_the_ones_after_it_to_start() {
     let rig = Rig::new("webapp");
     rig.push_by_hand("kelpie/6", "work.txt");
@@ -78,7 +106,8 @@ fn a_rework_held_by_its_labelled_account_leaves_the_ones_after_it_to_start() {
     reviewed_71(&rig);
     rig.forge.label_pull_request(71, READY);
     rig.write_codex_implementer();
-    rig.forge.label(6, "agent:codex");
+    rig.forge.label(6, "agent:codex!");
+    rig.agent_board.ranks(&["sonnet-high", "codex"]);
     rig.codex_day_began(0);
     rig.codex_meter.set(Rig::utilization(15, 0));
     let runner = running(&rig);
@@ -91,6 +120,41 @@ fn a_rework_held_by_its_labelled_account_leaves_the_ones_after_it_to_start() {
         })
     ));
     assert_eq!(rig.forge.pull_request_labels(70), [READY], "70 asks again");
+}
+
+#[test]
+fn an_unreachable_board_starts_no_rework_asks_once_and_the_next_poll_that_reaches_it_starts() {
+    let rig = Rig::new("webapp");
+    rig.push_by_hand("kelpie/6", "work.txt");
+    rig.forge.open_pull_request(70, "kelpie/6", &[6]);
+    rig.forge.review(70, review());
+    rig.forge.label_pull_request(70, READY);
+    reviewed_71(&rig);
+    rig.forge.label_pull_request(71, READY);
+    rig.agent_board.unreachable();
+    let runner = running(&rig);
+
+    assert_eq!(
+        step(&runner).unwrap(),
+        None,
+        "the poll is idle, as dispatch's is"
+    );
+
+    assert_eq!(rig.agent_board.asks().len(), 1, "the dog is asked once");
+    assert_eq!(rig.ask(&runner, "status", None)["skipped"], json!([]));
+    assert!(runner.lock().unwrap().state.work_items.is_empty());
+    assert_eq!(rig.forge.pull_request_labels(70), [READY]);
+    assert_eq!(rig.forge.pull_request_labels(71), [READY]);
+
+    rig.agent_board.ranks_first(&["sonnet-high"]);
+    rig.next_look();
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Reworked {
+            pull_request: 70,
+            ..
+        })
+    ));
 }
 
 #[test]

@@ -12,13 +12,13 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::Runner;
-
+use super::add::{AddError, Unpicked};
 use super::pace::{Passed, Started};
 use super::report::{Begin, StepReport};
 use super::rework::review_text;
 use super::trigger;
 use super::turn;
-use crate::board::{HUMAN, LabelError, OpenPullRequest, READY, Skip};
+use crate::board::{HUMAN, OpenPullRequest, READY, Skip};
 use crate::ports::{
     ForgeError, Issue, MaintainerReview, PullRequestState, Reviewed, Role, Timestamp,
 };
@@ -66,8 +66,8 @@ pub enum AdoptError {
     Viewer(ForgeError),
     /// The forge could not show the pull request's issue
     Issue(u64, ForgeError),
-    /// The issue's `agent:` label cannot be used
-    Label(LabelError),
+    /// The issue's `agent:` label cannot be used, or the agent board named no agent
+    Agent(AddError),
     /// No random session id could be drawn, with the OS's reason
     Session(String),
     /// The worktree could not be prepared on the branch, with the reason
@@ -118,7 +118,7 @@ impl fmt::Display for AdoptError {
             }
             Self::Viewer(e) => write!(f, "cannot read the account kelpie acts as: {e}"),
             Self::Issue(issue, e) => write!(f, "cannot read issue #{issue}: {e}"),
-            Self::Label(e) => e.fmt(f),
+            Self::Agent(e) => e.fmt(f),
             Self::Session(e) => write!(f, "cannot draw a session id: {e}"),
             Self::Worktree(e) => write!(f, "cannot prepare its worktree: {e}"),
             Self::Holder(e) => write!(f, "cannot list the worktrees of the repo: {e}"),
@@ -153,7 +153,7 @@ impl AdoptError {
                 | Self::Base(..)
                 | Self::Author(..)
                 | Self::NoIssue(_)
-                | Self::Label(_)
+                | Self::Agent(AddError::Label(_))
         )
     }
 }
@@ -281,6 +281,9 @@ impl Runner {
                 }
                 // It waits for the work item on its issue to end.
                 Err(AdoptError::InFlight(_)) => continue,
+                // A dog out of reach answers no pull request, so this poll asks for none after it
+                // and the pass is idle, as dispatch's is; the next poll asks again.
+                Err(AdoptError::Agent(AddError::Unpicked(Unpicked::Unreachable))) => break,
                 Err(e) if e.settled() => match self.refuse_adoption(number, &e)? {
                     Ok(begin) => begin,
                     Err(e) => {
@@ -539,15 +542,18 @@ impl Runner {
             .tickets
             .issue(&repo, ticket)
             .map_err(|e| AdoptError::Issue(issue, e))?;
-        let (agent, note) = self
-            .labelled_agent(ticket, &found.labels)
-            .map_err(AdoptError::Label)?;
-        // The account of an agent the project does not list has not been paced yet.
-        if let Some(held) = self.pace_agent(&agent).map_err(AdoptError::State)?.holds() {
-            return Ok(Started::Held(Box::new(held)));
-        }
+        let ranked = self
+            .board_ranked(ticket, &found.labels)
+            .map_err(AdoptError::Agent)?;
+        // The first agent the board ranks that the pacer lets start, as dispatch walks it.
+        let opening = match self.paced_opening(ranked).map_err(AdoptError::State)? {
+            Started::Opened(opening) => opening,
+            Started::Held(held) => return Ok(Started::Held(held)),
+        };
+        let (agent, note) = (opening.agent, opening.note);
         let session = new_session_id().map_err(|e| AdoptError::Session(e.to_string()))?;
-        let fresh = self.fresh(ticket, found.title.clone(), agent.clone(), session);
+        let mut fresh = self.fresh(ticket, found.title.clone(), agent.clone(), session);
+        fresh.pinned = opening.pinned;
         // A start that failed part way leaves a worktree on a head `origin`
         // may have moved past, so each start begins from a fresh one.
         let removed = worktree::remove(

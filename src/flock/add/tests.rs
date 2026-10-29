@@ -131,10 +131,7 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
         reviewers,
         [AgentName::try_from("defect-hunter-lite".to_owned()).unwrap()]
     );
-    let listed: Vec<&str> = (settings.agents.implementers.iter())
-        .map(|n| n.as_str())
-        .collect();
-    assert_eq!(listed, ["sonnet-high"]);
+    assert_eq!(settings.agents.gone_keys(), Vec::<&str>::new());
     for name in ["sonnet-high", "opus-high"] {
         assert_eq!(scene.written(name), stub(name));
     }
