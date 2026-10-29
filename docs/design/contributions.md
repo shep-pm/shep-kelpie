@@ -6,7 +6,7 @@ Whether and how kelpie picks up other people's pull requests. It sees and lists 
 
 - `[app.dogs.kelpie.contributions]`, `#[serde(default)]`: an absent table is `pick = "off"`. `deny_unknown_fields`, so a mistyped key is refused naming it. `crates/core/src/settings/contributions.rs`
 - `pick`: `off` (default, kelpie's own pull requests only), `label` (those the maintainer labels for it) or `all`. Kebab-case, any other word refused.
-- `reviewers`: ordered agent files whose role is `reviewer`, bots welcome, each once. Absent, it is kelpie's default pass, named in review.md.
+- `reviewers`: ordered agent files whose role is `reviewer`, bots welcome, each once, all held by `agents.allow`. Absent, it is kelpie's default contribution pass, named in review.md. Once released and adopted, it runs a work item's pass: `reviews.need` reviewers, each the agent board's pick among reviewer files `agents.allow` holds, apart from `contributions.security_reviewer`, ending sooner when no candidate can run.
 - `security_reviewer`: a reviewer agent file, `security-reviewer` when absent, shipped as `agents/security-reviewer.md`. It must run sessions: a command, endpoint or bot is refused.
 - `quiet_days` (7) and `nudge_days` (3): whole days above 0. `nudge_days` must be below `quiet_days`: the nudge comes before a contribution counts as quiet. A zero is refused by the parser, the ordering by `Contributions::check`, called from `Settings::from_table`, so a bad pair is refused by key when the settings are read and a reread keeps the old settings.
 

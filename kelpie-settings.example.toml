@@ -92,13 +92,21 @@ url = "https://ntfy.sh/your-private-topic"
 # Markdown body. Kelpie ships `sonnet-high` and `opus-high`, which build,
 # and `defect-hunter-lite`, `defect-hunter` and `iq3-xxs-review`, which
 # review, and `shep kelpie add` writes them out and never overwrites one.
-# `iq3-xxs-review` runs on a gateway named `paddock`, which a project that
-# lists no reviewers gets first only where this file holds that gateway. It
+# `iq3-xxs-review` runs on a gateway named `paddock`; it is first in the
+# default contribution pass only where this file holds that gateway. Kelpie
 # writes `qwen`, a reviewer that runs the
 # maintainer's qwen-review script, only where that script is installed. The
 # agent board picks each work item's implementer from the files below whose
 # role is `implementer`, and every reviewer file the project's `agents.allow`
-# holds is a candidate for each review round. An issue's `agent:<name>!` label
+# holds, apart from `contributions.security_reviewer`, is a candidate for
+# each review round. Each round is the agent board's pick toward
+# `reviews.need`, once per reviewer, ending sooner when no candidate can run.
+# The count is a project setting, in its Flockfile, not this file:
+#
+# [app.dogs.kelpie.reviews]
+# need = 2
+#
+# An issue's `agent:<name>!` label
 # runs it on the implementer it names. The
 # agents guide describes every key:
 # https://github.com/shep-pm/shep-kelpie/blob/main/docs/guide/agents.md
@@ -153,27 +161,31 @@ url = "https://ntfy.sh/your-private-topic"
 # A model reached by `url` is not queued: kelpie holds no lock around it, so
 # put a server shared with other callers behind a `gateway` (see
 # `[kelpie.gateways]`). A `lease` key in an agent file is refused. A missing
-# command or an unreachable endpoint stops the runner of a project that lists
-# it.
+# command or an unreachable endpoint stops the runner of a project that
+# names it in `agents.allow`.
 #
 # A pull request review bot is a reviewer too, on `harness: bot`. Kelpie
-# ships `coderabbit`, `cubic` and `codex`, which `add` writes out and no
-# project lists until told to. A bot's file is named for it and holds its
+# ships `coderabbit`, `cubic` and `codex`, which `add` writes out. Each is a
+# candidate wherever `agents.allow` holds it; absent or empty, that setting
+# allows every agent. A bot's file is named for it and holds its
 # window, so many `reviews` in so many `hours`, account-wide: the dog books
 # each bot's window from its file when it starts, so after a change to one
 # run `shep restart kelpie`, and holds the bot's lease by it. CodeRabbit's is one an hour, which its review footers raise. cubic's
 # free plan gives a repo GitHub marks private 20 reviews a month, and a
 # public repo draws on a fair-use pool of reviewed lines. Codex's is the
 # weekly allowance its plan gives code reviews, which its "usage limits"
-# reply holds it for. A listed bot reads once a pass, in its place: a round
-# that waits more than an hour for its window goes on without it. `rounds`
-# is the most reads it makes of a work item's pull request, whatever its
+# reply holds it for. If picked, a bot reads once a pass. A closed window is
+# passed over at the pick. A bot that has never reviewed on the repo and
+# does not answer, or CodeRabbit on a repo that is not public, is left out
+# of picks for 7 days and returns sooner if kelpie sees it reviewing.
+# Only a public repo can name `coderabbit` in `agents.allow`.
+# `rounds` is the most reads it makes of a work item's pull request, whatever its
 # passes. Codex's `reviews_on_ready: true` says it reviews a pull request
 # when it leaves draft, as the repo's Codex settings may have it: then
 # marking ready, under its lease, is the summon, with no comment, since a
 # comment on top would spend a second review the window does not count.
-# A runner refuses a list with another bot before it, whose mark-ready
-# would draw its review outside its lease, and never asks it again by
+# A runner refuses `contributions.reviewers` with another bot before it,
+# whose mark-ready would draw its review outside its lease, and never asks it again by
 # comment. Leave it off unless Codex's automatic reviews are on. A bot
 # writes its own
 # prompt, so the body stays empty:
