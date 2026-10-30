@@ -853,15 +853,11 @@ where
     S: AsRef<OsStr>,
 {
     let args: Vec<_> = args.into_iter().map(|a| a.as_ref().to_owned()).collect();
-    let started = std::time::Instant::now();
     let output = git
         .args(&args)
         .stdin(Stdio::null())
         .output()
         .map_err(|e| WorktreeError::Spawn(e.to_string()))?;
-    if std::env::var_os("KELPIE_TEST_TIMING").is_some() {
-        eprintln!("TIMING worktree git {args:?}: {:?}", started.elapsed());
-    }
     if !output.status.success() {
         let args: Vec<_> = args.iter().map(|a| a.to_string_lossy()).collect();
         return Err(WorktreeError::Git {

@@ -31,8 +31,6 @@ mod registered_app;
 mod rig_settings;
 mod rig_totp;
 mod script_cli;
-#[cfg(test)]
-mod windows_timing;
 
 // The stand-ins and helpers that name only `core` and the leaves, where `core`'s own tests use them
 pub use claude::{FakeClaude, LEFT_BEHIND, Scripted, Seen};
