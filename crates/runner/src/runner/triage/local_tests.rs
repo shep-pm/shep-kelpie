@@ -2,6 +2,7 @@
 //! first comment holds, the body the session writes back, and the pass it starts
 
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -592,6 +593,14 @@ fn a_body_rewritten_again_under_the_local_read_call_is_not_answered_by_it() {
     let twice = format!("{EDITED}\n\nAnd on macOS too.");
     list(&rig, rewritten(&rig, MAINTAINER, &twice));
     hold.release();
+    // A step waits only for a call it starts, and the released read ends on
+    // its own thread after removing its view of main with git.
+    let by = Instant::now() + CALL_PATIENCE;
+    while runner.lock().unwrap().flights.triaging() == Some(30) {
+        assert!(Instant::now() < by, "the released read never ended");
+        std::thread::sleep(Duration::from_millis(10));
+        assert_eq!(step(&runner).unwrap(), None);
+    }
 
     for _ in 0..4 {
         rig.next_look();
