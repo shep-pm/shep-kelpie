@@ -188,12 +188,11 @@ fn a_call_stopped_by_the_runner_leaves_no_record() {
     assert!(!w.record().exists());
 }
 
-// Real time: the stand-in ignores SIGTERM, so the ended call lives out the
-// grace before SIGKILL, long enough to read its record.
+// Real time: the stand-in saves its record on SIGTERM before it exits.
 #[test]
 fn a_call_asked_to_end_says_so_in_its_record_and_leaves_none_once_ended() {
     let w = World::new().script(
-        "trap '' TERM\ntouch {}started\nwhile kill -0 $PPID 2>/dev/null; do sleep 0.02; done",
+        "trap 'cp {}worker/settings.call.json {}ending.json; exit' TERM\ntouch {}started\nwhile kill -0 $PPID 2>/dev/null; do sleep 0.02; done",
     );
     let ending = Ending::default();
     let ended = w.start(&ending);
@@ -201,11 +200,8 @@ fn a_call_asked_to_end_says_so_in_its_record_and_leaves_none_once_ended() {
     assert_eq!(read(&w.record())["ending"], false);
 
     ending.end();
-    wait_for("ending in the record", || {
-        read(&w.record())["ending"] == true
-    });
-
     let result = ended.recv_timeout(Duration::from_secs(20)).unwrap();
     assert!(matches!(result, Err(AgentError::TimedOut(_))), "{result:?}");
+    assert_eq!(read(&w.path("ending.json"))["ending"], true);
     assert!(!w.record().exists());
 }
