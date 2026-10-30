@@ -196,9 +196,23 @@ fn skeleton(repo: &Path, git_dir: &Path) -> Result<(), WorktreeError> {
         &format!("{}\n", objects.display()),
     )?;
     create(&git_dir.join("modules"))?;
+    // One read for all three. Git names a key in lower case, and `--get`
+    // answers the last of several values.
+    let set = git(
+        repo,
+        ["config", "--local", "--null", "--get-regexp", COPIED_KEYS],
+    )
+    .unwrap_or_default();
+    let entries: Vec<(&str, &str)> = (set.split('\0'))
+        .filter_map(|entry| entry.split_once('\n'))
+        .collect();
     for key in COPIED {
-        if let Ok(value) = git(repo, ["config", "--local", "--get", key]) {
-            in_clone(git_dir, &["config", key, &value])?;
+        let value = entries
+            .iter()
+            .rev()
+            .find(|(name, _)| name.eq_ignore_ascii_case(key));
+        if let Some((_, value)) = value {
+            in_clone(git_dir, &["config", key, value.trim()])?;
         }
     }
     Ok(())
@@ -210,6 +224,9 @@ const COPIED: [&str; 3] = [
     "remote.origin.pushurl",
     "core.hooksPath",
 ];
+
+// [`COPIED`] as the pattern `--get-regexp` reads them with.
+const COPIED_KEYS: &str = r"^(remote\.origin\.(url|pushurl)|core\.hookspath)$";
 
 // The worktree's `.git` file, which names the clone's git dir.
 fn link(worktree: &Path, git_dir: &Path) -> Result<(), WorktreeError> {
