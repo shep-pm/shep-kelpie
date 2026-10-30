@@ -34,6 +34,11 @@ Of the sites that used `tempdir_in("/tmp")`:
 
 ## Tests Windows cannot run yet
 
+Two tests hung on Windows in [run 40990662373](https://github.com/shep-pm/shep-kelpie/actions/runs/40990662373/job/123852037746), and the job reached its 30-minute timeout before any other crate ran. The `lib` step skips them so the next run can measure the remaining tests:
+
+- `upgrade::tests::handover::a_runner_stopped_while_it_hands_over_stays_stopped`
+- `upgrade::tests::sheep::a_runner_stopped_while_the_upgrade_waits_stays_stopped`
+
 Not a sandbox list: `kelpie_ci_failures_total` and `SANDBOX_RED` do not read it. The Windows CI job runs `cargo check` and the gating `save` step (`lease::saved::`, `state::tests::release::` and one atomic-write test) only, so this is read from the source, not measured (#1149). Windows runs a file only if its name ends in `.cmd`, `.bat` or `.exe`, so a `#!/bin/sh` script a test starts itself cannot run there. A test that makes its stand-in with `write_fake` runs on both. `write_script` writes a script Windows runs only through Git for Windows' `sh.exe`, which `spawn::sh` finds (a hook, `sh -c`). A test that needs a FIFO is `#[cfg_attr(windows, ignore = "a FIFO is a Unix file")]`.
 
 | Needs | Modules |
