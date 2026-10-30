@@ -134,6 +134,18 @@ fn turns(rig: &Rig, runner: &Mutex<Runner>) -> Vec<(u64, String)> {
         .collect()
 }
 
+pub(super) fn calls_of_7(rig: &Rig, runner: &Mutex<Runner>) -> u64 {
+    rig.ask(runner, "status", None)["work_items"][0]["calls"]
+        .as_u64()
+        .unwrap()
+}
+
+// Waits for a call on #7 to end after `before` were counted. A turn reads
+// `ended` only until the worker moves #7 on, which a poll can miss.
+pub(super) fn see_the_turn_end(rig: &Rig, runner: &Mutex<Runner>, before: u64) {
+    eventually("the turn's end", || calls_of_7(rig, runner) > before);
+}
+
 fn eventually(what: &str, done: impl Fn() -> bool) {
     let deadline = Instant::now() + CALL_PATIENCE;
     while !done() {
@@ -431,11 +443,10 @@ fn a_calls_end_wakes_the_loop_to_record_it() {
     assert_eq!(turns(&rig, &runner), [(7, "running".to_owned())]);
     // Draining, so nothing starts once the turn's end is recorded.
     assert!(rig.ask(&runner, "drain", None)["draining"].is_object());
+    let before = calls_of_7(&rig, &runner);
     hold.release();
     // Well inside the minute until the next look at the board.
-    eventually("the turn's end", || {
-        turns(&rig, &runner) == [(7, "ended".to_owned())]
-    });
+    see_the_turn_end(&rig, &runner, before);
     assert!(worker.stop(JOIN_BOUND, || {}));
 }
 
@@ -500,10 +511,9 @@ fn finish_stops_the_sheep_only_once_the_last_work_item_ends() {
     );
     // Draining, so nothing starts once the turn's end is recorded.
     rig.ask(&runner, "drain", None);
+    let before = calls_of_7(&rig, &runner);
     hold.release();
-    eventually("the turn's end", || {
-        turns(&rig, &runner) == [(7, "ended".to_owned())]
-    });
+    see_the_turn_end(&rig, &runner, before);
     assert_eq!(stops.load(Ordering::SeqCst), 0, "#7 is still open");
 
     rig.ask(&runner, "drop", Some("7"));

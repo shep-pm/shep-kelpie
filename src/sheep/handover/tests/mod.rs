@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use shep_handover::HandOverError;
 
+use super::super::tests::{calls_of_7, see_the_turn_end};
 use super::super::{Hooks, Worker};
 use super::*;
 use crate::ports::{Adopted, Flying, Kept, KeptServer, SessionId, Timestamp};
@@ -63,18 +64,6 @@ fn turn_of_7(rig: &Rig, runner: &Mutex<Runner>) -> String {
     let item = &status["work_items"][0];
     assert_eq!(item["issue"], "7");
     item["turn"]["state"].as_str().unwrap().to_owned()
-}
-
-fn calls_of_7(rig: &Rig, runner: &Mutex<Runner>) -> u64 {
-    rig.ask(runner, "status", None)["work_items"][0]["calls"]
-        .as_u64()
-        .unwrap()
-}
-
-// Waits for a call on #7 to end after `before` were counted. A turn reads
-// `ended` only until the worker moves #7 on, which a poll can miss.
-fn see_the_turn_end(rig: &Rig, runner: &Mutex<Runner>, before: u64) {
-    eventually("the turn's end", || calls_of_7(rig, runner) > before);
 }
 
 fn eventually(what: &str, done: impl Fn() -> bool) {
