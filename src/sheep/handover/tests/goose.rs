@@ -284,8 +284,9 @@ fn incoming(folder: &Path, host: &str, carry: Carry) {
     eventually("the forwarder answering again", || {
         Stream::connect(&socket).is_ok()
     });
+    let before = calls_of_7(&rig, &runner);
     write(folder, "go", "");
-    eventually("the turn's end", || turn_of_7(&rig, &runner) == "ended");
+    see_the_turn_end(&rig, &runner, before);
     // What the wait saw, as the worker may move #7 on before a second read
     write(folder, "turn", "ended");
 
@@ -325,7 +326,8 @@ fn a_goose_turn_whose_record_is_gone_refuses_the_handover_and_the_old_image_keep
     assert!(error.contains("cannot be read"), "{error}");
     assert_eq!(tried.execs.load(Ordering::SeqCst), 0, "it execed anyway");
     assert_eq!(turn_of_7(&rig, &runner), "running");
+    let before = calls_of_7(&rig, &runner);
     write(folder, "go", "");
-    eventually("the turn's end", || turn_of_7(&rig, &runner) == "ended");
+    see_the_turn_end(&rig, &runner, before);
     assert!(worker.stop(CALL_PATIENCE, || {}));
 }

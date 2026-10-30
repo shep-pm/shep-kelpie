@@ -141,8 +141,9 @@ fn incoming(folder: &Path, carry: Carry) {
         handover: Handing::never(),
     };
     let worker = Worker::spawn(Arc::clone(&runner), hooks, wake, woken, died);
+    let before = calls_of_7(&rig, &runner);
     write(folder, "go", "");
-    eventually("the turn's end", || turn_of_7(&rig, &runner) == "ended");
+    see_the_turn_end(&rig, &runner, before);
     // What the wait saw, as the worker may move #7 on before a second read
     write(folder, "turn", "ended");
 

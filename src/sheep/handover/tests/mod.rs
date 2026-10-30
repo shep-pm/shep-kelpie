@@ -65,6 +65,18 @@ fn turn_of_7(rig: &Rig, runner: &Mutex<Runner>) -> String {
     item["turn"]["state"].as_str().unwrap().to_owned()
 }
 
+fn calls_of_7(rig: &Rig, runner: &Mutex<Runner>) -> u64 {
+    rig.ask(runner, "status", None)["work_items"][0]["calls"]
+        .as_u64()
+        .unwrap()
+}
+
+// Waits for a call on #7 to end after `before` were counted. A turn reads
+// `ended` only until the worker moves #7 on, which a poll can miss.
+fn see_the_turn_end(rig: &Rig, runner: &Mutex<Runner>, before: u64) {
+    eventually("the turn's end", || calls_of_7(rig, runner) > before);
+}
+
 fn eventually(what: &str, done: impl Fn() -> bool) {
     let deadline = std::time::Instant::now() + CALL_PATIENCE;
     while !done() {
@@ -95,8 +107,9 @@ fn a_refused_handover_leaves_the_runner_and_its_calls_as_they_were() {
     assert!(!handing.pending(), "the refused request stays queued");
     assert_eq!(turn_of_7(&rig, &runner), "running");
     assert!(!hold.returned(), "the call was ended");
+    let before = calls_of_7(&rig, &runner);
     hold.release();
-    eventually("the turn's end", || turn_of_7(&rig, &runner) == "ended");
+    see_the_turn_end(&rig, &runner, before);
     assert!(worker.stop(CALL_PATIENCE, || {}));
 }
 
