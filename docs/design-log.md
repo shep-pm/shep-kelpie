@@ -1007,6 +1007,7 @@ Kelpie's `[kelpie]` section of `dogs.toml`, `webhook.rs`:
 
 Parent #241. The shell-outs and the tests' command fakes (#1149).
 
+- 2026-10-29: on a Windows 11 ARM64 VM with a Windows shepherd, kelpie 1414937 and crabpot 0.5.4 ran [shep-pm/kelpie-scratch#26](https://github.com/shep-pm/kelpie-scratch/issues/26) end to end through [shep-pm/kelpie-scratch#27](https://github.com/shep-pm/kelpie-scratch/pull/27), merged at `97fa253c`. The worker ran under crabpot with no stopgaps (#1151).
 - Windows has no `sh`. Git for Windows ships `sh.exe` and `env.exe` under `usr/bin`, off `PATH` unless the installer put them there. `spawn::sh()` and `spawn::env()` return the Unix path on Unix. On Windows they find the Git for Windows that a `git.exe` on `PATH` belongs to, then its default install folders, and fall back to the bare name. The lookup is a pure function over injected `var` and `exists`, so it is tested on every platform.
 - Per call site: a hook (`core/hooks`), the test-runner (`adapters/test_runner`), the dev server's install (`runner/dev_server/bump/install`) and the Claude sandbox's `env` (`adapters/claude/sandbox.rs`) run a command line the maintainer wrote in POSIX shell, so they require Git for Windows and use `spawn::sh()`. Porting them to Rust would give a different language to the same setting.
 - `tar` and `shasum` in `upgrade` are reached only for a release asset, and no Windows asset exists, so they stay Unix. `cp -R` in `test_support` became Rust (`copy_dir`). `kill` and `ps` belong to #1148, sockets to #1147.
