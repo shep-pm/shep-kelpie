@@ -522,6 +522,10 @@ impl Machine {
 }
 
 impl Host for Machine {
+    fn browser_gaps(&self, _: &Path) -> Result<Vec<String>, String> {
+        Ok(Vec::new())
+    }
+
     fn on_path(&self, program: &str) -> bool {
         self.asked.lock().unwrap().push(program.to_owned());
         self.programs.contains(&program)

@@ -272,10 +272,18 @@ pub(super) fn sandbox(host: &dyn Host, listen: bool) -> Line {
         let list = gaps.join(" and ");
         // The fix names what is missing, and the example fits the machine:
         // `sandbox-exec` ships with macOS, and Debian calls `bwrap` `bubblewrap`.
+        let packages: Vec<_> = gaps
+            .iter()
+            .map(|program| match *program {
+                "bwrap" => "bubblewrap",
+                other => other,
+            })
+            .collect();
+        let packages = packages.join(" ");
         let fix = match host.os() {
             "macos" => format!("{list} ships with macOS at /usr/bin/sandbox-exec, so restore it"),
             _ => format!(
-                "install {list} with your package manager, such as `sudo apt-get install bubblewrap` on Debian"
+                "install {list} with your package manager, such as `sudo apt-get install {packages}` on Debian and Ubuntu"
             ),
         };
         return Line::missing(

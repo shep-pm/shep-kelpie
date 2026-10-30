@@ -4,6 +4,7 @@
 //! leases over the shepherd channel
 
 pub(crate) mod bridge;
+mod browser_libraries;
 mod classifier;
 mod claude;
 mod cli;
