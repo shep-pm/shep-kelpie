@@ -320,6 +320,29 @@ fn a_reviewer_whose_gateway_key_is_unset_is_noted_once_at_the_reread_that_leaves
 }
 
 #[test]
+fn a_named_reviewer_on_a_gateway_added_with_an_unset_key_waits_for_the_next_start() {
+    let rig = Rig::new("shep");
+    let runner = rig.open().unwrap();
+    rig.set_kelpie_settings(
+        "[gateways.paddock]\nurl = \"http://gpu:8700\"\nkey_env = \"KELPIE_TEST_KEY_NEVER_SET\"\n",
+    );
+    list_local(&rig);
+    let mut runner = runner.lock().unwrap();
+    let line = runner.reread(rig.settings(), rig.kelpie_settings());
+    let line = line.unwrap().unwrap();
+    assert!(
+        line.contains("agents from the runner's next start"),
+        "{line}"
+    );
+    assert!(
+        !runner
+            .take_notes()
+            .iter()
+            .any(|n| n.contains("reviewer local"))
+    );
+}
+
+#[test]
 fn agents_naming_a_gateway_added_with_them_wait_with_it_for_the_next_start() {
     let rig = Rig::new("shep");
     let runner = rig.open().unwrap();

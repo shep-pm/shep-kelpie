@@ -75,14 +75,15 @@ impl Runner {
         book.hold_for(self.state.work_items.iter().map(|item| &item.agent))?;
         let mut agents = settings.role_agents(&book)?;
         let gateways = kelpie.gateways();
-        let mut lineup = settings.lineup_with_keys(&book, &gateways, &self.home);
+        let lineup = settings.lineup(&book, &gateways, &self.home);
         // The gateways the agents in use were listed under.
         let mut in_use = &gateways;
-        // The gateways must hold as a start checks them.
-        check_gateways(&gateways, &book, &lineup)?;
+        // The gateways must hold as a start checks them. A key is not a shape: a
+        // reviewer without one is left out below, so it must not hide a missing gateway.
+        check_gateway_shapes(&gateways, &book, &lineup)?;
         gateways.check_triage_spam(&settings.triage.spam)?;
         // Agents the adapters cannot route yet wait with the gateways they name.
-        if check_gateways(&self.gateways, &book, &lineup).is_err() {
+        if check_gateway_shapes(&self.gateways, &book, &lineup).is_err() {
             waiting.push("agents");
             settings.agents.clone_from(&self.settings.agents);
             // The listed contributions' reviewers are agents too, and the old book may lack them.
@@ -93,7 +94,7 @@ impl Runner {
             in_use = &self.gateways;
         }
         // The adapters route with the gateways the runner has, so those hold the keys.
-        lineup = settings.lineup_with_keys(&book, &self.gateways, &self.home);
+        let lineup = settings.lineup_with_keys(&book, &self.gateways, &self.home);
         // As a start does, only a reviewer the project named in `agents.allow` is
         // held to what a round cannot work around. Read after the wait above, so it
         // names the reviewers this reread adopts and not the ones it turned away.
