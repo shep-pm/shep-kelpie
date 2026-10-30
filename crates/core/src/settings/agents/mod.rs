@@ -444,6 +444,19 @@ pub struct RoleAgents {
     pub pm: Option<PmAgent>,
 }
 
+// Why `refused` leaves `name` out, without the `name: ` a gateway check leads with.
+pub(super) fn refusal_reason(name: &AgentName, refused: SettingsError) -> String {
+    match refused {
+        SettingsError::Invalid { reason, .. } => {
+            let named = format!("{name}: ");
+            reason
+                .strip_prefix(&named)
+                .map_or(reason.clone(), str::to_owned)
+        }
+        other => other.to_string(),
+    }
+}
+
 impl Settings {
     /// The implementers the agent board may pick for this project, by name:
     /// each agent file whose role is `implementer` that `agents.allow` holds
@@ -481,15 +494,7 @@ impl Settings {
                 GatewayKeys::Unheld => gateways.check_listed_without_keys(agents, [&i.name]),
             };
             let refused = fenced.and_then(|()| routed()).err()?;
-            Some(match refused {
-                SettingsError::Invalid { reason, .. } => {
-                    let named = format!("{}: ", i.name);
-                    reason
-                        .strip_prefix(&named)
-                        .map_or(reason.clone(), str::to_owned)
-                }
-                other => other.to_string(),
-            })
+            Some(refusal_reason(&i.name, refused))
         };
         let allowed = self.allowed_implementers(agents);
         (allowed.iter())

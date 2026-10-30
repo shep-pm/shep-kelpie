@@ -180,7 +180,7 @@ pub use report::StepReport;
 pub use representative::{Post, RepresentError};
 pub use reread::check_gateway_shapes;
 pub(crate) use reread::check_gateways;
-use reviewers_check::{check_bots, check_local, coderabbit_left_out};
+use reviewers_check::{check_bots, check_local, coderabbit_left_out, left_in};
 pub use rework::ReworkError;
 pub use ruling::{Action, Answer, RuleError};
 pub use socket::{Handles, Limits, Serving, serve, start as serve_socket};
@@ -476,14 +476,14 @@ impl Runner {
         told.extend(notes);
         let agents = settings.role_agents(&book)?;
         let gateways = kelpie_settings.gateways();
-        // A candidate names a gateway kelpie can route, or none: what a start
-        // looks for is the key it spends there.
-        let lineup = settings.lineup(&book, &gateways, home);
+        // A candidate names a gateway kelpie can route and holds the key for, or
+        // none; one whose key is missing is left out and logged.
+        let lineup = settings.lineup_with_keys(&book, &gateways, home);
         check_gateways(&gateways, &book, &lineup)?;
         // A reviewer the project named in `agents.allow` is held to what a
         // round cannot work around. A candidate it never named is passed over
         // at its round.
-        let named = settings.named_reviewers(&book, home);
+        let named = left_in(settings.named_reviewers(&book, home), &lineup);
         gateways.check_triage_spam(&settings.triage.spam)?;
         let webhook = kelpie_settings.webhook;
         if webhook.is_none() {

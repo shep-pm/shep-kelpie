@@ -489,21 +489,29 @@ impl Runner {
         (self.settings).refused_implementers(&self.book, &self.gateways, GatewayKeys::Held)
     }
 
-    // The names `left_out` holds now
-    pub(super) fn left_out_names(&self) -> Vec<AgentName> {
-        self.left_out().into_iter().map(|(name, _)| name).collect()
+    // The reviewers the pass never picks from, each with why: the gateway's key is missing.
+    fn reviewers_left_out(&self) -> Vec<(AgentName, String)> {
+        (self.settings).refused_reviewers(&self.book, &self.gateways)
     }
 
-    // A log line for each implementer `left_out` that `before` does not name, so
-    // a reread tells only the ones it newly leaves out.
+    // The names `left_out` and `reviewers_left_out` hold now
+    pub(super) fn left_out_names(&self) -> Vec<AgentName> {
+        let both = self.left_out().into_iter().chain(self.reviewers_left_out());
+        both.map(|(name, _)| name).collect()
+    }
+
+    // A log line for each implementer or reviewer left out that `before` does not
+    // name, so a reread tells only the ones it newly leaves out.
     pub(super) fn left_out_notes(&self, before: &[AgentName]) -> Vec<String> {
-        let line = |(name, why): (AgentName, String)| {
-            format!("implementer {name} is left out of the agent board's ask: {why}")
+        let line = |role: &str, (name, why): (AgentName, String)| {
+            format!("{role} {name} is left out of the agent board's ask: {why}")
         };
-        (self.left_out().into_iter())
-            .filter(|(name, _)| !before.contains(name))
-            .map(line)
-            .collect()
+        let new = |(name, _): &(AgentName, String)| !before.contains(name);
+        let implementers = self.left_out().into_iter().filter(new);
+        let reviewers = self.reviewers_left_out().into_iter().filter(new);
+        let implementers = implementers.map(|left| line("implementer", left));
+        let reviewers = reviewers.map(|left| line("reviewer", left));
+        implementers.chain(reviewers).collect()
     }
 
     // Every agent an `agent:` label may name for this project, by name: each

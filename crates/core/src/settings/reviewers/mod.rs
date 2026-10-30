@@ -1,17 +1,17 @@
 //! The reviewers a review pass may pick from, by name
 //!
-//! A project names no reviewers. Every agent file whose role is `reviewer` that
-//! `agents.allow` holds is a candidate, but the one `contributions.security_reviewer`
-//! names. The agent board picks each round's reviewer, so the order does not
-//! matter. A project naming no agent is held to none of its candidates, so one
-//! `gateways` cannot route is left out; one naming the agents it may use keeps
-//! every candidate it named, and a start, a reread and `doctor` refuse one
-//! kelpie cannot route. A contribution's pass runs `contributions.reviewers`
-//! when it names them, else `iq3-xxs-review` where a gateway is named `paddock`.
+//! A project names no reviewers. Every reviewer file `agents.allow` holds is a
+//! candidate, but the one `contributions.security_reviewer` names. The agent
+//! board picks each round's reviewer. A project naming no agent is held to none
+//! of its candidates, so one `gateways` cannot route is left out; one naming the
+//! agents it may use keeps each, and a start, a reread and `doctor` refuse one
+//! on a gateway the settings lack. The runner leaves out one whose gateway key
+//! it lacks, and logs it. A contribution's pass runs `contributions.reviewers`
+//! when it names them, else `iq3-xxs-review` where a gateway is `paddock`.
 
 use std::path::Path;
 
-use super::agents::{Allow, find, left_out};
+use super::agents::{Allow, find, left_out, refusal_reason};
 use super::{AgentName, Gateways, NonBlank, Settings, SettingsError};
 use crate::agents::{Agent, Agents, DEFECT_HUNTER_LITE, IQ3_XXS_REVIEW, Role, Runs};
 use crate::review_bot::BotReviewer;
@@ -75,6 +75,45 @@ impl Settings {
         .filter(|(name, _)| named || gateways.check_listed_without_keys(agents, [*name]).is_ok())
         .map(|(name, agent)| reviewer(name.clone(), agent, home))
         .collect()
+    }
+
+    /// [`Settings::lineup`] for the runner, which holds the gateways' keys: a
+    /// candidate whose gateway has no usable key is left out too. A gateway the
+    /// settings lack, or one the forwarder cannot dial, stays for the start to refuse.
+    pub fn lineup_with_keys(
+        &self,
+        agents: &Agents,
+        gateways: &Gateways,
+        home: &Path,
+    ) -> Vec<ListedReviewer> {
+        let mut lineup = self.lineup(agents, gateways, home);
+        let unkeyed = |r: &ListedReviewer| {
+            let shaped = gateways.check_listed_without_keys(agents, [&r.name]);
+            shaped.is_ok() && gateways.check_listed(agents, [&r.name]).is_err()
+        };
+        lineup.retain(|r| !unkeyed(r));
+        lineup
+    }
+
+    /// The candidates [`Settings::lineup_with_keys`] leaves out, by name, each with why
+    pub fn refused_reviewers(
+        &self,
+        agents: &Agents,
+        gateways: &Gateways,
+    ) -> Vec<(AgentName, String)> {
+        let candidates = held(
+            self.agents.allow.as_ref(),
+            &self.contributions.security_reviewer,
+            agents,
+        );
+        let why = |name: &AgentName| {
+            gateways.check_listed_without_keys(agents, [name]).ok()?;
+            let refused = gateways.check_listed(agents, [name]).err()?;
+            Some(refusal_reason(name, refused))
+        };
+        candidates
+            .filter_map(|(name, _)| Some((name.clone(), why(name)?)))
+            .collect()
     }
 
     /// Whether the project named the agents it may use: `agents.allow` holds

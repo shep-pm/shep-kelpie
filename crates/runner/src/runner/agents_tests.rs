@@ -284,14 +284,44 @@ fn an_agent_on_a_gateway_kelpie_cannot_route_to_stops_the_runner() {
         err.contains("local: gateway paddock is not in kelpie's settings"),
         "{err}"
     );
+}
+
+#[test]
+fn a_reviewer_on_a_gateway_whose_key_is_unset_is_noted_and_left_out_of_every_round() {
+    let rig = Rig::new("shep");
+    rig.write_agent(
+        "local",
+        "---\nrole: reviewer\nharness: pi\nmodel: m\neffort: low\n\
+         gateway: paddock\ncontext: 65536\n---\nReview {{DIFF}}.\n",
+    );
     rig.set_kelpie_settings(
         "[gateways.paddock]\nurl = \"http://127.0.0.1:1\"\nkey_env = \"KELPIE_TEST_KEY_NEVER_SET\"\n",
     );
-    let err = rig.open_allowing(&named).unwrap_err().to_string();
-    assert!(
-        err.contains("KELPIE_TEST_KEY_NEVER_SET, which holds"),
-        "{err}"
+    rig.reviewers(&["qwen", "claude", "local"]);
+    rig.allow(&["sonnet-high", "qwen", "claude", "local"]);
+    let runner = rig.open().unwrap();
+    let notes = runner.lock().unwrap().take_notes();
+    let left = "reviewer local is left out of the agent board's ask: KELPIE_TEST_KEY_NEVER_SET, \
+                which holds the gateway's key, is not set in kelpie's environment";
+    assert_eq!(
+        notes.iter().filter(|n| n.as_str() == left).count(),
+        1,
+        "{notes:?}"
     );
+
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+    step(&runner).unwrap(); // the worker's first turn
+    step(&runner).unwrap(); // a round
+    let asks = rig.agent_board.asks();
+    let rounds: Vec<_> = (asks.iter())
+        .filter(|ask| ask.agents.iter().any(|a| a.as_str() == "claude"))
+        .collect();
+    assert!(!rounds.is_empty(), "{asks:?}");
+    for ask in rounds {
+        assert!(!ask.agents.iter().any(|a| a.as_str() == "local"), "{ask:?}");
+    }
 }
 
 #[test]

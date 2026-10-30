@@ -196,6 +196,40 @@ fn a_bot_that_reviews_on_ready_is_refused_after_another_bot_only_in_a_contributi
 }
 
 #[test]
+fn a_candidate_whose_gateway_key_is_unset_is_left_out_with_why_and_only_for_the_runner() {
+    let (settings, home) = project("", None);
+    let table = || {
+        let gateways = gateways_with("paddock", GatewayKind::Paddock);
+        (gateways.iter())
+            .map(|(n, g)| (n.clone(), g.clone()))
+            .collect::<BTreeMap<_, _>>()
+    };
+    let unkeyed = Gateways::reading(table(), |_| None);
+    let keyed = Gateways::reading(table(), |_| Some("pk".to_owned()));
+
+    // A shell that holds no key still lists the reviewer, for `doctor` to check.
+    assert!(names(&settings.lineup(&book(), &unkeyed, home.path())).contains(&"iq3-xxs-review"));
+    let runner = settings.lineup_with_keys(&book(), &unkeyed, home.path());
+    assert!(!names(&runner).contains(&"iq3-xxs-review"));
+    assert_eq!(runner.len(), EVERY_REVIEWER.len() - 1);
+    let [(left, why)] = settings
+        .refused_reviewers(&book(), &unkeyed)
+        .try_into()
+        .unwrap();
+    assert_eq!(left.as_str(), "iq3-xxs-review");
+    assert_eq!(
+        why,
+        "PADDOCK_KEY, which holds the gateway's key, is not set in kelpie's environment"
+    );
+
+    assert_eq!(
+        names(&settings.lineup_with_keys(&book(), &keyed, home.path())),
+        EVERY_REVIEWER
+    );
+    assert_eq!(settings.refused_reviewers(&book(), &keyed), []);
+}
+
+#[test]
 fn the_candidates_are_every_reviewer_file_allow_holds_but_the_security_reviewer() {
     let (mut settings, home) = project("", None);
     let paddock = gateways_with("paddock", GatewayKind::Paddock);
