@@ -477,10 +477,10 @@ fn settings_on_default_branch(
         let _ = git(checkout, ["fetch", "--quiet", "origin", base]);
     }
     let spec = format!("origin/{base}:{SETTINGS}");
-    if git(checkout, ["cat-file", "-e", &spec]).is_err() {
+    let Some(bytes) = blobs::read(checkout, &[&spec])?.pop().flatten() else {
         return Ok(None);
-    }
-    let text = git(checkout, ["show", &spec]).map_err(|e| e.to_string())?;
+    };
+    let text = String::from_utf8_lossy(&bytes);
     match serde_json::from_str::<Value>(&text) {
         Ok(settings) if settings.is_object() => {
             // A file whose `enabledPlugins` is no object turns on nothing.
@@ -577,7 +577,6 @@ fn marketplace(
 // `into`, replacing what was there. Only regular files come across: a link in
 // the tree is left out, so nothing a marketplace holds leads out of it.
 fn export(checkout: &Path, base: &str, relative: &Path, into: &Path) -> Result<(), String> {
-    use crate::worktree::in_repo;
     let plain = relative
         .components()
         .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
@@ -585,49 +584,20 @@ fn export(checkout: &Path, base: &str, relative: &Path, into: &Path) -> Result<(
     if !plain || folder.as_os_str().is_empty() {
         return Err("it is not a folder inside the checkout".into());
     }
-    let run = |args: Vec<std::ffi::OsString>| -> Result<Vec<u8>, String> {
-        let mut git = in_repo(checkout);
-        let output = git.args(args).output().map_err(|e| e.to_string())?;
-        if output.status.success() {
-            return Ok(output.stdout);
-        }
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
-    };
-    let tree = run(vec![
-        "ls-tree".into(),
-        "-r".into(),
-        "-z".into(),
-        format!("origin/{base}").into(),
-        "--".into(),
-        folder.clone().into_os_string(),
-    ])?;
+    let files = blobs::files_under(checkout, base, &[&folder])?;
     let _ = fs::remove_dir_all(into);
-    let mut written = 0;
-    for entry in tree.split(|b| *b == 0).filter(|e| !e.is_empty()) {
-        let text = String::from_utf8_lossy(entry);
-        let Some((meta, path)) = text.split_once('\t') else {
+    if files.is_empty() {
+        return Err("it holds no files there".into());
+    }
+    for (path, blob) in files {
+        let Ok(rest) = path.strip_prefix(&folder) else {
             continue;
         };
-        let fields: Vec<&str> = meta.split(' ').collect();
-        let [mode, "blob", sha] = fields[..] else {
-            continue;
-        };
-        if mode != "100644" && mode != "100755" {
-            continue;
-        }
-        let Ok(rest) = Path::new(path).strip_prefix(&folder) else {
-            continue;
-        };
-        let blob = run(vec!["cat-file".into(), "blob".into(), sha.into()])?;
         let target = into.join(rest);
         let parent = target.parent().unwrap_or(into);
         fs::create_dir_all(parent)
             .and_then(|()| fs::write(&target, blob))
             .map_err(|e| e.to_string())?;
-        written += 1;
-    }
-    if written == 0 {
-        return Err("it holds no files there".into());
     }
     Ok(())
 }
@@ -937,6 +907,7 @@ fn plain(name: &str) -> bool {
     SkillName::try_from(name.to_owned()).is_ok()
 }
 
+mod blobs;
 mod mcp;
 mod own;
 

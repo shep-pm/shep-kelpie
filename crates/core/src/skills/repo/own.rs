@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use super::{RepoPlugin, Servers, mcp, settings_on_default_branch};
+use super::{RepoPlugin, Servers, blobs, mcp, settings_on_default_branch};
 use crate::settings::{Part, RepoSetup};
 
 /// The plugin's name, which the repo's plugins never take: `kelpie-` names are refused
@@ -79,10 +79,20 @@ pub(super) fn plan(
 
 fn read(checkout: &Path, base: &str, setup: &RepoSetup) -> Result<Own, String> {
     let mut own = Own::default();
-    for part in FOLDERS.into_iter().filter(|part| setup.loads(*part)) {
-        let folder = format!("{}/{}", ".claude", part.as_str());
-        for (path, blob) in tree(checkout, base, &folder)? {
-            own.files.insert(Path::new(part.as_str()).join(path), blob);
+    let folders: Vec<(Part, PathBuf)> = (FOLDERS.into_iter())
+        .filter(|part| setup.loads(*part))
+        .map(|part| (part, PathBuf::from(format!(".claude/{}", part.as_str()))))
+        .collect();
+    if !folders.is_empty() {
+        let asked: Vec<&Path> = folders.iter().map(|(_, folder)| folder.as_path()).collect();
+        let files = blobs::files_under(checkout, base, &asked)
+            .map_err(|e| format!("cannot read .claude on {base}: {e}"))?;
+        for (path, blob) in files {
+            let found = (folders.iter())
+                .find_map(|(part, folder)| Some((part, path.strip_prefix(folder).ok()?)));
+            if let Some((part, rest)) = found {
+                own.files.insert(Path::new(part.as_str()).join(rest), blob);
+            }
         }
     }
     if setup.loads(Part::Hooks) {
@@ -104,62 +114,11 @@ fn read(checkout: &Path, base: &str, setup: &RepoSetup) -> Result<Own, String> {
 // The servers of `.mcp.json` on `origin`'s default branch, none where the file is absent or
 // unreadable. The worktree's copy is a worker's to change, so it is never read.
 fn mcp_json(checkout: &Path, base: &str) -> Servers {
-    use crate::worktree::git;
     let spec = format!("origin/{base}:{MCP_JSON}");
-    if git(checkout, ["cat-file", "-e", &spec]).is_err() {
-        return Servers::new();
+    match blobs::read(checkout, &[&spec]).map(|mut read| read.pop().flatten()) {
+        Ok(Some(bytes)) => mcp::own_servers(&String::from_utf8_lossy(&bytes)),
+        _ => Servers::new(),
     }
-    git(checkout, ["show", &spec])
-        .map(|text| mcp::own_servers(&text))
-        .unwrap_or_default()
-}
-
-// The regular files under `folder` on `origin`'s default branch, by path from `folder`. A link in
-// the tree is left out, so nothing the branch holds leads out of the plugin.
-fn tree(checkout: &Path, base: &str, folder: &str) -> Result<Vec<(PathBuf, Vec<u8>)>, String> {
-    use crate::worktree::in_repo;
-    let run = |args: &[&str]| -> Result<Vec<u8>, String> {
-        let output = in_repo(checkout)
-            .args(args)
-            .output()
-            .map_err(|e| e.to_string())?;
-        if output.status.success() {
-            return Ok(output.stdout);
-        }
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
-    };
-    let branch = format!("origin/{base}");
-    let listing = run(&[
-        "--literal-pathspecs",
-        "ls-tree",
-        "-r",
-        "-z",
-        &branch,
-        "--",
-        folder,
-    ])
-    .map_err(|e| format!("cannot read {folder} on {base}: {e}"))?;
-    let mut files = Vec::new();
-    for entry in listing.split(|b| *b == 0).filter(|e| !e.is_empty()) {
-        let text = String::from_utf8_lossy(entry);
-        let Some((meta, path)) = text.split_once('\t') else {
-            continue;
-        };
-        let fields: Vec<&str> = meta.split(' ').collect();
-        let [mode, "blob", sha] = fields[..] else {
-            continue;
-        };
-        if mode != "100644" && mode != "100755" {
-            continue;
-        }
-        let Ok(rest) = Path::new(path).strip_prefix(folder) else {
-            continue;
-        };
-        let blob = run(&["cat-file", "blob", sha])
-            .map_err(|e| format!("cannot read {path} on {base}: {e}"))?;
-        files.push((rest.to_owned(), blob));
-    }
-    Ok(files)
 }
 
 // The names of the skills among `files`: the folders of `skills/` that hold a `SKILL.md`.
