@@ -16,7 +16,7 @@ use std::process::{Command, Stdio};
 use super::patch;
 use crate::board::briefing::{Merge, named_paths};
 use crate::ticket::TicketId;
-use crate::worktree::{clone, in_repo};
+use crate::worktree::{clone, in_repo, loose_commit_in};
 
 /// Git's answers so far, by the commits they were read at
 #[derive(Debug, Default)]
@@ -134,7 +134,8 @@ impl GitJob {
             patches,
         } = self;
         let main_ref = format!("refs/remotes/origin/{base}");
-        let main = commits(&repo, [&main_ref]).remove(&main_ref);
+        let main = loose_commit_in(&repo.path, &main_ref)
+            .or_else(|| commits(&repo, [&main_ref]).remove(&main_ref));
         let heads: Vec<(TicketId, String)> = (branches.iter())
             .filter_map(|(ticket, branch)| {
                 let worktree = worktrees
@@ -222,7 +223,8 @@ impl Git {
     /// `origin/main`'s commit, as last fetched
     fn main(repo: &Reading, base: &str) -> Option<String> {
         let tracking = format!("refs/remotes/origin/{base}");
-        read(repo, &["rev-parse", "--verify", "--quiet", &tracking]).map(trimmed)
+        loose_commit_in(&repo.path, &tracking)
+            .or_else(|| read(repo, &["rev-parse", "--verify", "--quiet", &tracking]).map(trimmed))
     }
 
     /// Every file on `main`

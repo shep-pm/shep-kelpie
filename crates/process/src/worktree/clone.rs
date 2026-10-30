@@ -10,7 +10,8 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use super::{
-    WorktreeError, canonical, common_dir, git, has_ref, in_repo, output, own_git_dir, trusted,
+    WorktreeError, canonical, common_dir, git, git_dirs, has_ref, in_repo, loose_commit,
+    loose_commit_in, output, own_git_dir, trusted,
 };
 
 /// The clone's git dir for `worktree`: the sibling `<worktree>.git`
@@ -62,12 +63,22 @@ pub fn objects_of(repo: &Path, worktree: &Path) -> Option<PathBuf> {
 
 /// The commit `refs/heads/<branch>` is at for the work item whose worktree is `worktree`
 ///
-/// Read through the clone's trusted git, since a clone holds its branch and
-/// the checkout does not. A worktree that is no clone, or is gone, is read
-/// in the checkout, which a linked worktree shares its branch with.
+/// Read from the clone, since a clone holds its branch and the checkout does
+/// not: its loose ref where it has one, else through its trusted git. A
+/// worktree that is no clone, or is gone, is read in the checkout, which a
+/// linked worktree shares its branch with.
 pub fn branch_head(repo: &Path, worktree: &Path, branch: &str) -> Option<String> {
-    let full_ref = format!("refs/heads/{branch}^{{commit}}");
-    let args = ["rev-parse", "--verify", "--quiet", &full_ref];
+    let full_ref = format!("refs/heads/{branch}");
+    let common =
+        git_dirs(repo, worktree).map_or_else(|_| common_dir(repo), |(_, common)| Ok(common));
+    if let Some(commit) = common
+        .ok()
+        .and_then(|common| loose_commit(&common, &full_ref))
+    {
+        return Some(commit);
+    }
+    let peeled = format!("{full_ref}^{{commit}}");
+    let args = ["rev-parse", "--verify", "--quiet", &peeled];
     match trusted(repo, worktree) {
         Ok(in_worktree) => in_worktree(&args).ok(),
         Err(_) => git(repo, args).ok(),
@@ -244,10 +255,13 @@ pub fn mirror(repo: &Path, worktree: &Path, refs: &[&str]) -> Result<(), Worktre
     }
     let in_worktree = trusted(repo, worktree)?;
     for name in refs {
-        let commit = git(
-            repo,
-            ["rev-parse", "--verify", &format!("{name}^{{commit}}")],
-        )?;
+        let commit = match loose_commit_in(repo, name) {
+            Some(commit) => commit,
+            None => git(
+                repo,
+                ["rev-parse", "--verify", &format!("{name}^{{commit}}")],
+            )?,
+        };
         in_worktree(&["update-ref", "--no-deref", name, &commit])?;
     }
     Ok(())
