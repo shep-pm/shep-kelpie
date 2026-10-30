@@ -66,15 +66,7 @@ impl Settings {
     /// candidates `gateways` can route, since it asked for none of them and a
     /// round passes over one it cannot run.
     pub fn lineup(&self, agents: &Agents, gateways: &Gateways, home: &Path) -> Vec<ListedReviewer> {
-        let named = self.names_reviewers();
-        (held(
-            self.agents.allow.as_ref(),
-            &self.contributions.security_reviewer,
-            agents,
-        ))
-        .filter(|(name, _)| named || gateways.check_listed_without_keys(agents, [*name]).is_ok())
-        .map(|(name, agent)| reviewer(name.clone(), agent, home))
-        .collect()
+        self.candidates(agents, gateways, home, false)
     }
 
     /// [`Settings::lineup`] for the runner, which holds the gateways' keys: a
@@ -86,16 +78,35 @@ impl Settings {
         gateways: &Gateways,
         home: &Path,
     ) -> Vec<ListedReviewer> {
-        let mut lineup = self.lineup(agents, gateways, home);
-        let unkeyed = |r: &ListedReviewer| {
-            let shaped = gateways.check_listed_without_keys(agents, [&r.name]);
-            shaped.is_ok() && gateways.check_listed(agents, [&r.name]).is_err()
-        };
-        lineup.retain(|r| !unkeyed(r));
-        lineup
+        self.candidates(agents, gateways, home, true)
     }
 
-    /// The candidates [`Settings::lineup_with_keys`] leaves out, by name, each with why
+    // The lineup, leaving out a candidate with no usable key too when `by_key`.
+    fn candidates(
+        &self,
+        agents: &Agents,
+        gateways: &Gateways,
+        home: &Path,
+        by_key: bool,
+    ) -> Vec<ListedReviewer> {
+        let named = self.names_reviewers();
+        let kept = |name: &AgentName| {
+            let shaped = gateways.check_listed_without_keys(agents, [name]).is_ok();
+            let keyed = !by_key || !shaped || gateways.check_listed(agents, [name]).is_ok();
+            (named || shaped) && keyed
+        };
+        (held(
+            self.agents.allow.as_ref(),
+            &self.contributions.security_reviewer,
+            agents,
+        ))
+        .filter(|(name, _)| kept(name))
+        .map(|(name, agent)| reviewer(name.clone(), agent, home))
+        .collect()
+    }
+
+    /// The candidates [`Settings::lineup_with_keys`] leaves out for want of a
+    /// usable gateway key, by name, each with why
     pub fn refused_reviewers(
         &self,
         agents: &Agents,

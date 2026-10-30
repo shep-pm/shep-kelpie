@@ -299,6 +299,7 @@ fn a_reviewer_on_a_gateway_whose_key_is_unset_is_noted_and_left_out_of_every_rou
     );
     rig.reviewers(&["qwen", "claude", "local"]);
     rig.allow(&["sonnet-high", "qwen", "claude", "local"]);
+    assert!(std::env::var_os("KELPIE_TEST_KEY_NEVER_SET").is_none());
     let runner = rig.open().unwrap();
     let notes = runner.lock().unwrap().take_notes();
     let left = "reviewer local is left out of the agent board's ask: KELPIE_TEST_KEY_NEVER_SET, \
@@ -315,11 +316,11 @@ fn a_reviewer_on_a_gateway_whose_key_is_unset_is_noted_and_left_out_of_every_rou
     step(&runner).unwrap(); // the worker's first turn
     step(&runner).unwrap(); // a round
     let asks = rig.agent_board.asks();
-    let rounds: Vec<_> = (asks.iter())
-        .filter(|ask| ask.agents.iter().any(|a| a.as_str() == "claude"))
-        .collect();
-    assert!(!rounds.is_empty(), "{asks:?}");
-    for ask in rounds {
+    assert!(
+        asks.iter()
+            .any(|ask| ask.agents.iter().any(|a| a.as_str() == "claude"))
+    );
+    for ask in &asks {
         assert!(!ask.agents.iter().any(|a| a.as_str() == "local"), "{ask:?}");
     }
 }

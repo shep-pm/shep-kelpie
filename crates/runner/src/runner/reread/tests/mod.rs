@@ -292,6 +292,7 @@ fn a_reviewer_whose_gateway_key_is_unset_is_noted_once_at_the_reread_that_leaves
     );
     let runner = rig.open().unwrap();
     rig.write_agent("local", LOCAL);
+    assert!(std::env::var_os("KELPIE_TEST_KEY_NEVER_SET").is_none());
     let mut runner = runner.lock().unwrap();
     // The shipped `iq3-xxs-review` is on paddock too, so the start left it out.
     let at_start = runner.take_notes();
@@ -327,12 +328,19 @@ fn a_named_reviewer_on_a_gateway_added_with_an_unset_key_waits_for_the_next_star
         "[gateways.paddock]\nurl = \"http://gpu:8700\"\nkey_env = \"KELPIE_TEST_KEY_NEVER_SET\"\n",
     );
     list_local(&rig);
+    assert!(std::env::var_os("KELPIE_TEST_KEY_NEVER_SET").is_none());
     let mut runner = runner.lock().unwrap();
     let line = runner.reread(rig.settings(), rig.kelpie_settings());
-    let line = line.unwrap().unwrap();
+    assert_eq!(
+        line.unwrap().as_deref(),
+        Some(
+            "settings changed: reviews, webhook now in effect; gateways and agents from the runner's next start"
+        )
+    );
+    let local = |r: &crate::settings::ListedReviewer| r.name.as_str() == "local";
     assert!(
-        line.contains("agents from the runner's next start"),
-        "{line}"
+        !runner.lineup.iter().any(local),
+        "the runner has no gateway for it"
     );
     assert!(
         !runner
