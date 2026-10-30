@@ -22,6 +22,12 @@ const DRAINED: Duration = Duration::from_secs(2);
 
 /// The machine kelpie runs on
 pub trait Host: Send + Sync + fmt::Debug {
+    /// Libraries the installed headless Chromium cannot load on Linux
+    ///
+    /// # Errors
+    /// A message when the shell cannot be found or `ldd` cannot check it.
+    fn browser_gaps(&self, browsers: &Path) -> Result<Vec<String>, String>;
+
     /// The programs the sandbox runtime needs that are not on this machine,
     /// none when it can run
     fn sandbox_gaps(&self) -> Vec<&'static str>;
@@ -240,6 +246,13 @@ pub fn gaps(needs: &[&'static str], on_path: impl Fn(&str) -> bool) -> Vec<&'sta
 pub struct SystemHost;
 
 impl Host for SystemHost {
+    fn browser_gaps(&self, browsers: &Path) -> Result<Vec<String>, String> {
+        if env::consts::OS != "linux" {
+            return Ok(Vec::new());
+        }
+        super::browser_libraries::read(browsers, Path::new("ldd"))
+    }
+
     fn sandbox_gaps(&self) -> Vec<&'static str> {
         gaps(sandbox_needs(env::consts::OS), on_path)
     }

@@ -27,6 +27,7 @@ const WEBHOOK: &str =
 #[derive(Debug, Default)]
 struct FakeHost {
     gaps: Vec<&'static str>,
+    browser: Option<Result<Vec<String>, String>>,
     keychain: bool,
     token: bool,
     off_path: Vec<&'static str>,
@@ -42,6 +43,10 @@ struct FakeHost {
 }
 
 impl Host for FakeHost {
+    fn browser_gaps(&self, _: &Path) -> Result<Vec<String>, String> {
+        self.browser.clone().unwrap_or_else(|| Ok(Vec::new()))
+    }
+
     fn on_path(&self, program: &str) -> bool {
         match &self.path {
             Some(names) => names.contains(&program),

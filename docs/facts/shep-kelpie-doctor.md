@@ -14,3 +14,5 @@
 - Measured 2026-09-29 with this branch's build on a scratch shepherd (shep 0.11.0) and a scratch kelpie home, on a clone of shep-pm/kelpie-scratch:
   - `add` then `doctor` printed `ok` for `claude`, `gh`, the sandbox, the shepherd, push access, the three labels, CodeRabbit and the local command, and `MISSING` for rulings, since that shepherd had no `webhook` table. It exited 1 and the flock was as `add` left it.
   - With no shepherd running it printed the missing shepherd and skipped the projects. `--test-alert` with no webhook posted nothing.
+
+- Linux library checks (#194): `ldd` prints `libselinuy.so.1 => not found` for a copy of `ls` with that dependency name changed, recorded 2026-09-30 on WSL2 Ubuntu 24.04.1. The full output is `fixtures/ldd-wsl-ubuntu-24.04.txt`, recovered from commit `89319ac2`. This was not a Chromium run. Doctor checks installed Playwright headless shells on Linux and names `install-deps chromium-headless-shell` for missing libraries. A missing shell or a failed probe is `unsure`, not evidence that the libraries load. The live Linux checks remain open in #135.
