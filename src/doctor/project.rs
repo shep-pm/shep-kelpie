@@ -606,7 +606,19 @@ fn code_graph(subject: String, paths: &ProjectPaths) -> Line {
 
 // A runner whose browser is missing goes on without one, but the project turned it on.
 fn browser(subject: String, paths: &ProjectPaths, host: &dyn crate::adapters::host::Host) -> Line {
-    if paths.tools.has_browser() && host.os() == "linux" {
+    let tools = paths.tools.dir();
+    if !paths.tools.has_browser() {
+        return Line::missing(
+            subject,
+            format!(
+                "the Playwright server or Chromium is not under {}, so the project's workers run \
+                 without a browser",
+                tools.display()
+            ),
+            "run `shep kelpie tools install`, or turn `browser.enabled` off",
+        );
+    }
+    if host.os() == "linux" {
         match host.browser_gaps(&paths.tools.browsers()) {
             Ok(gaps) if !gaps.is_empty() => {
                 return Line::missing(
@@ -617,39 +629,27 @@ fn browser(subject: String, paths: &ProjectPaths, host: &dyn crate::adapters::ho
                     ),
                     format!(
                         "run `sudo node \"{}\" install-deps chromium-headless-shell`",
-                        paths
-                            .tools
-                            .dir()
-                            .join("node_modules/playwright-core/cli.js")
-                            .display()
+                        paths.tools.playwright_cli().display()
                     ),
                 );
             }
             Err(why) => {
-                return Line::unsure(subject, why, "run `ldd` on Playwright's headless Chromium");
+                return Line::unsure(
+                    subject,
+                    why,
+                    "check the headless shell installation and `ldd`, then rerun `shep kelpie doctor`",
+                );
             }
             Ok(_) => {}
         }
     }
-    let tools = paths.tools.dir();
-    match paths.tools.has_browser() {
-        true => Line::ok(
-            subject,
-            format!(
-                "the Playwright server and Chromium are under {}",
-                tools.display()
-            ),
+    Line::ok(
+        subject,
+        format!(
+            "the Playwright server and Chromium are under {}",
+            tools.display()
         ),
-        false => Line::missing(
-            subject,
-            format!(
-                "the Playwright server or Chromium is not under {}, so the project's workers run \
-                 without a browser",
-                tools.display()
-            ),
-            "run `shep kelpie tools install`, or turn `browser.enabled` off",
-        ),
-    }
+    )
 }
 
 fn instructions(subject: String, settings: &Settings) -> Line {

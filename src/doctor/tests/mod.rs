@@ -23,11 +23,14 @@ const SECRET: &str = "https://ntfy.example.invalid/kelpie-s3cr3t-topic";
 const WEBHOOK: &str =
     "[webhook]\nkind = \"ntfy\"\nurl = \"https://ntfy.example.invalid/kelpie-s3cr3t-topic\"\n";
 
-// A machine with a login token, no keychain and no gaps, unless it is given them
+// A machine with no login token, no keychain and no gaps, unless it is given them
 #[derive(Debug, Default)]
 struct FakeHost {
     gaps: Vec<&'static str>,
-    browser: Option<Result<Vec<String>, String>>,
+    // A completed library check with no gaps when unset.
+    browser_gaps: Option<Result<Vec<String>, String>>,
+    // The browser folder this scenario expects doctor to inspect, when set.
+    expected_browsers: Option<PathBuf>,
     keychain: bool,
     token: bool,
     off_path: Vec<&'static str>,
@@ -43,8 +46,14 @@ struct FakeHost {
 }
 
 impl Host for FakeHost {
-    fn browser_gaps(&self, _: &Path) -> Result<Vec<String>, String> {
-        self.browser.clone().unwrap_or_else(|| Ok(Vec::new()))
+    fn browser_gaps(&self, browsers: &Path) -> Result<Vec<String>, String> {
+        if let Some(expected) = &self.expected_browsers {
+            assert_eq!(
+                browsers, expected,
+                "doctor inspected another browser folder"
+            );
+        }
+        self.browser_gaps.clone().unwrap_or_else(|| Ok(Vec::new()))
     }
 
     fn on_path(&self, program: &str) -> bool {

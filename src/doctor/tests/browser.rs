@@ -1,6 +1,6 @@
 use super::*;
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_project_with_the_browser_on_is_missing_tools_that_are_not_installed() {
     let scene = Scene::new().await;
     scene.runs("golbat", |t| t["browser"] = json!({ "enabled": true }));
@@ -17,9 +17,7 @@ async fn a_project_with_the_browser_on_is_missing_tools_that_are_not_installed()
     );
 
     let tools = Tools::under(&scene.kelpie_home);
-    std::fs::create_dir_all(tools.playwright_mcp().parent().unwrap()).unwrap();
-    std::fs::write(tools.playwright_mcp(), "").unwrap();
-    std::fs::create_dir_all(tools.browsers().join("chromium-1200")).unwrap();
+    install_browser(&tools);
     ok(&scene.report().await, "golbat: browser");
 }
 
@@ -27,12 +25,11 @@ async fn a_project_with_the_browser_on_is_missing_tools_that_are_not_installed()
 async fn missing_linux_browser_libraries_fail_the_report_with_install_deps() {
     let mut scene = Scene::new().await;
     scene.host.os = "linux";
-    scene.host.browser = Some(Ok(vec!["libnss3.so".into(), "libatk-1.0.so.0".into()]));
+    scene.host.expected_browsers = Some(Tools::under(&scene.kelpie_home).browsers());
+    scene.host.browser_gaps = Some(Ok(vec!["libnss3.so".into(), "libatk-1.0.so.0".into()]));
     scene.runs("golbat", |t| t["browser"] = json!({ "enabled": true }));
     let tools = Tools::under(&scene.kelpie_home);
-    std::fs::create_dir_all(tools.playwright_mcp().parent().unwrap()).unwrap();
-    std::fs::write(tools.playwright_mcp(), "").unwrap();
-    std::fs::create_dir_all(tools.browsers().join("chromium-1200")).unwrap();
+    install_browser(&tools);
 
     let report = scene.report().await;
     let (what, fix) = missing(&report, "golbat: browser");
@@ -44,9 +41,34 @@ async fn missing_linux_browser_libraries_fail_the_report_with_install_deps() {
     assert!(fix.contains("playwright-core/cli.js"), "{fix}");
     assert!(!report.passed());
 
-    scene.host.browser = Some(Ok(Vec::new()));
+    scene.host.browser_gaps = Some(Ok(Vec::new()));
     ok(&scene.report().await, "golbat: browser");
+    scene.host.browser_gaps = Some(Err("no Playwright headless shell".into()));
+    let report = scene.report().await;
+    let Verdict::Unsure { what, next } = verdict(&report, "golbat: browser") else {
+        panic!("a failed library probe must remain unsure");
+    };
+    assert_eq!(what, "no Playwright headless shell");
+    assert_eq!(
+        next,
+        "check the headless shell installation and `ldd`, then rerun `shep kelpie doctor`"
+    );
+    assert!(report.passed());
     scene.host.os = "macos";
-    scene.host.browser = Some(Err("ldd is Linux only".into()));
+    scene.host.browser_gaps = Some(Err("ldd is Linux only".into()));
     ok(&scene.report().await, "golbat: browser");
+}
+
+// A browser presence check needs a server and any Chromium build, without installing real tools.
+fn install_browser(tools: &Tools) {
+    std::fs::create_dir_all(
+        tools
+            .playwright_mcp()
+            .parent()
+            .expect("MCP entry has a parent"),
+    )
+    .expect("make the browser server fixture folder");
+    std::fs::write(tools.playwright_mcp(), "").expect("write the browser server fixture");
+    std::fs::create_dir_all(tools.browsers().join("chromium-fixture"))
+        .expect("make the Chromium presence fixture");
 }
