@@ -510,20 +510,18 @@ pub(crate) async fn wait_out_merges(
         let mut busy = Vec::new();
         for &name in names {
             match trigger(client, name, "status", None).await? {
-                Answered::Runner(body) => busy.extend(
-                    merging(&body)
-                        .into_iter()
-                        .map(|(ticket, failing)| {
-                            let mut line = format!("`{name}` is merging {}", ticket.shown());
-                            if let Some(failing) = failing {
-                                line.push_str(&format!(
-                                    ", whose cleanup has failed {} times: {}",
-                                    failing.failures, failing.reason
-                                ));
-                            }
-                            line
-                        }),
-                ),
+                Answered::Runner(body) => {
+                    busy.extend(merging(&body).into_iter().map(|(ticket, failing)| {
+                        let mut line = format!("`{name}` is merging {}", ticket.shown());
+                        if let Some(failing) = failing {
+                            line.push_str(&format!(
+                                ", whose cleanup has failed {} times: {}",
+                                failing.failures, failing.reason
+                            ));
+                        }
+                        line
+                    }))
+                }
                 // Not taking its actions yet: it may be mid-merge from before.
                 Answered::Starting => busy.push(format!("`{name}` is starting")),
                 // Delivered and unanswered: whether it merges is unknown.

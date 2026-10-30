@@ -69,13 +69,16 @@ async fn the_wait_names_why_a_merged_item_has_not_cleaned_up() {
     let err = ran.unwrap_err();
 
     assert!(
-        said.iter().any(|line| line == "waiting: `koji` is merging #7, whose cleanup has failed \
+        said.iter().any(|line| line
+            == "waiting: `koji` is merging #7, whose cleanup has failed \
             8 times: cannot delete branch kelpie/7: checked out in another worktree"),
         "{said:?}"
     );
     assert!(
-        err.contains("`koji` is merging #7, whose cleanup has failed 8 times: \
-            cannot delete branch kelpie/7: checked out in another worktree"),
+        err.contains(
+            "`koji` is merging #7, whose cleanup has failed 8 times: \
+            cannot delete branch kelpie/7: checked out in another worktree"
+        ),
         "{err}"
     );
     assert!(err.contains("nothing was restarted"), "{err}");

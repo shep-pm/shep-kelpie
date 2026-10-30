@@ -10,9 +10,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Map, Value};
-use shep_kelpie_protocol::status::Failing;
 use shep_client::PROTOCOL_VERSION;
 use shep_client::shep_core::protocol::request::{Request, SelectorSpec};
+use shep_kelpie_protocol::status::Failing;
 
 use super::*;
 use crate::flock::Launch;
