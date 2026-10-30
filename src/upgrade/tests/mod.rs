@@ -14,6 +14,7 @@ use shep_client::PROTOCOL_VERSION;
 use shep_client::shep_core::protocol::request::{Request, SelectorSpec};
 use shep_kelpie_protocol::status::Failing;
 
+use super::restart::Merging;
 use super::*;
 use crate::flock::Launch;
 use crate::home::ProjectName;
@@ -259,19 +260,24 @@ fn the_five_forms_are_read_and_nothing_else() {
 #[test]
 fn a_merge_in_flight_is_a_work_item_being_merged_or_just_merged() {
     let phase = |phase: &str| format!(r#"{{"work_items":[{{"issue":"4","phase":{phase}}}]}}"#);
-    for (phase_json, merging_now) in [
-        (r#"{"state":"merge","head":"a"}"#, true),
-        (r#"{"state":"done","merged":true}"#, true),
-        (r#"{"state":"done","merged":false}"#, false),
-        (r#"{"state":"ruling","id":1}"#, false),
-        (r#"{"state":"implement"}"#, false),
-        (r#""merge""#, true),
+    for (phase_json, merged) in [
+        (r#"{"state":"merge","head":"a"}"#, Some(false)),
+        (r#"{"state":"done","merged":true}"#, Some(true)),
+        (r#"{"state":"done"}"#, Some(true)),
+        (r#""done""#, Some(true)),
+        (r#"{"state":"done","merged":false}"#, None),
+        (r#"{"state":"ruling","id":1}"#, None),
+        (r#"{"state":"implement"}"#, None),
+        (r#""merge""#, Some(false)),
     ] {
-        let expected = if merging_now {
-            vec![(ticket(4), None)]
-        } else {
-            vec![]
-        };
+        let expected: Vec<_> = merged
+            .map(|merged| Merging {
+                ticket: ticket(4),
+                failing: None,
+                merged,
+            })
+            .into_iter()
+            .collect();
         assert_eq!(
             restart::merging(&phase(phase_json)),
             expected,
@@ -282,14 +288,22 @@ fn a_merge_in_flight_is_a_work_item_being_merged_or_just_merged() {
     // say nothing.
     assert_eq!(
         restart::merging(r#"{"work_item":{"issue":9,"phase":{"state":"merge","head":"a"}}}"#),
-        [(ticket(9), None)]
+        [Merging {
+            ticket: ticket(9),
+            failing: None,
+            merged: false
+        }]
     );
     // A local ticket is a ticket too.
     assert_eq!(
         restart::merging(
             r#"{"work_items":[{"issue":"k12","phase":{"state":"merge","head":"a"}}]}"#
         ),
-        [("k12".parse().expect("a test's local ticket"), None)]
+        [Merging {
+            ticket: "k12".parse().expect("a test's local ticket"),
+            failing: None,
+            merged: false,
+        }]
     );
     for status in [r#"{"work_item":null}"#, "unknown action: status", "", "[]"] {
         assert!(restart::merging(status).is_empty(), "{status}");
@@ -307,15 +321,20 @@ fn merging_carries_the_failing_reason_of_a_merged_item() {
     assert_eq!(
         restart::merging(body),
         [
-            (
-                ticket(7),
-                Some(Failing {
+            Merging {
+                ticket: ticket(7),
+                failing: Some(Failing {
                     since: crate::ports::Timestamp(1790000000),
                     failures: 8,
                     reason: "cannot delete branch kelpie/7: checked out in another worktree".into(),
                 }),
-            ),
-            (ticket(9), None),
+                merged: true,
+            },
+            Merging {
+                ticket: ticket(9),
+                failing: None,
+                merged: false
+            },
         ]
     );
 }

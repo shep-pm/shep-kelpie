@@ -510,18 +510,17 @@ pub(crate) async fn wait_out_merges(
         let mut busy = Vec::new();
         for &name in names {
             match trigger(client, name, "status", None).await? {
-                Answered::Runner(body) => {
-                    busy.extend(merging(&body).into_iter().map(|(ticket, failing)| {
-                        let mut line = format!("`{name}` is merging {}", ticket.shown());
-                        if let Some(failing) = failing {
-                            line.push_str(&format!(
-                                ", whose cleanup has failed {} times: {}",
-                                failing.failures, failing.reason
-                            ));
-                        }
-                        line
-                    }))
-                }
+                Answered::Runner(body) => busy.extend(merging(&body).into_iter().map(|item| {
+                    let mut line = format!("`{name}` is merging {}", item.ticket.shown());
+                    if let Some(failing) = item.failing {
+                        let step = if item.merged { "cleanup" } else { "step" };
+                        line.push_str(&format!(
+                            ", whose {step} has failed {} times: {}",
+                            failing.failures, failing.reason
+                        ));
+                    }
+                    line
+                })),
                 // Not taking its actions yet: it may be mid-merge from before.
                 Answered::Starting => busy.push(format!("`{name}` is starting")),
                 // Delivered and unanswered: whether it merges is unknown.
@@ -548,13 +547,24 @@ pub(crate) async fn wait_out_merges(
     }
 }
 
-/// Each ticket a runner's `status` shows being merged, with its failing step
+/// A work item whose merge or cleanup holds a restart
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Merging {
+    /// The work item's ticket
+    pub ticket: TicketId,
+    /// Its repeated step failure, when the runner reports one
+    pub failing: Option<Failing>,
+    /// Whether the pull request has merged and its cleanup is pending
+    pub merged: bool,
+}
+
+/// Each ticket a runner's `status` shows being merged, with its failure and progress
 ///
 /// A work item in `merge` is being merged, and one in `done` with its pull
 /// request merged is having its worktree removed: a restart cuts neither short.
 /// A runner from before ticket ids writes a GitHub issue number, which reads as
 /// the GitHub id of that number.
-pub fn merging(status: &str) -> Vec<(TicketId, Option<Failing>)> {
+pub fn merging(status: &str) -> Vec<Merging> {
     let Ok(Value::Object(status)) = serde_json::from_str::<Value>(status) else {
         return Vec::new();
     };
@@ -565,18 +575,20 @@ pub fn merging(status: &str) -> Vec<(TicketId, Option<Failing>)> {
     };
     items
         .into_iter()
-        .filter(|item| {
-            let phase = &item["phase"];
-            match phase["state"].as_str().or(phase.as_str()) {
-                Some("merge") => true,
-                Some("done") => phase["merged"].as_bool().unwrap_or(true),
-                _ => false,
-            }
-        })
         .filter_map(|item| {
+            let phase = &item["phase"];
+            let merged = match phase["state"].as_str().or(phase.as_str()) {
+                Some("merge") => false,
+                Some("done") if phase["merged"].as_bool().unwrap_or(true) => true,
+                _ => return None,
+            };
             let ticket = TicketId::from_json(&item["issue"])?;
             let failing = serde_json::from_value(item["failing"].clone()).ok();
-            Some((ticket, failing))
+            Some(Merging {
+                ticket,
+                failing,
+                merged,
+            })
         })
         .collect()
 }
