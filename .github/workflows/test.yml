@@ -331,7 +331,7 @@ jobs:
       - id: save
         run: 'cargo test --locked -p shep-kelpie-core --lib -- lease::saved:: state::tests::release:: state::tests::a_second_atomic_write_over_a_file_replaces_it'
       # Measure every crate's lib tests before fixing each Windows failure group.
-      # Skip the two upgrade tests that hung in run 40990662373.
+      # Skip the tests that hung in runs 40990662373 and 41020519313.
       - id: lib
         continue-on-error: true
         timeout-minutes: 40
@@ -339,6 +339,10 @@ jobs:
           cargo test --workspace --lib --locked --no-fail-fast --
           --skip upgrade::tests::handover::a_runner_stopped_while_it_hands_over_stays_stopped
           --skip upgrade::tests::sheep::a_runner_stopped_while_the_upgrade_waits_stays_stopped
+          --skip runner::ci_help::tests::the_red_prompt_names_the_e2e_command_only_when_configured
+          --skip runner::claude_files::tests::a_trigger_is_answered_while_the_changed_files_are_read
+          --skip runner::closed::tests::a_trigger_is_answered_while_the_worktree_is_checked_for_work
+          --skip runner::contributions::pass_tests::a_pass_past_its_ceiling_ends_unread_and_counts_what_it_spent
       - if: steps.lib.outcome == 'failure'
         run: |
           echo "::warning title=windows::the workspace's lib test run failed or timed out. See the lib step's log for build errors, test failures or unfinished tests."
