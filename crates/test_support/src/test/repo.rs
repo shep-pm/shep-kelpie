@@ -31,6 +31,7 @@ const LONG_AGO: &str = "@1700000000 +0000";
 ///
 /// When git cannot run, or exits with a failure.
 pub fn git(cwd: &Path, args: &[&str]) -> String {
+    let started = std::time::Instant::now();
     let output = Command::new("git")
         .args([
             "-c",
@@ -46,6 +47,9 @@ pub fn git(cwd: &Path, args: &[&str]) -> String {
         .env("GIT_COMMITTER_DATE", LONG_AGO)
         .output()
         .unwrap();
+    if std::env::var_os("KELPIE_TEST_TIMING").is_some() {
+        eprintln!("TIMING git {args:?}: {:?}", started.elapsed());
+    }
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),

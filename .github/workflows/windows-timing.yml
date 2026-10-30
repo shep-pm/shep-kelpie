@@ -1,0 +1,39 @@
+name: windows timing
+on:
+  push:
+    branches: [kelpie/1578]
+permissions:
+  contents: read
+jobs:
+  timing:
+    runs-on: windows-11-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: 'false'
+      - shell: pwsh
+        run: |
+          'C:\Program Files\LLVM\bin' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          rustc -vV
+          git version --build-options
+          Get-Command git, sh, cmd | Format-List Name, Source
+          Get-MpComputerStatus | Select-Object AntivirusEnabled, RealTimeProtectionEnabled
+          Get-CimInstance Win32_Processor | Select-Object Name, NumberOfLogicalProcessors
+      - run: cargo test --locked -p shep-kelpie-runner --lib --no-run
+      - name: Fixture and process timings
+        shell: pwsh
+        env:
+          KELPIE_TEST_TIMING: '1'
+        run: |
+          Write-Output "Started $([DateTime]::UtcNow.ToString('o'))"
+          cargo test --locked -p shep-kelpie-runner --lib windows_timing_probe -- --nocapture --test-threads=1
+          Write-Output "Ended $([DateTime]::UtcNow.ToString('o'))"
+      - name: Existing runner test timings
+        shell: pwsh
+        env:
+          KELPIE_TEST_TIMING: '1'
+        run: |
+          cargo test --locked -p shep-kelpie-runner --lib runner::slots_tests::a_full_pending_rulings_opens_nothing_and_its_alert_counts_the_rulings -- --nocapture --test-threads=1
