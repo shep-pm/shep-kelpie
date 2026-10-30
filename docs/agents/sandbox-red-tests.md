@@ -36,14 +36,14 @@ Of the sites that used `tempdir_in("/tmp")`:
 
 The Windows CI job runs every crate's lib tests in the non-gating `lib` step, after `door`, `totp` and the gating `save` step. Not a sandbox list: `kelpie_ci_failures_total` and `SANDBOX_RED` do not read it.
 
-### Measured on [run 41026010104](https://github.com/shep-pm/shep-kelpie/actions/runs/41026010104/job/123964237357) (#1575)
+### Measured on [run 41032543922](https://github.com/shep-pm/shep-kelpie/actions/runs/41032543922/job/123985536432) (#1575)
 
-The step did not finish. The runner crate's 3035 tests ran at about 0.4 a second on the hosted runner, so 725 of them had run when the step's 40-minute limit ended it. The table is every crate that reached `test result`. `shep-kelpie-test-support`, `-tree`, `-trim` and `-worker-folder` come after the runner and did not run:
+The step did not finish. No test hung beyond the six skipped, but the runner crate's 3035 tests ran at 0.4 a second, 1941 of them in the step's 90 minutes, and `--test-threads=32` ran no faster than the default (run 41026010104: 725 in 30 minutes). The step now has 180 minutes. The table is every crate that reached `test result`. `shep-kelpie-test-support`, `-tree`, `-trim` and `-worker-folder` come after the runner and did not run:
 
 | Crate | Passed | Failed | Ignored |
 |---|---|---|---|
-| `shep-kelpie` (root) | 546 | 104 | 4 |
-| `shep-kelpie-adapters` | 789 | 132 | 21 |
+| `shep-kelpie` (root) | 543 | 107 | 4 |
+| `shep-kelpie-adapters` | 788 | 133 | 21 |
 | `shep-kelpie-client` | 11 | 0 | 0 |
 | `shep-kelpie-core` | 1412 | 50 | 5 |
 | `shep-kelpie-disk` | 4 | 0 | 0 |
@@ -52,7 +52,7 @@ The step did not finish. The runner crate's 3035 tests ran at about 0.4 a second
 | `shep-kelpie-owner-only` | 7 | 0 | 0 |
 | `shep-kelpie-process` | 63 | 51 | 0 |
 | `shep-kelpie-protocol` | 16 | 0 | 0 |
-| `shep-kelpie-runner` | no result | no result | no result |
+| `shep-kelpie-runner` | 1802 passed and 139 failed of 1941 run, no `test result` | | |
 
 The `lib` step skips these tests, which hang on Windows:
 
@@ -63,9 +63,9 @@ The `lib` step skips these tests, which hang on Windows:
 - `runner::closed::tests::a_trigger_is_answered_while_the_worktree_is_checked_for_work` (run 41020519313)
 - `runner::contributions::pass_tests::a_pass_past_its_ceiling_ends_unread_and_counts_what_it_spent` (run 41020519313)
 
-Five `sheep::handover::tests` ran past 60 seconds on the run above and then ended: `codex::a_codex_turn_whose_record_is_gone_refuses_the_handover_and_the_old_image_keeps_its_call`, the goose twin, and three `pi` tests. They are slow, not skipped.
+Five `sheep::handover::tests` ran past 60 seconds in the root package on both runs and then ended: `codex::a_codex_turn_whose_record_is_gone_refuses_the_handover_and_the_old_image_keeps_its_call`, the goose twin, and three `pi` tests. They are slow, not skipped.
 
-The failures by cause, counted from the panic messages of the crates above (the runner's are not in them):
+The failures by cause, counted from the panic messages of run 41026010104 for the crates above. The runner's 139 failures so far are ungrouped, but its panics are mostly the first row (about 40) and the third (about 5):
 
 | Cause | Panic message | Panics |
 |---|---|---|
@@ -77,7 +77,7 @@ The failures by cause, counted from the panic messages of the crates above (the 
 | A platform without the feature | `handing over is not supported on this platform`, `the images agree on the state: Unsupported` | 6 |
 | Smaller ones | a process the test never saw, `Unreachable(23)`, a TOML escape, an absolute-path check, a `curl: (23)` write error, a hook run through `sh`, and others | the rest |
 
-The step now runs with `--test-threads=32` and a 90-minute limit (the job's is 120), to reach the runner's `test result`. The counts above are replaced by those of the run that finishes.
+The counts are replaced by those of a run in which the runner reaches `test result`.
 
 ### Reading the source (#1149)
 
