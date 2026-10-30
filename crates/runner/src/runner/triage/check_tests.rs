@@ -7,15 +7,17 @@ use std::sync::Mutex;
 use serde_json::{Value, json};
 
 use super::checks::CHECK_TRIES;
-use super::pick_tests::{MAINTAINER, issue, list, rig_with};
+use super::pick_tests::{MAINTAINER, issue, list, rig_with, triaging};
 use super::ready_tests::said;
 use super::research_tests::{APP, WORDS, calls, moves, pump, reply, under};
+use crate::board::{ReadyIssue, Skip, SubIssues, check};
 use crate::github::ApiError;
 use crate::ports::Timestamp;
 use crate::ports::{OpenIssue, Role};
 use crate::runner::slots_tests::dispatched;
 use crate::runner::{Pass, Runner, advance, step};
-use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
+use crate::state::{CheckTriage, IssueCheck};
+use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, ticket};
 
 // A body the issue check passes, with the labels it needs beside it
 pub(super) const PASSING: &str = "Touches: `src/start.rs`\n\n## What to build\n\n- Fix the \
@@ -576,4 +578,78 @@ fn a_label_that_cannot_be_added_is_noted_once_and_the_issue_is_checked_as_it_sta
     assert_eq!(said, 1, "{notes:?}");
     // The title carries the kind, so the issue passes as it did before.
     assert_eq!(moves(&rig).last().unwrap(), "label ready-for-agent");
+}
+
+// A result kept for issue 30 after its triage ran, whose key is not any text's
+fn kept_after_triage(runner: &Mutex<Runner>, key: u64) {
+    runner.lock().unwrap().state.checks = vec![IssueCheck {
+        issue: 30,
+        key,
+        failures: vec!["no acceptance criteria".to_owned()],
+        triage: CheckTriage::Ran,
+    }];
+}
+
+// Issue 30 as the board lists it ready, with `body` and `labels`
+fn ready_issue(body: &str, labels: &[&str]) -> ReadyIssue {
+    ReadyIssue {
+        ticket: ticket(30),
+        title: "Crash on start".to_owned(),
+        body: body.to_owned(),
+        assigned: false,
+        labels: labels.iter().map(|&l| l.to_owned()).collect(),
+        blocked_by: Vec::new(),
+        unlisted_blockers: 0,
+        parent: None,
+        sub_issues: SubIssues::default(),
+    }
+}
+
+#[test]
+fn a_hand_fixed_issue_whose_triage_ran_is_no_longer_held_by_its_old_failures() {
+    let (_rig, runner) = triaging("off");
+    kept_after_triage(&runner, 1);
+    let fixed = ready_issue(PASSING, &PASSING_LABELS);
+
+    assert_eq!(runner.lock().unwrap().check_holds(&[fixed]), []);
+}
+
+#[test]
+fn an_unchanged_issue_whose_triage_ran_is_held_with_its_kept_failures() {
+    let (_rig, runner) = triaging("off");
+    let unchanged = ready_issue(FAILING, &[]);
+    kept_after_triage(
+        &runner,
+        check::key(&unchanged.title, &unchanged.body, &unchanged.labels),
+    );
+
+    assert_eq!(
+        runner
+            .lock()
+            .unwrap()
+            .check_holds(std::slice::from_ref(&unchanged)),
+        [Skip::Check {
+            issue: unchanged.ticket,
+            failures: vec!["no acceptance criteria".to_owned()],
+        }]
+    );
+}
+
+#[test]
+fn a_hand_fixed_issue_whose_triage_ran_passes_its_check_and_replaces_the_kept_result() {
+    let (rig, runner) = checking(
+        "pick = \"maintainer\"",
+        MAINTAINER,
+        PASSING,
+        &PASSING_LABELS,
+    );
+    kept_after_triage(&runner, 1);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let kept = checks(&rig);
+    assert_eq!(kept.as_array().unwrap().len(), 1, "{kept}");
+    assert_ne!(kept[0]["key"], 1, "{kept}");
+    assert_eq!(kept[0].get("failures"), None, "{kept}");
+    assert_eq!(kept[0].get("triage"), None, "{kept}");
 }
