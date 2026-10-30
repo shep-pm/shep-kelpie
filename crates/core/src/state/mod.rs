@@ -844,12 +844,19 @@ impl core::error::Error for StateError {}
 #[derive(Debug, Clone)]
 pub struct StateStore {
     path: PathBuf,
+    // Tests only: the saves left, shared by every clone of the store
+    #[cfg(any(test, feature = "test-support"))]
+    saves_left: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
 }
 
 impl StateStore {
     /// A store for the state file at `path`
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self {
+            path,
+            #[cfg(any(test, feature = "test-support"))]
+            saves_left: None,
+        }
     }
 
     /// The workers of the work items a file saved before agent files holds,
@@ -939,8 +946,10 @@ impl StateStore {
     ///
     /// # Errors
     ///
-    /// [`StateError::Write`] when any step fails. The previous state stands.
+    /// [`StateError::Write`] when any step fails, or when a test store has spent its saves. The previous state stands.
     pub fn save(&self, state: &ProjectState) -> Result<(), StateError> {
+        #[cfg(any(test, feature = "test-support"))]
+        self.refuse_when_spent()?;
         let mut bytes = serde_json::to_vec_pretty(state).expect("state serializes to JSON");
         bytes.push(b'\n');
         // A project `shep kelpie add` set up has no folder of its own yet.
@@ -984,5 +993,7 @@ pub fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(any(test, feature = "test-support"))]
+mod refuse;
 #[cfg(test)]
 mod tests;

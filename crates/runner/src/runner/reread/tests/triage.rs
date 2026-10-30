@@ -3,8 +3,14 @@ use std::sync::Mutex;
 use serde_json::Value;
 
 use crate::ports::{AuthorAssociation, Clock, OpenIssue, Role, Timestamp};
-use crate::runner::{Pass, Runner, advance, step};
+use crate::review_bot::Bot;
+use crate::runner::contributions::pass_tests::listing;
+use crate::runner::contributions::tests::{opened, poll};
+use crate::runner::{OpenError, Pass, Runner, advance, step};
+use crate::settings::AgentName;
+use crate::state::{BotTurn, StateError, Walking};
 use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
+use crate::work_item::ReviewStage;
 
 use super::settings_with;
 
@@ -241,4 +247,75 @@ fn pick_turned_off_while_a_call_runs_posts_nothing_when_it_ends() {
     assert_eq!(step(&runner).unwrap(), None);
 
     assert_eq!(rig.github.comments(), []);
+}
+
+#[test]
+fn a_reread_that_fails_after_pick_changes_keeps_the_old_triage_state() {
+    let (rig, runner) = listing(&["mine"]);
+    rig.edit_settings(|s| format!("{s}{TABLE}pick = \"off\"\n"));
+    opened(&rig, 30, "newcomer");
+    poll(&rig, &runner);
+    {
+        // A walk at a bot the next lineup does not list, so the reread must end its turn.
+        let mut runner = runner.lock().unwrap();
+        assert_eq!(
+            runner.state.contributions.len(),
+            1,
+            "the pull request is followed"
+        );
+        let (now, head) = (rig.clock.now(), runner.state.contributions[0].head.clone());
+        runner.state.contributions[0].walking = Some(Walking {
+            head: head.clone(),
+            past: Vec::new(),
+            ran: Vec::new(),
+            missed: Vec::new(),
+            bot: Some(BotTurn {
+                reviewer: AgentName::try_from("coderabbit".to_owned()).unwrap(),
+                stage: ReviewStage::Summon {
+                    bot: Bot::Coderabbit,
+                    started: now,
+                    head,
+                    readied: None,
+                    full: false,
+                },
+            }),
+        });
+        // The triage save is the first the reread makes and the turn's the second.
+        runner.store = runner.store.clone().refusing_after(1);
+    }
+    let before = rig.ask(&runner, "status", None)["triage"].clone();
+    let saved = || -> Value {
+        serde_json::from_str(&std::fs::read_to_string(&rig.paths().state).unwrap()).unwrap()
+    };
+    let stamped_before = saved()["triage"].clone();
+    let next = settings_with(&rig, |s| {
+        let edited = (s.replace("[\"mine\"]", "[\"other\"]")).replace(
+            &format!("{TABLE}pick = \"off\""),
+            &format!("{TABLE}pick = \"all\""),
+        );
+        assert!(edited.contains("[\"other\"]"), "the reviewers changed");
+        assert!(
+            edited.contains(&format!("{TABLE}pick = \"all\"")),
+            "pick changed"
+        );
+        edited
+    });
+
+    let err = runner
+        .lock()
+        .unwrap()
+        .reread(next, rig.kelpie_settings())
+        .unwrap_err();
+
+    assert!(
+        matches!(err, OpenError::State(StateError::Write { .. })),
+        "{err}"
+    );
+    assert_eq!(rig.ask(&runner, "status", None)["triage"], before);
+    assert_eq!(
+        saved()["triage"],
+        stamped_before,
+        "the saved state kept its triage"
+    );
+    assert!(runner.lock().unwrap().settings().triage.is_off());
 }

@@ -191,6 +191,11 @@ impl Runner {
         let to_github = settings.tickets.source != self.settings.tickets.source
             && settings.tickets.source == TicketSource::Github;
         let e2e_changed = settings.e2e != self.settings.e2e;
+        // A walk keeps the turn of a bot the lineup drops until it moves on, with its label on.
+        // Ended before the triage settles, so a failure here leaves the triage as it was.
+        if contribution_lineup != self.contribution_lineup {
+            self.end_unlisted_turns(&contribution_lineup)?;
+        }
         // A start stamps or clears it the same way, so it follows `pick` past `off`.
         let was_triaging = self.state.triage.clone();
         if triage::settle_since(&mut self.state, &settings, self.ports.clock.now()) {
@@ -208,10 +213,6 @@ impl Runner {
         // The listing was made under the old pick, and the next poll is up to a minute off.
         if settings.triage.pick != self.settings.triage.pick {
             self.triage_due.clear();
-        }
-        // A walk keeps the turn of a bot the lineup drops until it moves on, with its label on.
-        if contribution_lineup != self.contribution_lineup {
-            self.end_unlisted_turns(&contribution_lineup)?;
         }
         self.settings = settings;
         if e2e_changed {
