@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use shep_handover::HandOverError;
 
+use super::super::tests::{calls_of_7, see_the_turn_end};
 use super::super::{Hooks, Worker};
 use super::*;
 use crate::ports::{Adopted, Flying, Kept, KeptServer, SessionId, Timestamp};
@@ -95,8 +96,9 @@ fn a_refused_handover_leaves_the_runner_and_its_calls_as_they_were() {
     assert!(!handing.pending(), "the refused request stays queued");
     assert_eq!(turn_of_7(&rig, &runner), "running");
     assert!(!hold.returned(), "the call was ended");
+    let before = calls_of_7(&rig, &runner);
     hold.release();
-    eventually("the turn's end", || turn_of_7(&rig, &runner) == "ended");
+    see_the_turn_end(&rig, &runner, before);
     assert!(worker.stop(CALL_PATIENCE, || {}));
 }
 

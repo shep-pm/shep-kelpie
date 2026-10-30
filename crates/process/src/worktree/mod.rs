@@ -29,6 +29,7 @@ mod common;
 mod contribution;
 #[cfg(test)]
 mod line_endings_tests;
+mod loose;
 mod push;
 mod remote;
 mod stale_lock;
@@ -45,6 +46,7 @@ pub use contribution::{
     Change, Opaque, Touched, change as contribution_change, changed_paths,
     checkout as contribution_checkout,
 };
+pub use loose::{loose_commit, loose_commit_in};
 pub use push::push_commits;
 pub use remote::Remote;
 pub use workflows::runs_on_pull_requests;
@@ -265,7 +267,7 @@ fn mirror_main(repo: &Path, worktree: &Path, base: &str) -> Result<(), WorktreeE
 
 // Set the clone's `tracking` ref to the checkout's, when the checkout has one.
 fn mirror_tracking(repo: &Path, worktree: &Path, tracking: &str) -> Result<(), WorktreeError> {
-    if has_ref(repo, tracking)? {
+    if loose_commit_in(repo, tracking).is_some() || has_ref(repo, tracking)? {
         clone::mirror(repo, worktree, &[tracking])?;
     }
     Ok(())
@@ -583,7 +585,11 @@ pub fn head_with_main(
 ///
 /// [`WorktreeError`] naming the git command that failed.
 pub fn head(repo: &Path, worktree: &Path) -> Result<String, WorktreeError> {
-    trusted(repo, worktree)?(&["rev-parse", "HEAD"])
+    let dirs = git_dirs(repo, worktree)?;
+    match loose::loose_head(&dirs.0, &dirs.1) {
+        Some(commit) => Ok(commit),
+        None => output(trusted_git(worktree, &dirs), ["rev-parse", "HEAD"]),
+    }
 }
 
 /// Abandons the merge in progress in `worktree`, putting it back at its head

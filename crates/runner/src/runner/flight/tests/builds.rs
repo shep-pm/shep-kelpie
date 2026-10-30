@@ -85,10 +85,11 @@ fn a_folder_past_the_cap_pauses_the_turn_prunes_what_it_did_not_touch_and_resume
     assert!(notes.contains("removed 23 cargo cache files"), "{notes}");
 
     driven.started();
+    // The stand-in records a call on the call's own thread.
+    driven.landed();
     let [first, resumed] = rig.claude.calls().try_into().unwrap();
     assert_eq!(resumed.prompt, PAUSED);
     assert_eq!(resumed.session, Session::Resume(first.session.id().clone()));
-    driven.landed();
 }
 
 #[test]

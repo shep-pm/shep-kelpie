@@ -71,7 +71,9 @@ fn is_full_id(commit: &str) -> bool {
 
 /// The commit `origin/<base>` is at now
 pub(super) fn main_of(repo: &Path, base: &str) -> Result<String, WorktreeError> {
-    git(repo, ["rev-parse", &main_ref(base)])
+    let tracking = format!("refs/remotes/origin/{base}");
+    worktree::loose_commit_in(repo, &tracking)
+        .map_or_else(|| git(repo, ["rev-parse", &main_ref(base)]), Ok)
 }
 
 /// The commits `worktree` is at and `origin/<base>` is at now
@@ -82,7 +84,7 @@ pub(super) fn head_and_main(
     worktree: &Path,
     base: &str,
 ) -> Result<(String, String), WorktreeError> {
-    let head = worktree::trusted(repo, worktree)?(&["rev-parse", "HEAD"])?;
+    let head = worktree::head(repo, worktree)?;
     Ok((head, main_of(repo, base)?))
 }
 

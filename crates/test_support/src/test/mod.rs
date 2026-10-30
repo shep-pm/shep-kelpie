@@ -13,7 +13,7 @@ pub use access::open_to_administrators;
 pub use access::open_to_others;
 pub use elsewhere::Elsewhere;
 pub use fake::{Fake, write_fake};
-pub use repo::{cut_from_main, git, linked_worktree, main_commits, write_in};
+pub use repo::{copy_dir, cut_from_main, git, linked_worktree, main_commits, write_in};
 pub use script::{make_fifo, waits_for, write_script};
 pub use status::exited;
 #[cfg(unix)]
