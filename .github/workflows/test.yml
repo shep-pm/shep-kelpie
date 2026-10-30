@@ -253,13 +253,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo +1.88 check --all-targets --locked
 
-  # Reports whether the workspace compiles on Windows while #241 ports it
-  # crate by crate. `--keep-going` reports every failing crate, not the
-  # first. The check step's `continue-on-error` keeps the job green while
-  # #241 is open, and a warning says when it failed. On the job it would
-  # still post a red check, which kelpie reads as a failed run and holds
-  # every pull request on. Drop it, and add the job to the ruleset's
-  # required checks, when #241 is done.
+  # Ported crates and saved state gate Windows. The workspace check, door,
+  # ACL and lib steps report gaps without gating while #241 ports the rest.
+  # `--keep-going` reports every crate that fails to compile.
   windows:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
@@ -294,7 +290,7 @@ jobs:
         run: cargo check --workspace --all-targets --locked --keep-going
       - if: steps.check.outcome == 'failure'
         run: |
-          echo "::warning title=windows::cargo check fails on Windows until #241 is done. The check step's log names each crate."
+          echo "::warning title=windows::the workspace check failed on Windows. See the check step's log for compiler diagnostics."
       # The lease door's, the pipe's and the bridge's tests. `dog` compiles for
       # Windows now (#1274), and this step stays non-gating until a run of it
       # passes there.
@@ -303,7 +299,7 @@ jobs:
         run: 'cargo test --locked -p shep-kelpie-core -p shep-kelpie-dog --lib -- ipc:: bridge lease:: door'
       - if: steps.door.outcome == 'failure'
         run: |
-          echo "::warning title=windows::the lease door's tests do not pass on Windows yet. The step's log names each failing test."
+          echo "::warning title=windows::the lease door's test run failed or timed out. See the door step's log for build errors, test failures or unfinished tests."
       # The owner-only ACL: the secret, the answers files and the App's key
       # store. Non-gating until a run of it passes on Windows.
       - id: totp
@@ -311,7 +307,7 @@ jobs:
         run: 'cargo test --locked -p shep-kelpie-core -p shep-kelpie-owner-only -p shep-kelpie-adapters --lib -- totp:: owner_only:: github::tests::saving_makes github::tests::a_key_others'
       - if: steps.totp.outcome == 'failure'
         run: |
-          echo "::warning title=windows::the owner-only ACL's tests do not pass on Windows yet. The step's log names each failing test."
+          echo "::warning title=windows::the owner-only ACL's test run failed or timed out. See the totp step's log for build errors, test failures or unfinished tests."
       # What the atomic save settles: the lease book and the state file. Gates.
       - id: save
         run: 'cargo test --locked -p shep-kelpie-core --lib -- lease::saved:: state::tests::release:: state::tests::a_second_atomic_write_over_a_file_replaces_it'
@@ -326,4 +322,4 @@ jobs:
           --skip upgrade::tests::sheep::a_runner_stopped_while_the_upgrade_waits_stays_stopped
       - if: steps.lib.outcome == 'failure'
         run: |
-          echo "::warning title=windows::the workspace's lib tests do not pass on Windows yet. The lib step's log names each failing test."
+          echo "::warning title=windows::the workspace's lib test run failed or timed out. See the lib step's log for build errors, test failures or unfinished tests."
