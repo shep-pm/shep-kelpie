@@ -34,12 +34,54 @@ Of the sites that used `tempdir_in("/tmp")`:
 
 ## Tests Windows cannot run yet
 
-Two tests hung on Windows in [run 40990662373](https://github.com/shep-pm/shep-kelpie/actions/runs/40990662373/job/123852037746), and the job reached its 30-minute timeout before any other crate ran. The `lib` step skips them so the next run can measure the remaining tests:
+The Windows CI job runs every crate's lib tests in the non-gating `lib` step, after `door`, `totp` and the gating `save` step. Not a sandbox list: `kelpie_ci_failures_total` and `SANDBOX_RED` do not read it.
 
-- `upgrade::tests::handover::a_runner_stopped_while_it_hands_over_stays_stopped`
-- `upgrade::tests::sheep::a_runner_stopped_while_the_upgrade_waits_stays_stopped`
+### Measured on [run 41026010104](https://github.com/shep-pm/shep-kelpie/actions/runs/41026010104/job/123964237357) (#1575)
 
-Not a sandbox list: `kelpie_ci_failures_total` and `SANDBOX_RED` do not read it. The Windows CI job now runs every crate's lib tests in the non-gating `lib` step, after `door`, `totp` and the gating `save` step. The table below remains source-based (#1149), pending classification of the failures and panic messages from [run 40993994010](https://github.com/shep-pm/shep-kelpie/actions/runs/40993994010/job/123863769176). Windows runs a file only if its name ends in `.cmd`, `.bat` or `.exe`, so a `#!/bin/sh` script a test starts itself cannot run there. A test that makes its stand-in with `write_fake` runs on both. `write_script` writes a script Windows runs only through Git for Windows' `sh.exe`, which `spawn::sh` finds (a hook, `sh -c`). A test that needs a FIFO is `#[cfg_attr(windows, ignore = "a FIFO is a Unix file")]`.
+The step did not finish. The runner crate's 3035 tests ran at about 0.4 a second on the hosted runner, so 725 of them had run when the step's 40-minute limit ended it. The table is every crate that reached `test result`. `shep-kelpie-test-support`, `-tree`, `-trim` and `-worker-folder` come after the runner and did not run:
+
+| Crate | Passed | Failed | Ignored |
+|---|---|---|---|
+| `shep-kelpie` (root) | 546 | 104 | 4 |
+| `shep-kelpie-adapters` | 789 | 132 | 21 |
+| `shep-kelpie-client` | 11 | 0 | 0 |
+| `shep-kelpie-core` | 1412 | 50 | 5 |
+| `shep-kelpie-disk` | 4 | 0 | 0 |
+| `shep-kelpie-dog` | 170 | 5 | 2 |
+| `shep-kelpie-facts` | 77 | 0 | 0 |
+| `shep-kelpie-owner-only` | 7 | 0 | 0 |
+| `shep-kelpie-process` | 63 | 51 | 0 |
+| `shep-kelpie-protocol` | 16 | 0 | 0 |
+| `shep-kelpie-runner` | no result | no result | no result |
+
+The `lib` step skips these tests, which hang on Windows:
+
+- `upgrade::tests::handover::a_runner_stopped_while_it_hands_over_stays_stopped` (run 40990662373)
+- `upgrade::tests::sheep::a_runner_stopped_while_the_upgrade_waits_stays_stopped` (run 40990662373)
+- `runner::ci_help::tests::the_red_prompt_names_the_e2e_command_only_when_configured` (run 41020519313)
+- `runner::claude_files::tests::a_trigger_is_answered_while_the_changed_files_are_read` (run 41020519313)
+- `runner::closed::tests::a_trigger_is_answered_while_the_worktree_is_checked_for_work` (run 41020519313)
+- `runner::contributions::pass_tests::a_pass_past_its_ceiling_ends_unread_and_counts_what_it_spent` (run 41020519313)
+
+Five `sheep::handover::tests` ran past 60 seconds on the run above and then ended: `codex::a_codex_turn_whose_record_is_gone_refuses_the_handover_and_the_old_image_keeps_its_call`, the goose twin, and three `pi` tests. They are slow, not skipped.
+
+The failures by cause, counted from the panic messages of the crates above (the runner's are not in them):
+
+| Cause | Panic message | Panics |
+|---|---|---|
+| A `\\?\` path handed to git | `git init --bare` or `worktree add`: "cannot mkdir" or "could not create leading directories of '//?/C:/...'", and `fetch` of a fork | about 60 |
+| "Access is denied" flushing a file | `cannot flush ...\bin\.shep-kelpie.staged.<pid>: Access is denied. (os error 5)` in the `upgrade` tests | about 62 |
+| A stand-in started as an exe | `%1 is not a valid Win32 application. (os error 193)`: a script with no `.exe`, `.cmd` or `.bat` name | about 30 |
+| A stand-in started through `/usr/bin/env` | `/usr/bin/env: '\\?C:Users...pi': No such file or directory` (Pi, Goose, Codex), the `\\?\` path stripped of its separators | about 20 |
+| A file not found | `Os { code: 2, kind: NotFound }` | 11 |
+| A platform without the feature | `handing over is not supported on this platform`, `the images agree on the state: Unsupported` | 6 |
+| Smaller ones | a process the test never saw, `Unreachable(23)`, a TOML escape, an absolute-path check, a `curl: (23)` write error, a hook run through `sh`, and others | the rest |
+
+The step now runs with `--test-threads=32` and a 90-minute limit (the job's is 120), to reach the runner's `test result`. The counts above are replaced by those of the run that finishes.
+
+### Reading the source (#1149)
+
+Windows runs a file only if its name ends in `.cmd`, `.bat` or `.exe`, so a `#!/bin/sh` script a test starts itself cannot run there. A test that makes its stand-in with `write_fake` runs on both. `write_script` writes a script Windows runs only through Git for Windows' `sh.exe`, which `spawn::sh` finds (a hook, `sh -c`). A test that needs a FIFO is `#[cfg_attr(windows, ignore = "a FIFO is a Unix file")]`.
 
 | Needs | Modules |
 |---|---|

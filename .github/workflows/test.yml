@@ -279,7 +279,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: windows-11-arm
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install rustup if the image lacks it
@@ -334,9 +334,10 @@ jobs:
       # Skip the tests that hung in runs 40990662373 and 41020519313.
       - id: lib
         continue-on-error: true
-        timeout-minutes: 40
+        timeout-minutes: 90
         run: >-
           cargo test --workspace --lib --locked --no-fail-fast --
+          --test-threads=32
           --skip upgrade::tests::handover::a_runner_stopped_while_it_hands_over_stays_stopped
           --skip upgrade::tests::sheep::a_runner_stopped_while_the_upgrade_waits_stays_stopped
           --skip runner::ci_help::tests::the_red_prompt_names_the_e2e_command_only_when_configured
