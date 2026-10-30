@@ -17,10 +17,18 @@ impl StateStore {
         let Some(left) = &self.saves_left else {
             return Ok(());
         };
-        let spent = left.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
-        spent.map(drop).map_err(|_| StateError::Write {
-            path: self.path.clone(),
-            kind: std::io::ErrorKind::PermissionDenied,
-        })
+        let mut seen = left.load(Ordering::SeqCst);
+        loop {
+            if seen == 0 {
+                return Err(StateError::Write {
+                    path: self.path.clone(),
+                    kind: std::io::ErrorKind::PermissionDenied,
+                });
+            }
+            match left.compare_exchange(seen, seen - 1, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => return Ok(()),
+                Err(now) => seen = now,
+            }
+        }
     }
 }
