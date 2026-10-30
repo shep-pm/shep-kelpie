@@ -14,6 +14,35 @@ pub fn write_in(folder: &Path, file: &str, text: &str) {
     std::fs::write(path, text).unwrap();
 }
 
+/// Copies `from` and everything in it to `to`
+///
+/// An entry gone by the time it is copied, as a file git removes after the
+/// listing or a link to nothing, is left out: the copy needs nothing of it.
+///
+/// # Panics
+///
+/// When any other entry cannot be copied, naming its path.
+pub fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        let copied = match entry.file_type() {
+            Ok(kind) if kind.is_dir() => {
+                copy_dir(&entry.path(), &target);
+                continue;
+            }
+            Ok(_) => std::fs::copy(entry.path(), &target).map(drop),
+            Err(e) => Err(e),
+        };
+        match copied {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => panic!("cannot copy {}: {e}", entry.path().display()),
+            Ok(()) => {}
+        }
+    }
+}
+
 fn path(p: &Path) -> &str {
     p.to_str().expect("a UTF-8 temporary path")
 }

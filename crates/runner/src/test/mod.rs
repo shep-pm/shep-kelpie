@@ -2,7 +2,7 @@
 //! webhook and the clock, over a real git repo in a throwaway home
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::adapters::{GpuCurl, LocalReviewer};
 use crate::coderabbit::CodeRabbit;
@@ -54,8 +54,8 @@ pub use shep_kelpie_core::test::{
     project_table, ticket, toml_path, unreachable_url,
 };
 pub use shep_kelpie_test_support::{
-    CALL_PATIENCE, Elsewhere, Fake, cut_from_main, git, linked_worktree, main_commits, make_fifo,
-    short_tempdir, waits_for, write_fake, write_in, write_script,
+    CALL_PATIENCE, Elsewhere, Fake, copy_dir, cut_from_main, git, linked_worktree, main_commits,
+    make_fifo, short_tempdir, waits_for, write_fake, write_in, write_script,
 };
 
 /// A read a test holds open: a forge call, a token mint or a git fetch
@@ -84,6 +84,29 @@ impl Held for HeldToken {
 
 /// The workflow the rig's repo holds on `main`
 const WORKFLOW: &str = ".github/workflows/ci.yml";
+
+// The origin and checkout every rig copies, made once a test run: a README
+// and [`WORKFLOW`] on `main`, pushed. The folder outlives the run.
+static FIRST_REPO: LazyLock<PathBuf> = LazyLock::new(|| {
+    let dir = short_tempdir().keep();
+    let (origin, repo) = (dir.join("origin.git"), dir.join("repo"));
+    let bare = [
+        "init",
+        "--quiet",
+        "--bare",
+        "--initial-branch=main",
+        path(&origin),
+    ];
+    git(&dir, &bare);
+    git(&dir, &["clone", "--quiet", path(&origin), path(&repo)]);
+    std::fs::write(repo.join("README.md"), "a project\n").unwrap();
+    // Checks appear on a pull request only where a workflow runs on one.
+    write_in(&repo, WORKFLOW, "on: pull_request\njobs:\n  test:\n");
+    git(&repo, &["add", "README.md", WORKFLOW]);
+    git(&repo, &["commit", "--quiet", "-m", "first"]);
+    git(&repo, &["push", "--quiet", "origin", "main"]);
+    dir
+});
 
 /// The `git.checkout` value in `settings.example.toml`, quoted as it is written there,
 /// which the rig points at its own
@@ -271,31 +294,13 @@ impl Rig {
         std::fs::write(self.kelpie_settings_file(), format!("{text}{table}")).unwrap();
     }
 
+    // Copies the first repo in, which costs one git call where making it
+    // costs five, and five take about a second on Windows.
     fn make_repo(&self) {
-        let root = self.home.path();
-        let origin = self.origin();
-        git(
-            root,
-            &[
-                "init",
-                "--quiet",
-                "--bare",
-                "--initial-branch=main",
-                path(&origin),
-            ],
-        );
-        git(
-            root,
-            &["clone", "--quiet", path(&origin), path(&self.repo())],
-        );
-        std::fs::write(self.repo().join("README.md"), "a project\n").unwrap();
-        // Checks appear on a pull request only where a workflow runs on one.
-        let workflow = self.repo().join(WORKFLOW);
-        std::fs::create_dir_all(workflow.parent().unwrap()).unwrap();
-        std::fs::write(&workflow, "on: pull_request\njobs:\n  test:\n").unwrap();
-        git(&self.repo(), &["add", "README.md", WORKFLOW]);
-        git(&self.repo(), &["commit", "--quiet", "-m", "first"]);
-        git(&self.repo(), &["push", "--quiet", "origin", "main"]);
+        let (origin, repo) = (self.origin(), self.repo());
+        copy_dir(&FIRST_REPO.join("origin.git"), &origin);
+        copy_dir(&FIRST_REPO.join("repo"), &repo);
+        git(&repo, &["remote", "set-url", "origin", path(&origin)]);
     }
 
     fn origin(&self) -> PathBuf {
