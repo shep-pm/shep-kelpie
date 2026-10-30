@@ -36,14 +36,12 @@ Of the sites that used `tempdir_in("/tmp")`:
 
 The Windows CI job runs every crate's lib tests in the non-gating `lib` step, after `door`, `totp` and the gating `save` step. Not a sandbox list: `kelpie_ci_failures_total` and `SANDBOX_RED` do not read it.
 
-### Measured on [run 41032543922](https://github.com/shep-pm/shep-kelpie/actions/runs/41032543922/job/123985536432) (#1575)
-
-The step did not finish. No test hung beyond the six skipped, but the runner crate's 3035 tests ran at 0.4 a second, 1941 of them in the step's 90 minutes, and `--test-threads=32` ran no faster than the default (run 41026010104: 725 in 30 minutes). The step now has 180 minutes. The table is every crate that reached `test result`. `shep-kelpie-test-support`, `-tree`, `-trim` and `-worker-folder` come after the runner and did not run:
+Measured on [run 41044428502](https://github.com/shep-pm/shep-kelpie/actions/runs/41044428502/job/124024950902) (#1575), the first in which every crate reached `test result`. The runner took 7383 seconds of the step's 180 minutes (it started at 11:12 and ended at 13:15 UTC). Only the root package's `sheep::handover` tests and the runner's slow ones ran past 60 seconds:
 
 | Crate | Passed | Failed | Ignored |
 |---|---|---|---|
-| `shep-kelpie` (root) | 543 | 107 | 4 |
-| `shep-kelpie-adapters` | 788 | 133 | 21 |
+| `shep-kelpie` (root) | 546 | 104 | 4 |
+| `shep-kelpie-adapters` | 789 | 132 | 21 |
 | `shep-kelpie-client` | 11 | 0 | 0 |
 | `shep-kelpie-core` | 1412 | 50 | 5 |
 | `shep-kelpie-disk` | 4 | 0 | 0 |
@@ -52,7 +50,13 @@ The step did not finish. No test hung beyond the six skipped, but the runner cra
 | `shep-kelpie-owner-only` | 7 | 0 | 0 |
 | `shep-kelpie-process` | 63 | 51 | 0 |
 | `shep-kelpie-protocol` | 16 | 0 | 0 |
-| `shep-kelpie-runner` | 1802 passed and 139 failed of 1941 run, no `test result` | | |
+| `shep-kelpie-runner` | 2877 | 156 | 2 |
+| `shep-kelpie-test-support` | 7 | 0 | 3 |
+| `shep-kelpie-tree` | 7 | 0 | 0 |
+| `shep-kelpie-trim` | 3 | 0 | 0 |
+| `shep-kelpie-worker-folder` | 11 | 0 | 0 |
+
+The runner's 3035 tests run at 0.4 a second, and 32 test threads ran no faster than the default. The most failing modules are `upgrade::tests` (74), `worktree::remote` (32), `adapters::goose` (31), `adapters::codex` (28), `sheep::handover` (22), `runner::points_tests` (21), `runner::core_tests` (20), `runner::attach` (17) and `adapters::local` (17).
 
 The `lib` step skips these tests, which hang on Windows:
 
@@ -63,38 +67,32 @@ The `lib` step skips these tests, which hang on Windows:
 - `runner::closed::tests::a_trigger_is_answered_while_the_worktree_is_checked_for_work` (run 41020519313)
 - `runner::contributions::pass_tests::a_pass_past_its_ceiling_ends_unread_and_counts_what_it_spent` (run 41020519313)
 
-Five `sheep::handover::tests` ran past 60 seconds in the root package on both runs and then ended: `codex::a_codex_turn_whose_record_is_gone_refuses_the_handover_and_the_old_image_keeps_its_call`, the goose twin, and three `pi` tests. They are slow, not skipped.
+23 tests ran past 60 seconds and then ended, so they are slow and not skipped:
 
-The failures by cause, counted from the panic messages of run 41026010104 for the crates above. The runner's 139 failures so far are ungrouped, but its panics are mostly the first row (about 40) and the third (about 5):
+- 5 `sheep::handover::tests` (`codex`, `goose` and three `pi`): a turn whose record is gone or invalid.
+- 18 in the runner: `flight::tests::reads`, five in `gate::tests`, `merge::tests`, two in `pm::tests`, three in `replies::tests`, `review_bot::thread_replies`, three in `review::`, two in `turn::tests`. Most are the "a trigger is answered while ..." tests, which wait on a read the run never reached.
+
+The failures by cause, counted from the panic messages (a failing test can print more than one):
 
 | Cause | Panic message | Panics |
 |---|---|---|
-| A `\\?\` path handed to git | `git init --bare` or `worktree add`: "cannot mkdir" or "could not create leading directories of '//?/C:/...'", and `fetch` of a fork | about 60 |
+| A Windows path in TOML | `Error { message: "too few unicode value digits, expected unicode hexadecimal value" ... }`: a `C:\Users\...` path written into a TOML string unescaped | 56 |
 | "Access is denied" flushing a file | `cannot flush ...\bin\.shep-kelpie.staged.<pid>: Access is denied. (os error 5)` in the `upgrade` tests | about 62 |
-| A stand-in started as an exe | `%1 is not a valid Win32 application. (os error 193)`: a script with no `.exe`, `.cmd` or `.bat` name | about 30 |
-| A stand-in started through `/usr/bin/env` | `/usr/bin/env: '\\?C:Users...pi': No such file or directory` (Pi, Goose, Codex), the `\\?\` path stripped of its separators | about 20 |
+| A `\\?\` path handed to git | `git init --bare`, `worktree add` and `fetch`: "cannot mkdir ... Invalid argument" or "could not create leading directories of '//?/C:/...'" | about 60 |
+| A stand-in started as an exe | `%1 is not a valid Win32 application. (os error 193)`: a script with no `.exe`, `.cmd` or `.bat` name | about 40 |
+| A stand-in started through `/usr/bin/env` | `/usr/bin/env: '\\?C:Users...pi': No such file or directory` (Pi, Goose, Codex): the path has lost its separators | about 20 |
+| A process the test looks at with `ps` | `no process <pid> is running`, `NotRunning(<pid>)`, `never saw the turn's child` | about 20 |
 | A file not found | `Os { code: 2, kind: NotFound }` | 11 |
+| A run that never reached its read | `the run never reached the read`, `the turn never reached the fetch that prepares its worktree` | about 15 |
 | A platform without the feature | `handing over is not supported on this platform`, `the images agree on the state: Unsupported` | 6 |
-| Smaller ones | a process the test never saw, `Unreachable(23)`, a TOML escape, an absolute-path check, a `curl: (23)` write error, a hook run through `sh`, and others | the rest |
+| Smaller ones | `Unreachable(23)`, `EOF while parsing a value`, an absolute-path check on `/srv/shep`, a `curl: (23)` write error, a hook run through `sh`, a missing `sh` or `env`, and others | the rest |
 
-The counts are replaced by those of a run in which the runner reaches `test result`.
-
-### Reading the source (#1149)
-
-Windows runs a file only if its name ends in `.cmd`, `.bat` or `.exe`, so a `#!/bin/sh` script a test starts itself cannot run there. A test that makes its stand-in with `write_fake` runs on both. `write_script` writes a script Windows runs only through Git for Windows' `sh.exe`, which `spawn::sh` finds (a hook, `sh -c`). A test that needs a FIFO is `#[cfg_attr(windows, ignore = "a FIFO is a Unix file")]`.
-
-| Needs | Modules |
-|---|---|
-| A shebang script the test starts itself | `adapters::claude` (`tests`, `sandbox`, `calls`), `adapters::codex`, `adapters::goose`, `adapters::pi`, `adapters::local`, `adapters::dev_server`, `adapters::bridge` (some: the stand-in browser server), `adapters::process` (some), `process::tools::install`, `process::terminal` (some), `process::spawn` (some: the environment probe), `core::guard::tests::manager`, `runner::code_graph`, `runner::core_tests::metrics`, `runner::review::local`, `runner::triage::research_tests`, `sheep::handover::tests`, `upgrade::tests`, `issues::tests`, `flock::attach`, `flock::pm` |
-| `cat` or `sleep` as a live process, and `ps` or `kill` to look at it (#1148) | `runner::attach`, `runner::flight::carry`, `runner::pm::tests::attach`, `runner::turn::tests::held`, `adapters::process::adopt`, `adapters::dev_server` (some), `tests/dog_smoke.rs` |
-| A symlink or a mode bit the test reads or sets (`#[cfg(unix)]`, so it is not built there), | `core::confine` (some), `core::fence` (some), `core::guard` (some), `core::home` (some), `core::local_paths` (some), `core::profile::login` (some), `core::profile::housekeeping`, `core::totp` (some), `core::totp::answers` (some), `adapters::files`, `adapters::disk` (some), `adapters::codex` (some), `adapters::goose` (some), `adapters::claude::sandbox` (some), `adapters::claude::settings` (some), `adapters::dev_server` (some), `github` (some), `upgrade::install::tests` (some: the mode, `ino` and symlink reads, and `a_real_executable_is_staged_and_still_runs`, whose staged name has no `.exe`), `upgrade::tests::files` (some: the `ino` reads and the two symlink tests, through the `linked` rig path), `upgrade::tests::refusals` (some: `a_binary_without_its_executable_bits_is_refused_naming_chmod`), `tests/upgrade.rs` (some: the test of that name), `tests/dog_smoke.rs` (some: `stand_in_runner_with_lambs`) |
-| A Unix socket, a signal or a process group (#1147, #1148). Every crate compiles for Windows now (`core` since #1262, `dog` #1274, `adapters` #1298, `runner` #1299, the root package #1392), so these only keep tests from running | `runner` |
-| `env` as a command (the live sandbox probes) | `adapters::pi::escapes`, `adapters::goose::escapes` |
+Windows runs a file only if its name ends in `.cmd`, `.bat` or `.exe`, so a `#!/bin/sh` script a test starts itself cannot run there. A test that makes its stand-in with `write_fake` runs on both. `write_script` writes a script Windows runs only through Git for Windows' `sh.exe`, which `spawn::sh` finds (a hook, `sh -c`). A test that needs a FIFO is `#[cfg_attr(windows, ignore = "a FIFO is a Unix file")]`. A test that needs a symlink or a mode bit is `#[cfg(unix)]`, so it is not built there. Fixing a group is its own issue.
 
 ## Keeping the list true
 
-A change that moves a test into or out of either list updates the corresponding table in the same pull request. A new test that binds a socket or a port belongs in the sandbox table ("What fails, and why") when it lands.
+A change that moves a test into or out of the sandbox table updates it in the same pull request. A new test that binds a socket or a port belongs in the sandbox table ("What fails, and why") when it lands.
 
-The sandbox table alone determines what `kelpie_ci_failures_total` counts as a sandbox failure: `SANDBOX_RED` in `crates/runner/src/runner/ci_failure/mod.rs` holds that table's whole entries, and `the_doc_and_the_list_agree` fails when the two part ways. A whole entry added to that table and not to the list, or the other way round, is a failing test, not a note. A `some:` entry belongs in that table and not in the list: it says the module is red in part, which is not enough to call a failing test in it one a worker could not run. The Windows table does not affect this classification.
+The sandbox table alone determines what `kelpie_ci_failures_total` counts as a sandbox failure: `SANDBOX_RED` in `crates/runner/src/runner/ci_failure/mod.rs` holds that table's whole entries, and `the_doc_and_the_list_agree` fails when the two part ways. A whole entry added to that table and not to the list, or the other way round, is a failing test, not a note. A `some:` entry belongs in that table and not in the list: it says the module is red in part, which is not enough to call a failing test in it one a worker could not run. The Windows section does not affect this classification.
 
 The list is of this crate's modules, so kelpie uses it only on this repo. On a project kelpie holds no list of, every failing test of a red run counts as one its worker could have run, and `sandbox-only` is never used there. Giving another project a list of its own is unbuilt.
