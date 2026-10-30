@@ -169,9 +169,11 @@ pub fn project_table(entry: &str) -> serde_json::Map<String, serde_json::Value> 
     }
 }
 
-/// A path quoted and escaped as a TOML string value
+/// A path quoted and escaped as a TOML string value, so a Windows path
+/// like `C:\Users\me` reads back whole
 pub fn toml_path(path: &std::path::Path) -> String {
-    toml::Value::String(path.to_string_lossy().into_owned()).to_string()
+    let text = path.to_str().expect("a test path is UTF-8");
+    toml::Value::String(text.to_owned()).to_string()
 }
 
 #[test]
@@ -182,6 +184,8 @@ fn a_path_in_toml_reads_back_with_backslashes_and_quotes_intact() {
         r"C:\Users\runner\a repo",
         r#"C:\Users\runner\a "quoted" repo"#,
         "/home/me/a repo",
+        "",
+        "/home/me/tab\there\nnewline",
     ] {
         let path = Path::new(path);
         let text = format!("[git]\ncheckout = {}\n", toml_path(path));

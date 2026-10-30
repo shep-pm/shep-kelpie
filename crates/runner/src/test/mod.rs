@@ -85,7 +85,8 @@ impl Held for HeldToken {
 /// The workflow the rig's repo holds on `main`
 const WORKFLOW: &str = ".github/workflows/ci.yml";
 
-/// The `git.checkout` in `settings.example.toml`, which the rig points at its own
+/// The `git.checkout` value in `settings.example.toml`, quoted as it is written there,
+/// which the rig points at its own
 const EXAMPLE_REPO: &str = "\"~/GitHub/shep\"";
 
 /// The rig's reviewers: its qwen round and then its own Claude session, `claude`
