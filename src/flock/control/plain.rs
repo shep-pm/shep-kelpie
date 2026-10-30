@@ -206,6 +206,20 @@ fn items(status: &Value, lines: &mut Vec<String>) {
             item["turn"]["state"].as_str().unwrap_or("?"),
             pull_request(&item["pull_request"]),
         ));
+        let failing = &item["failing"];
+        if let Some(reason) = failing["reason"].as_str() {
+            let since = match failing["since"].as_u64() {
+                Some(at) => format!(
+                    "{} UTC",
+                    crate::board::briefing::date_time(crate::ports::Timestamp(at))
+                ),
+                None => "an unknown time".to_owned(),
+            };
+            lines.push(format!(
+                "      step failed {} times since {since}: {reason}",
+                failing["failures"].as_u64().unwrap_or(0),
+            ));
+        }
     }
 }
 
