@@ -315,3 +315,10 @@ jobs:
       # What the atomic save settles: the lease book and the state file. Gates.
       - id: save
         run: 'cargo test --locked -p shep-kelpie-core --lib -- lease::saved:: state::tests::release:: state::tests::a_second_atomic_write_over_a_file_replaces_it'
+      # Measure every crate's lib tests before fixing each Windows failure group.
+      - id: lib
+        continue-on-error: true
+        run: cargo test --workspace --lib --locked --no-fail-fast
+      - if: steps.lib.outcome == 'failure'
+        run: |
+          echo "::warning title=windows::the workspace's lib tests do not pass on Windows yet. The lib step's log names each failing test."
