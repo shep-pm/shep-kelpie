@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Map, Value};
+use shep_kelpie_protocol::status::Failing;
 use shep_client::PROTOCOL_VERSION;
 use shep_client::shep_core::protocol::request::{Request, SelectorSpec};
 
@@ -19,7 +20,6 @@ use crate::home::ProjectName;
 use crate::shepherd::Dial;
 use crate::test::ticket;
 use crate::test::{CALL_PATIENCE, FakeShepherd, waits_for, write_script};
-use crate::ticket::TicketId;
 
 mod commit;
 mod drain;
@@ -267,7 +267,11 @@ fn a_merge_in_flight_is_a_work_item_being_merged_or_just_merged() {
         (r#"{"state":"implement"}"#, false),
         (r#""merge""#, true),
     ] {
-        let expected: Vec<TicketId> = if merging_now { vec![ticket(4)] } else { vec![] };
+        let expected = if merging_now {
+            vec![(ticket(4), None)]
+        } else {
+            vec![]
+        };
         assert_eq!(
             restart::merging(&phase(phase_json)),
             expected,
@@ -278,16 +282,40 @@ fn a_merge_in_flight_is_a_work_item_being_merged_or_just_merged() {
     // say nothing.
     assert_eq!(
         restart::merging(r#"{"work_item":{"issue":9,"phase":{"state":"merge","head":"a"}}}"#),
-        [ticket(9)]
+        [(ticket(9), None)]
     );
     // A local ticket is a ticket too.
     assert_eq!(
         restart::merging(
             r#"{"work_items":[{"issue":"k12","phase":{"state":"merge","head":"a"}}]}"#
         ),
-        ["k12".parse().expect("a test's local ticket")]
+        [("k12".parse().expect("a test's local ticket"), None)]
     );
     for status in [r#"{"work_item":null}"#, "unknown action: status", "", "[]"] {
-        assert_eq!(restart::merging(status), Vec::<TicketId>::new(), "{status}");
+        assert!(restart::merging(status).is_empty(), "{status}");
     }
+}
+
+#[test]
+fn merging_carries_the_failing_reason_of_a_merged_item() {
+    let body = r#"{"work_items":[
+        {"issue":"7","phase":{"state":"done","merged":true},
+         "failing":{"failures":8,"since":1790000000,
+                    "reason":"cannot delete branch kelpie/7: checked out in another worktree"}},
+        {"issue":"9","phase":{"state":"merge","head":"abc"},"failing":null}] }"#;
+
+    assert_eq!(
+        restart::merging(body),
+        [
+            (
+                ticket(7),
+                Some(Failing {
+                    since: crate::ports::Timestamp(1790000000),
+                    failures: 8,
+                    reason: "cannot delete branch kelpie/7: checked out in another worktree".into(),
+                }),
+            ),
+            (ticket(9), None),
+        ]
+    );
 }

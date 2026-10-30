@@ -15,6 +15,7 @@ use std::time::Duration;
 use serde_json::Value;
 use shep_client::shep_core::protocol::request::DogSource;
 use shep_client::shep_core::status::ProcStatus;
+use shep_kelpie_protocol::status::Failing;
 use tokio::time::Instant;
 
 use super::drain::{self, Purpose};
@@ -512,7 +513,7 @@ pub(crate) async fn wait_out_merges(
                 Answered::Runner(body) => busy.extend(
                     merging(&body)
                         .into_iter()
-                        .map(|ticket| format!("`{name}` is merging {}", ticket.shown())),
+                        .map(|(ticket, _)| format!("`{name}` is merging {}", ticket.shown())),
                 ),
                 // Not taking its actions yet: it may be mid-merge from before.
                 Answered::Starting => busy.push(format!("`{name}` is starting")),
@@ -540,13 +541,13 @@ pub(crate) async fn wait_out_merges(
     }
 }
 
-/// The ticket of each work item a runner's `status` shows being merged
+/// Each ticket a runner's `status` shows being merged, with its failing step
 ///
 /// A work item in `merge` is being merged, and one in `done` with its pull
 /// request merged is having its worktree removed: a restart cuts neither short.
 /// A runner from before ticket ids writes a GitHub issue number, which reads as
 /// the GitHub id of that number.
-pub fn merging(status: &str) -> Vec<TicketId> {
+pub fn merging(status: &str) -> Vec<(TicketId, Option<Failing>)> {
     let Ok(Value::Object(status)) = serde_json::from_str::<Value>(status) else {
         return Vec::new();
     };
@@ -565,6 +566,10 @@ pub fn merging(status: &str) -> Vec<TicketId> {
                 _ => false,
             }
         })
-        .filter_map(|item| TicketId::from_json(&item["issue"]))
+        .filter_map(|item| {
+            let ticket = TicketId::from_json(&item["issue"])?;
+            let failing = serde_json::from_value(item["failing"].clone()).ok();
+            Some((ticket, failing))
+        })
         .collect()
 }
