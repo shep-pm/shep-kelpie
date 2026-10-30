@@ -285,6 +285,72 @@ fn an_implementer_new_guard_hooks_fence_out_is_left_off_the_boards_ask() {
 }
 
 #[test]
+fn a_reviewer_whose_gateway_key_is_unset_is_noted_once_at_the_reread_that_leaves_it_out() {
+    let rig = Rig::new("shep");
+    rig.set_kelpie_settings(
+        "[gateways.paddock]\nurl = \"http://gpu:8700\"\nkey_env = \"KELPIE_TEST_KEY_NEVER_SET\"\n",
+    );
+    let runner = rig.open().unwrap();
+    rig.write_agent("local", LOCAL);
+    assert!(std::env::var_os("KELPIE_TEST_KEY_NEVER_SET").is_none());
+    let mut runner = runner.lock().unwrap();
+    // The shipped `iq3-xxs-review` is on paddock too, so the start left it out.
+    let at_start = runner.take_notes();
+    assert!(
+        at_start
+            .iter()
+            .any(|n| n.starts_with("reviewer iq3-xxs-review is left out"))
+    );
+    runner
+        .reread(rig.settings(), rig.kelpie_settings())
+        .unwrap();
+    let left = "reviewer local is left out of the agent board's ask: KELPIE_TEST_KEY_NEVER_SET, \
+                which holds the gateway's key, is not set in kelpie's environment";
+    assert_eq!(runner.take_notes(), [left]);
+
+    rig.edit_settings(|s| {
+        s.replace(
+            "[app.dogs.kelpie.agents]\n",
+            "[app.dogs.kelpie.agents]\nslack = 20\n",
+        )
+    });
+    runner
+        .reread(rig.settings(), rig.kelpie_settings())
+        .unwrap();
+    assert_eq!(runner.take_notes(), [] as [String; 0]);
+}
+
+#[test]
+fn a_named_reviewer_on_a_gateway_added_with_an_unset_key_waits_for_the_next_start() {
+    let rig = Rig::new("shep");
+    let runner = rig.open().unwrap();
+    rig.set_kelpie_settings(
+        "[gateways.paddock]\nurl = \"http://gpu:8700\"\nkey_env = \"KELPIE_TEST_KEY_NEVER_SET\"\n",
+    );
+    list_local(&rig);
+    assert!(std::env::var_os("KELPIE_TEST_KEY_NEVER_SET").is_none());
+    let mut runner = runner.lock().unwrap();
+    let line = runner.reread(rig.settings(), rig.kelpie_settings());
+    assert_eq!(
+        line.unwrap().as_deref(),
+        Some(
+            "settings changed: reviews, webhook now in effect; gateways and agents from the runner's next start"
+        )
+    );
+    let local = |r: &crate::settings::ListedReviewer| r.name.as_str() == "local";
+    assert!(
+        !runner.lineup.iter().any(local),
+        "the runner has no gateway for it"
+    );
+    assert!(
+        !runner
+            .take_notes()
+            .iter()
+            .any(|n| n.contains("reviewer local"))
+    );
+}
+
+#[test]
 fn agents_naming_a_gateway_added_with_them_wait_with_it_for_the_next_start() {
     let rig = Rig::new("shep");
     let runner = rig.open().unwrap();

@@ -444,6 +444,21 @@ pub struct RoleAgents {
     pub pm: Option<PmAgent>,
 }
 
+/// Why `refused` leaves `name` out: the reason of an [`SettingsError::Invalid`] without the
+/// `name: ` a gateway check leads with, or any other error as it reads
+pub(super) fn refusal_reason(name: &AgentName, refused: SettingsError) -> String {
+    match refused {
+        SettingsError::Invalid { reason, .. } => {
+            let named = format!("{name}: ");
+            match reason.strip_prefix(&named) {
+                Some(rest) => rest.to_owned(),
+                None => reason,
+            }
+        }
+        other => other.to_string(),
+    }
+}
+
 impl Settings {
     /// The implementers the agent board may pick for this project, by name:
     /// each agent file whose role is `implementer` that `agents.allow` holds
@@ -481,19 +496,11 @@ impl Settings {
                 GatewayKeys::Unheld => gateways.check_listed_without_keys(agents, [&i.name]),
             };
             let refused = fenced.and_then(|()| routed()).err()?;
-            Some(match refused {
-                SettingsError::Invalid { reason, .. } => {
-                    let named = format!("{}: ", i.name);
-                    reason
-                        .strip_prefix(&named)
-                        .map_or(reason.clone(), str::to_owned)
-                }
-                other => other.to_string(),
-            })
+            Some(refusal_reason(&i.name, refused))
         };
         let allowed = self.allowed_implementers(agents);
         (allowed.iter())
-            .filter_map(|i| Some((i.name.clone(), why(i)?)))
+            .filter_map(|i| why(i).map(|why| (i.name.clone(), why)))
             .collect()
     }
 

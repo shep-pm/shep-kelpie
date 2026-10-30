@@ -6,6 +6,15 @@ use crate::review_bot::Bot;
 use crate::runner::OpenError;
 use crate::settings::{ForgeSlug, ListedReviewer, SettingsError};
 
+// The reviewers `named` that `lineup` still holds, since a round never reaches one it left out.
+pub(super) fn left_in(
+    mut named: Vec<ListedReviewer>,
+    lineup: &[ListedReviewer],
+) -> Vec<ListedReviewer> {
+    named.retain(|r| lineup.iter().any(|l| l.name == r.name));
+    named
+}
+
 // Each local reviewer's command is there, or its endpoint answers.
 pub(super) fn check_local(lineup: &[ListedReviewer], ports: &Ports) -> Result<(), SettingsError> {
     for reviewer in lineup {

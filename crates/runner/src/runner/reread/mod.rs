@@ -10,8 +10,8 @@
 //! runner has.
 
 use super::{
-    OpenError, Runner, check_bots, check_local, coderabbit_left_out, instructions, open_checks,
-    triage,
+    OpenError, Runner, check_bots, check_local, coderabbit_left_out, instructions, left_in,
+    open_checks, triage,
 };
 use crate::agents::Agents;
 use crate::review_bot::Bot;
@@ -75,14 +75,15 @@ impl Runner {
         book.hold_for(self.state.work_items.iter().map(|item| &item.agent))?;
         let mut agents = settings.role_agents(&book)?;
         let gateways = kelpie.gateways();
-        let mut lineup = settings.lineup(&book, &gateways, &self.home);
+        let lineup = settings.lineup(&book, &gateways, &self.home);
         // The gateways the agents in use were listed under.
         let mut in_use = &gateways;
-        // The gateways must hold as a start checks them.
-        check_gateways(&gateways, &book, &lineup)?;
+        // The gateways must hold as a start checks them. A key is not a shape: a
+        // reviewer without one is left out below, so it must not hide a missing gateway.
+        check_gateway_shapes(&gateways, &book, &lineup)?;
         gateways.check_triage_spam(&settings.triage.spam)?;
         // Agents the adapters cannot route yet wait with the gateways they name.
-        if check_gateways(&self.gateways, &book, &lineup).is_err() {
+        if check_gateway_shapes(&self.gateways, &book, &lineup).is_err() {
             waiting.push("agents");
             settings.agents.clone_from(&self.settings.agents);
             // The listed contributions' reviewers are agents too, and the old book may lack them.
@@ -91,12 +92,13 @@ impl Runner {
             // The agents the runner has, under the new settings as a start reads them.
             agents = settings.role_agents(&book)?;
             in_use = &self.gateways;
-            lineup = settings.lineup(&book, in_use, &self.home);
         }
+        // The adapters route with the gateways the runner has, so those hold the keys.
+        let lineup = settings.lineup_with_keys(&book, &self.gateways, &self.home);
         // As a start does, only a reviewer the project named in `agents.allow` is
         // held to what a round cannot work around. Read after the wait above, so it
         // names the reviewers this reread adopts and not the ones it turned away.
-        let named = settings.named_reviewers(&book, &self.home);
+        let named = left_in(settings.named_reviewers(&book, &self.home), &lineup);
         // A start refuses a hook that does not resolve, and a change to either table is checked as one.
         if settings.hooks != self.settings.hooks
             || settings.worker.guard_hooks != self.settings.worker.guard_hooks
@@ -166,7 +168,10 @@ impl Runner {
         // As a start does, only the reviewers the project named in `agents.allow`
         // are held, and only when the naming changed or a named reviewer's file
         // did: one it named before was held at the reread that named it.
-        let was_named = self.settings.named_reviewers(&self.book, &self.home);
+        let was_named = left_in(
+            self.settings.named_reviewers(&self.book, &self.home),
+            &self.lineup,
+        );
         let named_new = named != was_named;
         // A CodeRabbit that is not public is left out and logged, once, when it is first named.
         let coderabbit_note = if names_coderabbit(&named) && !names_coderabbit(&was_named) {
