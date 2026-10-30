@@ -1,5 +1,28 @@
 use super::*;
 
+#[tokio::test(start_paused = true)]
+async fn missing_sandbox_programs_each_name_their_apt_package() {
+    let mut scene = Scene::new().await;
+    scene.host.os = "linux";
+    for (gaps, packages) in [
+        (vec!["bwrap", "socat"], "bubblewrap socat"),
+        (vec!["socat"], "socat"),
+        (vec!["bwrap"], "bubblewrap"),
+    ] {
+        scene.host.gaps = gaps;
+        let report = scene.report().await;
+        let (_, fix) = missing(&report, "sandbox");
+        assert_eq!(
+            fix,
+            format!(
+                "install {} with your package manager, such as `sudo apt-get install {packages}` on Debian and Ubuntu",
+                scene.host.gaps.join(" and ")
+            )
+        );
+        assert!(!report.passed());
+    }
+}
+
 #[tokio::test]
 async fn doctor_names_the_linux_sandbox_limits() {
     let mut scene = Scene::new().await;

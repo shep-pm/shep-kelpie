@@ -164,7 +164,7 @@ pub(super) fn checks(
         lines.push(code_graph(at("code graph"), &paths));
     }
     if settings.browser.enabled {
-        lines.push(browser(at("browser"), &paths));
+        lines.push(browser(at("browser"), &paths, probes.host));
     }
     lines.extend(repo_plugins(at("repo plugins"), &settings, here));
     lines.extend(super::mcp::hosts(at("repo mcp servers"), &settings, here));
@@ -605,17 +605,10 @@ fn code_graph(subject: String, paths: &ProjectPaths) -> Line {
 }
 
 // A runner whose browser is missing goes on without one, but the project turned it on.
-fn browser(subject: String, paths: &ProjectPaths) -> Line {
+fn browser(subject: String, paths: &ProjectPaths, host: &dyn crate::adapters::host::Host) -> Line {
     let tools = paths.tools.dir();
-    match paths.tools.has_browser() {
-        true => Line::ok(
-            subject,
-            format!(
-                "the Playwright server and Chromium are under {}",
-                tools.display()
-            ),
-        ),
-        false => Line::missing(
+    if !paths.tools.has_browser() {
+        return Line::missing(
             subject,
             format!(
                 "the Playwright server or Chromium is not under {}, so the project's workers run \
@@ -623,8 +616,40 @@ fn browser(subject: String, paths: &ProjectPaths) -> Line {
                 tools.display()
             ),
             "run `shep kelpie tools install`, or turn `browser.enabled` off",
-        ),
+        );
     }
+    if host.os() == "linux" {
+        match host.browser_gaps(&paths.tools.browsers()) {
+            Ok(gaps) if !gaps.is_empty() => {
+                return Line::missing(
+                    subject,
+                    format!(
+                        "Playwright's headless Chromium cannot load {}",
+                        gaps.join(" and ")
+                    ),
+                    format!(
+                        "run `sudo node \"{}\" install-deps chromium-headless-shell`",
+                        paths.tools.playwright_cli().display()
+                    ),
+                );
+            }
+            Err(why) => {
+                return Line::unsure(
+                    subject,
+                    why,
+                    "check the headless shell installation and `ldd`, then rerun `shep kelpie doctor`",
+                );
+            }
+            Ok(_) => {}
+        }
+    }
+    Line::ok(
+        subject,
+        format!(
+            "the Playwright server and Chromium are under {}",
+            tools.display()
+        ),
+    )
 }
 
 fn instructions(subject: String, settings: &Settings) -> Line {

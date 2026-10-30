@@ -23,7 +23,8 @@ impl Tools {
         self.package(MCP).join("cli.js")
     }
 
-    fn playwright_cli(&self) -> PathBuf {
+    /// Playwright's own CLI, used to install Chromium and its system libraries
+    pub fn playwright_cli(&self) -> PathBuf {
         self.package(CORE).join("cli.js")
     }
 
