@@ -45,7 +45,7 @@ From nothing to a worker on your repo. The examples use a project called `scratc
 
 You need these on your machine:
 
-- macOS or Linux. Windows is being ported ([#241](https://github.com/shep-pm/shep-kelpie/issues/241)) and is not usable yet: no Windows machine has run a kelpie worker ([#1151](https://github.com/shep-pm/shep-kelpie/issues/1151)), and the root package does not yet compile there. A shepherd there must run in an interactive desktop session, not over SSH or as a service. [`docs/design/windows.md`](https://github.com/shep-pm/shep-kelpie/blob/main/docs/design/windows.md) has the install steps
+- macOS, Linux or native Windows. Native Windows runs a worker with the shepherd in an interactive desktop session, Git for Windows and a one-time `crabpot windows-install`. [`docs/design/windows.md`](https://github.com/shep-pm/shep-kelpie/blob/main/docs/design/windows.md) has the install steps; [#241](https://github.com/shep-pm/shep-kelpie/issues/241) tracks what is left of the port
 - [shep](https://github.com/shep-pm/shep) 0.13, from 0.13.0, and Rust 1.88 or later, to build shep-kelpie
 - Claude Code, signed in
 - `node` and `npm`: `tools install` runs them

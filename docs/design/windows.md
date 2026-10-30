@@ -17,6 +17,7 @@ What the person starting the shepherd needs on a Windows machine (#1271). Measur
 
 ## What the port covers
 
+- A live work item ran end to end on Windows 11 ARM64 on 2026-10-29: [shep-pm/kelpie-scratch#26](https://github.com/shep-pm/kelpie-scratch/issues/26) to [shep-pm/kelpie-scratch#27](https://github.com/shep-pm/kelpie-scratch/pull/27), merged at `97fa253c`, with a Windows shepherd, kelpie 1414937 and crabpot 0.5.4 (#1151). Beyond the install, it needed [`icacls <exe> /reset` after `cargo install`](../facts/worker-profile-and-sandbox.md).
 - `spawn::sh()` and `spawn::env()` are the only way to start a shell or `env`. On Unix they are `/bin/sh` and `/usr/bin/env`. On Windows they find Git for Windows through a `git.exe` on `PATH`, then its default install folders, and fall back to the bare name.
 - A hook, the test-runner, the dev server's install and the Claude sandbox's `env` run the maintainer's POSIX shell line, so they require Git for Windows.
 - `upgrade` reaches `tar` and `shasum` only for a release asset, so it keeps them Unix. `kill` and `ps` wait on #1148, sockets on #1147.
