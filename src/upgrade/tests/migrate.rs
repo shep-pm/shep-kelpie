@@ -1,6 +1,7 @@
 //! The migrations an upgrade runs after the install and before the restarts
 
 use super::*;
+use crate::test::toml_path;
 
 const STUB: &str = "---\nextends: kelpie:pm\n---\n";
 const WROTE: &str = "pm.md: wrote claude-code claude-opus-5-5 medium";
@@ -169,13 +170,13 @@ fn loading(shepherd: &FakeShepherd) -> Map<String, Value> {
     let status = crate::flock::git_in(&root).args(["init", "-q"]).status();
     assert!(status.unwrap().success());
     let text = format!(
-        "[git]\ncheckout = \"{}\"\nremote = \"shep-pm/koji\"\nmerging = \"ask\"\n\
+        "[git]\ncheckout = {}\nremote = \"shep-pm/koji\"\nmerging = \"ask\"\n\
          issues = \"ask\"\n[ci]\nblock = true\nfix_attempts = -1\n\
          [concurrency]\nactive_items = 1\npending_rulings = 2\n[budget]\nper_item_usd = 10\n\
          [agents]\nimplementers = [\"sonnet-high\"]\nreviewers = [\"standards\"]\n\
          [pacing]\nenabled = true\nkickoff_hours = 8\n[worker]\nallowed_domains = []\n\
          build_env = {{}}\nguard_hooks = []\nturn_timeout = 60\n",
-        root.display()
+        toml_path(&root)
     );
     crate::settings::table_of(&text).unwrap()
 }
