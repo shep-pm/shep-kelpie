@@ -42,6 +42,33 @@ fn a_plain_status_names_what_the_maintainer_looks_for() {
 }
 
 #[test]
+fn a_work_item_whose_step_keeps_failing_says_how_often_since_when_and_why() {
+    let body = r#"{"project":"koji","work_items":[
+        {"issue":"7","title":"Add a thing","phase":{"state":"done","merged":true},
+         "turn":{"state":"ended"},"pull_request":71,
+         "failing":{"failures":8,"since":1790000000,
+                    "reason":"cannot delete branch kelpie/7: checked out in another worktree"}},
+        {"issue":"9","title":"Fix the other","phase":{"state":"implement"},
+         "turn":{"state":"running"},"pull_request":null,"failing":null}],"rulings":[]}"#;
+
+    assert_eq!(
+        plain_status("koji", body, None),
+        [
+            "koji",
+            "  run: running",
+            "  build: not recorded",
+            "  work items:",
+            "    #7 Add a thing: phase done, turn ended, PR #71",
+            "      step failed 8 times since 2026-09-21 14:13 UTC: \
+             cannot delete branch kelpie/7: checked out in another worktree",
+            "    #9 Fix the other: phase implement, turn running, no PR",
+            "  rulings waiting: none",
+            "  pacer: on",
+        ]
+    );
+}
+
+#[test]
 fn a_plain_status_names_the_red_workflow_how_long_it_has_been_red_and_its_run() {
     let body = r#"{"project":"koji","work_items":[],"red_workflows":[
         {"workflow":"test","first_run":91,"run":91,"head":"head91","since":1700000000,

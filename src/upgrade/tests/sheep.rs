@@ -52,6 +52,74 @@ async fn an_upgrade_waits_out_a_merge_in_flight_before_any_restart() {
 }
 
 #[tokio::test]
+// The upgrade probes stand-in builds as real child processes.
+async fn the_wait_names_why_a_merged_item_has_not_cleaned_up() {
+    let mut rig = Rig::new().await;
+    let failing = r#"{"work_items":[{"issue":"7","phase":{"state":"done","merged":true},
+        "failing":{"failures":8,"since":1790000000,
+                   "reason":"cannot delete branch kelpie/7: checked out in another worktree"}}]}"#;
+    rig.shepherd.says("koji", &[failing]);
+    let new = rig.build("new", "0.3.0", "0.19.0");
+    let patience = Patience {
+        merge: Duration::from_millis(100),
+        ..FAST
+    };
+    let action = Action::Install(Source::Binary(new));
+    let (ran, said) = rig.upgrade_within(action, patience).await;
+    let err = ran.unwrap_err();
+
+    assert!(
+        said.iter().any(|line| line
+            == "waiting: `koji` is merging #7, whose cleanup has failed \
+            8 times: cannot delete branch kelpie/7: checked out in another worktree"),
+        "{said:?}"
+    );
+    assert!(
+        err.contains(
+            "`koji` is merging #7, whose cleanup has failed 8 times: \
+            cannot delete branch kelpie/7: checked out in another worktree"
+        ),
+        "{err}"
+    );
+    assert!(err.contains("nothing was restarted"), "{err}");
+    assert_eq!(rig.restarts(), Vec::<String>::new());
+}
+
+#[tokio::test]
+// The upgrade probes stand-in builds as real child processes.
+async fn the_wait_names_a_merge_failure_as_a_step_failure() {
+    let mut rig = Rig::new().await;
+    let failing = r#"{"work_items":[{"issue":"7","phase":{"state":"merge","head":"abc"},
+        "failing":{"failures":8,"since":1790000000,
+                   "reason":"merge refused: pull request is not ready"}}]}"#;
+    rig.shepherd.says("koji", &[failing]);
+    let new = rig.build("new", "0.3.0", "0.19.0");
+    let patience = Patience {
+        merge: Duration::from_millis(100),
+        ..FAST
+    };
+    let action = Action::Install(Source::Binary(new));
+    let (ran, said) = rig.upgrade_within(action, patience).await;
+    let err = ran.unwrap_err();
+
+    assert!(
+        said.iter().any(|line| line
+            == "waiting: `koji` is merging #7, whose step has failed 8 times: \
+                merge refused: pull request is not ready"),
+        "{said:?}"
+    );
+    assert!(
+        err.contains(
+            "`koji` is merging #7, whose step has failed 8 times: \
+                merge refused: pull request is not ready"
+        ),
+        "{err}"
+    );
+    assert!(err.contains("nothing was restarted"), "{err}");
+    assert_eq!(rig.restarts(), Vec::<String>::new());
+}
+
+#[tokio::test]
 async fn the_dog_goes_down_only_when_no_runner_is_merging() {
     let mut rig = Rig::new().await;
     rig.runs("aria", &rig.installed.clone(), true);
