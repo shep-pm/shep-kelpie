@@ -6,9 +6,9 @@ use crate::ports::{AuthorAssociation, Clock, OpenIssue, Role, Timestamp};
 use crate::review_bot::Bot;
 use crate::runner::contributions::pass_tests::listing;
 use crate::runner::contributions::tests::{opened, poll};
-use crate::runner::{Pass, Runner, advance, step};
+use crate::runner::{OpenError, Pass, Runner, advance, step};
 use crate::settings::AgentName;
-use crate::state::{BotTurn, Walking};
+use crate::state::{BotTurn, StateError, Walking};
 use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
 use crate::work_item::ReviewStage;
 
@@ -258,6 +258,11 @@ fn a_reread_that_fails_after_pick_changes_keeps_the_old_triage_state() {
     {
         // A walk at a bot the next lineup does not list, so the reread must end its turn.
         let mut runner = runner.lock().unwrap();
+        assert_eq!(
+            runner.state.contributions.len(),
+            1,
+            "the pull request is followed"
+        );
         let (now, head) = (rig.clock.now(), runner.state.contributions[0].head.clone());
         runner.state.contributions[0].walking = Some(Walking {
             head: head.clone(),
@@ -284,8 +289,16 @@ fn a_reread_that_fails_after_pick_changes_keeps_the_old_triage_state() {
     };
     let stamped_before = saved()["triage"].clone();
     let next = settings_with(&rig, |s| {
-        s.replace("[\"mine\"]", "[\"other\"]")
-            .replace("pick = \"off\"", "pick = \"all\"")
+        let edited = (s.replace("[\"mine\"]", "[\"other\"]")).replace(
+            &format!("{TABLE}pick = \"off\""),
+            &format!("{TABLE}pick = \"all\""),
+        );
+        assert!(edited.contains("[\"other\"]"), "the reviewers changed");
+        assert!(
+            edited.contains(&format!("{TABLE}pick = \"all\"")),
+            "pick changed"
+        );
+        edited
     });
 
     let err = runner
@@ -294,7 +307,10 @@ fn a_reread_that_fails_after_pick_changes_keeps_the_old_triage_state() {
         .reread(next, rig.kelpie_settings())
         .unwrap_err();
 
-    assert!(err.to_string().contains("cannot write state file"), "{err}");
+    assert!(
+        matches!(err, OpenError::State(StateError::Write { .. })),
+        "{err}"
+    );
     assert_eq!(rig.ask(&runner, "status", None)["triage"], before);
     assert_eq!(
         saved()["triage"],

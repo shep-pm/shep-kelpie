@@ -844,6 +844,7 @@ impl core::error::Error for StateError {}
 #[derive(Debug, Clone)]
 pub struct StateStore {
     path: PathBuf,
+    // Tests only: the saves left, shared by every clone of the store
     #[cfg(any(test, feature = "test-support"))]
     saves_left: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
 }
@@ -945,7 +946,7 @@ impl StateStore {
     ///
     /// # Errors
     ///
-    /// [`StateError::Write`] when any step fails. The previous state stands.
+    /// [`StateError::Write`] when any step fails, or when a test store has spent its saves. The previous state stands.
     pub fn save(&self, state: &ProjectState) -> Result<(), StateError> {
         #[cfg(any(test, feature = "test-support"))]
         self.refuse_when_spent()?;
