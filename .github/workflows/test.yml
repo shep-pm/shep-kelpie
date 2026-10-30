@@ -37,6 +37,7 @@ jobs:
       # A pull request's checkout is its merge commit, whose first parent is the base.
       - id: rust
         run: |
+          set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             git diff --name-only HEAD^1 HEAD | scripts/ci-changes.sh >> "$GITHUB_OUTPUT"
           else
@@ -168,7 +169,7 @@ jobs:
       # tests that passed; a failing test fails the step on its own.
       - name: Run the real-shepherd tests
         run: |
-          set -o pipefail
+          set -euo pipefail
           cargo test --locked -p shep-kelpie --test dog_smoke -- --ignored | tee dog_smoke.log
           grep -Eq 'test result: ok\. [1-9][0-9]* passed' dog_smoke.log
 
@@ -222,7 +223,7 @@ jobs:
       # a macOS run reads.
       - name: Run the sandbox tests
         run: |
-          set -o pipefail
+          set -euo pipefail
           cargo test --locked -- --ignored \
             adapters::claude::escapes \
             adapters::claude::ecosystems \
