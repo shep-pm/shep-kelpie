@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use shep_client::RequestError;
 use shep_client::shep_core::config::{AppConfig, DogTable};
@@ -8,11 +8,11 @@ use super::*;
 use crate::flock::glob::{Glob, Named};
 use crate::home::ProjectPaths;
 use crate::settings::table_of;
-use crate::test::{CALL_PATIENCE, FakeShepherd};
+use crate::test::{CALL_PATIENCE, FakeShepherd, toml_path};
 
 const TABLE: &str = r#"
 [git]
-checkout = "CHECKOUT"
+checkout = CHECKOUT
 remote = "REMOTE"
 merging = "ask"
 issues = "ask"
@@ -102,7 +102,7 @@ fn add_project(shepherd: &FakeShepherd, name: &str, table: &str) -> PathBuf {
         &format!("shep-pm/{name}"),
     );
     let text = table
-        .replace("CHECKOUT", &root.display().to_string())
+        .replace("CHECKOUT", &toml_path(&root))
         .replace("REMOTE", &format!("shep-pm/{name}"));
     let mut runner = AppConfig::minimal(name, "/opt/kelpie");
     let table = DogTable::from(table_of(&text).unwrap());
@@ -471,8 +471,8 @@ async fn a_checkout_moved_to_one_no_other_project_runs_is_written_and_waits_for_
         .unwrap();
     assert!(said[0].ends_with("when it next starts"), "{said:?}");
     assert_eq!(
-        scene.table()["git"]["checkout"],
-        spare.display().to_string()
+        Path::new(scene.table()["git"]["checkout"].as_str().unwrap()),
+        spare
     );
     let said = scene.set("git.merging", "auto").await.unwrap();
     assert!(said[0].ends_with("at its next wake"), "{said:?}");

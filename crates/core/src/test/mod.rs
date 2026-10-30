@@ -169,6 +169,31 @@ pub fn project_table(entry: &str) -> serde_json::Map<String, serde_json::Value> 
     }
 }
 
+/// A path quoted and escaped as a TOML string value, so a Windows path
+/// like `C:\Users\me` reads back whole
+pub fn toml_path(path: &std::path::Path) -> String {
+    let text = path.to_str().expect("a test path is UTF-8");
+    toml::Value::String(text.to_owned()).to_string()
+}
+
+#[test]
+fn a_path_in_toml_reads_back_with_backslashes_and_quotes_intact() {
+    use std::path::Path;
+
+    for path in [
+        r"C:\Users\runner\a repo",
+        r#"C:\Users\runner\a "quoted" repo"#,
+        "/home/me/a repo",
+        "",
+        "/home/me/tab\there\nnewline",
+    ] {
+        let path = Path::new(path);
+        let text = format!("[git]\ncheckout = {}\n", toml_path(path));
+        let table: toml::Table = toml::from_str(&text).unwrap();
+        assert_eq!(Path::new(table["git"]["checkout"].as_str().unwrap()), path);
+    }
+}
+
 /// A runner entry like `settings.example.toml` with `tables` added to its
 /// kelpie table, such as an older `[app.dogs.kelpie.review]`
 pub fn with_tables(entry: &str, tables: &str) -> String {

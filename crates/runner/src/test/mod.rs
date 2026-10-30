@@ -51,7 +51,7 @@ pub use shep_kelpie_core::test::{
     FakeDevServers, FakeDisk, FakeE2e, FakeForge, FakeGit, FakeMeter, FakePages, FakeShepherd,
     FakeTests, GB, HeldCall, Hold, Home, LOGIN_TOKEN, LeaseReads, Memory, OpenSandbox,
     RecordedSink, SeenAsk, StandInEndpoint, Synced, Take, VIEWER, a_work_item, clean_visit,
-    project_table, ticket, unreachable_url,
+    project_table, ticket, toml_path, unreachable_url,
 };
 pub use shep_kelpie_test_support::{
     CALL_PATIENCE, Elsewhere, Fake, cut_from_main, git, linked_worktree, main_commits, make_fifo,
@@ -85,8 +85,9 @@ impl Held for HeldToken {
 /// The workflow the rig's repo holds on `main`
 const WORKFLOW: &str = ".github/workflows/ci.yml";
 
-/// The `git.checkout` in `settings.example.toml`, which the rig points at its own
-const EXAMPLE_REPO: &str = "~/GitHub/shep";
+/// The `git.checkout` value in `settings.example.toml`, quoted as it is written there,
+/// which the rig points at its own
+const EXAMPLE_REPO: &str = "\"~/GitHub/shep\"";
 
 /// The rig's reviewers: its qwen round and then its own Claude session, `claude`
 pub const RIG_REVIEWERS: &[&str] = &["qwen", "claude"];
@@ -200,7 +201,7 @@ impl Rig {
 
         let example = include_str!("../../../../settings.example.toml");
         assert!(example.contains(EXAMPLE_REPO), "the example's repo moved");
-        let settings = example.replace(EXAMPLE_REPO, &rig.repo().display().to_string());
+        let settings = example.replace(EXAMPLE_REPO, &toml_path(&rig.repo()));
         // A retro is one more call after every batch, so most tests
         // leave it off and a test of the retro turns it on with [`Rig::retro_on`].
         let settings = format!("{settings}{NO_RETRO}");
