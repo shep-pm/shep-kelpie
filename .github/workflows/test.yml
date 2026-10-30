@@ -302,6 +302,15 @@ jobs:
             choco install llvm -y --no-progress
           }
           'C:\Program Files\LLVM\bin' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      # The `git.exe` in Git's `cmd` and `bin` starts this one, about 15 ms a
+      # call more, and the tests start git tens of thousands of times (#1578).
+      - name: Put Git's own git.exe first on the PATH
+        shell: pwsh
+        run: |
+          $own = 'C:\Program Files\Git\clangarm64\bin'
+          if (Test-Path "$own\git.exe") {
+            $own | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          }
       # `dog`, `core`, `adapters`, `runner`, the root package and the crates below them compile for Windows, tests included: keep them so.
       - run: cargo check --all-targets --locked -p shep-kelpie-core -p shep-kelpie-dog -p shep-kelpie-process -p shep-kelpie-test-support -p shep-kelpie-facts -p shep-kelpie-owner-only -p shep-kelpie-worker-folder -p shep-kelpie-trim -p shep-kelpie-adapters -p shep-kelpie-runner -p shep-kelpie-tree -p shep-kelpie-disk -p shep-kelpie
       - id: check
