@@ -181,7 +181,7 @@ fn a_path_in_toml_reads_back_with_backslashes_and_quotes_intact() {
     for path in [
         r"C:\Users\runner\a repo",
         r#"C:\Users\runner\a "quoted" repo"#,
-        "/home/runner/a repo",
+        "/home/me/a repo",
     ] {
         let path = Path::new(path);
         let text = format!("[git]\ncheckout = {}\n", toml_path(path));
