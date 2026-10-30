@@ -513,7 +513,16 @@ pub(crate) async fn wait_out_merges(
                 Answered::Runner(body) => busy.extend(
                     merging(&body)
                         .into_iter()
-                        .map(|(ticket, _)| format!("`{name}` is merging {}", ticket.shown())),
+                        .map(|(ticket, failing)| {
+                            let mut line = format!("`{name}` is merging {}", ticket.shown());
+                            if let Some(failing) = failing {
+                                line.push_str(&format!(
+                                    ", whose cleanup has failed {} times: {}",
+                                    failing.failures, failing.reason
+                                ));
+                            }
+                            line
+                        }),
                 ),
                 // Not taking its actions yet: it may be mid-merge from before.
                 Answered::Starting => busy.push(format!("`{name}` is starting")),
