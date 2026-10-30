@@ -56,7 +56,7 @@ Measured on [run 41044428502](https://github.com/shep-pm/shep-kelpie/actions/run
 | `shep-kelpie-trim` | 3 | 0 | 0 |
 | `shep-kelpie-worker-folder` | 11 | 0 | 0 |
 
-The runner's 3035 tests run at 0.4 a second, and 32 test threads ran no faster than the default. The most failing modules are `upgrade::tests` (74), `worktree::remote` (32), `adapters::goose` (31), `adapters::codex` (28), `sheep::handover` (22), `runner::points_tests` (21), `runner::core_tests` (20), `runner::attach` (17) and `adapters::local` (17).
+The runner's 3035 tests run at 0.4 a second, and 32 test threads ran no faster than the default. [Windows runner test time](../facts/windows-tests.md) records the timing probes and what reducing that time needs. The most failing modules are `upgrade::tests` (74), `worktree::remote` (32), `adapters::goose` (31), `adapters::codex` (28), `sheep::handover` (22), `runner::points_tests` (21), `runner::core_tests` (20), `runner::attach` (17) and `adapters::local` (17).
 
 The `lib` step skips these tests, which hang on Windows:
 
