@@ -26,6 +26,7 @@ A pull request that measures something adds it to its topic's file, or starts a 
 - [Cost by role and worker questions](cost-by-role-and-worker-questions.md)
 - [CI and the merge](ci-and-the-merge.md)
 - [Windows runner test time](windows-tests.md)
+- [Reading git in process](reading-git-in-process.md)
 - [Issue dependencies](issue-dependencies.md)
 - [Worker questions and the webhook](worker-questions-and-the-webhook.md)
 - [ntfy replies](ntfy-replies.md)
