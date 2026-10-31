@@ -95,6 +95,10 @@ pub(super) fn facts(rig: &Rig) -> String {
     asked.remove(0).call.prompt
 }
 
+// The prefixes of the labels the runner makes at its start, which no triage
+// test is about
+pub(super) const MADE_AT_START: [&str; 3] = ["agent:", "priority:", "kind:"];
+
 // What the App wrote on the repo, in order: a comment, a label made or put on an issue
 pub(super) fn moves(rig: &Rig) -> Vec<String> {
     let writes = rig.github.writes();
@@ -106,9 +110,9 @@ pub(super) fn moves(rig: &Rig) -> Vec<String> {
             match call.path.rsplit('/').next()? {
                 "comments" => Some("comment".to_owned()),
                 "labels" if on_issue => Some(format!("label {}", body["labels"][0].as_str()?)),
-                // The runner makes the agent labels and the priority labels at its start.
+                // The runner makes these labels at its start.
                 "labels" => Some(body["name"].as_str()?)
-                    .filter(|name| !name.starts_with("agent:") && !name.starts_with("priority:"))
+                    .filter(|name| !MADE_AT_START.iter().any(|l| name.starts_with(l)))
                     .map(|name| format!("make {name}")),
                 _ => None,
             }

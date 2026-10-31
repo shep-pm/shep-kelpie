@@ -43,7 +43,7 @@ pub(super) mod marker;
 pub(super) mod poll_read;
 pub(super) mod ready;
 pub(super) mod research;
-mod rewrite;
+pub(super) mod rewrite;
 mod scrub;
 pub(super) mod spam;
 

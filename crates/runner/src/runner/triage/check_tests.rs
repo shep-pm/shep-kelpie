@@ -301,7 +301,7 @@ const ASSUMED: &str = "Touches: `src/start.rs`\n\n## What to build\n\n- Fix the 
     - [ ] `runner::start::it_starts`\n";
 
 #[test]
-fn a_rewrite_that_passes_states_its_assumptions_and_goes_ready_with_its_kind_made() {
+fn a_rewrite_that_passes_states_its_assumptions_and_goes_ready_with_its_kind() {
     let (rig, runner) = checking("pick = \"maintainer\"", MAINTAINER, FAILING, &[]);
     let found = json!({ "type": "bug", "kind": "feat", "priority": "P2", "body": ASSUMED });
     rig.claude.script_for(Role::Triager, [reply(found)]);
@@ -328,14 +328,13 @@ fn a_rewrite_that_passes_states_its_assumptions_and_goes_ready_with_its_kind_mad
     assert_eq!(
         moves(&rig),
         [
-            "make kind:feat",
             "comment",
             "label bug",
             "label P2",
             "label kind:feat",
             "label ready-for-agent"
         ],
-        "no question is asked, and the kind the repo lacked is made"
+        "no question is asked"
     );
 
     // The pass's end, checked again, passes: nothing more is written.
@@ -344,7 +343,7 @@ fn a_rewrite_that_passes_states_its_assumptions_and_goes_ready_with_its_kind_mad
     rig.next_look();
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(rig.github.comments().len(), 1);
-    assert_eq!(moves(&rig).len(), 6);
+    assert_eq!(moves(&rig).len(), 5);
 }
 
 #[test]
@@ -503,6 +502,22 @@ fn titled(title: &str, labels: &[&str]) -> (Rig, Mutex<Runner>) {
 const NO_KIND: [&str; 1] = ["priority: P2"];
 
 #[test]
+fn a_kind_label_deleted_since_the_start_is_made_again_before_it_goes_on() {
+    let rig = Rig::new("shep");
+    rig.maintainer(MAINTAINER);
+    let mut feat = filed(&rig, MAINTAINER, PASSING, &NO_KIND);
+    feat.title = "feat: a thing".to_owned();
+    list(&rig, feat);
+    let runner = rig.open().unwrap();
+    rig.forge.set_repo_labels(&REPO_LABELS);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let have = rig.forge.repo_labels_now();
+    assert!(have.contains(&"kind:feat".to_owned()), "{have:?}");
+}
+
+#[test]
 fn a_typed_title_with_no_kind_label_gains_it_and_passes() {
     for (title, kind) in [
         ("fix(board): crash", "fix"),
@@ -513,13 +528,10 @@ fn a_typed_title_with_no_kind_label_gains_it_and_passes() {
 
         assert_eq!(step(&runner).unwrap(), None, "{title}");
 
-        let mut want = vec![
+        let want = [
             format!("label kind:{kind}"),
             "label ready-for-agent".to_owned(),
         ];
-        if kind == "feat" {
-            want.insert(0, "make kind:feat".to_owned());
-        }
         assert_eq!(moves(&rig), want, "{title}");
         assert!(checks(&rig)[0].get("failures").is_none(), "{title}");
 

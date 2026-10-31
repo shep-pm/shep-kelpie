@@ -244,6 +244,7 @@ impl Runner {
         if self.implementer_files() != had_labels || to_github {
             self.make_agent_labels();
             self.make_priority_labels();
+            self.make_kind_labels();
         }
         self.notes.extend(self.left_out_notes(&was_left_out));
         self.notes.extend(coderabbit_note);

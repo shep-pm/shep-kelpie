@@ -84,6 +84,8 @@ pub use instructions::check_instructions;
 mod kept;
 #[cfg(test)]
 mod kept_tests;
+#[cfg(test)]
+mod kind_labels_tests;
 mod ledger;
 #[cfg(test)]
 mod ledger_tests;
@@ -708,6 +710,7 @@ impl Runner {
         runner.settle_labels();
         runner.make_agent_labels();
         runner.make_priority_labels();
+        runner.make_kind_labels();
         runner.notes.extend(runner.left_out_notes(&[]));
         runner.brief_now();
         // A trigger asked before the loop's first pass is answered from this.

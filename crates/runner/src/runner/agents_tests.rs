@@ -21,11 +21,13 @@ fn name_agents(rig: &Rig, names: &str) {
     });
 }
 
-// The `agent:` labels the repo holds, apart from the priority labels the runner
-// makes beside them
+// The `agent:` labels the repo holds, apart from the priority and kind labels
+// the runner makes beside them
 fn agent_labels_now(rig: &Rig) -> Vec<String> {
     let mut have = rig.forge.repo_labels_now();
-    have.retain(|l| !crate::board::is_priority_label(l));
+    have.retain(|l| {
+        !crate::board::is_priority_label(l) && crate::board::check::kind_of(l).is_none()
+    });
     have
 }
 

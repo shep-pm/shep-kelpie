@@ -5,14 +5,15 @@
 //! reader of GitHub can see a worker has the issue. The label is a courtesy:
 //! a forge that refuses it leaves a note and never stops the work item.
 //! Each agent file of `role: implementer` gets its `agent:` label made where
-//! the repo lacks it, listed by the project or not.
-//! A project on the local store does neither.
+//! the repo lacks it, listed by the project or not, and so does each
+//! priority and kind label. A project on the local store makes none of them.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use super::Runner;
-use crate::board::IN_PROGRESS;
+use super::triage::rewrite::new_kind_label;
+use crate::board::{IN_PROGRESS, check};
 use crate::settings::TicketSource;
 use crate::ticket::TicketId;
 
@@ -100,6 +101,35 @@ impl Runner {
             .into_iter()
             .filter(|p| crate::board::repo_priority(&have, p).is_none())
             .filter_map(super::triage::comment::priority_label);
+        if let Err(e) = self.make_missing_labels(wanted) {
+            self.notes.push(e);
+        }
+    }
+
+    // Makes each of the nine kind labels, as `kind:feat`, the repo has under no
+    // spelling the issue check reads, so the maintainer and the triager have
+    // it to put on. Only adds, like the priority labels.
+    pub(super) fn make_kind_labels(&mut self) {
+        if self.local_store() {
+            return;
+        }
+        let have = match self.ports.forge.repo_labels(&self.remote) {
+            Ok(have) => have,
+            Err(e) => {
+                self.notes
+                    .push(format!("cannot read the repo's labels for kinds: {e}"));
+                return;
+            }
+        };
+        let names: Vec<String> = check::kinds()
+            .filter(|k| {
+                !have
+                    .iter()
+                    .any(|l| check::kind_of(l).is_some_and(|h| h.eq_ignore_ascii_case(k)))
+            })
+            .map(|k| format!("{}{k}", check::KIND))
+            .collect();
+        let wanted = names.iter().map(|n| new_kind_label(n));
         if let Err(e) = self.make_missing_labels(wanted) {
             self.notes.push(e);
         }
