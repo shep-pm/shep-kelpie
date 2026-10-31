@@ -113,6 +113,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Git starts `git maintenance run --auto` after each fetch and commit,
+      # a process start in 11% of the git calls the tests make (#1588). System
+      # config, since `trust_git_of` sets `GIT_CONFIG_COUNT` itself.
+      - name: Turn off git's automatic maintenance
+        run: |
+          sudo git config --system maintenance.auto false
+          git config --system --get maintenance.auto
       - run: rustup toolchain install stable --profile minimal
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -127,6 +134,13 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Git starts `git maintenance run --auto` after each fetch and commit,
+      # a process start in 11% of the git calls the tests make (#1588). System
+      # config, since `trust_git_of` sets `GIT_CONFIG_COUNT` itself.
+      - name: Turn off git's automatic maintenance
+        run: |
+          sudo git config --system maintenance.auto false
+          git config --system --get maintenance.auto
       - run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -152,6 +166,13 @@ jobs:
       KELPIE_TEST_SHEP: ${{ github.workspace }}/.shep/shep
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Git starts `git maintenance run --auto` after each fetch and commit,
+      # a process start in 11% of the git calls the tests make (#1588). System
+      # config, since `trust_git_of` sets `GIT_CONFIG_COUNT` itself.
+      - name: Turn off git's automatic maintenance
+        run: |
+          sudo git config --system maintenance.auto false
+          git config --system --get maintenance.auto
       - run: rustup toolchain install stable --profile minimal
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -185,6 +206,13 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Git starts `git maintenance run --auto` after each fetch and commit,
+      # a process start in 11% of the git calls the tests make (#1588). System
+      # config, since `trust_git_of` sets `GIT_CONFIG_COUNT` itself.
+      - name: Turn off git's automatic maintenance
+        run: |
+          sudo git config --system maintenance.auto false
+          git config --system --get maintenance.auto
       - run: rustup toolchain install stable --profile minimal
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -311,6 +339,15 @@ jobs:
           if (Test-Path "$own\git.exe") {
             $own | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
           }
+      # Git starts `git maintenance run --auto` after each fetch and commit,
+      # a process start in 11% of the git calls the tests make (#1588). This
+      # runs after the step above, so it writes the system config of the git
+      # the tests start.
+      - name: Turn off git's automatic maintenance
+        shell: pwsh
+        run: |
+          git config --system maintenance.auto false
+          git config --system --get maintenance.auto
       # `dog`, `core`, `adapters`, `runner`, the root package and the crates below them compile for Windows, tests included: keep them so.
       - run: cargo check --all-targets --locked -p shep-kelpie-core -p shep-kelpie-dog -p shep-kelpie-process -p shep-kelpie-test-support -p shep-kelpie-facts -p shep-kelpie-owner-only -p shep-kelpie-worker-folder -p shep-kelpie-trim -p shep-kelpie-adapters -p shep-kelpie-runner -p shep-kelpie-tree -p shep-kelpie-disk -p shep-kelpie
       - id: check
