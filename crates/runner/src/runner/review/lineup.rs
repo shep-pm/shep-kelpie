@@ -152,18 +152,61 @@ impl Runner {
         Ok(self.lineup.iter().filter(due).cloned().collect())
     }
 
-    // Whether `reviews.need` reviewers have read in `review`'s pass: those whose
-    // round ran, but a bot passed over or a reviewer that kept failing.
+    // Whether `reviews.need` reviewers have read in `review`'s pass.
     fn enough_read(&self, review: &Review) -> bool {
-        let Some(item) = self.current() else {
-            return false;
-        };
-        let counts = |name: &&AgentName| {
-            let passed_over = item.bots_skipped.iter().any(|s| s.reviewer() == *name);
+        self.current().is_some() && self.reads(review) >= self.settings.reviews.need.get()
+    }
+
+    // How many reviewers have read in `review`'s pass: those whose round ran,
+    // but a bot passed over or a reviewer that kept failing.
+    fn reads(&self, review: &Review) -> u32 {
+        self.current().map_or(0, |item| self.reads_in(item, review))
+    }
+
+    fn reads_in(&self, item: &WorkItem, review: &Review) -> u32 {
+        u32::try_from(self.readers(item, review).len()).unwrap_or(u32::MAX)
+    }
+
+    fn readers(&self, item: &WorkItem, review: &Review) -> Vec<AgentName> {
+        let counts = |name: &AgentName| {
+            let passed_over = item.bots_skipped.iter().any(|s| s.reviewer() == name);
             !passed_over && !item.reviewers_skipped.contains(name)
         };
-        let read = self.ran_of(review).iter().filter(counts).count();
-        u32::try_from(read).map_or(true, |read| read >= self.settings.reviews.need.get())
+        let mut ran = self.ran_of(review);
+        ran.retain(counts);
+        ran
+    }
+
+    /// Why `review`'s pass ends, when `pass_ended` is to hold the work item
+    /// for a ruling: `Some(None)` when the project's own list left it no
+    /// reader, `Some(Some(reason))` when a reviewer was down or passed over,
+    /// the agent board ranked none of `unranked`, or too few read for `reviews.need`
+    pub(super) fn pass_unread(
+        &self,
+        item: &WorkItem,
+        review: &Review,
+        unranked: &[AgentName],
+    ) -> Option<Option<String>> {
+        let board = (!unranked.is_empty()).then(|| {
+            let names: Vec<_> = unranked.iter().map(ToString::to_string).collect();
+            format!("the agent board ranked none of {}", names.join(", "))
+        });
+        let joined = |missed: Option<String>| match (missed, board.clone()) {
+            (Some(missed), Some(board)) => Some(format!("{missed}, and {board}")),
+            (missed, board) => missed.or(board),
+        };
+        if review.unread {
+            return Some(joined(self.missed(item, review, true)));
+        }
+        let (reads, need) = (
+            self.reads_in(item, review),
+            self.settings.reviews.need.get(),
+        );
+        if review.bots_only || reads >= need {
+            return None;
+        }
+        let why = joined(self.missed(item, review, false))?;
+        Some(Some(format!("{reads} of {need} reviewers read it: {why}")))
     }
 
     // When the window of `reviewer`, if a review bot, opens, while it is closed at `now`.
@@ -205,19 +248,43 @@ impl Runner {
     /// A pass with a bot it went on without ends in a round step of its own,
     /// which first reads whether that bot reviewed the head since.
     pub(in crate::runner) fn after_round(&self, review: Review, now: Timestamp) -> Phase {
+        match self.current() {
+            Some(item) => self.after_round_in(item, review, now),
+            None => Phase::Review(
+                Review {
+                    ran: self.ran_of(&review),
+                    ..review
+                }
+                .next_round(),
+            ),
+        }
+    }
+
+    /// [`Self::after_round`] for `item` as it will be saved, with the
+    /// reviewer just done counted as passed over, if it was
+    ///
+    /// A pass that ends short of `reviews.need` for want of a reviewer goes
+    /// on to a round step of its own, which marks the work item unreviewed.
+    pub(in crate::runner) fn after_round_in(
+        &self,
+        item: &WorkItem,
+        review: Review,
+        now: Timestamp,
+    ) -> Phase {
         let ran = self.ran_of(&review);
         let next = Review { ran, ..review }.next_round();
-        let Some(item) = self.current() else {
-            return Phase::Review(next);
-        };
         let base = item.review_base(self.item_base(item));
         // A diff git could not take is the next round's step to report, and a
         // pass no reviewer read ends in a step of its own, which says so.
-        let over = self.enough_read(&next)
+        let enough = self.reads_in(item, &next) >= self.settings.reviews.need.get();
+        let over = enough
             || self
                 .due(&next, &item.worktree, &base)
                 .is_ok_and(|due| due.is_empty());
-        match over && !next.unread && item.bots_skipped.is_empty() {
+        let short = self.pass_unread(item, &next, &[]).is_some();
+        // Only a bot passed over before this round makes one of its own.
+        let skipped_before = self.current().is_some_and(|i| !i.bots_skipped.is_empty());
+        match over && !next.unread && !skipped_before && !short {
             true => Phase::Ci {
                 head: None,
                 since: now,
@@ -230,8 +297,9 @@ impl Runner {
     /// each listed one that was down, left out as one the repo cannot run, or
     /// ran and read nothing, or none when every listed one was passed over by
     /// its own `paths`
-    pub(super) fn unread(&self, item: &WorkItem, review: &Review) -> Option<String> {
+    fn missed(&self, item: &WorkItem, review: &Review, with_readers: bool) -> Option<String> {
         let ran = self.ran_of(review);
+        let readers = self.readers(item, review);
         let now = self.ports.clock.now();
         let missed: Vec<String> = (self.lineup.iter())
             .filter_map(|r| {
@@ -239,6 +307,9 @@ impl Runner {
                 let skipped = item.bots_skipped.iter().find(|s| s.reviewer() == name);
                 if let Some(skipped) = skipped.filter(|_| ran.contains(name)) {
                     return Some(format!("{name} was passed over: {}", skipped.why()));
+                }
+                if readers.contains(name) && !with_readers {
+                    return None;
                 }
                 if ran.contains(name) {
                     let why = match item.reviewers_skipped.contains(name) {

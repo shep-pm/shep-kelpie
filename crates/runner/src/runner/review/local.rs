@@ -391,6 +391,10 @@ fn a_local_round_that_fails_in_two_passes_is_left_out_of_the_next_and_status_say
     next_pass(&rig, &runner, "third.txt");
     rig.claude.script([Scripted::Text(CLEAN)]);
     step(&runner).unwrap(); // claude, the only reviewer left: clean
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Unreviewed { .. })
+    ));
     assert_eq!(phase(&rig, &runner)["state"], "ci");
     assert_eq!(rig.reviewer.seen().len(), 2, "no third local round");
 }

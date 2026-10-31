@@ -297,6 +297,10 @@ fn a_reviewer_whose_call_fails_three_times_in_a_row_is_passed_over_for_the_pass(
     );
     rig.claude.script([Scripted::Text(CLEAN)]);
     step(&runner).unwrap(); // round 2, claude
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Unreviewed { .. })
+    ));
     assert_eq!(
         rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
         "ci"
