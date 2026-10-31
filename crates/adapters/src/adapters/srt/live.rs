@@ -94,8 +94,10 @@ fn runtime() -> Result<SandboxRuntime, String> {
     Ok(SandboxRuntime::new().run_by(built_kelpie()?))
 }
 
+// Any answer from GitHub counts as reached, a rate limit's 403 included: the
+// runners share their address, and these probes check the path, not the reply.
 fn online() -> bool {
-    sh("curl -sS -f -o /dev/null --max-time 10 https://api.github.com")
+    sh("curl -sS -o /dev/null --max-time 10 https://api.github.com")
         .status
         .success()
 }
@@ -141,14 +143,14 @@ fn a_covered_call_still_reaches_github_signs_and_runs_a_program() {
         return skipped("GitHub is out of reach");
     }
     let work: [(&str, &str); 4] = [
-        ("curl", "curl -sS -f -o /dev/null https://api.github.com"),
+        ("curl", "curl -sS -o /dev/null https://api.github.com"),
         (
             "git ls-remote",
             "git ls-remote https://github.com/shep-pm/shep-kelpie HEAD",
         ),
         (
             "python urllib",
-            "python3 -c \"import urllib.request as u; u.urlopen('https://api.github.com')\"",
+            "python3 -c \"import urllib.request as u, urllib.error as e\ntry: u.urlopen('https://api.github.com')\nexcept e.HTTPError: pass\"",
         ),
         (
             "codesign",
