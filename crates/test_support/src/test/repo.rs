@@ -68,6 +68,8 @@ pub fn git(cwd: &Path, args: &[&str]) -> String {
             "user.email=rig@example.invalid",
         ])
         .args(["-c", "commit.gpgsign=false"])
+        // `GIT_CONFIG_NOSYSTEM` skips the system config that turns this off in CI.
+        .args(["-c", "maintenance.auto=false"])
         .args(args)
         .current_dir(cwd)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")

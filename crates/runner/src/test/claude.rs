@@ -517,6 +517,8 @@ impl Agents for FakeClaude {
                     .args([
                         "-c",
                         "commit.gpgsign=false",
+                        "-c",
+                        "maintenance.auto=false",
                         "commit",
                         "--quiet",
                         "-m",
