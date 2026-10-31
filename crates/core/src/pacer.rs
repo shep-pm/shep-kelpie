@@ -109,14 +109,12 @@ pub enum Scope {
 
 impl Assessment {
     /// The hold that applies to `scope`, the one lasting longer when two do
-    ///
-    /// The allowance wins when both end together.
     pub fn hold(&self, scope: Scope) -> Option<&Hold> {
         let allowance = match scope {
             Scope::Dispatch => self.allowance.as_ref(),
             Scope::Turn => None,
         };
-        [self.window.as_ref(), allowance]
+        [allowance, self.window.as_ref()]
             .into_iter()
             .flatten()
             .max_by_key(|hold| hold.until)
@@ -422,8 +420,10 @@ mod tests {
         let hold = spent.hold(Scope::Dispatch).unwrap();
         assert_eq!(
             (hold.kind, hold.until),
-            (HoldKind::Allowance, Timestamp(RESETS))
+            (HoldKind::Window, Timestamp(RESETS)),
+            "the week is spent too, which holds every turn"
         );
+        assert_eq!(spent.allowance.unwrap().kind, HoldKind::Allowance);
     }
 
     #[test]
