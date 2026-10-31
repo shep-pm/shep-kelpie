@@ -46,7 +46,7 @@ pub use contribution::{
     Change, Opaque, Touched, change as contribution_change, changed_paths,
     checkout as contribution_checkout,
 };
-pub use loose::{loose_commit, loose_commit_in};
+pub use loose::{commit_of, loose_commit, loose_commit_in};
 pub use push::push_commits;
 pub use remote::Remote;
 pub use workflows::runs_on_pull_requests;
@@ -205,14 +205,14 @@ pub fn prepare(
         // kelpie brings main to it before each of its turns.
         main_fetch_failed = fetch_main(repo, worktree, base);
     } else {
-        let local = git(repo, ["rev-parse", "--verify", "--quiet", &full_ref]).ok();
+        let local = commit_of(repo, &full_ref).ok();
         if local.is_some() && start == Start::Main {
             return Err(WorktreeError::BranchTaken(branch.to_owned()));
         }
         let (start_ref, tracking) = match start {
             Start::Main => {
                 git(repo, ["fetch", "--quiet", "--", "origin", base])?;
-                (format!("origin/{base}"), None)
+                (format!("refs/remotes/origin/{base}"), None)
             }
             Start::Pushed => {
                 let tracking = remote.fetch(repo, branch)?;
@@ -224,7 +224,7 @@ pub fn prepare(
             // when it is at the same commit as the remote's. One ahead holds
             // work that is not kelpie's to throw away, and one behind is
             // not the pull request's branch as the remote holds it.
-            if git(repo, ["rev-parse", "--verify", "--quiet", &start_ref])? != local {
+            if commit_of(repo, &start_ref)? != local {
                 return Err(WorktreeError::BranchTaken(branch.to_owned()));
             }
         }
@@ -310,7 +310,7 @@ pub fn remove(
     }
     git(repo, ["worktree", "prune"])?;
     let full_ref = format!("refs/heads/{branch}");
-    if git(repo, ["rev-parse", "--verify", "--quiet", &full_ref]).is_ok() {
+    if commit_of(repo, &full_ref).is_ok() {
         git(repo, ["branch", "--quiet", "-D", branch])?;
     }
     if let Some(remote) = remote {
@@ -437,11 +437,14 @@ pub fn holds_work(
 ) -> Result<bool, WorktreeError> {
     git(repo, ["fetch", "--quiet", "origin", base])?;
     // Read from the checkout: a clone's own `origin/main` is the worker's.
-    let main = git(repo, ["rev-parse", "--verify", &format!("origin/{base}")])?;
+    let main = commit_of(repo, &format!("refs/remotes/origin/{base}"))?;
     let mut tips = Vec::new();
     let full_ref = format!("refs/heads/{branch}");
-    if has_ref(repo, &full_ref)? {
-        tips.push(git(repo, ["rev-parse", "--verify", &full_ref])?);
+    // A git that cannot answer is an error, not a branch that is not there.
+    match loose_commit_in(repo, &full_ref) {
+        Some(tip) => tips.push(tip),
+        None if has_ref(repo, &full_ref)? => tips.push(commit_of(repo, &full_ref)?),
+        None => {}
     }
     if worktree.exists() {
         if !uncommitted(repo, worktree)?.is_empty() {
@@ -530,7 +533,7 @@ pub fn base_of(
     base: &str,
 ) -> Result<Base, WorktreeError> {
     let tracking = remote.fetch_with_main(repo, branch, base)?;
-    if git(repo, ["rev-parse", "--verify", "--quiet", &tracking])? != head {
+    if commit_of(repo, &tracking)? != head {
         return Ok(Base::Lagging);
     }
     // `--is-ancestor` answers no with exit 1, and fails with any other code.
@@ -560,7 +563,7 @@ pub fn base_of(
 /// [`WorktreeError`] naming the git command that failed.
 pub fn origin_head(repo: &Path, branch: &str, remote: &Remote) -> Result<String, WorktreeError> {
     let tracking = remote.fetch(repo, branch)?;
-    git(repo, ["rev-parse", "--verify", "--quiet", &tracking])
+    commit_of(repo, &tracking)
 }
 
 /// Fetches `origin/main` and `branch` from `remote` together, and returns the
@@ -576,7 +579,7 @@ pub fn head_with_main(
     base: &str,
 ) -> Result<String, WorktreeError> {
     let tracking = remote.fetch_with_main(repo, branch, base)?;
-    git(repo, ["rev-parse", "--verify", "--quiet", &tracking])
+    commit_of(repo, &tracking)
 }
 
 /// The commit `worktree` has checked out
