@@ -6,7 +6,7 @@
 
 use std::path::{Component, Path};
 
-use super::common_dir;
+use super::{WorktreeError, common_dir, git};
 
 /// The commit the loose ref `full_ref` in the git dir `git_dir` names, none where git must answer
 ///
@@ -53,6 +53,18 @@ fn full_id(text: &str) -> Option<String> {
 /// remote-tracking refs are kept
 pub fn loose_commit_in(repo: &Path, full_ref: &str) -> Option<String> {
     loose_commit(&common_dir(repo).ok()?, full_ref)
+}
+
+/// The commit `full_ref` names in `repo`, from its loose file where it has one, else as git reads it
+///
+/// # Errors
+///
+/// [`WorktreeError`] when git cannot answer, as it cannot for an absent ref.
+pub fn commit_of(repo: &Path, full_ref: &str) -> Result<String, WorktreeError> {
+    match loose_commit_in(repo, full_ref) {
+        Some(commit) => Ok(commit),
+        None => git(repo, ["rev-parse", "--verify", "--quiet", full_ref]),
+    }
 }
 
 #[cfg(test)]
@@ -102,6 +114,22 @@ mod tests {
         assert_eq!(loose_commit_in(dir.path(), "refs/heads/main"), None);
         assert_eq!(loose_commit_in(dir.path(), "refs/heads/alias"), None);
         assert_eq!(loose_commit_in(dir.path(), "refs/heads/gone"), None);
+    }
+
+    #[test]
+    fn a_ref_reads_loose_and_asks_git_for_a_packed_or_absent_one() {
+        let (dir, head) = repo();
+        git(dir.path(), &["branch", "packed"]);
+        git(dir.path(), &["pack-refs", "--all"]);
+        git(dir.path(), &["branch", "loose"]);
+
+        assert_eq!(commit_of(dir.path(), "refs/heads/loose"), Ok(head.clone()));
+        assert_eq!(commit_of(dir.path(), "refs/heads/packed"), Ok(head));
+        let absent = commit_of(dir.path(), "refs/heads/gone").unwrap_err();
+        assert!(
+            matches!(&absent, WorktreeError::Git { args, .. } if args.ends_with("refs/heads/gone")),
+            "{absent:?}"
+        );
     }
 
     #[test]

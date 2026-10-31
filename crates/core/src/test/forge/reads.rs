@@ -8,6 +8,7 @@ use super::FakeForge;
 use super::handed::FakePullRequest;
 use crate::board::{OpenPullRequest, ReviewMarks};
 use crate::ports::{Checks, ForgeError, PullRequest, PullRequestState};
+use crate::worktree::loose_commit;
 
 /// How many times each kind of read of pull requests was made
 #[derive(Debug, Default)]
@@ -99,11 +100,15 @@ impl FakeForge {
 
     /// The commit `branch` points at in the bare repository `git_dir`
     pub fn head_in(git_dir: &Path, branch: &str) -> Option<String> {
+        let full_ref = format!("refs/heads/{branch}");
+        if let Some(commit) = loose_commit(git_dir, &full_ref) {
+            return Some(commit);
+        }
         let output = Command::new("git")
             .arg("--git-dir")
             .arg(git_dir)
             .args(["rev-parse", "--verify", "--quiet"])
-            .arg(format!("refs/heads/{branch}"))
+            .arg(full_ref)
             .output()
             .unwrap();
         output
