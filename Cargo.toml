@@ -60,6 +60,10 @@ shep-kelpie-worker-folder = { path = "crates/worker_folder" }
 crabpot = { version = "0.5.4", default-features = false }
 # The secret's random bytes, from the system's source on every platform
 getrandom = { version = "0.4", default-features = false, features = ["std"] }
+# Reads a ref and an ancestry in the checkout without starting git, which
+# costs tens of milliseconds on Windows. Reads only: no network, no worktree
+# writes. Anything it cannot answer falls back to git.
+gix = { version = "0.90", default-features = false, features = ["revision", "sha1"] }
 # The authenticator codes that answer a ruling from ntfy (RFC 6238 TOTP)
 hmac = { version = "0.13", default-features = false }
 # Zone-aware dates, for the reset times `/usage` prints in the maintainer's zone

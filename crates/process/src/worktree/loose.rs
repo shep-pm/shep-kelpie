@@ -6,7 +6,7 @@
 
 use std::path::{Component, Path};
 
-use super::{WorktreeError, common_dir, git};
+use super::{WorktreeError, common_dir, git, in_process};
 
 /// The commit the loose ref `full_ref` in the git dir `git_dir` names, none where git must answer
 ///
@@ -55,16 +55,19 @@ pub fn loose_commit_in(repo: &Path, full_ref: &str) -> Option<String> {
     loose_commit(&common_dir(repo).ok()?, full_ref)
 }
 
-/// The commit `full_ref` names in `repo`, from its loose file where it has one, else as git reads it
+/// The commit `full_ref` names in `repo`, from its loose file where it has one, else read in
+/// process, else as git reads it
 ///
 /// # Errors
 ///
 /// [`WorktreeError`] when git cannot answer, as it cannot for an absent ref.
 pub fn commit_of(repo: &Path, full_ref: &str) -> Result<String, WorktreeError> {
-    match loose_commit_in(repo, full_ref) {
-        Some(commit) => Ok(commit),
-        None => git(repo, ["rev-parse", "--verify", "--quiet", full_ref]),
+    if let Some(commit) =
+        loose_commit_in(repo, full_ref).or_else(|| in_process::commit_of(repo, full_ref))
+    {
+        return Ok(commit);
     }
+    git(repo, ["rev-parse", "--verify", "--quiet", full_ref])
 }
 
 #[cfg(test)]

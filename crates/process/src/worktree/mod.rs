@@ -27,6 +27,7 @@ mod changed;
 pub mod clone;
 mod common;
 mod contribution;
+mod in_process;
 #[cfg(test)]
 mod line_endings_tests;
 mod loose;
@@ -536,8 +537,15 @@ pub fn base_of(
     if commit_of(repo, &tracking)? != head {
         return Ok(Base::Lagging);
     }
-    // `--is-ancestor` answers no with exit 1, and fails with any other code.
     let tip = format!("origin/{base}");
+    if let Some(ancestor) = in_process::is_ancestor(repo, &tip, head) {
+        return Ok(if ancestor {
+            Base::Current
+        } else {
+            Base::Behind
+        });
+    }
+    // `--is-ancestor` answers no with exit 1, and fails with any other code.
     let args = ["merge-base", "--is-ancestor", &tip, head];
     let output = in_repo(repo)
         .args(args)
