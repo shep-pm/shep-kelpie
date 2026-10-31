@@ -19,7 +19,9 @@ use super::limits::DAY;
 use super::marker::MARKER;
 use super::pick_tests::{MAINTAINER, due, issue, list, rig_with};
 use super::research_tests::crashed_with;
-use super::research_tests::{WORDS, calls, crash, handed, moves, reply, restart, triage};
+use super::research_tests::{
+    MADE_AT_START, WORDS, calls, crash, handed, moves, reply, restart, triage,
+};
 use super::spam::POSSIBLE_SPAM;
 #[cfg(unix)]
 use crate::github::ApiError;
@@ -121,7 +123,11 @@ fn label_moves(rig: &Rig) -> Vec<String> {
                 _ => None,
             }
         })
-        .filter(|m| !m.starts_with("make agent:") && !m.starts_with("make priority:"))
+        .filter(|m| {
+            !MADE_AT_START
+                .iter()
+                .any(|l| m.starts_with(&format!("make {l}")))
+        })
         .collect()
 }
 

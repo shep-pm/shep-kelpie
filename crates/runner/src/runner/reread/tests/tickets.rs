@@ -144,11 +144,14 @@ fn a_work_item_on_a_local_ticket_finishes_on_it_across_a_change_to_github() {
         shown.iter().any(|line| line == "state: closed"),
         "{shown:?}"
     );
-    // The change to GitHub made the agent and priority labels, and nothing was
-    // written to the issues.
+    // The change to GitHub made the agent, priority and kind labels, and nothing
+    // was written to the issues.
     let writes = rig.forge.issue_writes();
-    let made =
-        |w: &String| w.starts_with("label made: agent:") || w.starts_with("label made: priority:");
+    let made = |w: &String| {
+        ["agent:", "priority:", "kind:"]
+            .iter()
+            .any(|l| w.starts_with(&format!("label made: {l}")))
+    };
     assert!(writes.iter().all(made), "{writes:?}");
     assert!(
         rig.forge.comments().is_empty(),
