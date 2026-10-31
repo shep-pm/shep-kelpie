@@ -14,9 +14,10 @@ use super::super::Runner;
 use super::super::contributions::post::forge_is_busy;
 use super::comment::NEEDS_TRIAGE;
 use super::ready::READY_LABEL;
+use super::rewrite::new_kind_label;
 use super::{TRIAGE_LABELS, opened_by_us_or_people};
 use crate::board::{READY, ReadyIssue, Skip, TRIAGE, check};
-use crate::ports::{ForgeError, NewLabel, OpenIssue, OpenPull};
+use crate::ports::{ForgeError, OpenIssue, OpenPull};
 use crate::settings::TriagePick;
 use crate::state::{CheckTriage, IssueCheck, TriageStep};
 
@@ -182,13 +183,8 @@ impl Runner {
         }
         let number = issue.number;
         let label = format!("{}{kind}", check::KIND);
-        let wanted = NewLabel {
-            name: &label,
-            color: "c5def5",
-            description: "The kind of work, from the issue's title",
-        };
         if !poll.made.contains(&label) {
-            if let Err(why) = self.make_missing_labels([wanted]) {
+            if let Err(why) = self.make_missing_labels([new_kind_label(&label)]) {
                 self.notes
                     .push(format!("check #{number}: cannot make `{label}`: {why}"));
                 return Ok(None);

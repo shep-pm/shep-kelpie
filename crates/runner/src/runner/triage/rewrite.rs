@@ -10,8 +10,14 @@ use super::super::Runner;
 use crate::board::{self, check};
 use crate::ports::NewLabel;
 
-// The colour a kind label is made in
-const KIND_COLOR: &str = "c5def5";
+/// The kind label `name`, as `kind:feat`, as kelpie makes it on a repo that lacks it
+pub(in crate::runner) fn new_kind_label(name: &str) -> NewLabel<'_> {
+    NewLabel {
+        name,
+        color: "c5def5",
+        description: "The kind of work, as a conventional commit type",
+    }
+}
 
 impl Runner {
     // The `kind:<type>` label for `work` on `issue`, made where `have` lacks it.
@@ -32,13 +38,7 @@ impl Runner {
         if let Some(had) = board::repo_label(have, &name) {
             return Some(had.to_owned());
         }
-        let description = format!("An issue whose change is a conventional `{work}`");
-        let label = NewLabel {
-            name: &name,
-            color: KIND_COLOR,
-            description: &description,
-        };
-        match self.make_missing_labels([label]) {
+        match self.make_missing_labels([new_kind_label(&name)]) {
             Ok(()) => Some(name),
             Err(why) => {
                 self.notes.push(format!(
