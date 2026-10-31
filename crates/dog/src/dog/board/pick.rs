@@ -78,7 +78,12 @@ impl View {
 }
 
 // The agents `ask` names, in the order the board tries them for its item at `now`.
-fn answer(view: &View, shown: &Availability, ask: &PickAsk, now: Timestamp) -> Vec<Pick> {
+pub(super) fn answer(
+    view: &View,
+    shown: &Availability,
+    ask: &PickAsk,
+    now: Timestamp,
+) -> Vec<Pick> {
     let history = view.history();
     let kind = ask.kind.as_deref();
     let candidates: Vec<_> = (view.ranked.iter())

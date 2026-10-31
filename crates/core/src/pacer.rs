@@ -4,8 +4,8 @@
 //! was left of the weekly window when the day began, divided by the days
 //! until it resets; once today's spend reaches it, no new work item is
 //! dispatched and the current one continues. Near half of the 5-hour window,
-//! no turn starts until the window resets. A turn already running is never
-//! interrupted, since the pacer is asked only between turns.
+//! or with the week spent, no turn starts until the window resets. A running
+//! turn is never interrupted: the pacer is asked only between turns.
 //!
 //! Days are 24 hours from the weekly reset, so the allowance is 100 / 7 on a fresh week.
 
@@ -50,7 +50,7 @@ pub struct DayStart {
 pub enum HoldKind {
     /// Today's allowance is spent: nothing new is dispatched
     Allowance,
-    /// The 5-hour window is past its mark: no turn starts
+    /// The 5-hour window is past its mark or the week is spent: no turn starts
     Window,
     /// Usage could not be read, so neither limit can be checked
     Unreadable,
@@ -109,12 +109,14 @@ pub enum Scope {
 
 impl Assessment {
     /// The hold that applies to `scope`, the one lasting longer when two do
+    ///
+    /// The allowance wins when both end together.
     pub fn hold(&self, scope: Scope) -> Option<&Hold> {
         let allowance = match scope {
             Scope::Dispatch => self.allowance.as_ref(),
             Scope::Turn => None,
         };
-        [allowance, self.window.as_ref()]
+        [self.window.as_ref(), allowance]
             .into_iter()
             .flatten()
             .max_by_key(|hold| hold.until)
@@ -193,9 +195,10 @@ pub fn assess(
     }
 }
 
-/// The hold on every turn while `account`'s 5-hour window is past [`PARK_AT_PCT`], until it resets
+/// The hold on every turn while `account`'s 5-hour window is past [`PARK_AT_PCT`] or its
+/// week is spent, until the window or the week resets, the longer of the two when both apply
 pub fn window(account: Account, usage: &Utilization) -> Option<Hold> {
-    (usage.session.used_pct >= PARK_AT_PCT).then(|| Hold {
+    let session = (usage.session.used_pct >= PARK_AT_PCT).then(|| Hold {
         kind: HoldKind::Window,
         reason: format!(
             "{} 5-hour window is at {}%, past the {PARK_AT_PCT}% mark, \
@@ -204,6 +207,25 @@ pub fn window(account: Account, usage: &Utilization) -> Option<Hold> {
             usage.session.used_pct
         ),
         until: usage.session.resets_at,
+    });
+    [session, spent_week(account, &usage.week)]
+        .into_iter()
+        .flatten()
+        .max_by_key(|hold| hold.until)
+}
+
+/// The hold on every turn while `account`'s `week` is at 100%, until it resets
+///
+/// A spent week fails each turn at once, so it holds whatever `pacing.enabled` says.
+pub fn spent_week(account: Account, week: &Window) -> Option<Hold> {
+    (week.used_pct >= 100).then(|| Hold {
+        kind: HoldKind::Window,
+        reason: format!(
+            "{} week is at {}%, so no turn starts until it resets",
+            named(account, "the", "Codex's"),
+            week.used_pct
+        ),
+        until: week.resets_at,
     })
 }
 
@@ -408,7 +430,12 @@ mod tests {
     fn a_week_with_nothing_left_holds_at_once() {
         let a = assess(Account::Claude, at(3, 1), &usage(100, 0), None, eight());
         assert_eq!(a.reading.unwrap().allowance_pct, 0.0);
-        assert_eq!(a.hold(Scope::Dispatch).unwrap().kind, HoldKind::Allowance);
+        let hold = a.hold(Scope::Dispatch).unwrap();
+        assert_eq!(
+            (hold.kind, hold.until),
+            (HoldKind::Window, Timestamp(RESETS))
+        );
+        assert_eq!(a.allowance.unwrap().until, at(4, 0), "the day ends sooner");
     }
 
     #[test]
@@ -425,6 +452,23 @@ mod tests {
             (dispatch.kind, dispatch.until),
             (HoldKind::Window, at(0, 3))
         );
+    }
+
+    #[test]
+    fn a_spent_week_holds_every_turn_until_the_week_resets_and_outlasts_the_window() {
+        let a = assess(Account::Codex, at(3, 1), &usage(100, 60), None, eight());
+        let hold = a.hold(Scope::Turn).unwrap();
+        assert_eq!(
+            (hold.kind, hold.until),
+            (HoldKind::Window, Timestamp(RESETS))
+        );
+        assert_eq!(
+            hold.reason,
+            "Codex's week is at 100%, so no turn starts until it resets"
+        );
+
+        let almost = assess(Account::Codex, at(3, 1), &usage(99, 0), None, eight());
+        assert_eq!(almost.hold(Scope::Turn), None);
     }
 
     #[test]
