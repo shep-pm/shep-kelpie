@@ -161,6 +161,7 @@ fn a_catch_up_with_main_on_an_adopted_fork_merges_into_the_fork_and_not_origin()
     assert_eq!(step(&runner).unwrap(), Some(adopted()));
     let landed = rig.land_on_origin("landed.txt");
     rig.forge.set_checks(&fork_head, Checks::Passed);
+    rig.claude.script([Scripted::Text(CLEAN)]);
 
     // The adopted pull request is read by the project's reviewers first, and
     // the catch-up with `main` comes at the CI gate once that pass ends.

@@ -435,9 +435,10 @@ fn a_fix_that_pushes_nothing_still_parks_on_a_ruling() {
     still_stuck(&rig, &runner, id, "fix-not-pushed");
 }
 
-// The qwen and Claude rounds read it, so the pass is not unread.
+// The qwen and Claude rounds read it, two of the three `reviews.need`, so the
+// pass is short and `auto` leaves the merge to the maintainer.
 #[test]
-fn a_summon_coderabbit_never_answers_passes_it_over_and_a_read_pass_still_merges() {
+fn a_summon_coderabbit_never_answers_passes_it_over_and_a_short_pass_is_not_merged() {
     let (rig, runner, head) = summoned_under_auto("chelone");
     rig.clock.advance(ANSWER_WAIT);
     step(&runner).unwrap();
@@ -446,8 +447,17 @@ fn a_summon_coderabbit_never_answers_passes_it_over_and_a_read_pass_still_merges
         step(&runner).unwrap(),
         Some(StepReport::ReviewerSkipped { .. })
     ));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Unreviewed { .. })
+    ));
     rig.forge.set_checks(&head, Checks::Passed);
-    assert!(merged(rig.verdict(&runner)));
+    let report = rig.verdict(&runner);
+    assert!(
+        matches!(&report, Some(StepReport::Ruling { question, .. }) if question.contains("2 of 3 reviewers read it")),
+        "{report:?}"
+    );
+    assert!(rig.forge.merges().is_empty(), "nothing merged");
 }
 
 // After the gate passed under `auto` with CodeRabbit off: the draft marked
