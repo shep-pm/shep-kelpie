@@ -4,8 +4,6 @@
 use std::num::NonZeroU32;
 use std::path::Path;
 
-use crate::settings::Gateways;
-
 const EXAMPLE: &str = include_str!("../../../../../settings.example.toml");
 
 const HOME: &str = "/home/me";
