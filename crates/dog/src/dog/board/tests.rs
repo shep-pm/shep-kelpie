@@ -134,7 +134,7 @@ async fn seen_plans(
 
 #[tokio::test(start_paused = true)]
 async fn a_plan_past_half_its_window_waits_until_the_window_resets() {
-    let agents = Agents::embedded();
+    let (_dir, agents) = crate::test::claude_implementers();
     let view = Board::new(&agents).view();
     let now = Timestamp(EPOCH);
 
