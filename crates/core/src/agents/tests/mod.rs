@@ -64,17 +64,16 @@ fn left_out(dir: &Path) -> String {
 }
 
 #[test]
-fn kelpies_own_agents_are_sonnet_and_opus_at_high_on_claude_code() {
+fn kelpie_ships_no_agent_that_names_a_model() {
     let agents = Agents::embedded();
-    let sonnet = agents.get(&name("sonnet-high")).unwrap();
-    assert_eq!(pair(sonnet), ("claude-sonnet-5-5", Effort::High));
-    let opus = agents.get(&name("opus-high")).unwrap();
-    assert_eq!(pair(opus), ("claude-opus-5-5", Effort::High));
-    for agent in [sonnet, opus] {
-        assert_eq!(agent.role, Role::Implementer);
-        assert_eq!(model(agent).harness, AgentHarness::ClaudeCode);
-        assert_eq!(*limit(agent), Limit::Account(Account::Claude));
-        assert_eq!(agent.prompt, None, "the comments are not a prompt");
+    for gone in [
+        "sonnet-high",
+        "opus-high",
+        "defect-hunter-lite",
+        "iq3-xxs-review",
+        "qwen",
+    ] {
+        assert!(agents.get(&name(gone)).is_none(), "{gone}");
     }
     assert_eq!(
         Agents::embedded().bind_all(OPUS_HIGH).agents.len(),
@@ -91,7 +90,7 @@ fn a_folder_that_is_not_there_holds_kelpies_own_agents() {
 }
 
 #[test]
-fn a_file_adds_an_agent_and_one_named_for_a_default_replaces_it() {
+fn a_file_adds_an_agent() {
     let sonnet6 = "---\nrole: implementer\nharness: claude-code\nmodel: claude-sonnet-6\n\
                    effort: medium\n---\n\nKeep each commit small.\n\n";
     let dir = folder(&[
@@ -110,7 +109,6 @@ fn a_file_adds_an_agent_and_one_named_for_a_default_replaces_it() {
     assert_eq!(server.host, ModelHost::Url(url("http://box:11434/v1")));
     assert_eq!(server.context.get(), 65536);
     assert_eq!(*limit(qwen), Limit::Unqueued);
-    assert!(agents.get(&name("opus-high")).is_some());
     assert!(agents.get(&name("notes")).is_none());
 }
 
@@ -342,68 +340,30 @@ fn the_embedded_security_reviewer_file_parses_as_a_reviewer() {
 }
 
 #[test]
-fn the_embedded_default_reviewers_are_a_lite_hunter_and_a_local_endpoint_on_paddock() {
-    let agents = Agents::embedded().bind("defect-hunter", OPUS_HIGH);
-    let lite = agents.get(&name("defect-hunter-lite")).unwrap();
-    assert_eq!(lite.role, Role::Reviewer);
-    assert_eq!(model(lite).harness, AgentHarness::ClaudeCode);
-    assert_eq!(pair(lite), ("claude-opus-5-5", Effort::Medium));
-    assert!(!lite.second_look, "it reads once");
-    let full = agents.get(&name("defect-hunter")).unwrap();
-    assert_eq!(
-        lite.prompt, full.prompt,
-        "the same prompt on a smaller budget"
-    );
-
-    let local = agents.get(&name("iq3-xxs-review")).unwrap();
-    assert_eq!(local.role, Role::Reviewer);
-    let (gateway, model) = local.runs.gateway().unwrap();
-    assert_eq!((gateway.as_str(), model), ("paddock", "iq3_xxs"));
-    assert!(local.runs.local().is_some() && local.prompt.is_none());
-}
-
-#[test]
 fn defaults_are_written_where_missing_and_never_over_a_file() {
     let dir = tempfile::tempdir().unwrap();
     let agents = dir.path().join("agents");
-    let home = dir.path().join("home");
     assert_eq!(
-        write_defaults(&agents, &home).unwrap(),
-        [
-            "sonnet-high",
-            "opus-high",
-            "defect-hunter-lite",
-            "iq3-xxs-review",
-            "coderabbit",
-            "cubic",
-            "codex"
-        ]
+        write_defaults(&agents).unwrap(),
+        ["coderabbit", "cubic", "codex"]
     );
     assert_eq!(Agents::load(&agents).unwrap(), Agents::embedded());
-    assert!(!agents.join("qwen.md").exists(), "no qwen-review script");
     let mine = QWEN.replace("model: qwen3.8:27b", "model: mine");
-    fs::write(agents.join("opus-high.md"), &mine).unwrap();
-    fs::remove_file(agents.join("sonnet-high.md")).unwrap();
-    assert_eq!(write_defaults(&agents, &home).unwrap(), ["sonnet-high"]);
-    assert_eq!(
-        fs::read_to_string(agents.join("opus-high.md")).unwrap(),
-        mine
-    );
-    assert_eq!(write_defaults(&agents, &home).unwrap(), Vec::<&str>::new());
-    let script = home.join(".claude/scripts/qwen-review.sh");
-    fs::create_dir_all(script.parent().unwrap()).unwrap();
-    fs::write(&script, "#!/bin/sh\n").unwrap();
-    assert_eq!(write_defaults(&agents, &home).unwrap(), ["qwen"]);
+    fs::write(agents.join("codex.md"), &mine).unwrap();
+    fs::remove_file(agents.join("cubic.md")).unwrap();
+    assert_eq!(write_defaults(&agents).unwrap(), ["cubic"]);
+    assert_eq!(fs::read_to_string(agents.join("codex.md")).unwrap(), mine);
+    assert_eq!(write_defaults(&agents).unwrap(), Vec::<&str>::new());
 }
 
 #[test]
 fn a_default_is_written_as_a_stub_that_extends_the_shipped_agent() {
     let dir = tempfile::tempdir().unwrap();
     let agents = dir.path().join("agents");
-    write_defaults(&agents, &dir.path().join("home")).unwrap();
+    write_defaults(&agents).unwrap();
     assert_eq!(
-        fs::read_to_string(agents.join("opus-high.md")).unwrap(),
-        "---\nextends: kelpie:opus-high\n---\n"
+        fs::read_to_string(agents.join("codex.md")).unwrap(),
+        "---\nextends: kelpie:codex\n---\n"
     );
     assert!(
         !agents.join("triager.md").exists(),
@@ -415,7 +375,7 @@ fn a_default_is_written_as_a_stub_that_extends_the_shipped_agent() {
 fn defaults_are_also_written_whole_and_read_only_under_dot_defaults() {
     let dir = tempfile::tempdir().unwrap();
     let agents = dir.path().join("agents");
-    write_defaults(&agents, &dir.path().join("home")).unwrap();
+    write_defaults(&agents).unwrap();
     let shipped = Agents::embedded();
     let kept = agents.join(".defaults");
     for (agent, _) in shipped.iter() {
@@ -437,10 +397,7 @@ fn defaults_are_also_written_whole_and_read_only_under_dot_defaults() {
     for said in ["Kelpie writes this file", "edit", "agents/triager.md"] {
         assert!(comment.contains(said), "{comment}");
     }
-    assert!(
-        kept.join("qwen.md").is_file(),
-        "every shipped agent, the script or not"
-    );
+    assert!(kept.join("codex.md").is_file(), "every shipped agent");
     assert_eq!(
         Agents::load(&agents).unwrap(),
         Agents::embedded(),
@@ -564,7 +521,7 @@ const REVIEWER: &str = "---\nrole: reviewer\nharness: claude-code\nmodel: claude
 const COMMAND: &str = "---\nrole: reviewer\nharness: command\ncommand: ~/bin/review\n---\n";
 
 #[test]
-fn kelpies_own_reviewers_are_defect_hunter_and_qwen() {
+fn kelpies_own_reviewer_is_the_defect_hunter() {
     let agents =
         Agents::embedded().bind("defect-hunter", &format!("{OPUS_HIGH}second_look: true\n"));
     let hunter = agents.get(&name("defect-hunter")).unwrap();
@@ -575,17 +532,6 @@ fn kelpies_own_reviewers_are_defect_hunter_and_qwen() {
     let prompt = hunter.prompt.as_deref().unwrap();
     assert!(prompt.starts_with("You are reviewing a pull request for defects"));
     assert!(prompt.ends_with("--- diff against {{BASE}} ---\n{{DIFF}}\n--- end ---"));
-
-    let qwen = agents.get(&name("qwen")).unwrap();
-    assert_eq!(qwen.role, Role::Reviewer);
-    let Runs::Command(command) = &qwen.runs else {
-        panic!("{qwen:?}");
-    };
-    assert_eq!(
-        command.command,
-        PathBuf::from("~/.claude/scripts/qwen-review.sh")
-    );
-    assert_eq!(qwen.prompt, None);
 }
 
 #[test]

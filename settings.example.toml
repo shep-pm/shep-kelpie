@@ -120,8 +120,7 @@ per_item_usd = 10
 # picks no implementer it leaves out, every setting that names an agent
 # (`pm`, `representative`, `contributions.reviewers`,
 # `contributions.security_reviewer` and `triage.agent`) is refused when it
-# names one left out, so is one of kelpie's default contribution reviewers,
-# and an `agent:<name>` label naming one is skipped. It is also what a review
+# names one left out, and an `agent:<name>` label naming one is skipped. It is also what a review
 # pass may pick from: every reviewer file it holds is a candidate, and a
 # project that holds no reviewer file gets no review. Names are
 # not checked against the agents folder: a missing file is refused where the
@@ -139,12 +138,9 @@ per_item_usd = 10
 # of that reviewer's findings; a round of nits, or of nothing, goes straight to
 # the next. After the last to read, the pull request goes to CI. A reviewer
 # whose file sets `paths` runs only on a pull request that changes one of them.
-# `defect-hunter-lite` is kelpie's own: Opus 5.5 at medium, reading for
-# defects once. `defect-hunter` is the same prompt at high effort, which then
-# looks again for what it missed, with one fix turn after both.
-# `iq3-xxs-review` is kelpie's own too: a local model, `iq3_xxs`, behind the
-# gateway named `paddock` in kelpie's settings, and no candidate where that
-# gateway is absent. The review bots `coderabbit`, `cubic` and
+# Kelpie's own reviewers bind no model: `defect-hunter` reads for defects at
+# the effort its file binds and can look again for what it missed, with one
+# fix turn after. The review bots `coderabbit`, `cubic` and
 # `codex` are reviewers too, on files `add` writes: one the board picks
 # reads the pull request once a pass, and is passed over, not waited on,
 # while its window is closed. Its open threads get the one fix turn. Each
@@ -166,8 +162,8 @@ per_item_usd = 10
 # The representative's agent file, from a file whose role is `representative`:
 # the voice of every post kelpie makes to a contributor, which words the facts
 # kelpie's code drafted and reads and runs nothing. It runs on any harness.
-# `representative` when absent. Only a project whose `contributions.pick` is
-# not `off` needs the file, and a missing or mis-roled one stops the runner.
+# Only a project whose `contributions.pick` is not `off` needs it, and an
+# unset one, or a missing or mis-roled file, stops the runner.
 # representative = "representative"
 # Minutes past the soonest finish that the agent board lets a work item's
 # agent take: a new item opens on the cheapest ranked agent finishing within
@@ -358,8 +354,9 @@ compact_window = 200000
 # `all`. Anything but `off` needs the GitHub App to cover the repo, or the
 # runner refuses to start: the representative would post as the maintainer.
 # `reviewers` lists agent files, review bots welcome, in the order they run;
-# kelpie's default pass when absent. `security_reviewer` is the
-# reviewer agent that reads a contribution for security. `quiet_days` and
+# a project whose `pick` is not `off` and names none is refused.
+# `security_reviewer` is the reviewer agent that reads a contribution for
+# security, and is refused unset when security review is on. `quiet_days` and
 # `nudge_days` are whole days above 0, and `nudge_days` is below `quiet_days`.
 # The agent files are checked only when `pick` is not `off`.
 # `security_reviewer` is read when a contribution's head is; the other keys
@@ -379,7 +376,7 @@ compact_window = 200000
 # or labelled yet. `wait_days` is whole days above 0 without a word from the
 # author before kelpie treats the triage as unanswered. `max_questions` is 1 to
 # 10, the most one comment asks. `agent` is an agent file whose role is
-# `triager`. The agent file is checked only when `pick` is not `off`. A change
+# `triager`. It is checked, and refused unset, only when `pick` is not `off`. A change
 # waits for the runner's next start. `hand_ready` (off when absent) takes back
 # an open issue the maintainer opened after `pick` was turned on and labelled
 # `ready-for-agent` by hand, when it has no triage record, no work item and no

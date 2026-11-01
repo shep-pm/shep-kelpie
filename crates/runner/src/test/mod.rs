@@ -26,6 +26,7 @@ mod claude;
 mod fork;
 mod held_git;
 mod home;
+mod lineup;
 mod reads;
 mod registered_app;
 mod rig_settings;
@@ -237,6 +238,7 @@ impl Rig {
         std::fs::write(rig.settings_file(), settings).unwrap();
         rig.reviewers(RIG_REVIEWERS);
         rig.write_agent("claude", CLAUDE_REVIEWER);
+        rig.write_lineup();
         // Kelpie's own agents bind nothing, so each runs as the file the maintainer binds.
         crate::agents::write_bound_stubs(
             &paths.agents,

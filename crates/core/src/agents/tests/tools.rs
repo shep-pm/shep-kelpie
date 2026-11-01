@@ -31,7 +31,7 @@ fn a_reviewer_on_claude_code_names_its_own_tools() {
 #[test]
 fn an_agent_that_names_no_tools_starts_with_its_roles() {
     let agents = Agents::embedded().bind("defect-hunter", super::OPUS_HIGH);
-    for default in ["sonnet-high", "opus-high", "defect-hunter"] {
+    for default in ["defect-hunter"] {
         let agent = agents.get(&name(default)).unwrap();
         assert_eq!(tools(agent), None, "{default}");
     }

@@ -107,7 +107,7 @@ fn an_unknown_shipped_name_is_refused_naming_the_shipped_agents() {
         "{err}"
     );
     assert!(
-        err.contains("sonnet-high, opus-high, defect-hunter"),
+        err.contains("coderabbit, cubic, codex, defect-hunter"),
         "{err}"
     );
     assert!(err.ends_with("representative, triager"), "{err}");
