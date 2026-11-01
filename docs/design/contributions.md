@@ -6,7 +6,7 @@ Kelpie follows other people's pull requests: security review (`contribution-secu
 
 - `[app.dogs.kelpie.contributions]`, `#[serde(default)]`: an absent table is `pick = "off"`. `deny_unknown_fields`, so a mistyped key is refused naming it. `crates/core/src/settings/contributions.rs`
 - `pick`: `off` (default, kelpie's own pull requests only), `label` (those the maintainer labels for it) or `all`. Kebab-case, any other word refused.
-- `reviewers`: ordered reviewer agent files, bots welcome, each once, all held by `agents.allow`. Absent, kelpie's default contribution pass (review.md). After adoption: `reviews.need` reviewers, each the agent board's pick from reviewer files `agents.allow` holds except `contributions.security_reviewer`, ending sooner with no candidate.
+- `reviewers`: ordered reviewer agent files, bots welcome, each once, all held by `agents.allow`. Absent, a `pick` that is not `off` is refused. After adoption: `reviews.need` reviewers, each the agent board's pick from reviewer files `agents.allow` holds except `contributions.security_reviewer`, ending sooner with no candidate.
 - `security_reviewer`: a reviewer agent file, needed while `pick` is not `off`. Absent, the candidates still leave out kelpie's own `security-reviewer` baseline (`agents/security-reviewer.md`). It must run sessions: a command, endpoint or bot is refused.
 - `quiet_days` (7) and `nudge_days` (3): whole days above 0. `nudge_days` must be below `quiet_days`: the nudge comes before a contribution counts as quiet. A zero is refused by the parser, the ordering by `Contributions::check`, called from `Settings::from_table`, so a bad pair is refused by key when the settings are read and a reread keeps the old settings.
 
