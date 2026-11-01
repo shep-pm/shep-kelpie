@@ -53,7 +53,7 @@ async fn a_reviewer_on_a_gateway_kelpie_lacks_is_no_candidate_when_the_project_n
 
 #[tokio::test]
 async fn a_candidate_the_project_named_no_that_cannot_run_is_no_line_s_to_refuse() {
-    // `qwen` is a shipped reviewer file, so it is a candidate of every project
+    // `qwen` is a reviewer file the scene writes, so it is a candidate of every project
     // that names no agent, and its round is passed over when its script is not
     // there. Only a reviewer the project named is held to what a round cannot
     // work around, as the runner holds it.

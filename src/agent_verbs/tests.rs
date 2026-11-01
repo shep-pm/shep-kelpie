@@ -184,6 +184,9 @@ fn list_shows_bound_agents_unbound_files_and_baselines_that_bind_nothing_with_no
     let dir = tempfile::tempdir().unwrap();
     agents(dir.path(), PM_ON_CLAUDE).unwrap();
     std::fs::write(dir.path().join("scribe.md"), UNBOUND_PM).unwrap();
+    let everyday = "---\nrole: implementer\nharness: claude-code\nmodel: claude-sonnet-5-5\n\
+                    effort: high\ntier: standard\n---\n";
+    std::fs::write(dir.path().join("sonnet-high.md"), everyday).unwrap();
     let baselines = [
         *baseline::named("pm").unwrap(),
         Baseline {
@@ -200,8 +203,7 @@ fn list_shows_bound_agents_unbound_files_and_baselines_that_bind_nothing_with_no
 
     let has = |line: &str| assert!(lines.iter().any(|l| l == line), "{line} in {lines:#?}");
     has("pm: pm, claude-code, claude-opus-5-5, high");
-    let shipped = "sonnet-high: implementer, claude-code, claude-sonnet-5-5, high, tier standard";
-    assert!(lines.iter().any(|l| l.starts_with(shipped)), "{lines:#?}");
+    has("sonnet-high: implementer, claude-code, claude-sonnet-5-5, high, tier standard");
     has("scribe: pm, unbound: run `shep kelpie agents new pm --name scribe`");
     has("triager: baseline, no file: run `shep kelpie agents new triager`");
     has("spec: baseline, no file: run `shep kelpie agents new reviewer --baseline spec`");
