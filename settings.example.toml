@@ -162,8 +162,8 @@ per_item_usd = 10
 # The representative's agent file, from a file whose role is `representative`:
 # the voice of every post kelpie makes to a contributor, which words the facts
 # kelpie's code drafted and reads and runs nothing. It runs on any harness.
-# Only a project whose `contributions.pick` is not `off` needs it, and an
-# unset one, or a missing or mis-roled file, stops the runner.
+# Only a project whose `contributions.pick` or `triage.pick` is not `off`
+# needs it, and an unset one, or a missing or mis-roled file, stops the runner.
 # representative = "representative"
 # Minutes past the soonest finish that the agent board lets a work item's
 # agent take: a new item opens on the cheapest ranked agent finishing within

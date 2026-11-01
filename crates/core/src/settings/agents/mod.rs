@@ -671,8 +671,9 @@ pub(super) fn unset(setting: &'static str, role: Role) -> SettingsError {
     SettingsError::Invalid {
         setting,
         reason: format!(
-            "`{setting}` is not set, and this project needs an agent whose role is `{}`: name \
-             one, or run `shep kelpie agents init <harness>` to write bound agent files",
+            "`{setting}` is not set, and this project needs an agent whose role is `{}`: set \
+             `{setting}` to one, after `shep kelpie agents init <harness>` writes bound \
+             agent files if you have none",
             role.as_str()
         ),
     }

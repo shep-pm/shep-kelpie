@@ -272,6 +272,21 @@ fn a_file_with_no_legacy_parent_is_left_alone() {
     assert_eq!(read(&dir, "whole.md"), whole);
 }
 
+// `opus-high` as kelpie shipped it, which a bare stub of it is written out as.
+const FORMER_OPUS_HIGH: &str = r#"---
+# Opus 5.5 at high effort, for work that is hard to undo. The agent board
+# picks it for heavy work, and an `agent:opus-high!` label on an issue pins
+# it there. Anything below the closing line is added to kelpie's own
+# instructions for this agent; it adds nothing here.
+role: implementer
+harness: claude-code
+model: claude-opus-5-5
+effort: high
+description: Builds work that is hard to undo, such as a data migration, a release step or a change to a public interface.
+tier: heavy
+---
+"#;
+
 #[test]
 fn a_bare_stub_of_an_agent_kelpie_no_longer_ships_is_written_out_once() {
     let dir = folder(&[("opus-high.md", &stub("opus-high"))]);
@@ -279,6 +294,7 @@ fn a_bare_stub_of_an_agent_kelpie_no_longer_ships_is_written_out_once() {
     let report = legacy::migrate(dir.path()).unwrap();
 
     assert_eq!(wrote(&report), ["opus-high.md"]);
+    assert_eq!(read(&dir, "opus-high.md"), FORMER_OPUS_HIGH);
     let agents = Agents::load(dir.path()).unwrap();
     let agent = agents.get(&name("opus-high")).unwrap();
     assert_eq!(
