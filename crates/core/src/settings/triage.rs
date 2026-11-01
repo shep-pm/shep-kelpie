@@ -7,10 +7,10 @@ use std::num::{NonZeroU8, NonZeroU32};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::agents::find;
+use super::agents::{find, unset};
 use super::gateway::GatewayName;
 use super::{AgentName, ExpertAgent, Settings, SettingsError};
-use crate::agents::{Agents, Role, Runs, TRIAGER};
+use crate::agents::{Agents, Role, Runs};
 use crate::ports::{AuthorAssociation, Probability};
 use crate::state::TRIAGED_KEPT;
 
@@ -109,8 +109,8 @@ pub struct Triage {
     /// The most questions one triage comment asks, 1 to 10. 10 when absent.
     pub max_questions: NonZeroU8,
     /// The agent file whose role is `triager` that researches an issue.
-    /// `triager` when absent.
-    pub agent: AgentName,
+    /// Needed while `pick` is not `off`.
+    pub agent: Option<AgentName>,
     /// The most triage calls in any 24 hours, up to 200. An issue past it waits
     /// for the next free place and is never dropped. 10 when absent, 0 for no
     /// cap.
@@ -146,7 +146,7 @@ impl Default for Triage {
             hand_ready: false,
             wait_days: NonZeroU32::new(7).unwrap_or(NonZeroU32::MIN),
             max_questions: NonZeroU8::new(MOST_QUESTIONS).unwrap_or(NonZeroU8::MIN),
-            agent: AgentName::kelpies(TRIAGER),
+            agent: None,
             per_day: 10,
             per_author_per_day: 2,
             min_account_days: 30,
@@ -308,11 +308,12 @@ impl Settings {
     ///
     /// # Errors
     ///
-    /// [`SettingsError::Invalid`] naming `triage.agent` when it has no agent
-    /// file, its file's role is not `triager`, or `agents.allow` leaves it out.
+    /// [`SettingsError::Invalid`] naming `triage.agent` when it is absent, has
+    /// no agent file, its file's role is not `triager`, or `agents.allow`
+    /// leaves it out.
     pub fn triager(&self, agents: &Agents) -> Result<ExpertAgent, SettingsError> {
         let at = "triage.agent";
-        let name = &self.triage.agent;
+        let name = self.triage.agent.as_ref().ok_or_else(|| unset(at, Role::Triager))?;
         let agent = find(
             agents,
             name,

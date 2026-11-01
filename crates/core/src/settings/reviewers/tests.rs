@@ -75,7 +75,7 @@ fn names(lineup: &[ListedReviewer]) -> Vec<&str> {
 fn a_contributions_list_runs_its_reviewers_in_order_each_once() {
     let (settings, home) = contributing(r#"["opus", "qwen", "gpu-box", "opus"]"#);
     let lineup = settings
-        .contribution_lineup(&book(), &Gateways::default(), home.path())
+        .contribution_lineup(&book(), home.path())
         .unwrap();
     assert_eq!(names(&lineup), ["opus", "qwen", "gpu-box"]);
 
@@ -104,7 +104,7 @@ fn a_contributions_list_runs_its_reviewers_in_order_each_once() {
 fn an_empty_contributions_list_runs_no_review() {
     let (settings, home) = contributing("[]");
     let lineup = settings
-        .contribution_lineup(&book(), &Gateways::default(), home.path())
+        .contribution_lineup(&book(), home.path())
         .unwrap();
     assert_eq!(names(&lineup), Vec::<&str>::new());
 }
@@ -112,7 +112,7 @@ fn an_empty_contributions_list_runs_no_review() {
 #[test]
 fn a_contributions_reviewer_with_no_file_or_an_implementers_is_refused_naming_it() {
     let (settings, home) = contributing(r#"["fable"]"#);
-    let err = (settings.contribution_lineup(&book(), &Gateways::default(), home.path()))
+    let err = (settings.contribution_lineup(&book(), home.path()))
         .unwrap_err()
         .to_string();
     assert_eq!(
@@ -121,7 +121,7 @@ fn a_contributions_reviewer_with_no_file_or_an_implementers_is_refused_naming_it
          write `agents/fable.md` in kelpie's home"
     );
     let (settings, home) = contributing(r#"["sonnet-high"]"#);
-    let err = (settings.contribution_lineup(&book(), &Gateways::default(), home.path()))
+    let err = (settings.contribution_lineup(&book(), home.path()))
         .unwrap_err()
         .to_string();
     assert!(
@@ -169,7 +169,7 @@ fn a_commands_leading_tilde_is_the_home_folder_and_an_absolute_path_stays() {
 fn a_bot_that_reviews_on_ready_is_refused_after_another_bot_only_in_a_contributions_list() {
     let book = book().with("codex", CODEX_ON_READY);
     let (settings, home) = contributing(r#"["defect-hunter", "coderabbit", "codex"]"#);
-    let err = (settings.contribution_lineup(&book, &Gateways::default(), home.path()))
+    let err = (settings.contribution_lineup(&book, home.path()))
         .unwrap_err()
         .to_string();
     assert_eq!(
@@ -180,7 +180,7 @@ fn a_bot_that_reviews_on_ready_is_refused_after_another_bot_only_in_a_contributi
     );
     let (settings, home) = contributing(r#"["codex", "defect-hunter", "coderabbit"]"#);
     let lineup = settings
-        .contribution_lineup(&book, &Gateways::default(), home.path())
+        .contribution_lineup(&book, home.path())
         .unwrap();
     assert_eq!(names(&lineup), ["codex", "defect-hunter", "coderabbit"]);
 
@@ -316,12 +316,12 @@ fn the_candidates_ignore_an_old_reviewers_list() {
 fn a_contribution_with_no_list_gets_the_default_lineup() {
     let paddock = gateways_with("paddock", GatewayKind::Paddock);
     let (settings, home) = project("", None);
-    let lineup = (settings.contribution_lineup(&book(), &paddock, home.path())).unwrap();
+    let lineup = (settings.contribution_lineup(&book(), home.path())).unwrap();
     assert_eq!(names(&lineup), ["iq3-xxs-review", "defect-hunter-lite"]);
 
     let (settings, home) = project("", None);
     let lineup =
-        (settings.contribution_lineup(&book(), &Gateways::default(), home.path())).unwrap();
+        (settings.contribution_lineup(&book(), home.path())).unwrap();
     assert_eq!(
         names(&lineup),
         ["defect-hunter-lite"],
@@ -330,14 +330,14 @@ fn a_contribution_with_no_list_gets_the_default_lineup() {
 
     // An old `agents.reviewers` list is read by nothing here either.
     let (old, home) = project("reviewers = [\"opus\"]\n", None);
-    let lineup = (old.contribution_lineup(&book(), &paddock, home.path())).unwrap();
+    let lineup = (old.contribution_lineup(&book(), home.path())).unwrap();
     assert_eq!(names(&lineup), ["iq3-xxs-review", "defect-hunter-lite"]);
 }
 
 #[test]
 fn a_default_reviewer_that_allow_leaves_out_is_refused_naming_the_contribution_key() {
     let (settings, home) = project("allow = [\"opus\"]\n", None);
-    let err = (settings.contribution_lineup(&book(), &Gateways::default(), home.path()))
+    let err = (settings.contribution_lineup(&book(), home.path()))
         .unwrap_err()
         .to_string();
     assert_eq!(

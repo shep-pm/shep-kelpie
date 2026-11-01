@@ -45,22 +45,8 @@ const IGNORED: char = '_';
 /// The folder of `agents` that holds each baseline whole, for reading and diffing
 pub const BASELINES: &str = ".defaults";
 
-/// Kelpie's own Sonnet 5.5 implementer, at high effort
-pub const DEFAULT_IMPLEMENTER: &str = "sonnet-high";
-
 /// The reviewer that reads a pull request twice, Opus 5.5 at high effort
 pub const DEFECT_HUNTER: &str = "defect-hunter";
-
-/// The reviewer a contribution pass runs when it names none, and a candidate
-/// for every project's review rounds
-pub const DEFECT_HUNTER_LITE: &str = "defect-hunter-lite";
-
-/// The reviewer a contribution pass runs first when it names none, where
-/// paddock is set up, and a candidate for every project's review rounds
-pub const IQ3_XXS_REVIEW: &str = "iq3-xxs-review";
-
-/// The reviewer that runs the maintainer's qwen-review script
-pub const QWEN: &str = "qwen";
 
 /// The reviewer that reads a contribution for security, which a project runs
 /// with `contributions.security_reviewer`
@@ -76,61 +62,13 @@ pub const REPRESENTATIVE: &str = "representative";
 /// The triager kelpie ships, which a project runs with `triage.agent`
 pub const TRIAGER: &str = "triager";
 
-/// The maintainer's qwen-review script, which the `qwen` reviewer runs
-pub const QWEN_REVIEW: &str = "~/.claude/scripts/qwen-review.sh";
-
-// When `add` writes one of kelpie's own agents out.
-#[derive(Debug, Clone, Copy)]
-enum Written {
-    Always,
-    // Only where this file, under the home folder, is installed.
-    Beside(&'static str),
-}
-
-// Kelpie's own whole agents, by name: what `add` writes a stub for, what a file
-// reaches with `extends: kelpie:<name>`, and what a missing file falls back
-// to. A project lists none of the review bots unless told to.
-const DEFAULTS: [(&str, &str, Written); 8] = [
-    (
-        DEFAULT_IMPLEMENTER,
-        include_str!("../../../../agents/sonnet-high.md"),
-        Written::Always,
-    ),
-    (
-        "opus-high",
-        include_str!("../../../../agents/opus-high.md"),
-        Written::Always,
-    ),
-    (
-        DEFECT_HUNTER_LITE,
-        include_str!("../../../../agents/defect-hunter-lite.md"),
-        Written::Always,
-    ),
-    (
-        IQ3_XXS_REVIEW,
-        include_str!("../../../../agents/iq3-xxs-review.md"),
-        Written::Always,
-    ),
-    (
-        QWEN,
-        include_str!("../../../../agents/qwen.md"),
-        Written::Beside(QWEN_REVIEW),
-    ),
-    (
-        "coderabbit",
-        include_str!("../../../../agents/coderabbit.md"),
-        Written::Always,
-    ),
-    (
-        "cubic",
-        include_str!("../../../../agents/cubic.md"),
-        Written::Always,
-    ),
-    (
-        "codex",
-        include_str!("../../../../agents/codex.md"),
-        Written::Always,
-    ),
+// Kelpie's own whole agents, by name: what `add` writes a stub for and what a
+// file reaches with `extends: kelpie:<name>`. A project lists none of the review
+// bots unless told to.
+const DEFAULTS: [(&str, &str); 3] = [
+    ("coderabbit", include_str!("../../../../agents/coderabbit.md")),
+    ("cubic", include_str!("../../../../agents/cubic.md")),
+    ("codex", include_str!("../../../../agents/codex.md")),
 ];
 
 /// What an agent is for
@@ -337,7 +275,7 @@ impl Agents {
     // `embedded` over `baselines`.
     fn embedded_over(baselines: &[Baseline]) -> Self {
         // A test pins that every default parses, so none is dropped here.
-        let whole = DEFAULTS.iter().map(|(name, text, _)| (*name, *text));
+        let whole = DEFAULTS.iter().copied();
         let own = baselines.iter().map(|b| (b.name, b.text));
         let mut agents = BTreeMap::new();
         let mut bare = Vec::new();
@@ -625,23 +563,18 @@ pub fn write_bound_stubs(folder: &Path, binding: &str) {
 /// Writes a stub for each of kelpie's own whole agents that `folder` lacks,
 /// never over a file, and refreshes the shipped files in `folder`'s `.defaults`
 ///
-/// A stub is `extends: kelpie:<name>` and nothing else. The `qwen` reviewer
-/// is written only where the maintainer's qwen-review script is installed
-/// under `home`. Returns the names written, in order.
+/// A stub is `extends: kelpie:<name>` and nothing else. Returns the names
+/// written, in order.
 ///
 /// # Errors
 ///
 /// [`AgentsError::Read`] naming the folder or file that could not be written.
-pub fn write_defaults(folder: &Path, home: &Path) -> Result<Vec<&'static str>, AgentsError> {
+pub fn write_defaults(folder: &Path) -> Result<Vec<&'static str>, AgentsError> {
     fs::create_dir_all(folder).map_err(|e| failed(folder, e))?;
     let mut written = Vec::new();
-    for (name, _, when) in DEFAULTS {
-        let wanted = match when {
-            Written::Always => true,
-            Written::Beside(file) => installed(file, home),
-        };
+    for (name, _) in DEFAULTS {
         let stub = format!("---\nextends: {}{name}\n---\n", extends::SHIPPED);
-        if wanted && write_new(&folder.join(format!("{name}.md")), &stub)? {
+        if write_new(&folder.join(format!("{name}.md")), &stub)? {
             written.push(name);
         }
     }
@@ -662,7 +595,8 @@ pub fn write_defaults(folder: &Path, home: &Path) -> Result<Vec<&'static str>, A
 pub fn write_baselines(folder: &Path) -> Result<(), AgentsError> {
     let kept = folder.join(BASELINES);
     fs::create_dir_all(&kept).map_err(|e| failed(&kept, e))?;
-    let shipped: Vec<(&str, &str)> = (DEFAULTS.iter().map(|(name, text, _)| (*name, *text)))
+    let shipped: Vec<(&str, &str)> = DEFAULTS
+        .into_iter()
         .chain(baseline::ALL.iter().map(|b| (b.name, b.text)))
         .collect();
     for &(name, text) in &shipped {
@@ -763,12 +697,6 @@ fn sweep(kept: &Path, shipped: &[(&str, &str)]) {
             let _ = writable(&path).and_then(|()| fs::remove_file(&path));
         }
     }
-}
-
-/// Whether `file`, written with a leading `~/`, is a file under `home`
-pub fn installed(file: &str, home: &Path) -> bool {
-    file.strip_prefix("~/")
-        .is_some_and(|rest| home.join(rest).is_file())
 }
 
 // Writes `text` to `path` when nothing is there, and says whether it did.

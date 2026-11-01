@@ -541,7 +541,7 @@ fn spends_on(
     if settings.contributions.pick != Pick::Off {
         reviewers.extend(
             settings
-                .contribution_lineup(book, gateways, here.home)
+                .contribution_lineup(book, here.home)
                 .unwrap_or_default(),
         );
         security = settings.security_reviewer(book).ok();

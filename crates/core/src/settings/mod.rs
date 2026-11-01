@@ -65,7 +65,7 @@ pub use hooks::{HookPoint, PointKind, ProjectHook};
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use local_rounds::{KeepDays, LocalRounds, RoundsFolder};
 pub use repo_setup::{CallRole, MarketplaceSource, Part, PluginId, RepoSetup};
-pub use reviewers::{ListedReviewer, default_reviewers};
+pub use reviewers::ListedReviewer;
 pub use reviews::Reviews;
 pub use rulings::{PM_ALONE, PM_DECIDES, RulingName, Rulings};
 pub use skills::{SkillChoice, SkillName, StepSkills};

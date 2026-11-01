@@ -113,7 +113,7 @@ impl Scene {
     fn contribution(&self, gateways: &Gateways) -> Vec<String> {
         let settings = self.settings();
         let book = Agents::load(&self.agents()).unwrap();
-        (settings.contribution_lineup(&book, gateways, &self.home))
+        (settings.contribution_lineup(&book, &self.home))
             .unwrap()
             .iter()
             .map(|r| r.name.to_string())

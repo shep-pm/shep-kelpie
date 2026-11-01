@@ -104,7 +104,7 @@ fn absent_contributions_reviewers_are_kelpies_default_pass() {
     let home = tempfile::tempdir().unwrap();
     let settings = parse(EXAMPLE).unwrap();
     let lineup = settings
-        .contribution_lineup(&book, &Gateways::default(), home.path())
+        .contribution_lineup(&book, home.path())
         .unwrap();
     let names: Vec<&str> = lineup.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(
@@ -115,7 +115,7 @@ fn absent_contributions_reviewers_are_kelpies_default_pass() {
 
     let own = parse(&with("reviewers = [\"defect-hunter\", \"opus\"]\n")).unwrap();
     let lineup = own
-        .contribution_lineup(&book, &Gateways::default(), home.path())
+        .contribution_lineup(&book, home.path())
         .unwrap();
     let names: Vec<&str> = lineup.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(names, ["defect-hunter", "opus"]);

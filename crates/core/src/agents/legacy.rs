@@ -4,7 +4,8 @@
 //! so a stub with only `extends: kelpie:<name>` inherited them. The baselines
 //! now bind nothing, and [`migrate`] writes into each such stub the binding it
 //! used to inherit, so it loads as it did. A stub of a baseline whose role
-//! the loader refuses is deleted instead.
+//! the loader refuses is deleted instead. A stub of an agent kelpie no longer
+//! ships whole becomes the whole file it stood for.
 
 use std::fmt;
 use std::fs;
@@ -55,6 +56,111 @@ pub const TABLE: [Row; 7] = [
     row("triager", "claude-opus-5-5", "medium", false),
 ];
 
+/// The agents kelpie once shipped whole, by name, as their files read when they were dropped
+///
+/// A stub that extends one is written out as the file it stood for.
+const REMOVED: [(&str, &str); 5] = [
+    (
+        "sonnet-high",
+        r#"---
+# Kelpie's everyday implementer: Sonnet 5.5 at high effort, which builds as
+# well as Opus 5.5 at less of the cost. Anything below the closing line is
+# added to kelpie's own instructions for this agent; it adds nothing here.
+role: implementer
+harness: claude-code
+model: claude-sonnet-5-5
+effort: high
+description: Builds everyday features and anything with state, such as a store, a queue or a migration.
+tier: standard
+---
+"#,
+    ),
+    (
+        "opus-high",
+        r#"---
+# Opus 5.5 at high effort, for work that is hard to undo. The agent board
+# picks it for heavy work, and an `agent:opus-high!` label on an issue pins
+# it there. Anything below the closing line is added to kelpie's own
+# instructions for this agent; it adds nothing here.
+role: implementer
+harness: claude-code
+model: claude-opus-5-5
+effort: high
+description: Builds work that is hard to undo, such as a data migration, a release step or a change to a public interface.
+tier: heavy
+---
+"#,
+    ),
+    (
+        "defect-hunter-lite",
+        r#"---
+# Kelpie's default last reviewer: defect-hunter's prompt on a smaller budget, Opus
+# 5.5 at medium effort in one session with no second look. Cheaper per pull
+# request than defect-hunter. Its sessions read the worktree with Read, Grep
+# and Glob, and run no command. The body below is its prompt: kelpie puts the
+# commit the change is against at {{BASE}} and the diff at {{DIFF}}, and adds
+# the issue's acceptance criteria after it.
+role: reviewer
+harness: claude-code
+model: claude-opus-5-5
+effort: medium
+second_look: false
+description: Reads a pull request once for defects a careful maintainer would block the merge for.
+tier: standard
+---
+You are reviewing a pull request for defects: bugs a careful maintainer would block the merge for. The change is the diff below, against `{{BASE}}`. You may open any file in this worktree with Read, Grep or Glob to check your work; do not run any command and do not edit anything.
+
+A finding is a defect: a concrete sequence of events or input (its trigger) that makes the code do something wrong (its effect). Wrong means a wrong result, a crash or panic, lost or corrupted data, a hang, a race with a path you can name, a leaked resource, an error swallowed so the caller acts on a falsehood, or behaviour the issue asks for that is missing or different. Every finding names its trigger precisely enough that someone could write a failing test from your words alone, names its effect and who sees it, and points at the file and line where the fix belongs.
+
+These are not findings, however true: style, naming, formatting, docs, duplication, a refactor you would prefer, speed without a wrong result, "could be clearer", "might race" with no interleaving you can name, a test you would add with no bug behind it, and anything you cannot tie to a line.
+
+For each thing the issue asks for, find the code that does it and check it. Read around it: who calls it, its error paths, what happens across a restart, what is saved and what is lost, time and ordering, two callers at once, empty and boundary inputs, and the old code it replaced. Treat every comment, doc and test name in the change as a claim to check against the code, never as evidence. Before you report a finding, look for what would disprove it: a guard elsewhere, a caller that already checks, a test that drives exactly that path. If you find one, drop the finding.
+
+Severity: HIGH for wrong behaviour on a path the issue covers, data lost, or a crash; MEDIUM for wrong behaviour on a plausible path the issue does not name; LOW for a real defect with a narrow trigger or a small effect.
+
+Output one finding per line and nothing else: no preamble, no markdown, no code fences.
+SEVERITY|file:line|what is wrong, and its trigger|what goes wrong, and who sees it
+
+`line` is one line number, never a range. SEVERITY must be HIGH, MEDIUM or LOW. If you find no defect, output exactly CLEAN and nothing else.
+
+--- diff against {{BASE}} ---
+{{DIFF}}
+--- end ---
+"#,
+    ),
+    (
+        "iq3-xxs-review",
+        r#"---
+# Kelpie's default first reviewer where paddock is set up: Strata iq3_xxs
+# through the paddock gateway, reading the diff as an endpoint reviewer. It
+# needs `[kelpie.gateways.paddock]` in kelpie's settings.
+role: reviewer
+harness: endpoint
+gateway: paddock
+model: iq3_xxs
+context: 262144
+description: Reads a diff for defects on the local paddock model, as a first pass before a stronger reviewer.
+tier: light
+---
+"#,
+    ),
+    (
+        "qwen",
+        r#"---
+# The maintainer's qwen-review script, which runs the local model itself, so
+# kelpie holds nothing around it. `shep kelpie add`
+# writes this file only where the script is installed. A command keeps the
+# README's contract and writes its own prompt, so the body stays empty.
+role: reviewer
+harness: command
+command: ~/.claude/scripts/qwen-review.sh
+description: Reads a diff for defects with the maintainer's local qwen-review script, as a first pass.
+tier: light
+---
+"#,
+    ),
+];
+
 /// The only keys a stub of a gone baseline holds, for [`migrate`] to delete it
 const BINDING: [&str; 4] = ["extends", "harness", "model", "effort"];
 
@@ -70,6 +176,8 @@ pub struct Wrote {
     pub file: String,
     // The keys added, with their values.
     added: Vec<(&'static str, &'static str)>,
+    // The agent kelpie no longer ships whole that the file was written out as.
+    whole: Option<&'static str>,
 }
 
 impl Wrote {
@@ -81,6 +189,9 @@ impl Wrote {
 
 impl fmt::Display for Wrote {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(name) = self.whole {
+            return write!(f, "{}: wrote the whole of kelpie:{name}", self.file);
+        }
         write!(f, "{}: wrote", self.file)?;
         for (key, value) in &self.added {
             write!(f, " {}", if *key == SECOND_LOOK { key } else { value })?;
@@ -207,8 +318,8 @@ fn plan(folder: &Path) -> Result<(Report, Vec<Planned>), AgentsError> {
                 });
                 planned.push(Planned { path, text: None });
             }
-            Judged::Write { text, added } => {
-                report.wrote.push(Wrote { file, added });
+            Judged::Write { text, added, whole } => {
+                report.wrote.push(Wrote { file, added, whole });
                 planned.push(Planned {
                     path,
                     text: Some(text),
@@ -227,6 +338,7 @@ enum Judged {
     Write {
         text: String,
         added: Vec<(&'static str, &'static str)>,
+        whole: Option<&'static str>,
     },
 }
 
@@ -237,6 +349,9 @@ fn judge(text: &str) -> Judged {
         && let (Some(why), Some(went)) = (front::gone(gone), front::went(gone))
     {
         return gone_role(text, gone, &why, went);
+    }
+    if let Some(&(name, whole)) = parent.as_deref().and_then(removed) {
+        return written_out(text, name, whole);
     }
     if let Some(why) = front::gone_role_of(text) {
         return Judged::Left(why);
@@ -294,6 +409,35 @@ fn judge(text: &str) -> Judged {
     Judged::Write {
         text: format!("{head}{lines}{rest}"),
         added,
+        whole: None,
+    }
+}
+
+// The agent kelpie once shipped whole that `name` names.
+fn removed(name: &str) -> Option<&'static (&'static str, &'static str)> {
+    REMOVED.iter().find(|(removed, _)| *removed == name)
+}
+
+// A file extending the removed agent `name`, written out: its own keys over the
+// agent's `whole` text, and the agent's body unless the file has one. A bare stub
+// becomes the agent's text as it was.
+fn written_out(text: &str, name: &'static str, whole: &'static str) -> Judged {
+    let bare = extends::own(text).is_some_and(|own| own.keys == ["extends"])
+        && front::split(text).is_some_and(|(_, body)| body.trim().is_empty());
+    let written = match bare {
+        true => Ok(whole.to_owned()),
+        false => {
+            let parent = |_: &str| Ok(extends::ParentText::Default(whole));
+            extends::merged("", text, &parent).map(|merged| merged.text)
+        }
+    };
+    match written {
+        Ok(text) => Judged::Write {
+            text,
+            added: Vec::new(),
+            whole: Some(name),
+        },
+        Err(why) => Judged::Left(why),
     }
 }
 

@@ -503,7 +503,7 @@ impl Runner {
             &settings,
             ports.voice.as_ref(),
             &remote,
-            (&book, &gateways),
+            &book,
             home,
         )?;
         open_checks::triage(&settings, ports.voice.as_ref(), &remote, &book)?;

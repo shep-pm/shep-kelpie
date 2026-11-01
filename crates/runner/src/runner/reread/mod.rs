@@ -118,13 +118,13 @@ impl Runner {
                 &settings,
                 self.ports.voice.as_ref(),
                 &self.remote,
-                (&book, in_use),
+                &book,
                 &self.home,
             )?
         } else if settings.contributions.is_off() {
             Vec::new()
         } else {
-            settings.contribution_lineup(&book, in_use, &self.home)?
+            settings.contribution_lineup(&book, &self.home)?
         };
         if settings.triage != self.settings.triage {
             open_checks::triage(&settings, self.ports.voice.as_ref(), &self.remote, &book)?;

@@ -347,10 +347,9 @@ pub struct RoleAgentNames {
     pub pm: Option<AgentName>,
     /// The representative, from kelpie's agent files: the one voice that
     /// words every post to a contributor. A project that picks contributions
-    /// needs it, so unlike the project manager it has a default. `representative`
-    /// when absent.
-    #[serde(default = "default_representative")]
-    pub representative: AgentName,
+    /// or triages issues needs it, and is refused while it is absent.
+    #[serde(default)]
+    pub representative: Option<AgentName>,
 }
 
 impl Default for RoleAgentNames {
@@ -363,7 +362,7 @@ impl Default for RoleAgentNames {
             slack: DEFAULT_SLACK_MINUTES,
             reviewers: None,
             pm: None,
-            representative: default_representative(),
+            representative: None,
         }
     }
 }
@@ -385,10 +384,6 @@ impl RoleAgentNames {
 
 fn default_slack() -> u32 {
     DEFAULT_SLACK_MINUTES
-}
-
-fn default_representative() -> AgentName {
-    AgentName::kelpies(crate::agents::REPRESENTATIVE)
 }
 
 /// An implementer the agent board may pick for a project
@@ -534,12 +529,12 @@ impl Settings {
     ///
     /// # Errors
     ///
-    /// [`SettingsError::Invalid`] naming `agents.representative` when it has
-    /// no agent file, its file's role is not `representative`, or
+    /// [`SettingsError::Invalid`] naming `agents.representative` when it is
+    /// absent, has no agent file, its file's role is not `representative`, or
     /// `agents.allow` leaves it out.
     pub fn representative(&self, agents: &Agents) -> Result<ExpertAgent, SettingsError> {
         let at = "agents.representative";
-        let name = &self.agents.representative;
+        let name = self.agents.representative.as_ref().ok_or_else(|| unset(at, Role::Representative))?;
         let agent = find(
             agents,
             name,
@@ -664,6 +659,19 @@ pub(super) fn find<'a>(
         )));
     }
     Ok(agent)
+}
+
+/// The refusal of a setting that names the agent of `role`, while the project needs
+/// it and has not set it
+pub(super) fn unset(setting: &'static str, role: Role) -> SettingsError {
+    SettingsError::Invalid {
+        setting,
+        reason: format!(
+            "`{setting}` is not set, and this project needs an agent whose role is `{}`: name \
+             one, or run `shep kelpie agents init <harness>` to write bound agent files",
+            role.as_str()
+        ),
+    }
 }
 
 /// The refusal of `name` when `allow` leaves it out, with `instead` as the
