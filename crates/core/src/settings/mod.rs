@@ -266,8 +266,8 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "models.worker",
         because: AGENT_FILES,
-        fix: "write an agent file whose role is `implementer`, such as kelpie's own \
-              `sonnet-high`, which is Sonnet 5.5 at high",
+        fix: "write an agent file whose role is `implementer`, which \
+              `shep kelpie agents init <harness>` does for your harness",
     },
     Removed {
         key: "models.labels",

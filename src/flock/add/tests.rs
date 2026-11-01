@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use shep_client::shep_core::config::AppConfig;
@@ -8,10 +7,7 @@ use super::*;
 use crate::agents::Agents;
 use crate::home::ProjectPaths;
 use crate::ports::Visibility;
-use crate::settings::{
-    BaseBranch, EndpointUrl, ForgeSlug, Gateway, GatewayKind, GatewayName, Gateways, KeyVar,
-    RulingName,
-};
+use crate::settings::{BaseBranch, ForgeSlug, Gateways, RulingName};
 use crate::state::STATE_FILE;
 use crate::test::{CALL_PATIENCE, FakeForge, FakeShepherd, ticket};
 
@@ -108,28 +104,6 @@ impl Scene {
             .map(|r| r.name.to_string())
             .collect()
     }
-
-    /// The reviewers a contribution reads, as the runner reads them
-    fn contribution(&self, gateways: &Gateways) -> Vec<String> {
-        let settings = self.settings();
-        let book = Agents::load(&self.agents()).unwrap();
-        (settings.contribution_lineup(&book, &self.home))
-            .unwrap()
-            .iter()
-            .map(|r| r.name.to_string())
-            .collect()
-    }
-}
-
-/// Kelpie holding one gateway named `paddock`, as its own settings hold it
-fn paddock() -> Gateways {
-    let gateway = Gateway {
-        kind: GatewayKind::Paddock,
-        url: EndpointUrl::try_from("http://gpu-box:8700".to_owned()).unwrap(),
-        key_env: KeyVar::try_from("PADDOCK_KEY".to_owned()).unwrap(),
-    };
-    let name = GatewayName::try_from("paddock".to_owned()).unwrap();
-    Gateways::new(BTreeMap::from([(name, gateway)]))
 }
 
 fn stub(agent: &str) -> String {
@@ -167,13 +141,18 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     assert_eq!(settings.agents.reviewers, None, "add names no reviewers");
     assert_eq!(settings.agents.allow, None, "nor an allow list");
     assert_eq!(settings.agents.gone_keys(), Vec::<&str>::new());
-    for name in ["sonnet-high", "opus-high"] {
-        assert_eq!(scene.written(name), stub(name));
+    for gone in [
+        "sonnet-high",
+        "opus-high",
+        "defect-hunter-lite",
+        "iq3-xxs-review",
+        "qwen",
+    ] {
+        assert!(
+            !scene.agents().join(format!("{gone}.md")).exists(),
+            "kelpie ships no {gone}"
+        );
     }
-    assert!(
-        !scene.agents().join("qwen.md").exists(),
-        "no qwen-review script, so no qwen reviewer"
-    );
     for bot in ["coderabbit", "cubic", "codex"] {
         assert_eq!(
             scene.written(bot),
@@ -183,10 +162,7 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
     }
     let shipped = scene.agents().join(".defaults");
     for (name, text) in [
-        (
-            "sonnet-high",
-            include_str!("../../../agents/sonnet-high.md"),
-        ),
+        ("codex", include_str!("../../../agents/codex.md")),
         ("triager", include_str!("../../../agents/triager.md")),
         ("pm", include_str!("../../../agents/pm.md")),
     ] {
@@ -223,12 +199,12 @@ async fn add_writes_no_reviewers() {
         .unwrap();
     assert_eq!(agents.get("reviewers"), None, "{agents:?}");
     assert_eq!(agents.get("allow"), None, "{agents:?}");
+    assert_eq!(agents.get("implementers"), None, "{agents:?}");
     assert_eq!(scene.settings().agents.reviewers, None);
 }
 
 #[tokio::test]
-async fn where_the_qwen_review_script_is_installed_add_writes_no_reviewers_and_still_the_qwen_stub()
-{
+async fn where_the_qwen_review_script_is_installed_add_still_writes_no_qwen_file() {
     let scene = Scene::new().await;
     let script = scene.home.join(".claude/scripts/qwen-review.sh");
     std::fs::create_dir_all(script.parent().unwrap()).unwrap();
@@ -236,30 +212,7 @@ async fn where_the_qwen_review_script_is_installed_add_writes_no_reviewers_and_s
     scene.add().await.unwrap();
 
     assert_eq!(scene.settings().agents.reviewers, None);
-    assert_eq!(scene.written("qwen"), stub("qwen"));
-    assert!(
-        scene.candidates().contains(&"qwen".to_owned()),
-        "a reviewer file the project holds is a candidate it never named"
-    );
-}
-
-#[tokio::test]
-async fn where_kelpie_holds_a_paddock_gateway_a_contribution_reads_iq3_xxs_review_first() {
-    let scene = Scene::new().await;
-    scene.shepherd.holds_section(
-        "[gateways.paddock]\nurl = \"http://gpu-box:8700\"\nkey_env = \"PADDOCK_KEY\"\n",
-    );
-    scene.add().await.unwrap();
-
-    assert_eq!(scene.settings().agents.reviewers, None);
-    assert_eq!(
-        scene.contribution(&paddock()),
-        ["iq3-xxs-review", "defect-hunter-lite"],
-        "a contribution with no list takes kelpie's default pass"
-    );
-    for agent in ["iq3-xxs-review", "defect-hunter-lite"] {
-        assert_eq!(scene.written(agent), stub(agent));
-    }
+    assert!(!scene.agents().join("qwen.md").exists());
 }
 
 // The runner works its home out from the `SHEP_HOME` its entry carries.
@@ -295,11 +248,11 @@ async fn add_twice_changes_nothing() {
 
     let mine = "---\nrole: implementer\nharness: claude-code\nmodel: claude-sonnet-6\n\
                 effort: high\n---\n";
-    std::fs::write(scene.agents().join("sonnet-high.md"), mine).unwrap();
+    std::fs::write(scene.agents().join("codex.md"), mine).unwrap();
 
     let lines = scene.add().await.unwrap();
     assert_eq!(scene.shepherd.writes(), []);
-    let kept = std::fs::read_to_string(scene.agents().join("sonnet-high.md")).unwrap();
+    let kept = std::fs::read_to_string(scene.agents().join("codex.md")).unwrap();
     assert_eq!(kept, mine, "add never writes over an agent file");
     assert_eq!(
         scene.forge.repo_labels_now(),

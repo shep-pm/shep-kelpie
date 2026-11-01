@@ -45,7 +45,7 @@ fn an_absent_contributions_table_means_pick_off_quiet_7_nudge_3() {
     assert_eq!(c.quiet_days, days(7));
     assert_eq!(c.nudge_days, days(3));
     assert_eq!(c.reviewers, None);
-    assert_eq!(c.security_reviewer.as_str(), "security-reviewer");
+    assert_eq!(c.security_reviewer, None);
     assert_eq!(parse(&with("")).unwrap().contributions, c, "an empty table");
 }
 
@@ -96,19 +96,19 @@ fn nudge_days_at_or_past_quiet_days_is_refused() {
 }
 
 #[test]
-fn absent_contributions_reviewers_are_kelpies_default_pass() {
+fn absent_contributions_reviewers_are_refused_and_a_list_runs_in_order() {
     let binding = "harness: claude-code\nmodel: claude-opus-5-5\neffort: high\n";
     let book = Agents::embedded()
         .bind("defect-hunter", binding)
         .with("opus", REVIEWER);
     let home = tempfile::tempdir().unwrap();
     let settings = parse(EXAMPLE).unwrap();
-    let lineup = settings.contribution_lineup(&book, home.path()).unwrap();
-    let names: Vec<&str> = lineup.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(
-        names,
-        ["defect-hunter-lite"],
-        "no paddock gateway, no local round"
+    let err = (settings.contribution_lineup(&book, home.path()))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("`contributions.reviewers` is not set"),
+        "{err}"
     );
 
     let own = parse(&with("reviewers = [\"defect-hunter\", \"opus\"]\n")).unwrap();
