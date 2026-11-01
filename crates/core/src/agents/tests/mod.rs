@@ -721,7 +721,7 @@ fn a_refresh_replaces_baselines_the_last_one_left_read_only() {
 // The names a refresh in this process would take first, a crash's leftovers.
 fn leftovers(kept: &Path, count: u32) -> Vec<PathBuf> {
     let mut left = Vec::new();
-    for (agent, _, _) in DEFAULTS {
+    for (agent, _) in DEFAULTS {
         for n in 0..count {
             let path = kept.join(format!("{agent}.md.{}-{n}.tmp", std::process::id()));
             fs::write(&path, "half").unwrap();
