@@ -397,7 +397,10 @@ async fn a_reviewers_list_that_names_one_name_twice_writes_it_once() {
 #[tokio::test]
 async fn a_project_that_names_its_own_contribution_reviewers_keeps_them() {
     let agents = with_agents("allow = [\"sonnet-high\"]\nreviewers = [\"standards\"]");
-    let table = format!("{agents}\n[contributions]\nreviewers = [\"spec\"]\n");
+    let table = agents.replace(
+        "[contributions]\n",
+        "[contributions]\nreviewers = [\"spec\"]\n",
+    );
     let scene = Scene::holding(&table).await;
 
     scene.migrate().await.unwrap();
@@ -417,7 +420,8 @@ async fn a_project_that_names_its_own_contribution_reviewers_keeps_them() {
 #[tokio::test]
 async fn a_migrated_project_still_runs_the_reviewers_it_named_on_a_contribution() {
     let agents = with_agents("allow = [\"sonnet-high\"]\nreviewers = [\"standards\"]");
-    let scene = Scene::holding(&format!("{agents}\n[contributions]\npick = \"all\"\n")).await;
+    let table = agents.replace("[contributions]\n", "[contributions]\npick = \"all\"\n");
+    let scene = Scene::holding(&table).await;
 
     scene.migrate().await.unwrap();
 

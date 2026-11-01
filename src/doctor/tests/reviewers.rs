@@ -8,6 +8,7 @@ const PADDOCK: &str = "[gateways.paddock]\nurl = \"http://127.0.0.1:1\"\n\
 async fn a_reviewer_on_a_gateway_kelpie_holds_is_a_candidate() {
     let scene = Scene::new().await;
     scene.shepherd.holds_section(&format!("{WEBHOOK}{PADDOCK}"));
+    lineup::write_iq3_xxs_review(&scene.kelpie_home.join("agents"));
     scene.runs("golbat", |t| {
         holds(t, &["iq3-xxs-review", "defect-hunter-lite"]);
     });
@@ -21,6 +22,7 @@ async fn a_reviewer_on_a_gateway_kelpie_holds_is_a_candidate() {
 #[tokio::test]
 async fn a_reviewer_the_project_named_on_a_gateway_kelpie_lacks_is_missing() {
     let scene = Scene::new().await;
+    lineup::write_iq3_xxs_review(&scene.kelpie_home.join("agents"));
     scene.runs("golbat", |t| {
         holds(t, &["iq3-xxs-review"]);
     });
@@ -39,6 +41,7 @@ async fn a_reviewer_on_a_gateway_kelpie_lacks_is_no_candidate_when_the_project_n
     // is held to what a round cannot work around: `iq3-xxs-review` is left out
     // rather than refused.
     let scene = Scene::new().await;
+    lineup::write_iq3_xxs_review(&scene.kelpie_home.join("agents"));
     scene.runs("golbat", |t| {
         t["agents"]["allow"] = json!([]);
     });
