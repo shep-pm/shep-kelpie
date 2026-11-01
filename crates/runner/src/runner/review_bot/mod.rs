@@ -708,7 +708,6 @@ impl Runner {
         let review = self.pass();
         let round = review.round;
         let now = self.ports.clock.now();
-        let next = self.after_round(review, now);
         let reviewer = skipped.reviewer().clone();
         let reason = skipped.why();
         // Only a bot the repo cannot run is left out for a week: one passed
@@ -727,7 +726,7 @@ impl Runner {
         item.bots_skipped
             .retain(|s| s.reviewer() != skipped.reviewer());
         item.bots_skipped.push(skipped);
-        item.phase = next;
+        item.phase = self.after_round_in(item, review, now);
         self.save(saved)?;
         Ok(Begin::Report(StepReport::ReviewerSkipped {
             issue: self.item().issue,

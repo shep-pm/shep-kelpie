@@ -215,6 +215,10 @@ pub struct WorkItem {
     /// on without them
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reviewers_skipped: Vec<AgentName>,
+    /// The local reviewers whose round in this pass reviewed no file, which
+    /// read nothing and do not count toward `reviews.need`
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reviewers_blank: Vec<AgentName>,
     /// Why the last review pass ended with no reviewer having read the pull
     /// request, as a listed reviewer was down or failed. None once a later
     /// pass has a reviewer read it.
@@ -542,6 +546,7 @@ impl WorkItem {
             resolve_failures: 0,
             threads_accepted: Vec::new(),
             reviewers_skipped: Vec::new(),
+            reviewers_blank: Vec::new(),
             unreviewed: None,
             local_failures: BTreeMap::new(),
             local_unreviewed: Vec::new(),
@@ -568,11 +573,13 @@ impl WorkItem {
         self.resolve_failures = 0;
     }
 
-    /// Forgets what the last pass made of the review bots, as a new one
-    /// starts, and the head of a late round's fix, which the pass reads
+    /// Forgets what the last pass made of its reviewers and review bots, as a
+    /// new one starts, and the head of a late round's fix, which the pass reads
     pub fn new_pass(&mut self) {
         self.forget_threads();
         self.bots_skipped.clear();
+        self.reviewers_skipped.clear();
+        self.reviewers_blank.clear();
         self.late_from = None;
         self.disputes.clear();
         self.disputes_comment = None;

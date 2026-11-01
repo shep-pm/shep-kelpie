@@ -314,6 +314,7 @@ fn a_catch_up_before_coderabbits_first_read_is_summoned_by_the_label_alone() {
         step(&runner).unwrap(),
         Some(StepReport::ReviewerSkipped { .. })
     ));
+    super::ends_short(&runner);
     rig.leases.opens_at(&cr(), Timestamp(now(&rig)));
     let noted = noted_after_a_catch_up(&rig, &runner, &head);
     assert!(matches!(

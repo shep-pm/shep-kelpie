@@ -4,7 +4,7 @@
 use serde_json::json;
 
 use super::super::{HEARD_WAIT, LABEL, REVIEW_WAIT};
-use super::{cr, labels, now, off, on, reviewed, reviewed_by_qwen, skipped, summoned};
+use super::{cr, ends_short, labels, now, off, on, reviewed, reviewed_by_qwen, skipped, summoned};
 use crate::runner::{StepReport, step};
 
 // A dog that never grants, or a book the runner cannot read, holds the pass
@@ -25,6 +25,7 @@ fn a_lease_never_granted_passes_the_bot_over_after_its_review_wait() {
         step(&runner).unwrap(),
         skipped("it could not be summoned in the wait its agent file allows after its round began")
     );
+    ends_short(&runner);
     assert_eq!(labels(&rig), []);
     let status = rig.ask(&runner, "status", None);
     assert_eq!(
