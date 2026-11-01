@@ -547,7 +547,10 @@ fn an_implementer_allow_leaves_out_is_no_pick_for_the_board() {
 
 #[test]
 fn an_old_reviewers_list_loads_and_is_read_by_nothing() {
-    let old = project("reviewers = [\"opus-high\", \"fable\", \"sonnet-high\"]\n");
+    let old = allowing(
+        "reviewers = [\"opus-high\", \"fable\", \"sonnet-high\"]\n",
+        "security_reviewer = \"security-reviewer\"\n",
+    );
     assert_eq!(old.agents.gone_keys(), ["agents.reviewers"]);
     assert_eq!(lineup(&old), EVERY_REVIEWER, "the list names no reviewer");
     let err = (old.contribution_lineup(&book(), Path::new("/h"))).unwrap_err();

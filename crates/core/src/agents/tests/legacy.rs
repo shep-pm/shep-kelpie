@@ -257,7 +257,7 @@ fn a_file_extending_a_stub_loads_bound() {
 #[test]
 fn a_file_with_no_legacy_parent_is_left_alone() {
     let own = "---\nrole: implementer\nharness: claude-code\nmodel: m\neffort: low\n---\n";
-    let whole = "---\nextends: kelpie:opus-high\n---\n";
+    let whole = "---\nextends: kelpie:codex\n---\n";
     let bare = "---\nextends: pm\n---\n";
     let dir = folder(&[
         ("own.md", own),
@@ -270,6 +270,37 @@ fn a_file_with_no_legacy_parent_is_left_alone() {
 
     assert_eq!(report, Report::default());
     assert_eq!(read(&dir, "whole.md"), whole);
+}
+
+#[test]
+fn a_bare_stub_of_an_agent_kelpie_no_longer_ships_is_written_out_once() {
+    let dir = folder(&[("opus-high.md", &stub("opus-high"))]);
+
+    let report = legacy::migrate(dir.path()).unwrap();
+
+    assert_eq!(wrote(&report), ["opus-high.md"]);
+    let agents = Agents::load(dir.path()).unwrap();
+    let agent = agents.get(&name("opus-high")).unwrap();
+    assert_eq!(
+        super::pair(agent),
+        ("claude-opus-5-5", crate::settings::Effort::High)
+    );
+    assert_eq!(legacy::migrate(dir.path()).unwrap(), Report::default());
+}
+
+#[test]
+fn a_stub_of_a_removed_agent_with_keys_of_its_own_keeps_them() {
+    let mine = "---\nextends: kelpie:sonnet-high\neffort: low\n---\n";
+    let dir = folder(&[("mine.md", mine)]);
+
+    legacy::migrate(dir.path()).unwrap();
+
+    let agents = Agents::load(dir.path()).unwrap();
+    let agent = agents.get(&name("mine")).unwrap();
+    assert_eq!(
+        super::pair(agent),
+        ("claude-sonnet-5-5", crate::settings::Effort::Low)
+    );
 }
 
 #[test]

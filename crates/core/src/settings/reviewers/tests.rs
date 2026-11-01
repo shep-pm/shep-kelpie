@@ -63,16 +63,18 @@ fn bound(agents: Agents) -> Agents {
 }
 
 // The example's project, with `agents` added to its `[agents]` table and
-// `contribution` as its contributions reviewers, and its home.
+// `contribution` as its contributions reviewers, and its home. It names
+// `security-reviewer` as its security reviewer, which the example leaves unset.
 fn project(agents: &str, contribution: Option<&str>) -> (Settings, tempfile::TempDir) {
     assert!(EXAMPLE.contains(GONE), "the example's reviewers key moved");
-    let mut entry = EXAMPLE.replace(GONE, &format!("{GONE}{agents}"));
-    if let Some(list) = contribution {
-        entry = crate::test::with_tables(
-            &entry,
-            &format!("[app.dogs.kelpie.contributions]\nreviewers = {list}\n"),
-        );
-    }
+    let entry = EXAMPLE.replace(GONE, &format!("{GONE}{agents}"));
+    let reviewers = contribution.map_or_else(String::new, |list| format!("reviewers = {list}\n"));
+    let entry = crate::test::with_tables(
+        &entry,
+        &format!(
+            "[app.dogs.kelpie.contributions]\nsecurity_reviewer = \"security-reviewer\"\n{reviewers}"
+        ),
+    );
     let home = tempfile::tempdir().unwrap();
     let table = crate::test::project_table(&entry);
     let settings = Settings::from_table(&table, "shep", home.path(), Path::new("/p")).unwrap();
@@ -265,6 +267,14 @@ fn the_candidates_are_every_reviewer_file_allow_holds_but_the_security_reviewer(
     settings.contributions.security_reviewer = Some(AgentName::kelpies("spec"));
     let moved = settings.lineup(&book(), &paddock, home.path());
     assert_eq!(names(&moved), ["opus"]);
+}
+
+#[test]
+fn an_unset_security_reviewer_leaves_the_shipped_one_among_the_candidates() {
+    let (mut settings, home) = project("", None);
+    settings.contributions.security_reviewer = None;
+    let lineup = settings.lineup(&book(), &Gateways::default(), home.path());
+    assert!(names(&lineup).contains(&"security-reviewer"));
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! `settings migrate` against the stand-in shepherd's flock
 
 use super::*;
-use crate::settings::{Gateways, RulingName};
+use crate::settings::RulingName;
 
 impl Scene {
     async fn migrate(&self) -> Result<Vec<String>, String> {
