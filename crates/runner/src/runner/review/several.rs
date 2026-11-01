@@ -186,6 +186,7 @@ fn another_reviewers_first_miss_on_a_file_is_not_a_failure_against_it() {
 #[test]
 fn a_local_round_that_reviews_nothing_goes_on_to_the_next_local_reviewer() {
     let rig = two_local();
+    rig.reviews_need(Some(1));
     let runner = at_review(&rig, "work.txt");
     let down = crate::ports::parse_findings(UNREACHABLE);
     rig.reviewer.script([ScriptedRound::Findings(down)]);

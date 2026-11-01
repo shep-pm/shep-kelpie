@@ -99,7 +99,10 @@ impl Runner {
                 bots_only: review.bots_only,
                 ..Review::first()
             };
-        let left = !item.threads_sent.is_empty() || !item.bots_skipped.is_empty();
+        let left = !item.threads_sent.is_empty()
+            || !item.bots_skipped.is_empty()
+            || !item.reviewers_skipped.is_empty()
+            || !item.reviewers_blank.is_empty();
         if fresh && (left || item.late_from.is_some()) {
             self.update(WorkItem::new_pass)?;
         }
@@ -860,7 +863,10 @@ impl Runner {
                     // The next round leaving any of these unreviewed again counts too.
                     item.local_unreviewed.clone_from(&unreviewed);
                     item.local_unreviewed_by = Some(reviewer.clone());
-                    item.phase = self.after_round(review, now);
+                    if !item.reviewers_blank.contains(&reviewer) {
+                        item.reviewers_blank.push(reviewer.clone());
+                    }
+                    item.phase = self.after_round_in(item, review, now);
                     StepReport::LocalRoundFailed {
                         issue,
                         pull_request: number,

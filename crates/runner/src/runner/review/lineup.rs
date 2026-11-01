@@ -158,7 +158,8 @@ impl Runner {
     }
 
     // How many reviewers have read in `review`'s pass: those whose round ran,
-    // but a bot passed over or a reviewer that kept failing.
+    // but a bot passed over, a reviewer that kept failing, or a local round
+    // that reviewed no file.
     fn reads(&self, review: &Review) -> u32 {
         self.current().map_or(0, |item| self.reads_in(item, review))
     }
@@ -170,7 +171,9 @@ impl Runner {
     fn readers(&self, item: &WorkItem, review: &Review) -> Vec<AgentName> {
         let counts = |name: &AgentName| {
             let passed_over = item.bots_skipped.iter().any(|s| s.reviewer() == name);
-            !passed_over && !item.reviewers_skipped.contains(name)
+            !passed_over
+                && !item.reviewers_skipped.contains(name)
+                && !item.reviewers_blank.contains(name)
         };
         let mut ran = self.ran_of(review);
         ran.retain(counts);

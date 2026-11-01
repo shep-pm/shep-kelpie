@@ -5,10 +5,11 @@
 use std::sync::Mutex;
 
 use crate::lease::LeaseKind;
-use crate::ports::{Checks, Timestamp};
+use crate::ports::{AgentError, CLEAN, Checks, Timestamp, parse_findings};
 use crate::runner::{Runner, StepReport, step};
+use crate::settings::Harness;
 use crate::test::ticket;
-use crate::test::{Rig, Scripted};
+use crate::test::{Rig, Scripted, ScriptedRound};
 
 const SHORT: &str = "1 of 2 reviewers read it: cubic was passed over: its window is closed";
 
@@ -128,4 +129,49 @@ fn a_list_that_leaves_the_pass_short_is_noted_and_not_marked() {
         }
         assert_eq!(rig.forge.merges().len(), 1, "{listed:?}: auto merges it");
     }
+}
+
+#[test]
+fn a_local_round_that_reviewed_no_file_does_not_count_as_a_read() {
+    let rig = Rig::new("koji");
+    let runner = at_review(&rig, &["qwen", "claude"], 2);
+    let unreachable = "LOW|work.txt:0|not reviewed: curl: (7) Failed to connect|raw kept\n";
+    rig.reviewer
+        .script([ScriptedRound::Findings(parse_findings(unreachable))]);
+    rig.claude.script([Scripted::Text(CLEAN)]);
+    let reports = through_review(&rig, &runner);
+    assert_eq!(
+        reports.last(),
+        Some(&StepReport::Unreviewed {
+            issue: ticket(7),
+            pull_request: 71,
+            reason: "1 of 2 reviewers read it: qwen reviewed no file".into(),
+        })
+    );
+}
+
+#[test]
+fn a_reviewer_passed_over_in_one_pass_counts_when_it_reads_the_next() {
+    let rig = Rig::new("koji");
+    let runner = at_review(&rig, &["qwen", "claude"], 2);
+    let outage = || Scripted::Fail(AgentError::TimedOut(Harness::ClaudeCode));
+    rig.claude.script([outage(), outage(), outage()]);
+    let reports = through_review(&rig, &runner);
+    assert!(unreviewed(&reports), "claude kept failing: {reports:#?}");
+
+    green(&rig);
+    let Some(StepReport::Ruling { id, .. }) = rig.verdict(&runner) else {
+        panic!("no merge ruling");
+    };
+    rig.ask(&runner, "rule", Some(&format!("{id} rework fix it")));
+    rig.claude.script([Scripted::Push("fix.txt", "fixed\n")]);
+    step(&runner).unwrap(); // the noted turn: pushes, and a pass begins
+    rig.claude.script([Scripted::Text(CLEAN)]);
+    let reports = through_review(&rig, &runner);
+    assert!(
+        !unreviewed(&reports),
+        "both read the second pass: {reports:#?}"
+    );
+    let item = &rig.ask(&runner, "status", None)["work_item"];
+    assert_eq!(item.get("unreviewed"), None);
 }
