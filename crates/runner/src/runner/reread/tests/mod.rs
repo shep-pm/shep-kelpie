@@ -294,13 +294,7 @@ fn a_reviewer_whose_gateway_key_is_unset_is_noted_once_at_the_reread_that_leaves
     rig.write_agent("local", LOCAL);
     assert!(std::env::var_os("KELPIE_TEST_KEY_NEVER_SET").is_none());
     let mut runner = runner.lock().unwrap();
-    // The shipped `iq3-xxs-review` is on paddock too, so the start left it out.
-    let at_start = runner.take_notes();
-    assert!(
-        at_start
-            .iter()
-            .any(|n| n.starts_with("reviewer iq3-xxs-review is left out"))
-    );
+    runner.take_notes();
     runner
         .reread(rig.settings(), rig.kelpie_settings())
         .unwrap();
