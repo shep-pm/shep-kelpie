@@ -270,11 +270,19 @@ fn the_candidates_are_every_reviewer_file_allow_holds_but_the_security_reviewer(
 }
 
 #[test]
-fn an_unset_security_reviewer_leaves_the_shipped_one_among_the_candidates() {
+fn an_unset_security_reviewer_keeps_the_shipped_one_out_of_the_candidates() {
     let (mut settings, home) = project("", None);
     settings.contributions.security_reviewer = None;
     let lineup = settings.lineup(&book(), &Gateways::default(), home.path());
-    assert!(names(&lineup).contains(&"security-reviewer"));
+    assert!(!names(&lineup).contains(&"security-reviewer"));
+    assert_eq!(
+        names(&lineup),
+        names(
+            &project("", None)
+                .0
+                .lineup(&book(), &Gateways::default(), home.path())
+        )
+    );
 }
 
 #[test]

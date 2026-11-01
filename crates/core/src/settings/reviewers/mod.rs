@@ -1,7 +1,7 @@
 //! The reviewers a review pass may pick from, by name
 //!
 //! A project names no reviewers. Every reviewer file `agents.allow` holds is a
-//! candidate, but the one `contributions.security_reviewer` names. The agent
+//! candidate, but the security reviewer (see [`Settings::lineup`]). The agent
 //! board picks each round's reviewer. A project naming no agent is held to none
 //! of its candidates, so one `gateways` cannot route is left out; one naming the
 //! agents it may use keeps each, and a start, a reread and `doctor` refuse one
@@ -13,7 +13,7 @@ use std::path::Path;
 
 use super::agents::{Allow, find, refusal_reason, unset};
 use super::{AgentName, Gateways, NonBlank, Settings, SettingsError};
-use crate::agents::{Agent, Agents, Role, Runs};
+use crate::agents::{Agent, Agents, Role, Runs, SECURITY_REVIEWER};
 use crate::review_bot::BotReviewer;
 
 /// Where a project lists the reviewers a contribution reads, as a refusal names it
@@ -60,11 +60,11 @@ impl Settings {
     /// The reviewers a pass may pick from
     ///
     /// Every agent file whose role is `reviewer` that `agents.allow` holds, but
-    /// the agent `contributions.security_reviewer` names. Their order does not
-    /// matter. Agents come from `agents`, and `~/` in a command expands against
-    /// `home`. A project that names no agent in `agents.allow` takes only the
-    /// candidates `gateways` can route, since it asked for none of them and a
-    /// round passes over one it cannot run.
+    /// the security reviewer: the agent `contributions.security_reviewer` names,
+    /// or kelpie's own `security-reviewer` where it names none. Their order does
+    /// not matter. Agents come from `agents`, and `~/` in a command expands
+    /// against `home`. A project that names no agent in `agents.allow` takes only
+    /// the candidates `gateways` can route, as a round passes over one it cannot run.
     pub fn lineup(&self, agents: &Agents, gateways: &Gateways, home: &Path) -> Vec<ListedReviewer> {
         self.candidates(agents, gateways, home, false)
     }
@@ -209,16 +209,18 @@ impl Settings {
     }
 }
 
-// Every reviewer file `allow` holds, but the one `security` names. An absent or
-// empty `allow` holds every agent with a file.
+// Every reviewer file `allow` holds, but the one `security` names, or kelpie's own
+// security reviewer where it names none. An absent or empty `allow` holds every
+// agent with a file.
 fn held<'a>(
     allow: Option<&'a Allow>,
     security: Option<&'a AgentName>,
     agents: &'a Agents,
 ) -> impl Iterator<Item = (&'a AgentName, &'a Agent)> + 'a {
+    let security = security.map_or(SECURITY_REVIEWER, AgentName::as_str);
     (agents.iter()).filter(move |(name, agent)| {
         agent.role == Role::Reviewer
-            && Some(*name) != security
+            && name.as_str() != security
             && allow.is_none_or(|allow| allow.holds(name))
     })
 }
