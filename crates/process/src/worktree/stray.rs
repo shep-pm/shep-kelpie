@@ -50,8 +50,15 @@ pub(super) fn end_running_from(build: &Path) {
     let mut left = found;
     while Instant::now() < deadline {
         std::thread::sleep(POLL);
-        let Ok(now) = running_from(&prefixes) else {
-            return;
+        let now = match running_from(&prefixes) {
+            Ok(now) => now,
+            Err(why) => {
+                eprintln!(
+                    "cannot tell which processes running from {} ended, since {why}: killing the rest",
+                    build.display()
+                );
+                break;
+            }
         };
         left.retain(|pid| now.contains(pid));
         if left.is_empty() {

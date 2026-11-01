@@ -79,14 +79,18 @@ fn a_link_in_the_build_folder_leaves_what_it_points_at_alone() {
     assert_eq!(mode, 0o555);
 }
 
-// Sleeps for a minute when a copy of this test binary runs it with
-// `SLEEPER` set, and does nothing in a normal run. System binaries cannot
-// be copied and run on macOS, so the copy that stands for a test binary in
-// a build folder is this one.
+// What the sleeper prints once it is running.
+#[cfg(unix)]
+const SLEEPER_STARTED: &str = "sleeper started";
+
+// Says it started and sleeps for a minute when a copy of this test binary runs
+// it with `SLEEPER` set, and does nothing in a normal run. System binaries
+// cannot be copied and run on macOS, so the copy is of this one.
 #[cfg(unix)]
 #[test]
 fn sleeper_for_the_build_removal_tests() {
     if std::env::var_os("SLEEPER").is_some() {
+        println!("{SLEEPER_STARTED}");
         std::thread::sleep(std::time::Duration::from_secs(60));
     }
 }
@@ -98,15 +102,27 @@ fn sleep_from(folder: &Path, shell_prefix: &str) -> std::process::Child {
     std::fs::create_dir_all(folder).unwrap();
     let copy = folder.join("sleeper");
     std::fs::copy(std::env::current_exe().unwrap(), &copy).unwrap();
-    std::process::Command::new("sh")
+    let mut child = std::process::Command::new("sh")
         .arg("-c")
         .arg(format!(
-            "{shell_prefix}exec \"$0\" --exact worktree::tests::sleeper_for_the_build_removal_tests"
+            "{shell_prefix}exec \"$0\" --exact --nocapture worktree::tests::sleeper_for_the_build_removal_tests"
         ))
         .arg(&copy)
         .env("SLEEPER", "1")
+        .stdout(std::process::Stdio::piped())
         .spawn()
-        .unwrap()
+        .unwrap();
+    // Until the copy says so, it may still be the shell, which no folder holds.
+    let mut lines = std::io::BufReader::new(child.stdout.as_mut().unwrap());
+    let mut line = String::new();
+    while line.trim() != SLEEPER_STARTED {
+        line.clear();
+        assert_ne!(
+            std::io::BufRead::read_line(&mut lines, &mut line).unwrap(),
+            0
+        );
+    }
+    child
 }
 
 // Waits for the child to end, which a running `sleep 60` does not in time.
