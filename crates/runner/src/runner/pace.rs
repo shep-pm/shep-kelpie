@@ -7,7 +7,7 @@
 //! finds a hold is trusted for [`RECHECK_SECS`] or until the hold ends. One
 //! that finds no hold is never reused past its step, which reads it with the
 //! lock let go. With `pacing.enabled` off the reading still runs for `status`,
-//! and neither limit holds anything.
+//! and neither limit holds anything but a spent week, which fails every turn.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -19,7 +19,7 @@ use super::report::{Begin, StepReport};
 use super::turn::reads::Job;
 use crate::agents::Runs;
 use crate::board::Skip;
-use crate::pacer::{Assessment, Hold, RECHECK_SECS, Reading, Scope, assess, named};
+use crate::pacer::{Assessment, Hold, RECHECK_SECS, Reading, Scope, assess, named, spent_week};
 use crate::ports::{Meter, PaddockHolder, Timestamp};
 use crate::settings::{Account, AgentHarness, AgentName, GatewayName, Limit, ModelHost};
 use crate::state::StateError;
@@ -180,7 +180,8 @@ impl Runner {
         }
         if !self.settings.pacing.enabled {
             assessment.allowance = None;
-            assessment.window = None;
+            assessment.window = (assessment.reading.as_ref())
+                .and_then(|reading| spent_week(account, &reading.week));
         }
         let hold = assessment.hold(scope).cloned();
         self.pacing.insert(account, (now, assessment));
