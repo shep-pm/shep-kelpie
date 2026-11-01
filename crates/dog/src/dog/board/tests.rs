@@ -6,7 +6,8 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::dog::availability::{Availability, Readers, Sources, read};
-use crate::ports::{Meter, Timestamp};
+use crate::lease::door::PickAsk;
+use crate::ports::{Meter, Timestamp, Utilization};
 use crate::settings::{Account, Gateway, GatewayName, Gateways};
 use crate::test::{EPOCH, FakeClock, FakeMeter, LeaseReads, utilization, write_in};
 
@@ -96,13 +97,35 @@ fn a_ledger_that_cannot_be_looked_at_keeps_its_last_lines() {
 // What the dog has read once of `agents`' models and plans, with Claude's
 // plan at `session` percent of its 5-hour window.
 async fn seen(agents: &Agents, gateways: &Gateways, session: u32) -> Availability {
+    seen_plans(
+        agents,
+        gateways,
+        utilization(10, session),
+        utilization(0, 0),
+    )
+    .await
+}
+
+// What the dog has read once of `agents`' models and the Claude and Codex plans.
+async fn seen_plans(
+    agents: &Agents,
+    gateways: &Gateways,
+    claude: Utilization,
+    codex: Utilization,
+) -> Availability {
     let sources = Sources::of(agents, gateways);
     let shown = Mutex::new(Availability::new(&sources));
-    let claude = FakeMeter::idle();
-    claude.set(utilization(10, session));
+    let meter = |usage| {
+        let meter = FakeMeter::idle();
+        meter.set(usage);
+        Arc::new(meter) as Arc<dyn Meter>
+    };
     let readers = Readers {
         leases: Arc::new(LeaseReads::default()),
-        meters: BTreeMap::from([(Account::Claude, Arc::new(claude) as Arc<dyn Meter>)]),
+        meters: BTreeMap::from([
+            (Account::Claude, meter(claude)),
+            (Account::Codex, meter(codex)),
+        ]),
         clock: Arc::new(FakeClock::at(EPOCH)),
     };
     read(&shown, &sources, &readers).await;
@@ -124,6 +147,52 @@ async fn a_plan_past_half_its_window_waits_until_the_window_resets() {
         "its window resets in 5 hours"
     );
     assert_eq!(under["sonnet-high"]["wait"], 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_plan_whose_week_is_spent_waits_until_the_week_resets() {
+    let dir = tempfile::tempdir().unwrap();
+    let on = |usage: &str| {
+        format!(
+            "---\nrole: implementer\nharness: stand-in\nmodel: m\neffort: low\n\
+             usage: {usage}\n---\n"
+        )
+    };
+    write_in(dir.path(), "on-claude.md", &on("claude"));
+    write_in(dir.path(), "on-codex.md", &on("codex"));
+    let agents = Agents::load(dir.path()).unwrap();
+    let now = Timestamp(EPOCH);
+    let week_resets = 7 * 86_400;
+    // The week is spent on Claude's plan, with the 5-hour window nearly empty
+    let shown = seen_plans(
+        &agents,
+        &Gateways::default(),
+        utilization(100, 19),
+        utilization(40, 19),
+    )
+    .await;
+    let view = Board::new(&agents).view();
+
+    let status = view.status(&shown, now);
+    let ask = PickAsk {
+        kind: None,
+        tier: None,
+        pin: None,
+        slack: None,
+        agents: ["on-claude", "on-codex"].map(AgentName::kelpies).to_vec(),
+        leave_out: vec![],
+    };
+    let picks = pick::answer(&view, &shown, &ask, now);
+
+    assert_eq!(status["on-claude"]["wait"], week_resets);
+    assert_eq!(status["on-codex"]["wait"], 0);
+    let order: Vec<_> = picks.iter().map(|p| p.agent.as_str()).collect();
+    assert_eq!(
+        order,
+        ["on-codex", "on-claude"],
+        "the spent account goes last"
+    );
+    assert_eq!(picks[1].wait, week_resets);
 }
 
 #[tokio::test(start_paused = true)]

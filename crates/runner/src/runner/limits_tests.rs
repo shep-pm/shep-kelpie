@@ -312,6 +312,70 @@ fn a_project_all_on_codex_paces_on_codexs_own_windows() {
 }
 
 #[test]
+fn a_codex_week_at_100_holds_the_turn_until_the_week_resets() {
+    let (rig, runner) = named("shep", AS_IS);
+    let runner = reopened(&rig, runner, || rig.codex_day_began(0));
+    rig.forge.label(7, "agent:codex!");
+    rig.ask(&runner, "add", Some("7"));
+    rig.codex_meter.set(Rig::utilization(100, 19));
+
+    let report = step(&runner).unwrap();
+    let Some(StepReport::Held {
+        kind,
+        reason,
+        until,
+    }) = report
+    else {
+        panic!("expected a hold, got {report:?}");
+    };
+    assert_eq!(
+        (kind, until),
+        (HoldKind::Window, Timestamp(Rig::EPOCH + 7 * Rig::DAY))
+    );
+    assert!(reason.starts_with("Codex's week is at 100%"), "{reason}");
+    assert_eq!(rig.claude.calls(), []);
+
+    // The week is still spent at the recheck, so the hold stands
+    rig.clock.advance(RECHECK_SECS);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Held { .. })
+    ));
+    assert_eq!(rig.claude.calls(), []);
+
+    rig.clock.advance(7 * Rig::DAY);
+    let mut next_week = Rig::utilization(2, 0);
+    next_week.week.resets_at = Timestamp(Rig::EPOCH + 14 * Rig::DAY);
+    rig.codex_meter.set(next_week);
+    rig.claude.script([Scripted::Say("done")]);
+    step(&runner).unwrap();
+    assert_eq!(rig.claude.calls().len(), 1);
+}
+
+#[test]
+fn a_spent_week_holds_with_pacing_off() {
+    for (week, session, starts) in [(100, 0, false), (30, 60, true)] {
+        let (rig, runner) = named("koji", AS_IS);
+        let runner = reopened(&rig, runner, || {
+            rig.edit_settings(|s| {
+                let on = "[app.dogs.kelpie.pacing]\nenabled = true";
+                assert!(s.contains(on), "the example's pacing moved");
+                s.replace(on, "[app.dogs.kelpie.pacing]\nenabled = false")
+            });
+        });
+        rig.ask(&runner, "add", Some("7"));
+        rig.meter.set(Rig::utilization(week, session));
+        rig.claude.script([Scripted::Say("done")]);
+
+        let report = step(&runner).unwrap();
+
+        let held = matches!(report, Some(StepReport::Held { .. }));
+        assert_eq!(held, !starts, "week {week}%, window {session}%: {report:?}");
+        assert_eq!(rig.claude.calls().len(), usize::from(starts));
+    }
+}
+
+#[test]
 fn each_account_keeps_its_own_day() {
     let (rig, runner) = named("golbat", ALL_CODEX);
     rig.forge.list_ready(7, false);
