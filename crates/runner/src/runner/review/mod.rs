@@ -46,6 +46,8 @@ mod second_look;
 #[cfg(test)]
 mod several;
 #[cfg(test)]
+mod short;
+#[cfg(test)]
 mod unread;
 
 use std::path::Path;
@@ -97,7 +99,10 @@ impl Runner {
                 bots_only: review.bots_only,
                 ..Review::first()
             };
-        let left = !item.threads_sent.is_empty() || !item.bots_skipped.is_empty();
+        let left = !item.threads_sent.is_empty()
+            || !item.bots_skipped.is_empty()
+            || !item.reviewers_skipped.is_empty()
+            || !item.reviewers_blank.is_empty();
         if fresh && (left || item.late_from.is_some()) {
             self.update(WorkItem::new_pass)?;
         }
@@ -266,28 +271,15 @@ impl Runner {
         }
     }
 
-    // The last reviewer is done, so the work item goes on to CI. A pass no
-    // reviewer read because one was down or failing marks the work item
-    // unreviewed, which the merge ruling names and which `auto` will not
-    // merge. One with nobody to read it, by the project's own list, is noted.
+    // The last reviewer is done, so the work item goes on to CI. A pass that
+    // fewer than `reviews.need` reviewers read, because one was down or failing,
+    // marks the work item unreviewed, which the merge ruling names and `auto`
+    // will not merge. One the project's own list left short is only noted.
     fn pass_ended(&mut self, review: &Review, unranked: &[AgentName]) -> Result<Begin, StateError> {
         let since = self.ports.clock.now();
         let item = self.current().expect("a pass is a work item's");
         let (issue, number) = (item.issue, item.pull_request);
-        let unread = review.unread.then(|| self.unread(item, review));
-        // Candidates that could run, none ranked, are not a choice of the project's.
-        let unread = match (unread, unranked.is_empty()) {
-            (unread, true) => unread,
-            (None, false) => None,
-            (unread, false) => {
-                let names: Vec<_> = unranked.iter().map(ToString::to_string).collect();
-                let board = format!("the agent board ranked none of {}", names.join(", "));
-                Some(Some(match unread.flatten() {
-                    Some(missed) => format!("{missed}, and {board}"),
-                    None => board,
-                }))
-            }
-        };
+        let unread = self.pass_unread(item, review, unranked);
         // Nobody to read it, by the project's own list, sends it unread on purpose.
         let unread_by_choice = match &unread {
             Some(None) => match self.head_on_origin() {
@@ -830,7 +822,7 @@ impl Runner {
                 if !item.reviewers_skipped.contains(&reviewer) {
                     item.reviewers_skipped.push(reviewer.clone());
                 }
-                item.phase = self.after_round(review, now);
+                item.phase = self.after_round_in(item, review, now);
                 StepReport::ReviewerSkipped {
                     issue,
                     pull_request: number,
@@ -871,7 +863,10 @@ impl Runner {
                     // The next round leaving any of these unreviewed again counts too.
                     item.local_unreviewed.clone_from(&unreviewed);
                     item.local_unreviewed_by = Some(reviewer.clone());
-                    item.phase = self.after_round(review, now);
+                    if !item.reviewers_blank.contains(&reviewer) {
+                        item.reviewers_blank.push(reviewer.clone());
+                    }
+                    item.phase = self.after_round_in(item, review, now);
                     StepReport::LocalRoundFailed {
                         issue,
                         pull_request: number,

@@ -25,7 +25,8 @@ fn status(rig: &Rig, runner: &Mutex<Runner>) -> serde_json::Value {
 }
 
 // cubic, last after qwen and Claude, refuses its summon and is passed over,
-// so the pass ends and the pull request goes to CI on the returned head.
+// so the pass ends, two of three having read, and the pull request goes to
+// CI on the returned head.
 pub(in crate::runner) fn passed_over(rig: &Rig) -> (Mutex<Runner>, String) {
     let (runner, head) = reviewed(rig);
     step(&runner).unwrap(); // marks the draft ready
@@ -35,6 +36,10 @@ pub(in crate::runner) fn passed_over(rig: &Rig) -> (Mutex<Runner>, String) {
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::ReviewerSkipped { round: 3, .. })
+    ));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Unreviewed { .. })
     ));
     // The pass is over, so CI is what the work item waits at.
     rig.ci_on_now(&runner);
@@ -465,6 +470,10 @@ fn a_bot_read_does_not_cost_the_merge_ruling_the_count_of_the_disputes_posted() 
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::ReviewerSkipped { .. })
+    ));
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Unreviewed { .. })
     ));
     rig.ci_on_now(&runner);
     rig.forge.set_checks(&head, Checks::Passed);

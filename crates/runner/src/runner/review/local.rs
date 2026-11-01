@@ -317,7 +317,10 @@ fn qwen() -> AgentName {
     AgentName::try_from("qwen".to_owned()).unwrap()
 }
 
+// One read is enough here: a local round that reviewed no file is no read, so
+// the next reviewer's makes the pass.
 fn at_round_one(rig: &Rig) -> Mutex<Runner> {
+    rig.reviews_need(Some(1));
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
@@ -523,7 +526,8 @@ fn a_file_skipped_for_its_size_stays_a_finding_and_is_not_unreviewed() {
             held: 0,
         })
     );
-    assert_eq!(phase(&rig, &runner)["ran"], json!(["qwen"]));
+    // The round read what it could, so one read ends the pass.
+    assert_eq!(phase(&rig, &runner)["state"], "ci");
     assert_eq!(rig.claude.calls().len(), 1, "no fix turn");
 }
 

@@ -213,6 +213,7 @@ fn a_bot_seen_reviewing_comes_off_the_list() {
     rig.clock.advance(ANSWER_WAIT);
     assert_eq!(step(&runner).unwrap(), skipped(NOT_INSTALLED));
     assert_eq!(left_out(&rig), ["coderabbit"]);
+    step(&runner).unwrap(); // the pass ends short of its reads, marked unreviewed
 
     // It reviews the head anyway, and its late round reads it.
     rig.ci_on_now(&runner);

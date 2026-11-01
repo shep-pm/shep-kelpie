@@ -721,6 +721,12 @@ fn a_reviewer_that_fails_after_being_shown_the_disputes_leaves_them_for_the_pull
     for _ in 0..3 {
         step(&runner).unwrap(); // claude's round fails, and is passed over on the third
     }
+    // The bots are not listed, so claude was the pass's last reviewer.
+    rig.reviewers(&["qwen", "claude"]);
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
+    let (settings, kelpie) = (rig.settings(), rig.kelpie_settings());
+    runner.lock().unwrap().reread(settings, kelpie).unwrap();
+    step(&runner).unwrap(); // one of two read, so the pass ends marked unreviewed
 
     let question = merge_question(&rig, &runner);
 

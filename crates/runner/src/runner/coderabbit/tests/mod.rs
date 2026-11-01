@@ -431,6 +431,16 @@ fn skipped(reason: &str) -> Option<StepReport> {
     })
 }
 
+// The step after a bot is passed over with reads short of `reviews.need`: the
+// pass ends, marked unreviewed.
+pub(super) fn ends_short(runner: &Mutex<Runner>) {
+    let report = step(runner).unwrap();
+    assert!(
+        matches!(report, Some(StepReport::Unreviewed { .. })),
+        "{report:?}"
+    );
+}
+
 const FAR_OFF: &str = "its window is closed";
 
 #[test]
@@ -440,6 +450,7 @@ fn a_refusal_that_opens_more_than_an_hour_on_passes_the_bot_over_for_the_pass() 
     rig.forge.coderabbit.refuse(71, refused_at, 61);
     rig.clock.advance(30);
     assert_eq!(step(&runner).unwrap(), skipped(FAR_OFF));
+    ends_short(&runner);
     let opens = refused_at + 61 * 60;
     let told = rig.leases.told();
     assert!(told.contains(&Told::Window(WindowFact::Opens, opens)));
@@ -452,16 +463,17 @@ fn a_refusal_that_opens_more_than_an_hour_on_passes_the_bot_over_for_the_pass() 
     );
     assert_eq!(status["work_item"]["phase"]["state"], "ci");
 
-    // qwen and claude read it, so the merge ruling marks nothing unread.
+    // qwen and claude read it, two of the three needed, and the ruling says so.
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
         rig.verdict(&runner),
         Some(StepReport::Ruling { id, .. }) if id == ticket(71)
     ));
     let status = rig.ask(&runner, "status", None);
+    let short = "2 of 3 reviewers read it: coderabbit was passed over: its window is closed";
     assert_eq!(
         status["rulings"][0]["kind"],
-        json!({ "kind": "merge", "head": head })
+        json!({ "kind": "merge", "head": head, "unreviewed": short })
     );
 }
 
@@ -473,6 +485,7 @@ fn a_window_the_dogs_book_opens_more_than_an_hour_on_is_skipped_unasked() {
     assert_eq!(rig.leases.told(), [], "no lease asked for");
     assert_eq!(labels(&rig), []);
     assert!(rig.forge.readied().is_empty(), "nothing to mark ready for");
+    ends_short(&runner);
     assert_eq!(phase(&rig, &runner)["state"], "ci");
 }
 
@@ -511,6 +524,7 @@ fn a_summon_nobody_answers_is_counted_spent_and_then_passed_over() {
         &head[..7]
     );
     assert_eq!(step(&runner).unwrap(), skipped(&silent));
+    ends_short(&runner);
     assert_eq!(labels(&rig), [on(), off(), on(), off()]);
     let status = rig.ask(&runner, "status", None);
     assert_eq!(
