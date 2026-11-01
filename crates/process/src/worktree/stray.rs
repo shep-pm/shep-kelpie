@@ -119,31 +119,31 @@ mod tests {
 
     const LISTING: &str = "\
     1 /sbin/launchd
-  412 /Users/x/builds/7/debug/deps/shep_kelpie-0a1b2c --test-threads=1
-  413 /Users/x/builds/70/debug/deps/other-9f
-  414 cargo test --target-dir /Users/x/builds/7
-  415 /Users/x/builds/7
-  416 /Users/x/builds/7/release/app
+  412 /Users/me/builds/7/debug/deps/shep_kelpie-0a1b2c --test-threads=1
+  413 /Users/me/builds/70/debug/deps/other-9f
+  414 cargo test --target-dir /Users/me/builds/7
+  415 /Users/me/builds/7
+  416 /Users/me/builds/7/release/app
   417 (sleeper)
 ";
 
     #[test]
     fn a_listing_yields_the_programs_inside_the_folder() {
-        let prefixes = ["/Users/x/builds/7/".to_owned()];
+        let prefixes = ["/Users/me/builds/7/".to_owned()];
         assert_eq!(inside(LISTING, &prefixes, 999), [412, 416]);
     }
 
     #[test]
     fn the_calling_process_is_never_picked() {
-        let prefixes = ["/Users/x/builds/7/".to_owned()];
+        let prefixes = ["/Users/me/builds/7/".to_owned()];
         assert_eq!(inside(LISTING, &prefixes, 412), [416]);
     }
 
     #[test]
     fn a_folder_known_by_two_paths_picks_the_programs_of_both() {
         let prefixes = [
-            "/Users/x/builds/7/".to_owned(),
-            "/Users/x/builds/70/".to_owned(),
+            "/Users/me/builds/7/".to_owned(),
+            "/Users/me/builds/70/".to_owned(),
         ];
         assert_eq!(inside(LISTING, &prefixes, 999), [412, 413, 416]);
     }
