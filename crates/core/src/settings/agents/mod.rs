@@ -534,7 +534,11 @@ impl Settings {
     /// `agents.allow` leaves it out.
     pub fn representative(&self, agents: &Agents) -> Result<ExpertAgent, SettingsError> {
         let at = "agents.representative";
-        let name = self.agents.representative.as_ref().ok_or_else(|| unset(at, Role::Representative))?;
+        let name = self
+            .agents
+            .representative
+            .as_ref()
+            .ok_or_else(|| unset(at, Role::Representative))?;
         let agent = find(
             agents,
             name,

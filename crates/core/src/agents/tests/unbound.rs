@@ -60,11 +60,7 @@ fn a_stub_that_adds_harness_model_and_effort_loads_with_the_baselines_prompt() {
 #[test]
 fn the_review_bots_and_the_codex_agent_still_load_whole() {
     let agents = Agents::load(tempfile::tempdir().unwrap().path()).unwrap();
-    for whole in [
-        "coderabbit",
-        "cubic",
-        "codex",
-    ] {
+    for whole in ["coderabbit", "cubic", "codex"] {
         assert!(agents.get(&name(whole)).is_some(), "{whole}");
     }
     assert!(agents.unbound().is_empty());

@@ -525,9 +525,7 @@ fn an_old_reviewers_list_loads_and_is_read_by_nothing() {
     let old = project("reviewers = [\"opus-high\", \"fable\", \"sonnet-high\"]\n");
     assert_eq!(old.agents.gone_keys(), ["agents.reviewers"]);
     assert_eq!(lineup(&old), EVERY_REVIEWER, "the list names no reviewer");
-    let default = old
-        .contribution_lineup(&book(), Path::new("/h"))
-        .unwrap();
+    let default = old.contribution_lineup(&book(), Path::new("/h")).unwrap();
     assert_eq!(
         default.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
         ["defect-hunter-lite"],
@@ -544,8 +542,7 @@ fn a_reviewer_or_a_contributions_default_allow_leaves_out_is_refused() {
         Vec::<String>::new(),
         "a pass picks only from the reviewers allowed"
     );
-    let err =
-        (only.contribution_lineup(&book(), Path::new("/h"))).unwrap_err();
+    let err = (only.contribution_lineup(&book(), Path::new("/h"))).unwrap_err();
     assert_eq!(
         err.to_string(),
         "setting `agents`: `contributions.reviewers` names defect-hunter-lite, which \

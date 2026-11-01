@@ -313,7 +313,11 @@ impl Settings {
     /// leaves it out.
     pub fn triager(&self, agents: &Agents) -> Result<ExpertAgent, SettingsError> {
         let at = "triage.agent";
-        let name = self.triage.agent.as_ref().ok_or_else(|| unset(at, Role::Triager))?;
+        let name = self
+            .triage
+            .agent
+            .as_ref()
+            .ok_or_else(|| unset(at, Role::Triager))?;
         let agent = find(
             agents,
             name,

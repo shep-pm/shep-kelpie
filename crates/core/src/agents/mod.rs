@@ -66,7 +66,10 @@ pub const TRIAGER: &str = "triager";
 // file reaches with `extends: kelpie:<name>`. A project lists none of the review
 // bots unless told to.
 const DEFAULTS: [(&str, &str); 3] = [
-    ("coderabbit", include_str!("../../../../agents/coderabbit.md")),
+    (
+        "coderabbit",
+        include_str!("../../../../agents/coderabbit.md"),
+    ),
     ("cubic", include_str!("../../../../agents/cubic.md")),
     ("codex", include_str!("../../../../agents/codex.md")),
 ];

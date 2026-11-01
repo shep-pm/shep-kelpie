@@ -74,9 +74,7 @@ fn names(lineup: &[ListedReviewer]) -> Vec<&str> {
 #[test]
 fn a_contributions_list_runs_its_reviewers_in_order_each_once() {
     let (settings, home) = contributing(r#"["opus", "qwen", "gpu-box", "opus"]"#);
-    let lineup = settings
-        .contribution_lineup(&book(), home.path())
-        .unwrap();
+    let lineup = settings.contribution_lineup(&book(), home.path()).unwrap();
     assert_eq!(names(&lineup), ["opus", "qwen", "gpu-box"]);
 
     let opus = &lineup[0];
@@ -103,9 +101,7 @@ fn a_contributions_list_runs_its_reviewers_in_order_each_once() {
 #[test]
 fn an_empty_contributions_list_runs_no_review() {
     let (settings, home) = contributing("[]");
-    let lineup = settings
-        .contribution_lineup(&book(), home.path())
-        .unwrap();
+    let lineup = settings.contribution_lineup(&book(), home.path()).unwrap();
     assert_eq!(names(&lineup), Vec::<&str>::new());
 }
 
@@ -179,9 +175,7 @@ fn a_bot_that_reviews_on_ready_is_refused_after_another_bot_only_in_a_contributi
          which draws Codex's own review outside its lease"
     );
     let (settings, home) = contributing(r#"["codex", "defect-hunter", "coderabbit"]"#);
-    let lineup = settings
-        .contribution_lineup(&book, home.path())
-        .unwrap();
+    let lineup = settings.contribution_lineup(&book, home.path()).unwrap();
     assert_eq!(names(&lineup), ["codex", "defect-hunter", "coderabbit"]);
 
     // A pass's candidates are kelpie's own files in their own order, which no
@@ -320,8 +314,7 @@ fn a_contribution_with_no_list_gets_the_default_lineup() {
     assert_eq!(names(&lineup), ["iq3-xxs-review", "defect-hunter-lite"]);
 
     let (settings, home) = project("", None);
-    let lineup =
-        (settings.contribution_lineup(&book(), home.path())).unwrap();
+    let lineup = (settings.contribution_lineup(&book(), home.path())).unwrap();
     assert_eq!(
         names(&lineup),
         ["defect-hunter-lite"],

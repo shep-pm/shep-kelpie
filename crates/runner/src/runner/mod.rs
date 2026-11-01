@@ -499,13 +499,8 @@ impl Runner {
         if let Some(refused) = settings.rulings.refusal() {
             return Err(refused.into());
         }
-        let contribution_lineup = open_checks::contributions(
-            &settings,
-            ports.voice.as_ref(),
-            &remote,
-            &book,
-            home,
-        )?;
+        let contribution_lineup =
+            open_checks::contributions(&settings, ports.voice.as_ref(), &remote, &book, home)?;
         open_checks::triage(&settings, ports.voice.as_ref(), &remote, &book)?;
         // What the project's `publish` hooks judge is every text bound for the forge.
         let metrics = Arc::new(crate::metrics::Recorder::new(Arc::clone(&ports.metrics)));

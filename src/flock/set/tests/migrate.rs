@@ -427,9 +427,7 @@ async fn a_migrated_project_still_runs_the_reviewers_it_named_on_a_contribution(
     let table = scene.table();
     let settings = Settings::from_table(&table, "koji", &home, &paths.folder).unwrap();
     let book = Agents::load(&home.join("kelpie").join("agents")).unwrap();
-    let lineup = settings
-        .contribution_lineup(&book, &home)
-        .unwrap();
+    let lineup = settings.contribution_lineup(&book, &home).unwrap();
     assert_eq!(
         lineup.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
         ["standards"],
