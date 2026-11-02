@@ -7,7 +7,7 @@ use super::marker::MARKER;
 use super::pick_tests::MAINTAINER;
 use super::ready_tests::filed;
 use super::research_tests::{WORDS, calls, moves, reply, triage, under};
-use crate::ports::{Role, Session};
+use crate::ports::{AgentError, Role, Session};
 use crate::runner::step;
 use crate::test::Scripted;
 
@@ -121,4 +121,20 @@ fn an_outside_issue_is_not_repaired_since_kelpie_never_rewrites_it() {
     assert_eq!(step(&runner).unwrap(), None);
 
     assert_eq!(calls(&rig, Role::Triager).len(), 1);
+}
+
+#[test]
+fn a_runner_stopping_during_the_repair_posts_nothing_and_leaves_the_pass_for_the_next_poll() {
+    let (rig, runner) = filed("maintainer", MAINTAINER);
+    rig.claude.script_for(
+        Role::Triager,
+        [drafted(WRONG_HEADINGS), Scripted::Fail(AgentError::Stopped)],
+    );
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(calls(&rig, Role::Triager).len(), 2);
+    assert_eq!(rig.github.comments(), []);
+    assert_eq!(rig.github.issue_edits(), []);
+    assert_eq!(moves(&rig), Vec::<String>::new());
 }

@@ -341,8 +341,10 @@ fn researched(
             match reasons.is_empty() {
                 true => (ran, found),
                 false => match redrafted(last, &reasons, call, agents, ending, &read) {
-                    Some((second, draft)) => (Ok(second), Some(Ok(draft))),
-                    None => (ran, found),
+                    Ok(Some((second, draft))) => (Ok(second), Some(Ok(draft))),
+                    Ok(None) => (ran, found),
+                    // A runner stopping asks the pass again at the next poll
+                    Err(stopped) => (Err(stopped), None),
                 },
             }
         }
@@ -388,7 +390,7 @@ fn repaired(
 // Asks the session `last` ran in, once, for its reply again with the issue
 // check's `reasons` said. Its usage is added to `last`'s, as one call's. `None`
 // where the first draft stands, to be written under the author's text: the
-// call failed or was stopped, or the reply does not read.
+// call failed, or the reply does not read. A stop is the error, as in `repaired`.
 fn redrafted(
     last: &AgentReply,
     reasons: &[String],
@@ -396,11 +398,14 @@ fn redrafted(
     agents: &dyn Agents,
     ending: &Ending,
     read: &impl Fn(&str) -> Result<Found, Unread>,
-) -> Option<(AgentReply, Found)> {
+) -> Result<Option<(AgentReply, Found)>, AgentError> {
     call.session = Session::Resume(last.session_id.clone());
     call.prompt = redraft_prompt(reasons);
-    let mut second = agents.run(call, ending).ok()?;
-    let found = read(&second.text).ok()?;
+    let mut second = match agents.run(call, ending) {
+        Ok(second) => second,
+        Err(AgentError::Stopped) => return Err(AgentError::Stopped),
+        Err(_) => return Ok(None),
+    };
     second.usage += last.usage;
-    Some((second, found))
+    Ok(read(&second.text).ok().map(|found| (second, found)))
 }
