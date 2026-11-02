@@ -184,14 +184,14 @@ struct Cleared {
 // `red` holds the latest completed run of each workflow and event. A red
 // run keeps or adds its workflow, a successful one drops it. A red
 // workflow's run from before the one kelpie reran is not its latest. While
-// the rerun's jobs go the run is not completed, and an older run shows. A fix
-// work item stays a workflow's through every new head until it is one of
-// `closed`, so one failure has one fix however many commits land on top of it.
+// the rerun's jobs go the run is not completed, and an older run shows.
 fn still_red(red: &[RedWorkflow], runs: &[BranchRun], closed: &[TicketId]) -> Read {
     let mut next = red.to_vec();
     let mut failing = Vec::new();
     let mut cleared = Vec::new();
     let mut reopened = Vec::new();
+    // A fix work item stays its workflow's through every new head until it is
+    // one of `closed`, so one failure has one fix however many commits land on top.
     for red in next
         .iter_mut()
         .filter(|r| r.fix().is_some_and(|t| closed.contains(&t)))
