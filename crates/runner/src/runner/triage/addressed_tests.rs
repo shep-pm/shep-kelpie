@@ -10,9 +10,12 @@ use super::research_tests::{
     untouched,
 };
 use crate::github::ApiError;
-use crate::ports::{IssueCloseReason, PullRequestState, Role, Timestamp};
-use crate::runner::{Pass, advance, step};
-use crate::test::{CALL_PATIENCE, Hold, Scripted};
+use crate::ports::{
+    BranchRun, IssueCloseReason, PullRequestState, Role, Timestamp, Workflow, WorkflowState,
+};
+use crate::runner::{Pass, Runner, advance, step};
+use crate::state::{Handled, RedWorkflow};
+use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, ticket};
 
 // The triager's reply naming `#number`, of `kind`, as covering the issue
 fn covered(number: u64, kind: &str, why: &str) -> Scripted {
@@ -492,4 +495,85 @@ fn a_duplicate_comment_to_anyone_but_the_maintainer_is_worded_plain() {
     );
     assert_eq!(step(&runner).unwrap(), None);
     assert!(!facts(&rig).contains(plain), "the maintainer is not");
+}
+
+// Records `test` as red on `main` with issue `fix` as the fix the project manager opened, and
+// the forge as still running it red at that head, so the pass's read of `main` keeps it
+fn red_with_fix(rig: &Rig, runner: &std::sync::Mutex<Runner>, fix: u64) {
+    rig.forge.set_branch_runs(
+        "main",
+        vec![BranchRun {
+            workflow: "test".to_owned(),
+            id: 91,
+            head: "head91".to_owned(),
+            event: "push".to_owned(),
+            conclusion: "failure".to_owned(),
+            created: Timestamp(0),
+        }],
+    );
+    rig.forge.set_workflows(vec![Workflow {
+        name: "test".to_owned(),
+        path: ".github/workflows/test.yml".to_owned(),
+        state: WorkflowState::Active,
+    }]);
+    runner.lock().unwrap().state.red.push(RedWorkflow {
+        workflow: "test".to_owned(),
+        first_run: 91,
+        run: 91,
+        head: "head91".to_owned(),
+        since: Timestamp(0),
+        reran: Some(91),
+        reran_head: Some("head91".to_owned()),
+        again: true,
+        handled: Some(Handled::Fix(ticket(fix))),
+        noticed: true,
+    });
+}
+
+#[test]
+fn a_fix_item_a_red_workflow_names_is_never_closed_as_a_duplicate_of_an_older_issue() {
+    let (rig, runner) = untouched();
+    red_with_fix(&rig, &runner, 30);
+    let mut older = issue(&rig, 12, "someone", 0);
+    older.title = "Fix the failing test on main".to_owned();
+    list(&rig, older);
+    rig.claude.script_for(
+        Role::Triager,
+        [covered(12, "issue", "It is the same failure.")],
+    );
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(rig.forge.closings(), Vec::<u64>::new());
+    assert_eq!(rig.github.comments(), [(30, handed(WORDS))]);
+    let told: Vec<String> = runner.lock().unwrap().take_notes();
+    assert!(
+        told.iter().any(|n| n.starts_with("triage #30:")
+            && n.contains("names #12")
+            && n.contains("fix work item")
+            && n.contains("triaged as any other")),
+        "{told:?}"
+    );
+}
+
+#[test]
+fn an_older_issue_the_red_workflows_fix_item_covers_is_closed_pointing_at_it() {
+    let (rig, runner) = untouched();
+    red_with_fix(&rig, &runner, 12);
+    let mut fix = issue(&rig, 12, "someone", 0);
+    fix.title = "Fix the failing test on main".to_owned();
+    list(&rig, fix);
+    rig.claude.script_for(
+        Role::Triager,
+        [covered(12, "issue", "It is the same failure.")],
+    );
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(rig.forge.closings(), [30]);
+    assert_eq!(
+        rig.forge.closing_reason(30),
+        Some(IssueCloseReason::Duplicate)
+    );
+    assert_eq!(triage(&rig, &runner)["issues"][0]["duplicate_of"], 12);
 }
