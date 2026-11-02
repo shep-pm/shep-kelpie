@@ -89,6 +89,22 @@ pub(in crate::runner) fn disputes_note(disputes: &[Dispute]) -> String {
     )
 }
 
+/// What a reader is told of the findings earlier rounds sent the worker, to
+/// add after its prompt: each finding, and that a change answering one is
+/// asked for, and nothing when there are none
+pub(in crate::runner) fn asked_note(held: &[Finding]) -> String {
+    if held.is_empty() {
+        return String::new();
+    }
+    let lines: String = held.iter().map(line).collect();
+    format!(
+        "\n\nEarlier reviewers on this pull request asked the worker to make these \
+         changes. A change in the diff that answers one of them counts as asked for: \
+         do not report it as behaviour nobody asked for.\n\n\
+         --- the findings earlier rounds sent ---\n{lines}--- end ---"
+    )
+}
+
 // One finding as the readers write it, its test as a fifth field.
 fn line(f: &Finding) -> String {
     let test = (f.test.as_ref()).map_or_else(String::new, |t| format!("|{t}"));
@@ -253,6 +269,34 @@ SEVERITY|file:line|what is wrong, and its trigger|what goes wrong, and who sees 
         assert!(
             prompt.contains("/k/targets/shep/7/review-tests"),
             "{prompt}"
+        );
+    }
+
+    #[test]
+    fn the_asked_note_is_empty_with_no_earlier_finding() {
+        assert_eq!(asked_note(&[]), "");
+    }
+
+    #[test]
+    fn the_asked_note_lists_each_earlier_finding_and_counts_a_change_answering_one_as_asked_for() {
+        let held = [finding(Severity::High, 3), finding(Severity::Medium, 9)];
+
+        let note = asked_note(&held);
+
+        assert!(
+            note.contains("asked the worker to make these changes"),
+            "{note}"
+        );
+        assert!(note.contains("counts as asked for"), "{note}");
+        assert!(note.contains("behaviour nobody asked for"), "{note}");
+        assert!(
+            note.ends_with(
+                "--- the findings earlier rounds sent ---\n\
+                 HIGH|src/lib.rs:3|the flag is read first|a caller sees nothing\n\
+                 MEDIUM|src/lib.rs:9|the flag is read first|a caller sees nothing\n\
+                 --- end ---"
+            ),
+            "{note}"
         );
     }
 
