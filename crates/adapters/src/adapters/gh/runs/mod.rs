@@ -5,6 +5,8 @@
 //! runs' logs as the login `gh` acts as and puts the end of each in the
 //! worker's prompt.
 
+use std::collections::HashSet;
+
 use serde::Deserialize;
 
 use self::timeout::cancelled_job;
@@ -382,9 +384,10 @@ fn failed_runs(listed: &[u8], head: &str, merge_group: bool) -> Result<Vec<Faile
         .collect())
 }
 
-// The last `max` bytes of `log` once cargo's progress lines, GitHub's
-// timestamps and terminal colour codes are gone, so the end is the failure and
-// not the build before it
+// What of `log` a worker reads, in at most `max` bytes: the failure lines of
+// the log with the lines after them, then its end. The log's progress lines,
+// GitHub's timestamps and terminal colour codes are gone, so the end is the
+// failure and not the build before it. A log that fits whole is kept whole.
 fn failure_tail(log: &str, max: usize) -> String {
     let kept: Vec<String> = log
         .lines()
@@ -399,7 +402,67 @@ fn failure_tail(log: &str, max: usize) -> String {
             (!is_progress(&text)).then(|| format!("{names}{text}"))
         })
         .collect();
-    tail(&kept.join("\n"), max).to_owned()
+    let cleaned = kept.join("\n");
+    if cleaned.len() <= max {
+        return cleaned.trim_end().to_owned();
+    }
+    let failures = failure_blocks(&kept, max / 2);
+    if failures.is_empty() {
+        return tail(&cleaned, max).to_owned();
+    }
+    let head = format!("Failures:\n{failures}\nLog end:\n");
+    format!("{head}{}", tail(&cleaned, max.saturating_sub(head.len())))
+}
+
+// How many lines after a failure line belong to it
+const FAILURE_LINES: usize = 15;
+
+// The lines of `lines` that hold a failure and the `FAILURE_LINES` after each,
+// in log order and whole lines, within `max` bytes
+fn failure_blocks(lines: &[String], max: usize) -> String {
+    let mut seen = HashSet::new();
+    let mut blocks = String::new();
+    let mut next = 0;
+    for (at, line) in lines.iter().enumerate() {
+        if !is_failure(line) || !seen.insert(line.as_str()) {
+            continue;
+        }
+        let end = (at + FAILURE_LINES + 1).min(lines.len());
+        for line in &lines[at.max(next)..end] {
+            let added = line.len() + usize::from(!blocks.is_empty());
+            if blocks.len() + added > max {
+                return blocks.trim_end().to_owned();
+            }
+            if !blocks.is_empty() {
+                blocks.push('\n');
+            }
+            blocks.push_str(line);
+        }
+        next = end;
+    }
+    blocks.trim_end().to_owned()
+}
+
+// Whether `line` says a test or a step failed
+fn is_failure(line: &str) -> bool {
+    if line.contains("##[error]Process completed with exit code") {
+        return false;
+    }
+    let test_output = line
+        .split_once("---- ")
+        .is_some_and(|(_, rest)| rest.contains("stdout ----"));
+    test_output
+        || [
+            " FAIL ",
+            "Error:",
+            "AssertionError",
+            "error TS",
+            "##[error]",
+            "panicked at",
+            "test result: FAILED",
+        ]
+        .iter()
+        .any(|marker| line.contains(marker))
 }
 
 // The verbs cargo prints as it builds, with the width it right-aligns them to

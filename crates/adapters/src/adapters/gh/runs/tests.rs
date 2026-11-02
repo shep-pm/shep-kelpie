@@ -378,6 +378,111 @@ fn a_log_keeps_its_end_from_a_line_start_and_never_splits_a_character() {
     assert_eq!(tail("é".repeat(10).as_str(), 5), "éé");
 }
 
+// A monorepo's test step runs every package at once: the failing package's
+// block comes early and more than `LOG_BYTES` of a sibling passing follows it
+const INTERLEAVED: &str = include_str!("../../../../../../fixtures/gh-run-log-interleaved.txt");
+
+#[test]
+fn an_interleaved_monorepo_log_leads_with_the_failing_packages_test() {
+    let kept = failure_tail(INTERLEAVED, LOG_BYTES);
+
+    assert!(kept.starts_with("Failures:\n"), "{kept}");
+    assert!(
+        kept.contains("FAIL  src/a.test.ts > suite > case"),
+        "{kept}"
+    );
+    assert!(kept.contains("Error: Test timed out in 5000ms."), "{kept}");
+    let (failures, end) = kept.split_once("\nLog end:\n").unwrap();
+    assert!(failures.contains("Error: Test timed out in 5000ms."));
+    assert!(end.contains("feature109.test.ts"), "{end}");
+    assert!(!end.contains("Error: Test timed out"), "{end}");
+    assert!(kept.len() <= LOG_BYTES, "{}", kept.len());
+}
+
+#[test]
+fn a_log_with_no_failure_lines_keeps_only_its_tail() {
+    let line = "test\tBuild\t2026-10-13T10:00:00.0000000Z test a_test ... ok\n";
+    let log = line.repeat(300);
+
+    let kept = failure_tail(&log, LOG_BYTES);
+
+    let cleaned = log.replace("2026-10-13T10:00:00.0000000Z ", "");
+    assert_eq!(kept, tail(cleaned.trim_end(), LOG_BYTES));
+    assert!(!kept.contains("Failures:"));
+    assert!(!kept.contains("Log end:"));
+}
+
+#[test]
+fn the_failure_blocks_stay_within_half_the_budget() {
+    let mut log = String::new();
+    for n in 0..100 {
+        log.push_str(&format!("test\tBuild\t FAIL  src/f{n}.test.ts > case\n"));
+        for m in 0..15 {
+            log.push_str(&format!(
+                "test\tBuild\tdetail {n} line {m} of the failure\n"
+            ));
+        }
+    }
+    log.push_str(&"test\tBuild\tpassing output of a sibling package\n".repeat(200));
+
+    let kept = failure_tail(&log, LOG_BYTES);
+
+    let (failures, end) = kept.split_once("\nLog end:\n").unwrap();
+    let blocks = failures.strip_prefix("Failures:\n").unwrap();
+    assert!(blocks.len() <= LOG_BYTES / 2, "{}", blocks.len());
+    assert!(blocks.starts_with("test\tBuild\t FAIL  src/f0.test.ts"));
+    assert!(end.contains("passing output of a sibling package"));
+    assert!(kept.len() <= LOG_BYTES, "{}", kept.len());
+}
+
+#[test]
+fn a_failure_line_that_repeats_is_collected_once() {
+    let gap = "j\ts\tpassing\n".repeat(30);
+    let log =
+        format!("j\ts\t FAIL  a > b\nj\ts\tdetail\n{gap}j\ts\t FAIL  a > b\nj\ts\tlater\n{gap}")
+            + &"j\ts\tpassing\n".repeat(600);
+
+    let kept = failure_tail(&log, LOG_BYTES);
+
+    let (failures, _) = kept.split_once("\nLog end:\n").unwrap();
+    assert_eq!(failures.matches(" FAIL  a > b").count(), 1, "{failures}");
+    assert!(failures.contains("j\ts\tdetail"));
+    assert!(!failures.contains("later"));
+}
+
+#[test]
+fn the_exit_code_line_is_no_failure_line() {
+    let log = "j\ts\t##[error]Process completed with exit code 1.\n".to_owned()
+        + &"j\ts\tpassing\n".repeat(600);
+
+    let kept = failure_tail(&log, LOG_BYTES);
+
+    assert!(!kept.contains("Failures:"), "{kept}");
+}
+
+#[test]
+fn every_kind_of_failure_line_is_found() {
+    for line in [
+        " FAIL  a > b",
+        "Error: boom",
+        "AssertionError: left != right",
+        "src/a.ts(1,2): error TS2322: no",
+        "##[error]The operation was canceled.",
+        "thread 'x' panicked at src/lib.rs:1:1:",
+        "test result: FAILED. 0 passed; 1 failed",
+        "---- sheep::tests::a stdout ----",
+    ] {
+        let log = format!("j\ts\t{line}\n") + &"j\ts\tpassing\n".repeat(600);
+
+        let kept = failure_tail(&log, LOG_BYTES);
+
+        assert!(
+            kept.starts_with(&format!("Failures:\nj\ts\t{line}")),
+            "{line}: {kept}"
+        );
+    }
+}
+
 // Run 38275563600 of shep-pm/shep-kelpie, read with gh 2.96: its `test-macos` job
 // (`timeout-minutes: 20`) was stopped in `Run cargo test --locked`, and its
 // `--log-failed` answer is empty. The log is the first 3 and last 60 lines, with
@@ -465,9 +570,11 @@ fn a_timed_out_tail_names_the_job_the_step_and_its_elapsed_time() {
     let mut lines = read.text.lines();
     assert_eq!(lines.next(), Some(NOTE));
     let kept: Vec<&str> = lines.collect();
-    assert!(!kept.is_empty());
+    assert_eq!(kept[0], "Failures:");
+    assert!(kept.contains(&"Log end:"));
     assert!(
-        kept.iter()
+        (kept.iter())
+            .filter(|l| !matches!(**l, "Failures:" | "Log end:"))
             .all(|l| l.starts_with("test-macos\tUNKNOWN STEP\t"))
     );
     assert!(
