@@ -4,7 +4,8 @@
 //!
 //! Kelpie reruns each new red head itself (`runner/main_ci/`), so only a head
 //! that came back red, or whose rerun the forge refused, is the project
-//! manager's to settle, once.
+//! manager's to settle, once. A fix work item it opened stays the workflow's through new
+//! heads, and settles it again only once the item is closed.
 
 use super::Wake;
 use super::act::{WORDS, plain};
