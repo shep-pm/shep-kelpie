@@ -201,15 +201,23 @@ const TRUSTED: [&str; 3] = ["OWNER", "MEMBER", "COLLABORATOR"];
 // reads one login's collaborator permission.
 const WRITERS: [&str; 3] = ["write", "maintain", "admin"];
 
-fn can_write(answer: Result<Vec<u8>, ForgeError>) -> bool {
+// A refusal or a reply it cannot read leaves the review uncounted. A tool
+// that did not start and a rate limit are the caller's to see: an older
+// review must not stand in for one that was never judged.
+fn can_write(answer: Result<Vec<u8>, ForgeError>) -> Result<bool, ForgeError> {
     #[derive(Deserialize)]
     struct Permission {
         permission: String,
     }
-    answer
-        .ok()
-        .and_then(|body| serde_json::from_slice::<Permission>(&body).ok())
-        .is_some_and(|p| WRITERS.contains(&p.permission.as_str()))
+    let body = match answer {
+        Ok(body) => body,
+        Err(
+            reached @ (ForgeError::Spawn(_) | ForgeError::Held(_) | ForgeError::Limited { .. }),
+        ) => return Err(reached),
+        Err(_) => return Ok(false),
+    };
+    Ok(serde_json::from_slice::<Permission>(&body)
+        .is_ok_and(|p| WRITERS.contains(&p.permission.as_str())))
 }
 
 pub(crate) fn parse_reviewed(
@@ -234,23 +242,34 @@ pub(crate) fn parse_reviewed(
     let reply: Reply = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
     let pr = reply.data.repository.pull_request;
     let mut writers: HashMap<String, bool> = HashMap::new();
-    let latest = pr.reviews.nodes.into_iter().rev().find(|r| {
+    let mut latest = None;
+    for r in pr.reviews.nodes.into_iter().rev() {
         let Some(author) = r.author.as_ref().filter(|a| a.kind == "User") else {
-            return false;
+            continue;
         };
         if r.state == "PENDING" {
-            return false;
+            continue;
         }
-        if TRUSTED.contains(&r.author_association.as_str()) {
-            return true;
-        }
-        let Some(login) = author.login.as_deref() else {
-            return false;
+        let counts = match (
+            TRUSTED.contains(&r.author_association.as_str()),
+            &author.login,
+        ) {
+            (true, _) => true,
+            (false, None) => false,
+            (false, Some(login)) => match writers.get(login) {
+                Some(&known) => known,
+                None => {
+                    let known = can_write(permission(login))?;
+                    writers.insert(login.clone(), known);
+                    known
+                }
+            },
         };
-        *writers
-            .entry(login.to_owned())
-            .or_insert_with(|| can_write(permission(login)))
-    });
+        if counts {
+            latest = Some(r);
+            break;
+        }
+    }
     let review = latest.map(|latest| {
         let comments = pr
             .review_threads
@@ -301,7 +320,7 @@ pub(crate) fn parse_reviewed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::{Cooldown, PullRequestState};
+    use crate::ports::{Cooldown, PullRequestState, Timestamp};
 
     // Recorded from gh 2.96: `gh api graphql` with `QUERY` on shep-pm/shep#617,
     // where the maintainer's reviews are empty replies and every thread is
@@ -366,6 +385,23 @@ mod tests {
             Ok(b"not json".to_vec()),
         ] {
             assert_eq!(latest_id(|_| failed.clone()).as_deref(), Some("R1"));
+        }
+    }
+
+    #[test]
+    fn a_permission_read_that_the_forge_held_back_is_the_callers_to_see() {
+        let pr = private_member_reviews();
+        for held in [
+            ForgeError::Spawn("not found".to_owned()),
+            ForgeError::Held(Timestamp(1_900_000_000)),
+            ForgeError::Limited {
+                said: "rate limit".to_owned(),
+                cooldown: Cooldown::default(),
+            },
+        ] {
+            let held = Err(held);
+            let answer = parse_reviewed(pr.as_bytes(), &shep(), |_| held.clone());
+            assert_eq!(answer.err().as_ref(), held.as_ref().err());
         }
     }
 
