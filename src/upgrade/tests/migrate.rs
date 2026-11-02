@@ -279,7 +279,7 @@ async fn a_bare_upgrade_moves_a_listed_reviewers_list_into_a_listed_allow() {
         "{wrote}"
     );
     assert!(
-        wrote.contains("contributions.reviewers = [\"standards\"]; removed "),
+        wrote.contains("contributions.reviewers = [\"standards\"], agents.representative"),
         "{wrote}"
     );
     assert!(
