@@ -172,10 +172,16 @@ pub(super) const STILL: &str = "Touches: `src/start.rs`\n\nIt crashes when I run
 fn a_failing_issue_is_triaged_and_a_rewrite_that_still_fails_gets_one_comment() {
     let (rig, runner) = checking("pick = \"maintainer\"", MAINTAINER, FAILING, &[]);
     let found = json!({ "type": "bug", "kind": "fix", "priority": "P2", "body": STILL });
-    rig.claude.script_for(Role::Triager, [reply(found)]);
+    // The repair round gets the same draft back
+    rig.claude
+        .script_for(Role::Triager, [reply(found.clone()), reply(found)]);
 
     assert_eq!(step(&runner).unwrap(), None);
-    assert_eq!(calls(&rig, Role::Triager).len(), 1);
+    assert_eq!(
+        calls(&rig, Role::Triager).len(),
+        2,
+        "the call and its repair"
+    );
     assert_eq!(rig.github.comments().len(), 1, "the triage comment");
     assert_eq!(
         rig.github.issue_edits(),
@@ -212,14 +218,15 @@ fn a_failing_issue_is_triaged_and_a_rewrite_that_still_fails_gets_one_comment() 
         assert_eq!(step(&runner).unwrap(), None);
     }
     assert_eq!(rig.github.comments().len(), 2);
-    assert_eq!(calls(&rig, Role::Triager).len(), 1);
+    assert_eq!(calls(&rig, Role::Triager).len(), 2);
 }
 
 #[test]
 fn a_later_rewrite_the_check_refuses_replaces_kelpies_section_and_keeps_the_rest() {
     let (rig, runner) = checking("pick = \"maintainer\"", MAINTAINER, FAILING, &[]);
     let found = json!({ "type": "bug", "kind": "fix", "priority": "P2", "body": STILL });
-    rig.claude.script_for(Role::Triager, [reply(found)]);
+    rig.claude
+        .script_for(Role::Triager, [reply(found.clone()), reply(found)]);
     assert_eq!(step(&runner).unwrap(), None);
     let first = under(FAILING, STILL);
     assert_eq!(rig.github.issue_edits(), [(30, first.clone())]);
@@ -233,14 +240,19 @@ fn a_later_rewrite_the_check_refuses_replaces_kelpies_section_and_keeps_the_rest
     let edited = format!("{first}\n\nOn Linux only.");
     list(&rig, filed(&rig, MAINTAINER, &edited, &labels));
     let again = "Touches: `src/start.rs`\n\nIt crashes on Linux.";
-    rig.claude
-        .script_for(Role::Triager, [reply(json!({ "body": again }))]);
+    rig.claude.script_for(
+        Role::Triager,
+        [
+            reply(json!({ "body": again })),
+            reply(json!({ "body": again })),
+        ],
+    );
     rig.claude
         .script_for(Role::Representative, [Scripted::Say(WORDS)]);
     rig.next_look();
     assert_eq!(step(&runner).unwrap(), None);
 
-    assert_eq!(calls(&rig, Role::Triager).len(), 2);
+    assert_eq!(calls(&rig, Role::Triager).len(), 4);
     let whole = format!("{}\n\nOn Linux only.", under(FAILING, again));
     assert_eq!(rig.github.issue_edits().last(), Some(&(30, whole)));
 }
@@ -353,10 +365,11 @@ fn a_maintainers_edit_made_while_the_triager_ran_survives_its_rewrite() {
         let (rig, runner) = checking("pick = \"maintainer\"", MAINTAINER, FAILING, &[]);
         let found = json!({ "type": "bug", "kind": "fix", "priority": "P2", "body": rewrite });
         let hold = Hold::default();
-        rig.claude.script_for(
-            Role::Triager,
-            [Scripted::HoldThenSay(hold.clone(), said(found))],
-        );
+        let repair = (rewrite == STILL).then(|| reply(found.clone()));
+        let held = Scripted::HoldThenSay(hold.clone(), said(found));
+        rig.claude
+            .script_for(Role::Triager, std::iter::once(held).chain(repair));
+        let repaired = usize::from(rewrite == STILL);
 
         assert!(matches!(advance(&runner).unwrap(), Pass::Started));
         assert!(hold.entered(CALL_PATIENCE), "the research never began");
@@ -380,7 +393,7 @@ fn a_maintainers_edit_made_while_the_triager_ran_survives_its_rewrite() {
         list(&rig, filed(&rig, MAINTAINER, edited, &labels));
         rig.next_look();
         assert_eq!(step(&runner).unwrap(), None);
-        assert_eq!(calls(&rig, Role::Triager).len(), 2, "{rewrite}");
+        assert_eq!(calls(&rig, Role::Triager).len(), 2 + repaired, "{rewrite}");
     }
 }
 

@@ -19,6 +19,7 @@ use super::super::in_flight::Key;
 use super::super::triage::ask::Purpose;
 use super::super::triage::images::{self, Pictures};
 use super::super::triage::research::{Found, Listed, Unread, read_reply, repair_prompt};
+use super::super::triage::rewrite::{redraft_prompt, refusals};
 use super::{End, News};
 use crate::dep_sources::grant;
 use crate::metrics::Recorder;
@@ -63,6 +64,9 @@ pub(in crate::runner) struct Research {
     pub(in crate::runner) open: Vec<Listed>,
     pub(in crate::runner) most: usize,
     pub(in crate::runner) role: AuthorRole,
+    /// The title of an issue kelpie rewrites, whose draft the issue check reads
+    /// and may send back once
+    pub(in crate::runner) redraft: Option<String>,
     pub(in crate::runner) pictures: Pictures,
 }
 
@@ -301,6 +305,7 @@ fn researched(
         open,
         most,
         role,
+        redraft,
         pictures,
     } = research;
     // A view a crash left behind would stop the new one.
@@ -322,10 +327,27 @@ fn researched(
         return (End::Turn(ran), None);
     };
     let found = read(&first.text);
-    let Err(Unread::NotTriage(why)) = &found else {
-        return (End::Turn(ran), Some(found.map_err(|e| e.to_string())));
+    let (ran, found) = match found {
+        Err(Unread::NotTriage(why)) => repaired(first, &why, call, agents, ending, &read),
+        found => (ran, Some(found.map_err(|e| e.to_string()))),
     };
-    let (ran, found) = repaired(first, why, call, agents, ending, read);
+    let (ran, found) = match (&ran, &found, redraft) {
+        (Ok(last), Some(Ok(draft)), Some(title)) => {
+            let reasons = (draft.open.is_empty())
+                .then_some(draft.body.as_deref())
+                .flatten()
+                .map(|body| refusals(title, body))
+                .unwrap_or_default();
+            match reasons.is_empty() {
+                true => (ran, found),
+                false => match redrafted(last, &reasons, call, agents, ending, &read) {
+                    Some((second, draft)) => (Ok(second), Some(Ok(draft))),
+                    None => (ran, found),
+                },
+            }
+        }
+        _ => (ran, found),
+    };
     (End::Turn(ran), found)
 }
 
@@ -339,7 +361,7 @@ fn repaired(
     call: &mut AgentCall,
     agents: &dyn Agents,
     ending: &Ending,
-    read: impl Fn(&str) -> Result<Found, Unread>,
+    read: &impl Fn(&str) -> Result<Found, Unread>,
 ) -> (
     Result<AgentReply, AgentError>,
     Option<Result<Found, String>>,
@@ -361,4 +383,24 @@ fn repaired(
             Some(Err(format!("its repair failed: {e}"))),
         ),
     }
+}
+
+// Asks the session `last` ran in, once, for its reply again with the issue
+// check's `reasons` said. Its usage is added to `last`'s, as one call's. `None`
+// where the first draft stands, to be written under the author's text: the
+// call failed or was stopped, or the reply does not read.
+fn redrafted(
+    last: &AgentReply,
+    reasons: &[String],
+    call: &mut AgentCall,
+    agents: &dyn Agents,
+    ending: &Ending,
+    read: &impl Fn(&str) -> Result<Found, Unread>,
+) -> Option<(AgentReply, Found)> {
+    call.session = Session::Resume(last.session_id.clone());
+    call.prompt = redraft_prompt(reasons);
+    let mut second = agents.run(call, ending).ok()?;
+    let found = read(&second.text).ok()?;
+    second.usage += last.usage;
+    Some((second, found))
 }

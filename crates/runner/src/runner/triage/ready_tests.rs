@@ -37,7 +37,7 @@ pub(super) fn said(found: Value) -> &'static str {
 // 30 opened by `author` after triage was turned on, whose representative says
 // WORDS and whose repo has `labels`. `before` runs what a test needs set
 // before the runner opens.
-fn filed(pick: &str, author: &str) -> (Rig, Mutex<Runner>) {
+pub(super) fn filed(pick: &str, author: &str) -> (Rig, Mutex<Runner>) {
     filed_at(pick, author, &REPO_LABELS, |_| {})
 }
 
