@@ -219,7 +219,9 @@ fn a_package_ships_a_vscode_folder_under_node_modules_only_when_the_run_starts_b
     if !run(&srt, &policy, &build, "true").status.success() {
         return skipped("the runtime cannot start inside this sandbox");
     }
-    let ships = "mkdir -p node_modules/p/.vscode node_modules/p/.claude/commands";
+    // The sandbox denies what lies below those folders, so a package's files are the probe.
+    let ships = "mkdir -p node_modules/p/.vscode node_modules/p/.claude/commands \
+                 && touch node_modules/p/.vscode/launch.json node_modules/p/.claude/commands/a.md";
 
     let inside = run(&srt, &policy, &worktree, ships);
     assert!(!inside.status.success(), "{inside:?}");
@@ -230,7 +232,11 @@ fn a_package_ships_a_vscode_folder_under_node_modules_only_when_the_run_starts_b
         &format!("cd '{}' && {ships}", worktree.display()),
     );
     assert!(beside.status.success(), "{beside:?}");
-    assert!(worktree.join("node_modules/p/.vscode").is_dir());
+    assert!(
+        worktree
+            .join("node_modules/p/.vscode/launch.json")
+            .is_file()
+    );
     let root = run(
         &srt,
         &policy,
