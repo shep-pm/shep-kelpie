@@ -53,6 +53,9 @@ pub(super) fn existing(worktree: &Path) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
+
     use super::super::deny_write_on;
     use super::*;
 
@@ -117,5 +120,63 @@ mod tests {
                 "{os}"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deny_write_lists_existing_nested_harness_folders_on_linux() {
+        let dir = tempfile::tempdir().unwrap();
+        let wt = dir.path();
+        for folder in [
+            ".claude/agents",
+            "src/.claude/skills",
+            "lib/deep/.Claude",
+            "docs/.CODEX",
+            "docs/.agents",
+            "tools/.pi/extensions",
+            "app/.Goose/recipes",
+            "src/plain",
+            "src/claude",
+        ] {
+            fs::create_dir_all(wt.join(folder)).unwrap();
+        }
+        // A link is listed and never followed.
+        symlink("/etc", wt.join("lib/.codex")).unwrap();
+        let listed = |os| -> Vec<String> {
+            deny_write_on(wt, os)
+                .iter()
+                .map(|p| p.strip_prefix(wt).unwrap().display().to_string())
+                .collect()
+        };
+
+        let linux = listed("linux");
+        assert_eq!(linux[..13], listed("macos")[..]);
+        assert_eq!(
+            linux[13..],
+            [
+                "app/.Goose",
+                "docs/.CODEX",
+                "docs/.agents",
+                "lib/.codex",
+                "lib/deep/.Claude",
+                "src/.claude",
+                "tools/.pi",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_nested_harness_folder_past_the_walks_bounds_is_left_to_the_check_after_the_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let wt = dir.path();
+        let mut deep = PathBuf::new();
+        for level in 0..12 {
+            deep.push(format!("d{level}"));
+        }
+        fs::create_dir_all(wt.join(&deep).join(".claude")).unwrap();
+        fs::create_dir_all(wt.join(".git/.claude")).unwrap();
+        fs::create_dir_all(wt.join("near/.claude")).unwrap();
+        let listed = deny_write_on(wt, "linux");
+        assert_eq!(listed[13..], [wt.join("near/.claude")]);
     }
 }

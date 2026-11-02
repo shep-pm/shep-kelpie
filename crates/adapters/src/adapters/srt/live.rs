@@ -196,3 +196,49 @@ fn a_listed_folder_binds_a_socket_and_one_beside_it_is_refused() {
     assert!(!refused.status.success(), "{refused:?}");
     assert!(!beside.join("s").exists());
 }
+
+// The sandbox refuses `.vscode` and `.claude/commands` below the folder it starts in, and no
+// setting lifts it, so the package install starts beside the worktree and `cd`s into it.
+#[test]
+fn a_package_ships_a_vscode_folder_under_node_modules_only_when_the_run_starts_beside_the_worktree()
+{
+    let srt = match runtime() {
+        Ok(srt) => srt,
+        Err(why) => return skipped(&why),
+    };
+    let dir = crate::test::short_tempdir();
+    let dir = dir.path().canonicalize().unwrap();
+    let (worktree, build) = (dir.join("wt"), dir.join("build"));
+    std::fs::create_dir_all(worktree.join("node_modules")).unwrap();
+    std::fs::create_dir(&build).unwrap();
+    let policy = Policy {
+        write: vec![worktree.clone(), build.clone()],
+        no_write: vec![worktree.join(".claude")],
+        ..Policy::default()
+    };
+    if !run(&srt, &policy, &build, "true").status.success() {
+        return skipped("the runtime cannot start inside this sandbox");
+    }
+    let ships = "mkdir -p node_modules/p/.vscode node_modules/p/.claude/commands";
+
+    let inside = run(&srt, &policy, &worktree, ships);
+    assert!(!inside.status.success(), "{inside:?}");
+    let beside = run(
+        &srt,
+        &policy,
+        &build,
+        &format!("cd '{}' && {ships}", worktree.display()),
+    );
+    assert!(beside.status.success(), "{beside:?}");
+    assert!(worktree.join("node_modules/p/.vscode").is_dir());
+    let root = run(
+        &srt,
+        &policy,
+        &build,
+        &format!("mkdir '{}'", worktree.join(".claude").display()),
+    );
+    assert!(
+        !root.status.success(),
+        "the root `.claude` stays refused: {root:?}"
+    );
+}
