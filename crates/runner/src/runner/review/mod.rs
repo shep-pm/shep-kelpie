@@ -257,6 +257,7 @@ impl Runner {
                 .map(|(command, folder, tool)| (*command, folder.as_path(), *tool)),
         );
         prompt.push_str(&prompts::disputes_note(&item.disputes));
+        prompt.push_str(&prompts::asked_note(&item.held));
         let call =
             calls::reviewer_call(ticket, &worktree, &self.paths.worker, model, prompt, tests);
         match call.and_then(|call| self.prepared(call)) {
