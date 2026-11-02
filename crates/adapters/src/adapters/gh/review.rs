@@ -1,6 +1,7 @@
 //! A pull request's branch, what it closes and the maintainer's latest
 //! review, for a rework or an adoption
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde::Deserialize;
@@ -18,7 +19,7 @@ const QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
     author { login } \
     closingIssuesReferences(first: 50) { nodes { number repository { name owner { login } } } } \
     labels(first: 100) { nodes { name } } \
-    reviews(last: 100) { nodes { id state body authorAssociation author { __typename } } } \
+    reviews(last: 100) { nodes { id state body authorAssociation author { __typename login } } } \
     reviewThreads(last: 100) { nodes { isResolved comments(last: 100) { nodes { \
     body path line pullRequestReview { id } } } } } } } }";
 
@@ -45,6 +46,15 @@ pub(super) fn reviewed(
             ],
         )?,
         repo,
+        |login| {
+            gh_as(
+                config,
+                &[
+                    "api",
+                    &format!("repos/{}/collaborators/{login}/permission", repo.as_str()),
+                ],
+            )
+        },
     )
 }
 
@@ -156,6 +166,8 @@ struct Review {
 struct Author {
     #[serde(rename = "__typename")]
     kind: String,
+    #[serde(default)]
+    login: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -184,7 +196,27 @@ struct ReviewId {
 // with a hand in the repo counts.
 const TRUSTED: [&str; 3] = ["OWNER", "MEMBER", "COLLABORATOR"];
 
-pub(crate) fn parse_reviewed(stdout: &[u8], repo: &ForgeSlug) -> Result<Reviewed, ForgeError> {
+// The App reads a reviewer whose organization membership is private as a
+// contributor, so a person the repo lets write also counts. `permission`
+// reads one login's collaborator permission.
+const WRITERS: [&str; 3] = ["write", "maintain", "admin"];
+
+fn can_write(answer: Result<Vec<u8>, ForgeError>) -> bool {
+    #[derive(Deserialize)]
+    struct Permission {
+        permission: String,
+    }
+    answer
+        .ok()
+        .and_then(|body| serde_json::from_slice::<Permission>(&body).ok())
+        .is_some_and(|p| WRITERS.contains(&p.permission.as_str()))
+}
+
+pub(crate) fn parse_reviewed(
+    stdout: &[u8],
+    repo: &ForgeSlug,
+    mut permission: impl FnMut(&str) -> Result<Vec<u8>, ForgeError>,
+) -> Result<Reviewed, ForgeError> {
     #[derive(Deserialize)]
     struct Reply {
         data: Data,
@@ -201,10 +233,23 @@ pub(crate) fn parse_reviewed(stdout: &[u8], repo: &ForgeSlug) -> Result<Reviewed
     }
     let reply: Reply = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
     let pr = reply.data.repository.pull_request;
+    let mut writers: HashMap<String, bool> = HashMap::new();
     let latest = pr.reviews.nodes.into_iter().rev().find(|r| {
-        r.state != "PENDING"
-            && r.author.as_ref().is_some_and(|a| a.kind == "User")
-            && TRUSTED.contains(&r.author_association.as_str())
+        let Some(author) = r.author.as_ref().filter(|a| a.kind == "User") else {
+            return false;
+        };
+        if r.state == "PENDING" {
+            return false;
+        }
+        if TRUSTED.contains(&r.author_association.as_str()) {
+            return true;
+        }
+        let Some(login) = author.login.as_deref() else {
+            return false;
+        };
+        *writers
+            .entry(login.to_owned())
+            .or_insert_with(|| can_write(permission(login)))
     });
     let review = latest.map(|latest| {
         let comments = pr
@@ -270,6 +315,76 @@ mod tests {
 
     fn shep() -> ForgeSlug {
         ForgeSlug::try_from("shep-pm/shep".to_owned()).unwrap()
+    }
+
+    // Recorded in the shape of `gh api repos/shep-pm/shep/collaborators/<login>/permission`.
+    const ADMIN: &str =
+        include_str!("../../../../../fixtures/gh-collaborator-permission-admin.json");
+
+    fn unasked(login: &str) -> Result<Vec<u8>, ForgeError> {
+        panic!("the permission of {login} was read")
+    }
+
+    // Two reviews by `maintainer`, whom the App reads as a contributor, the
+    // newest after an older `MEMBER` review by `colleague`
+    fn private_member_reviews() -> String {
+        reply(
+            r#"{"state":"OPEN","title":"t","body":"","isDraft":false,"baseRefName":"main",
+            "headRefName":"fix/3","isCrossRepository":false,"author":{"login":"newcomer"},
+            "closingIssuesReferences":{"nodes":[]},"labels":{"nodes":[]},
+            "reviews":{"nodes":[
+              {"id":"R1","state":"COMMENTED","body":"","authorAssociation":"MEMBER","author":{"__typename":"User","login":"colleague"}},
+              {"id":"R2","state":"COMMENTED","body":"","authorAssociation":"CONTRIBUTOR","author":{"__typename":"User","login":"maintainer"}},
+              {"id":"R3","state":"CHANGES_REQUESTED","body":"Fix it.","authorAssociation":"CONTRIBUTOR","author":{"__typename":"User","login":"maintainer"}}]},
+            "reviewThreads":{"nodes":[]}}"#,
+        )
+    }
+
+    fn latest_id(permission: impl FnMut(&str) -> Result<Vec<u8>, ForgeError>) -> Option<String> {
+        let pr = private_member_reviews();
+        let pr = parse_reviewed(pr.as_bytes(), &shep(), permission).unwrap();
+        pr.review.map(|r| r.id)
+    }
+
+    #[test]
+    fn a_private_member_with_write_access_is_the_maintainer() {
+        let id = latest_id(|_| Ok(ADMIN.as_bytes().to_vec()));
+        assert_eq!(id.as_deref(), Some("R3"));
+    }
+
+    #[test]
+    fn a_contributor_with_read_access_is_not_the_maintainer() {
+        let read = ADMIN.replace(r#""permission": "admin""#, r#""permission": "read""#);
+        let id = latest_id(|_| Ok(read.clone().into_bytes()));
+        assert_eq!(id.as_deref(), Some("R1"));
+    }
+
+    #[test]
+    fn a_failed_permission_read_leaves_the_review_uncounted() {
+        for failed in [
+            Err(ForgeError::Failed("HTTP 404".to_owned())),
+            Ok(b"not json".to_vec()),
+        ] {
+            assert_eq!(latest_id(|_| failed.clone()).as_deref(), Some("R1"));
+        }
+    }
+
+    #[test]
+    fn the_permission_is_read_once_per_login() {
+        let mut asked = Vec::new();
+        let id = latest_id(|login| {
+            asked.push(login.to_owned());
+            Ok(ADMIN.as_bytes().to_vec())
+        });
+        assert_eq!(id.as_deref(), Some("R3"));
+        assert_eq!(asked, ["maintainer"]);
+        asked.clear();
+        let read = ADMIN.replace(r#""permission": "admin""#, r#""permission": "none""#);
+        latest_id(|login| {
+            asked.push(login.to_owned());
+            Ok(read.clone().into_bytes())
+        });
+        assert_eq!(asked, ["maintainer"], "a refusal is remembered too");
     }
 
     fn reply(pr: &str) -> String {
@@ -365,11 +480,12 @@ mod tests {
         }
         assert!(!QUERY.contains("reviewThreads(first"));
         assert!(!QUERY.contains("comments(first"));
+        assert!(QUERY.contains("author { __typename login }"));
     }
 
     #[test]
     fn a_bots_later_review_and_resolved_threads_are_not_the_maintainers() {
-        let pr = parse_reviewed(PR_617.as_bytes(), &shep()).unwrap();
+        let pr = parse_reviewed(PR_617.as_bytes(), &shep(), unasked).unwrap();
         assert_eq!(pr.author, "TurtIeSocks");
         assert_eq!(
             pr.title,
@@ -402,7 +518,7 @@ mod tests {
     fn the_gh_adapter_reads_maintainer_can_modify_and_the_head_repository_from_the_recording() {
         assert!(QUERY.contains("maintainerCanModify"));
         assert!(QUERY.contains("headRepository { url owner { __typename } }"));
-        let pr = parse_reviewed(PR_617.as_bytes(), &shep()).unwrap();
+        let pr = parse_reviewed(PR_617.as_bytes(), &shep(), unasked).unwrap();
         assert!(!pr.from_fork);
         assert!(!pr.maintainer_can_edit);
         assert_eq!(
@@ -419,7 +535,7 @@ mod tests {
                 "closingIssuesReferences":{{"nodes":[]}},"labels":{{"nodes":[]}},
                 "reviews":{{"nodes":[]}},"reviewThreads":{{"nodes":[]}}}}"#
             ));
-            parse_reviewed(pr.as_bytes(), &shep()).unwrap()
+            parse_reviewed(pr.as_bytes(), &shep(), unasked).unwrap()
         };
         let open = fork(true, r#"{"url":"https://github.com/newcomer/shep"}"#);
         assert!(open.from_fork && open.maintainer_can_edit);
@@ -438,7 +554,7 @@ mod tests {
 
     #[test]
     fn an_organization_s_fork_is_read_as_not_pushable() {
-        let pr = parse_reviewed(ORG_FORK.as_bytes(), &shep()).unwrap();
+        let pr = parse_reviewed(ORG_FORK.as_bytes(), &shep(), unasked).unwrap();
         assert!(pr.from_fork && pr.maintainer_can_edit);
         assert!(pr.head_owner_is_organization);
         assert_eq!(
@@ -470,7 +586,7 @@ mod tests {
               {"isResolved":false,"comments":{"nodes":[
                 {"body":"Outdated now.","path":"src/old.ts","line":null,"pullRequestReview":{"id":"R2"}}]}}]}}"#,
         );
-        let pr = parse_reviewed(pr.as_bytes(), &shep()).unwrap();
+        let pr = parse_reviewed(pr.as_bytes(), &shep(), unasked).unwrap();
         assert_eq!(pr.labels, ["review please"]);
         assert_eq!(
             pr.review,
@@ -504,7 +620,7 @@ mod tests {
               {"number":9,"repository":{"name":"shep-kelpie","owner":{"login":"shep-pm"}}}]},
             "labels":{"nodes":[]},"reviews":{"nodes":[]},"reviewThreads":{"nodes":[]}}"#,
         );
-        let pr = parse_reviewed(pr.as_bytes(), &shep()).unwrap();
+        let pr = parse_reviewed(pr.as_bytes(), &shep(), unasked).unwrap();
         assert_eq!((pr.title.as_str(), pr.closes), ("Fix it", vec![3]));
     }
 
@@ -520,7 +636,7 @@ mod tests {
               {"id":"R3","state":"CHANGES_REQUESTED","body":"Me too.","authorAssociation":"CONTRIBUTOR","author":{"__typename":"User"}}]},
             "reviewThreads":{"nodes":[]}}"#,
         );
-        let pr = parse_reviewed(pr.as_bytes(), &shep()).unwrap();
+        let pr = parse_reviewed(pr.as_bytes(), &shep(), unasked).unwrap();
         assert_eq!(pr.review.map(|r| r.id).as_deref(), Some("R1"));
         assert_eq!(pr.body, "", "a null body reads as none");
     }
@@ -535,7 +651,7 @@ mod tests {
               {"id":"R2","state":"COMMENTED","body":"ghost","authorAssociation":"NONE","author":null}]},
             "reviewThreads":{"nodes":[]}}"#,
         );
-        let pr = parse_reviewed(pr.as_bytes(), &shep()).unwrap();
+        let pr = parse_reviewed(pr.as_bytes(), &shep(), unasked).unwrap();
         assert_eq!((pr.state, pr.from_fork), (PullRequestState::Closed, true));
         assert_eq!(pr.review, None);
     }
@@ -556,7 +672,11 @@ mod tests {
     #[test]
     fn a_reply_without_a_pull_request_is_unreadable() {
         assert!(matches!(
-            parse_reviewed(br#"{"data":{"repository":{"pullRequest":null}}}"#, &shep()),
+            parse_reviewed(
+                br#"{"data":{"repository":{"pullRequest":null}}}"#,
+                &shep(),
+                unasked
+            ),
             Err(ForgeError::Unreadable(_))
         ));
     }
