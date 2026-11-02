@@ -23,7 +23,7 @@ pub const CEILING: Duration = Duration::from_secs(10 * 60);
 pub struct TestRun {
     /// The command, as a shell reads it, with the test's path and name filled in
     pub command: String,
-    /// The folder it runs in: the work item's worktree
+    /// The folder it runs in: the work item's worktree, or its build folder for the install
     pub cwd: PathBuf,
     /// What it may reach: the worker's own fence
     pub reach: Reach,

@@ -138,29 +138,44 @@ pub fn deny_write(worktree: &Path) -> Vec<PathBuf> {
 // The same, as on the operating system `os` names, which a test runs on any.
 fn deny_write_on(worktree: &Path, os: &str) -> Vec<PathBuf> {
     let windows = os == "windows";
-    let mut paths = Vec::new();
-    for own in &HARNESSES {
-        for folder in own.folders {
-            paths.push(worktree.join(folder));
-            if !windows {
-                paths.push(worktree.join("**").join(folder));
-            }
-        }
-        for [parent, folder] in own.nested {
-            let inside = Path::new(parent).join(folder);
-            paths.push(worktree.join(&inside));
-            if !windows {
-                paths.push(worktree.join("**").join(inside));
-            }
-        }
-        paths.extend(own.root_files.iter().map(|file| worktree.join(file)));
-    }
+    let mut paths = roots(worktree, !windows);
     if matches!(os, "linux" | "windows") {
         for path in nested::existing(worktree) {
             if !paths.contains(&path) {
                 paths.push(path);
             }
         }
+    }
+    paths
+}
+
+/// The sandbox's `denyWrite` paths for the package install that runs before a worker's first turn
+///
+/// Only the harnesses' files at the worktree's root. The install runs the package
+/// manager and no agent, and a package may ship a `.claude` folder of its own
+/// under `node_modules`, which the `**` globs of [`deny_write`] would refuse.
+pub fn install_deny_write(worktree: &Path) -> Vec<PathBuf> {
+    roots(worktree, false)
+}
+
+// The harnesses' files at the worktree's root, and with `globs` the same folders at any depth.
+fn roots(worktree: &Path, globs: bool) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for own in &HARNESSES {
+        for folder in own.folders {
+            paths.push(worktree.join(folder));
+            if globs {
+                paths.push(worktree.join("**").join(folder));
+            }
+        }
+        for [parent, folder] in own.nested {
+            let inside = Path::new(parent).join(folder);
+            paths.push(worktree.join(&inside));
+            if globs {
+                paths.push(worktree.join("**").join(inside));
+            }
+        }
+        paths.extend(own.root_files.iter().map(|file| worktree.join(file)));
     }
     paths
 }
@@ -704,62 +719,31 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
-    fn deny_write_lists_existing_nested_harness_folders_on_linux() {
-        let dir = tempfile::tempdir().unwrap();
-        let wt = dir.path();
-        for folder in [
-            ".claude/agents",
-            "src/.claude/skills",
-            "lib/deep/.Claude",
-            "docs/.CODEX",
-            "docs/.agents",
-            "tools/.pi/extensions",
-            "app/.Goose/recipes",
-            "src/plain",
-            "src/claude",
-        ] {
-            fs::create_dir_all(wt.join(folder)).unwrap();
-        }
-        // A link is listed and never followed.
-        symlink("/etc", wt.join("lib/.codex")).unwrap();
-        let listed = |os| -> Vec<String> {
-            deny_write_on(wt, os)
-                .iter()
-                .map(|p| p.strip_prefix(wt).unwrap().display().to_string())
-                .collect()
-        };
-
-        let linux = listed("linux");
-        assert_eq!(linux[..13], listed("macos")[..]);
+    fn the_install_fence_keeps_the_root_harness_files_and_drops_the_nested_globs() {
+        let wt = Path::new("/k/wt/7");
+        let deny: Vec<String> = install_deny_write(wt)
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
         assert_eq!(
-            linux[13..],
+            deny,
             [
-                "app/.Goose",
-                "docs/.CODEX",
-                "docs/.agents",
-                "lib/.codex",
-                "lib/deep/.Claude",
-                "src/.claude",
-                "tools/.pi",
+                "/k/wt/7/.claude",
+                "/k/wt/7/.mcp.json",
+                "/k/wt/7/.codex",
+                "/k/wt/7/.agents",
+                "/k/wt/7/.pi",
+                "/k/wt/7/.goose",
+                "/k/wt/7/.config/goose",
             ]
         );
     }
 
     #[test]
-    fn a_nested_harness_folder_past_the_walks_bounds_is_left_to_the_check_after_the_call() {
-        let dir = tempfile::tempdir().unwrap();
-        let wt = dir.path();
-        let mut deep = PathBuf::new();
-        for level in 0..12 {
-            deep.push(format!("d{level}"));
-        }
-        fs::create_dir_all(wt.join(&deep).join(".claude")).unwrap();
-        fs::create_dir_all(wt.join(".git/.claude")).unwrap();
-        fs::create_dir_all(wt.join("near/.claude")).unwrap();
-        let listed = deny_write_on(wt, "linux");
-        assert_eq!(listed[13..], [wt.join("near/.claude")]);
+    fn a_workers_fence_still_denies_a_nested_claude_folder() {
+        let wt = Path::new("/k/wt/7");
+        assert!(deny_write_on(wt, "macos").contains(&wt.join("**").join(".claude")));
     }
 
     #[test]

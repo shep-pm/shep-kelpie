@@ -13,8 +13,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::fence;
 use crate::package_managers::{self, MANAGERS, PackageManager};
-use crate::ports::{DevRun, TestOutcome};
+use crate::ports::{DevRun, Fence, TestOutcome};
 use crate::spawn::shell_quote;
 
 /// How long the install and the server together get to answer on the port, and the install of a
@@ -115,6 +116,17 @@ pub(in crate::runner) fn worktree(worktree: &Path, build: &Path) -> Option<Plan>
         env,
         folders,
     })
+}
+
+/// Lets the install of `worktree`'s packages write the harness folders a package ships
+///
+/// The install runs the package manager and no agent, so `fence` keeps the harnesses' root files
+/// and drops the `**` globs a worker's own calls are held to: a package may ship a `.claude`
+/// folder, and `lib0` does.
+pub(in crate::runner) fn relax(fence: &mut Fence, worktree: &Path) {
+    let workers = fence::deny_write(worktree);
+    fence.no_write.retain(|path| !workers.contains(path));
+    fence.no_write.extend(fence::install_deny_write(worktree));
 }
 
 /// The folder with a lockfile that `cwd` or the first folder above it, up to `worktree`, holds

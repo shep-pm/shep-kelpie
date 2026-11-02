@@ -34,6 +34,7 @@ mod loose;
 mod push;
 mod remote;
 mod stale_lock;
+mod stray;
 mod workflows;
 mod writable;
 
@@ -277,6 +278,7 @@ fn mirror_tracking(repo: &Path, worktree: &Path, tracking: &str) -> Result<(), W
 /// Removes a work item's worktree, its branch and its build folder
 ///
 /// A clone's worktree and git dir are removed whole, a linked one through git.
+/// Whatever still runs from the build folder is ended before it is deleted.
 /// `remote` also deletes the branch on that [`Remote`]. Whatever is already
 /// gone, a branch the forge deleted first included, is skipped, so a removal
 /// cut short can run again.
@@ -317,6 +319,7 @@ pub fn remove(
     if let Some(remote) = remote {
         delete_on_remote(repo, remote, branch)?;
     }
+    stray::end_running_from(build);
     remove_tree_of(build)
 }
 
@@ -886,113 +889,4 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    #[cfg(unix)]
-    use std::os::unix::fs::{PermissionsExt, symlink};
-    use std::path::Path;
-
-    use super::{git, has_ref, remove, status_names};
-
-    #[cfg(unix)]
-    fn mode_of(path: &Path) -> u32 {
-        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
-    }
-
-    #[cfg(unix)]
-    fn set_mode(path: &Path, mode: u32) {
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
-    }
-
-    // A repo with nothing to remove but the build folder
-    fn remove_build(repo: &Path, build: &Path) -> Result<(), super::WorktreeError> {
-        git(repo, ["init", "--quiet"]).unwrap();
-        remove(repo, &repo.join("none"), "kelpie/7", build, None)
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_build_folder_holding_read_only_folders_is_removed() {
-        let dir = tempfile::tempdir().unwrap();
-        let build = dir.path().join("build");
-        let cache = build.join("gomod/cache/mod");
-        std::fs::create_dir_all(&cache).unwrap();
-        std::fs::write(cache.join("go.mod"), "module x\n").unwrap();
-        set_mode(&cache.join("go.mod"), 0o444);
-        set_mode(&cache, 0o555);
-        set_mode(&build.join("gomod"), 0o555);
-
-        remove_build(dir.path(), &build).unwrap();
-        assert!(!build.exists());
-    }
-
-    #[test]
-    fn removing_a_work_item_keeps_its_claude_config_folder() {
-        let dir = tempfile::tempdir().unwrap();
-        let build = dir.path().join("build/7");
-        std::fs::create_dir_all(&build).unwrap();
-        let transcript = dir.path().join("claude/7/worker/projects/x/s.jsonl");
-        std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
-        std::fs::write(&transcript, "{}\n").unwrap();
-
-        remove_build(dir.path(), &build).unwrap();
-        assert!(!build.exists());
-        assert!(transcript.is_file());
-    }
-
-    #[test]
-    fn a_build_folder_already_gone_is_removed() {
-        let dir = tempfile::tempdir().unwrap();
-        remove_build(dir.path(), &dir.path().join("build")).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_link_in_the_build_folder_leaves_what_it_points_at_alone() {
-        let dir = tempfile::tempdir().unwrap();
-        let outside = dir.path().join("outside");
-        std::fs::create_dir(&outside).unwrap();
-        set_mode(&outside, 0o555);
-        let build = dir.path().join("build");
-        let cache = build.join("mod");
-        std::fs::create_dir_all(&cache).unwrap();
-        std::fs::write(cache.join("go.mod"), "module x\n").unwrap();
-        set_mode(&cache, 0o555);
-        symlink(&outside, build.join("link")).unwrap();
-
-        let removed = remove_build(dir.path(), &build);
-        let mode = mode_of(&outside);
-        set_mode(&outside, 0o755);
-        removed.unwrap();
-        assert!(!build.exists());
-        assert!(outside.exists());
-        assert_eq!(mode, 0o555);
-    }
-
-    #[test]
-    fn a_missing_ref_is_absent_but_a_folder_git_cannot_read_is_an_error() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(has_ref(dir.path(), "refs/heads/kelpie/7").is_err());
-        git(dir.path(), ["init", "--quiet"]).unwrap();
-        assert!(!has_ref(dir.path(), "refs/heads/kelpie/7").unwrap());
-    }
-
-    #[test]
-    fn a_status_names_every_changed_staged_renamed_and_new_path() {
-        let status = "1 .M N... 100644 100644 100644 aaaa bbbb src/a b.rs\0\
-                      1 AD N... 000000 100644 000000 0000 cccc staged.txt\0\
-                      2 R. N... 100644 100644 100644 dddd eeee R100 new.rs\0old.rs\0\
-                      u UU N... 100644 100644 100644 100644 ffff gggg hhhh clash.rs\0\
-                      ? left.txt\0";
-        assert_eq!(
-            status_names(status),
-            [
-                "src/a b.rs",
-                "staged.txt",
-                "old.rs",
-                "new.rs",
-                "clash.rs",
-                "left.txt"
-            ]
-        );
-    }
-}
+mod tests;

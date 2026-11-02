@@ -32,9 +32,8 @@ fn a_worktree_with_a_bun_lock_and_no_node_modules_is_installed_before_the_first_
     let (rig, runner) = first_turn(&["bun.lock"], Vec::new());
 
     let [ran] = rig.tests.ran().try_into().unwrap();
-    let worktree = rig.home.path().join("shep/kelpie/shep/worktrees/7");
     let build = rig.home.path().join("shep/kelpie/shep/builds/7");
-    assert_eq!(ran.run.cwd, worktree);
+    assert_eq!(ran.run.cwd, build);
     assert!(
         ran.run
             .command

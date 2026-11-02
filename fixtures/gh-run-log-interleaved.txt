@@ -1,0 +1,133 @@
+test	Run pnpm -r test	2026-10-30T21:04:01.1234567Z > @acme/a@1.0.0 test /home/me/work/acme/packages/a
+test	Run pnpm -r test	2026-10-30T21:04:02.1234567Z > vitest run
+test	Run pnpm -r test	2026-10-30T21:04:03.1234567Z  RUN  v2.1.0 /home/me/work/acme/packages/a
+test	Run pnpm -r test	2026-10-30T21:04:04.1234567Z  ❯ src/a.test.ts (1 test | 1 failed) 5012ms
+test	Run pnpm -r test	2026-10-30T21:04:04.1234567Z    × suite > case 5009ms
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z      → Test timed out in 5000ms.
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z 
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z 
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z  FAIL  src/a.test.ts > suite > case
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z Error: Test timed out in 5000ms.
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z  ❯ src/a.test.ts:12:3
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z      10| 
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z      11| describe('suite', () => {
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z      12|   it('case', async () => {
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z        |   ^
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z      13|     await never()
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z      14|   })
+test	Run pnpm -r test	2026-10-30T21:04:05.1234567Z 
+test	Run pnpm -r test	2026-10-30T21:04:06.1234567Z  Test Files  1 failed (1)
+test	Run pnpm -r test	2026-10-30T21:04:06.1234567Z       Tests  1 failed (1)
+test	Run pnpm -r test	2026-10-30T21:04:07.1234567Z  ✓ src/b/feature0.test.ts > b suite > passes case number 0 3ms
+test	Run pnpm -r test	2026-10-30T21:04:07.1234567Z  ✓ src/b/feature1.test.ts > b suite > passes case number 1 3ms
+test	Run pnpm -r test	2026-10-30T21:04:07.1234567Z  ✓ src/b/feature2.test.ts > b suite > passes case number 2 3ms
+test	Run pnpm -r test	2026-10-30T21:04:07.1234567Z  ✓ src/b/feature3.test.ts > b suite > passes case number 3 3ms
+test	Run pnpm -r test	2026-10-30T21:04:07.1234567Z  ✓ src/b/feature4.test.ts > b suite > passes case number 4 3ms
+test	Run pnpm -r test	2026-10-30T21:04:07.1234567Z  ✓ src/b/feature5.test.ts > b suite > passes case number 5 3ms
+test	Run pnpm -r test	2026-10-30T21:04:07.1234567Z  ✓ src/b/feature6.test.ts > b suite > passes case number 6 3ms
+test	Run pnpm -r test	2026-10-30T21:04:07.1234567Z  ✓ src/b/feature7.test.ts > b suite > passes case number 7 3ms
+test	Run pnpm -r test	2026-10-30T21:04:07.1234567Z  ✓ src/b/feature8.test.ts > b suite > passes case number 8 3ms
+test	Run pnpm -r test	2026-10-30T21:04:07.1234567Z  ✓ src/b/feature9.test.ts > b suite > passes case number 9 3ms
+test	Run pnpm -r test	2026-10-30T21:04:08.1234567Z  ✓ src/b/feature10.test.ts > b suite > passes case number 10 3ms
+test	Run pnpm -r test	2026-10-30T21:04:08.1234567Z  ✓ src/b/feature11.test.ts > b suite > passes case number 11 3ms
+test	Run pnpm -r test	2026-10-30T21:04:08.1234567Z  ✓ src/b/feature12.test.ts > b suite > passes case number 12 3ms
+test	Run pnpm -r test	2026-10-30T21:04:08.1234567Z  ✓ src/b/feature13.test.ts > b suite > passes case number 13 3ms
+test	Run pnpm -r test	2026-10-30T21:04:08.1234567Z  ✓ src/b/feature14.test.ts > b suite > passes case number 14 3ms
+test	Run pnpm -r test	2026-10-30T21:04:08.1234567Z  ✓ src/b/feature15.test.ts > b suite > passes case number 15 3ms
+test	Run pnpm -r test	2026-10-30T21:04:08.1234567Z  ✓ src/b/feature16.test.ts > b suite > passes case number 16 3ms
+test	Run pnpm -r test	2026-10-30T21:04:08.1234567Z  ✓ src/b/feature17.test.ts > b suite > passes case number 17 3ms
+test	Run pnpm -r test	2026-10-30T21:04:08.1234567Z  ✓ src/b/feature18.test.ts > b suite > passes case number 18 3ms
+test	Run pnpm -r test	2026-10-30T21:04:08.1234567Z  ✓ src/b/feature19.test.ts > b suite > passes case number 19 3ms
+test	Run pnpm -r test	2026-10-30T21:04:09.1234567Z  ✓ src/b/feature20.test.ts > b suite > passes case number 20 3ms
+test	Run pnpm -r test	2026-10-30T21:04:09.1234567Z  ✓ src/b/feature21.test.ts > b suite > passes case number 21 3ms
+test	Run pnpm -r test	2026-10-30T21:04:09.1234567Z  ✓ src/b/feature22.test.ts > b suite > passes case number 22 3ms
+test	Run pnpm -r test	2026-10-30T21:04:09.1234567Z  ✓ src/b/feature23.test.ts > b suite > passes case number 23 3ms
+test	Run pnpm -r test	2026-10-30T21:04:09.1234567Z  ✓ src/b/feature24.test.ts > b suite > passes case number 24 3ms
+test	Run pnpm -r test	2026-10-30T21:04:09.1234567Z  ✓ src/b/feature25.test.ts > b suite > passes case number 25 3ms
+test	Run pnpm -r test	2026-10-30T21:04:09.1234567Z  ✓ src/b/feature26.test.ts > b suite > passes case number 26 3ms
+test	Run pnpm -r test	2026-10-30T21:04:09.1234567Z  ✓ src/b/feature27.test.ts > b suite > passes case number 27 3ms
+test	Run pnpm -r test	2026-10-30T21:04:09.1234567Z  ✓ src/b/feature28.test.ts > b suite > passes case number 28 3ms
+test	Run pnpm -r test	2026-10-30T21:04:09.1234567Z  ✓ src/b/feature29.test.ts > b suite > passes case number 29 3ms
+test	Run pnpm -r test	2026-10-30T21:04:10.1234567Z  ✓ src/b/feature30.test.ts > b suite > passes case number 30 3ms
+test	Run pnpm -r test	2026-10-30T21:04:10.1234567Z  ✓ src/b/feature31.test.ts > b suite > passes case number 31 3ms
+test	Run pnpm -r test	2026-10-30T21:04:10.1234567Z  ✓ src/b/feature32.test.ts > b suite > passes case number 32 3ms
+test	Run pnpm -r test	2026-10-30T21:04:10.1234567Z  ✓ src/b/feature33.test.ts > b suite > passes case number 33 3ms
+test	Run pnpm -r test	2026-10-30T21:04:10.1234567Z  ✓ src/b/feature34.test.ts > b suite > passes case number 34 3ms
+test	Run pnpm -r test	2026-10-30T21:04:10.1234567Z  ✓ src/b/feature35.test.ts > b suite > passes case number 35 3ms
+test	Run pnpm -r test	2026-10-30T21:04:10.1234567Z  ✓ src/b/feature36.test.ts > b suite > passes case number 36 3ms
+test	Run pnpm -r test	2026-10-30T21:04:10.1234567Z  ✓ src/b/feature37.test.ts > b suite > passes case number 37 3ms
+test	Run pnpm -r test	2026-10-30T21:04:10.1234567Z  ✓ src/b/feature38.test.ts > b suite > passes case number 38 3ms
+test	Run pnpm -r test	2026-10-30T21:04:10.1234567Z  ✓ src/b/feature39.test.ts > b suite > passes case number 39 3ms
+test	Run pnpm -r test	2026-10-30T21:04:11.1234567Z  ✓ src/b/feature40.test.ts > b suite > passes case number 40 3ms
+test	Run pnpm -r test	2026-10-30T21:04:11.1234567Z  ✓ src/b/feature41.test.ts > b suite > passes case number 41 3ms
+test	Run pnpm -r test	2026-10-30T21:04:11.1234567Z  ✓ src/b/feature42.test.ts > b suite > passes case number 42 3ms
+test	Run pnpm -r test	2026-10-30T21:04:11.1234567Z  ✓ src/b/feature43.test.ts > b suite > passes case number 43 3ms
+test	Run pnpm -r test	2026-10-30T21:04:11.1234567Z  ✓ src/b/feature44.test.ts > b suite > passes case number 44 3ms
+test	Run pnpm -r test	2026-10-30T21:04:11.1234567Z  ✓ src/b/feature45.test.ts > b suite > passes case number 45 3ms
+test	Run pnpm -r test	2026-10-30T21:04:11.1234567Z  ✓ src/b/feature46.test.ts > b suite > passes case number 46 3ms
+test	Run pnpm -r test	2026-10-30T21:04:11.1234567Z  ✓ src/b/feature47.test.ts > b suite > passes case number 47 3ms
+test	Run pnpm -r test	2026-10-30T21:04:11.1234567Z  ✓ src/b/feature48.test.ts > b suite > passes case number 48 3ms
+test	Run pnpm -r test	2026-10-30T21:04:11.1234567Z  ✓ src/b/feature49.test.ts > b suite > passes case number 49 3ms
+test	Run pnpm -r test	2026-10-30T21:04:12.1234567Z  ✓ src/b/feature50.test.ts > b suite > passes case number 50 3ms
+test	Run pnpm -r test	2026-10-30T21:04:12.1234567Z  ✓ src/b/feature51.test.ts > b suite > passes case number 51 3ms
+test	Run pnpm -r test	2026-10-30T21:04:12.1234567Z  ✓ src/b/feature52.test.ts > b suite > passes case number 52 3ms
+test	Run pnpm -r test	2026-10-30T21:04:12.1234567Z  ✓ src/b/feature53.test.ts > b suite > passes case number 53 3ms
+test	Run pnpm -r test	2026-10-30T21:04:12.1234567Z  ✓ src/b/feature54.test.ts > b suite > passes case number 54 3ms
+test	Run pnpm -r test	2026-10-30T21:04:12.1234567Z  ✓ src/b/feature55.test.ts > b suite > passes case number 55 3ms
+test	Run pnpm -r test	2026-10-30T21:04:12.1234567Z  ✓ src/b/feature56.test.ts > b suite > passes case number 56 3ms
+test	Run pnpm -r test	2026-10-30T21:04:12.1234567Z  ✓ src/b/feature57.test.ts > b suite > passes case number 57 3ms
+test	Run pnpm -r test	2026-10-30T21:04:12.1234567Z  ✓ src/b/feature58.test.ts > b suite > passes case number 58 3ms
+test	Run pnpm -r test	2026-10-30T21:04:12.1234567Z  ✓ src/b/feature59.test.ts > b suite > passes case number 59 3ms
+test	Run pnpm -r test	2026-10-30T21:04:14.1234567Z  ✓ src/b/feature60.test.ts > b suite > passes case number 60 3ms
+test	Run pnpm -r test	2026-10-30T21:04:14.1234567Z  ✓ src/b/feature61.test.ts > b suite > passes case number 61 3ms
+test	Run pnpm -r test	2026-10-30T21:04:14.1234567Z  ✓ src/b/feature62.test.ts > b suite > passes case number 62 3ms
+test	Run pnpm -r test	2026-10-30T21:04:14.1234567Z  ✓ src/b/feature63.test.ts > b suite > passes case number 63 3ms
+test	Run pnpm -r test	2026-10-30T21:04:14.1234567Z  ✓ src/b/feature64.test.ts > b suite > passes case number 64 3ms
+test	Run pnpm -r test	2026-10-30T21:04:14.1234567Z  ✓ src/b/feature65.test.ts > b suite > passes case number 65 3ms
+test	Run pnpm -r test	2026-10-30T21:04:14.1234567Z  ✓ src/b/feature66.test.ts > b suite > passes case number 66 3ms
+test	Run pnpm -r test	2026-10-30T21:04:14.1234567Z  ✓ src/b/feature67.test.ts > b suite > passes case number 67 3ms
+test	Run pnpm -r test	2026-10-30T21:04:14.1234567Z  ✓ src/b/feature68.test.ts > b suite > passes case number 68 3ms
+test	Run pnpm -r test	2026-10-30T21:04:14.1234567Z  ✓ src/b/feature69.test.ts > b suite > passes case number 69 3ms
+test	Run pnpm -r test	2026-10-30T21:04:15.1234567Z  ✓ src/b/feature70.test.ts > b suite > passes case number 70 3ms
+test	Run pnpm -r test	2026-10-30T21:04:15.1234567Z  ✓ src/b/feature71.test.ts > b suite > passes case number 71 3ms
+test	Run pnpm -r test	2026-10-30T21:04:15.1234567Z  ✓ src/b/feature72.test.ts > b suite > passes case number 72 3ms
+test	Run pnpm -r test	2026-10-30T21:04:15.1234567Z  ✓ src/b/feature73.test.ts > b suite > passes case number 73 3ms
+test	Run pnpm -r test	2026-10-30T21:04:15.1234567Z  ✓ src/b/feature74.test.ts > b suite > passes case number 74 3ms
+test	Run pnpm -r test	2026-10-30T21:04:15.1234567Z  ✓ src/b/feature75.test.ts > b suite > passes case number 75 3ms
+test	Run pnpm -r test	2026-10-30T21:04:15.1234567Z  ✓ src/b/feature76.test.ts > b suite > passes case number 76 3ms
+test	Run pnpm -r test	2026-10-30T21:04:15.1234567Z  ✓ src/b/feature77.test.ts > b suite > passes case number 77 3ms
+test	Run pnpm -r test	2026-10-30T21:04:15.1234567Z  ✓ src/b/feature78.test.ts > b suite > passes case number 78 3ms
+test	Run pnpm -r test	2026-10-30T21:04:15.1234567Z  ✓ src/b/feature79.test.ts > b suite > passes case number 79 3ms
+test	Run pnpm -r test	2026-10-30T21:04:16.1234567Z  ✓ src/b/feature80.test.ts > b suite > passes case number 80 3ms
+test	Run pnpm -r test	2026-10-30T21:04:16.1234567Z  ✓ src/b/feature81.test.ts > b suite > passes case number 81 3ms
+test	Run pnpm -r test	2026-10-30T21:04:16.1234567Z  ✓ src/b/feature82.test.ts > b suite > passes case number 82 3ms
+test	Run pnpm -r test	2026-10-30T21:04:16.1234567Z  ✓ src/b/feature83.test.ts > b suite > passes case number 83 3ms
+test	Run pnpm -r test	2026-10-30T21:04:16.1234567Z  ✓ src/b/feature84.test.ts > b suite > passes case number 84 3ms
+test	Run pnpm -r test	2026-10-30T21:04:16.1234567Z  ✓ src/b/feature85.test.ts > b suite > passes case number 85 3ms
+test	Run pnpm -r test	2026-10-30T21:04:16.1234567Z  ✓ src/b/feature86.test.ts > b suite > passes case number 86 3ms
+test	Run pnpm -r test	2026-10-30T21:04:16.1234567Z  ✓ src/b/feature87.test.ts > b suite > passes case number 87 3ms
+test	Run pnpm -r test	2026-10-30T21:04:16.1234567Z  ✓ src/b/feature88.test.ts > b suite > passes case number 88 3ms
+test	Run pnpm -r test	2026-10-30T21:04:16.1234567Z  ✓ src/b/feature89.test.ts > b suite > passes case number 89 3ms
+test	Run pnpm -r test	2026-10-30T21:04:17.1234567Z  ✓ src/b/feature90.test.ts > b suite > passes case number 90 3ms
+test	Run pnpm -r test	2026-10-30T21:04:17.1234567Z  ✓ src/b/feature91.test.ts > b suite > passes case number 91 3ms
+test	Run pnpm -r test	2026-10-30T21:04:17.1234567Z  ✓ src/b/feature92.test.ts > b suite > passes case number 92 3ms
+test	Run pnpm -r test	2026-10-30T21:04:17.1234567Z  ✓ src/b/feature93.test.ts > b suite > passes case number 93 3ms
+test	Run pnpm -r test	2026-10-30T21:04:17.1234567Z  ✓ src/b/feature94.test.ts > b suite > passes case number 94 3ms
+test	Run pnpm -r test	2026-10-30T21:04:17.1234567Z  ✓ src/b/feature95.test.ts > b suite > passes case number 95 3ms
+test	Run pnpm -r test	2026-10-30T21:04:17.1234567Z  ✓ src/b/feature96.test.ts > b suite > passes case number 96 3ms
+test	Run pnpm -r test	2026-10-30T21:04:17.1234567Z  ✓ src/b/feature97.test.ts > b suite > passes case number 97 3ms
+test	Run pnpm -r test	2026-10-30T21:04:17.1234567Z  ✓ src/b/feature98.test.ts > b suite > passes case number 98 3ms
+test	Run pnpm -r test	2026-10-30T21:04:17.1234567Z  ✓ src/b/feature99.test.ts > b suite > passes case number 99 3ms
+test	Run pnpm -r test	2026-10-30T21:04:18.1234567Z  ✓ src/b/feature100.test.ts > b suite > passes case number 100 3ms
+test	Run pnpm -r test	2026-10-30T21:04:18.1234567Z  ✓ src/b/feature101.test.ts > b suite > passes case number 101 3ms
+test	Run pnpm -r test	2026-10-30T21:04:18.1234567Z  ✓ src/b/feature102.test.ts > b suite > passes case number 102 3ms
+test	Run pnpm -r test	2026-10-30T21:04:18.1234567Z  ✓ src/b/feature103.test.ts > b suite > passes case number 103 3ms
+test	Run pnpm -r test	2026-10-30T21:04:18.1234567Z  ✓ src/b/feature104.test.ts > b suite > passes case number 104 3ms
+test	Run pnpm -r test	2026-10-30T21:04:18.1234567Z  ✓ src/b/feature105.test.ts > b suite > passes case number 105 3ms
+test	Run pnpm -r test	2026-10-30T21:04:18.1234567Z  ✓ src/b/feature106.test.ts > b suite > passes case number 106 3ms
+test	Run pnpm -r test	2026-10-30T21:04:18.1234567Z  ✓ src/b/feature107.test.ts > b suite > passes case number 107 3ms
+test	Run pnpm -r test	2026-10-30T21:04:18.1234567Z  ✓ src/b/feature108.test.ts > b suite > passes case number 108 3ms
+test	Run pnpm -r test	2026-10-30T21:04:18.1234567Z  ✓ src/b/feature109.test.ts > b suite > passes case number 109 3ms
+test	Run pnpm -r test	2026-10-30T21:04:20.1234567Z ##[error]Process completed with exit code 1.

@@ -259,6 +259,8 @@ pub(super) struct Desk {
     asked_pick: bool,
     // Each red head it was woken for, so a head wakes it once
     red_woken: BTreeSet<(String, String)>,
+    // Each fix work item read closed while its workflow was red, and when it was first read so
+    fixes_closed: BTreeMap<TicketId, Timestamp>,
     // Since when a window of held reasons has been open
     holding_since: Option<Timestamp>,
     pick: Option<Pick>,

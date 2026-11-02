@@ -8,6 +8,7 @@ use serde_json::json;
 
 use super::{answered, dispatched, pm_on, pm_seen, step_until};
 use crate::ports::{BranchRun, Timestamp};
+use crate::runner::main_ci::FIX_CLOSED_GRACE;
 use crate::runner::{BOARD_POLL, MAIN_CI_POLL, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, ticket};
 
@@ -59,6 +60,13 @@ fn answers(rig: &Rig, runner: &Mutex<Runner>, say: &'static str) -> StepReport {
 }
 
 const FIX: &str = "{\"pick\": null, \"red\": {\"workflow\": \"test\", \"call\": \"fix\", \
+    \"title\": \"Fix e2e::checkout on main\", \"body\": \"Touches: `tests/e2e/checkout.rs`\\n\\n\
+    ## What to build\\n\\n`test` fails in e2e::checkout: `times out after 3 tries`. Suspect: the \
+    merge of #323.\\n\\n## Acceptance criteria\\n\\n- [ ] `test` is green on `main`\\n\", \
+    \"why\": \"a real break\"}}";
+
+/// A fix whose body names no file, no work and no criterion, which the issue check refuses
+const BARE_FIX: &str = "{\"pick\": null, \"red\": {\"workflow\": \"test\", \"call\": \"fix\", \
     \"title\": \"Fix e2e::checkout on main\", \"body\": \"`test` fails in e2e::checkout: \
     `times out after 3 tries`. Suspect: the merge of #323.\", \"why\": \"a real break\"}}";
 
@@ -166,6 +174,33 @@ fn a_fix_call_opens_an_issue_with_what_it_read_and_it_starts_ahead_of_the_board(
 }
 
 #[test]
+fn a_fix_body_the_issue_check_refuses_is_asked_of_the_maintainer_and_never_filed() {
+    let (rig, runner) = red_again();
+
+    let report = answers(&rig, &runner, BARE_FIX);
+
+    let StepReport::PmAnswered { acted, reply, .. } = report else {
+        panic!("not an answer: {report:?}");
+    };
+    assert_eq!(
+        acted,
+        [
+            "asked the maintainer about test red on main, since the fix I drafted fails the issue check"
+        ]
+    );
+    let reply = reply.expect("the question went to the maintainer");
+    assert!(reply.contains("fails the issue check"), "{reply}");
+    assert!(reply.contains("no `Touches:` line"), "{reply}");
+    assert!(reply.contains("Fix e2e::checkout on main"), "{reply}");
+    assert!(reply.contains("`times out after 3 tries`"), "{reply}");
+    assert!(rig.forge.created().is_empty());
+    assert_eq!(
+        ask(&rig, &runner, "red_workflows")[0]["doing"],
+        json!("the project manager asked the maintainer, with the log lines it read")
+    );
+}
+
+#[test]
 fn status_shows_what_is_being_done_about_each_red_workflow() {
     let (rig, runner) = rerun();
     let doing = || ask(&rig, &runner, "red_workflows")[0]["doing"].clone();
@@ -251,6 +286,7 @@ fn a_head_is_settled_once_and_a_new_red_head_is_the_project_managers_again() {
     );
     assert_eq!(rig.forge.created().len(), 1);
 
+    rig.forge.close_issue(900);
     rig.forge
         .set_branch_runs("main", vec![run(95, Rig::EPOCH + 3600)]);
     rig.clock.advance(MAIN_CI_POLL.as_secs());
@@ -259,6 +295,97 @@ fn a_head_is_settled_once_and_a_new_red_head_is_the_project_managers_again() {
         ask(&rig, &runner, "red_workflows")[0]["doing"],
         json!("kelpie reran its failed jobs and waits for the result")
     );
+}
+
+/// Reads head95 red, then its rerun red again, with the clock moved past each read
+fn new_head_red_again(rig: &Rig, runner: &Mutex<Runner>) {
+    rig.forge
+        .set_branch_runs("main", vec![run(95, Rig::EPOCH + 3600)]);
+    for _ in 0..2 {
+        rig.clock.advance(MAIN_CI_POLL.as_secs());
+        step(runner).unwrap();
+    }
+}
+
+#[test]
+fn a_new_red_head_keeps_the_fix_work_item_that_is_still_open() {
+    let (rig, runner) = red_again();
+    answers(&rig, &runner, FIX);
+    assert_eq!(rig.forge.created().len(), 1);
+    // A second call would file a second fix, were the project manager woken for head95.
+    rig.claude.script([Scripted::Say(FIX)]);
+
+    new_head_red_again(&rig, &runner);
+
+    let red = ask(&rig, &runner, "red_workflows");
+    assert_eq!(red[0]["head"], "head95", "{red}");
+    assert_eq!(
+        red[0]["doing"],
+        json!("the project manager opened fix work item #900 at the front of the board")
+    );
+    assert_eq!(rig.forge.created().len(), 1);
+}
+
+#[test]
+fn a_new_red_head_after_its_fix_work_item_closed_is_the_project_managers_again() {
+    let (rig, runner) = red_again();
+    answers(&rig, &runner, FIX);
+    rig.forge.close_issue(900);
+
+    new_head_red_again(&rig, &runner);
+
+    assert_eq!(
+        ask(&rig, &runner, "red_workflows")[0]["doing"],
+        json!("red again after its rerun; the project manager opens a fix or asks")
+    );
+}
+
+// `test` red at head91 with fix #900 filed, then the fix closed and read closed once
+fn fix_closed_once() -> (Rig, Mutex<Runner>) {
+    let (rig, runner) = rerun();
+    rig.claude.script([Scripted::Say(FIX)]);
+    rig.clock.advance(MAIN_CI_POLL.as_secs());
+    step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    assert_eq!(rig.forge.created().len(), 1);
+    rig.forge.close_issue(900);
+    // A second call would file a second fix, were the project manager woken again.
+    rig.claude.script([Scripted::Say(FIX)]);
+    rig.clock.advance(MAIN_CI_POLL.as_secs());
+    for _ in 0..3 {
+        step(&runner).unwrap();
+        std::thread::yield_now();
+    }
+    (rig, runner)
+}
+
+#[test]
+fn a_fix_work_item_that_just_closed_leaves_the_head_alone_while_the_merges_run_may_be_out() {
+    let (rig, runner) = fix_closed_once();
+
+    // main still shows the old red run: the run of the merge that closed the fix
+    // is not completed, so a second fix would be one for a failure being fixed.
+    assert_eq!(rig.forge.created().len(), 1);
+    assert_eq!(
+        ask(&rig, &runner, "red_workflows")[0]["doing"],
+        json!("the project manager opened fix work item #900 at the front of the board")
+    );
+}
+
+#[test]
+fn a_fix_work_item_that_stays_closed_while_the_head_stays_red_is_settled_again() {
+    let (rig, runner) = fix_closed_once();
+
+    rig.clock.advance(FIX_CLOSED_GRACE.as_secs());
+    let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+
+    let StepReport::PmAnswered { acted, .. } = report else {
+        panic!("not an answer: {report:?}");
+    };
+    assert_eq!(
+        acted,
+        ["opened fix work item #901 at the front of the board for test"]
+    );
+    assert_eq!(rig.forge.created().len(), 2);
 }
 
 #[test]
