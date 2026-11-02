@@ -528,6 +528,10 @@ impl Runner {
                 open: listed,
                 most,
                 role,
+                // Only the first pass answers with a whole issue body, and only the
+                // issues kelpie rewrites have a draft worth mending
+                redraft: (matches!(purpose, Purpose::First) && self.own_author(&this.author))
+                    .then(|| this.title.clone()),
                 pictures: Pictures {
                     tickets: Arc::clone(&self.ports.tickets),
                     repo: self.remote.clone(),
@@ -724,6 +728,8 @@ mod ready_tests;
 mod repair_tests;
 #[cfg(test)]
 mod research_tests;
+#[cfg(test)]
+mod rewrite_tests;
 #[cfg(test)]
 mod roles_tests;
 #[cfg(test)]

@@ -300,9 +300,12 @@ pub(super) fn prompt(
          how urgent it is. A question you have a good answer for is no question: write it \
          into `body` as `Assumed: <the answer>. Say otherwise.` and leave it out of `open`. \
          When `open` is empty, answer `body` with the whole issue body in the format of \
-         kelpie's issue skill, and `kind` with its one type: when the maintainer opened the \
-         issue and the body passes the issue check, kelpie writes it over the issue and labels \
-         it `ready-for-agent`, and otherwise under the issue's text.\n\n\
+         kelpie's issue skill, and `kind` with its one type. The issue check reads the body \
+         for a `Touches:` line naming the files it changes, each path in backticks, a \
+         `## What to build` section and a `## Acceptance criteria` section of `- [ ]` items, \
+         under those headings and no others. When the maintainer opened the issue and the \
+         body passes the issue check, kelpie writes it over the issue and labels it \
+         `ready-for-agent`, and otherwise under the issue's text.\n\n\
          Reply with exactly one JSON object and nothing else: {{\"type\": \"bug\" | \
          \"enhancement\" | null, \"kind\": \"feat\" | \"fix\" | \"docs\" | \"refactor\" | \
          \"perf\" | \"test\" | \"ci\" | \"chore\" | \"style\" | null, \"priority\": \"P0\" | \"P1\" | \"P2\" | \"P3\" | \"P4\", \
