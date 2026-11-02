@@ -10,12 +10,13 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use super::{Read, still_red};
-use crate::ports::{BranchRun, Forge, ForgeError, Rerun, Workflow, WorkflowState};
+use super::{Closed, FIX_CLOSED_GRACE, Read, still_red};
+use crate::ports::{BranchRun, Forge, ForgeError, Rerun, Tickets, Workflow, WorkflowState};
 use crate::runner::Runner;
 use crate::runner::trigger::lock;
 use crate::settings::ForgeSlug;
 use crate::state::RedWorkflow;
+use crate::ticket::TicketId;
 
 /// Reads `main`'s workflows when they are due and the forge is not held, with the runner's lock
 /// let go, at the start of every pass, before any work item is stepped
@@ -102,6 +103,7 @@ impl Acts {
 /// A read of `main`'s runs the runner decided was due, which needs no lock
 struct MainCiJob {
     forge: Arc<dyn Forge>,
+    tickets: Arc<dyn Tickets>,
     repo: ForgeSlug,
     branch: String,
     /// The red workflows as they stood when the read began
@@ -113,6 +115,9 @@ struct Runs {
     runs: Vec<BranchRun>,
     /// The forge's workflows, read only while one was red
     workflows: Option<Vec<Workflow>>,
+    /// The fix work items of the red workflows that the source says are closed. One it
+    /// could not read is left out, so it stays the workflow's.
+    closed: Vec<TicketId>,
 }
 
 impl MainCiJob {
@@ -121,11 +126,21 @@ impl MainCiJob {
     // is what drops one that can no longer run.
     fn run(self) -> Result<Runs, ForgeError> {
         let runs = self.forge.branch_runs(&self.repo, &self.branch)?;
-        let workflows = match still_red(&self.red, &runs).red.is_empty() {
+        let workflows = match still_red(&self.red, &runs, Closed::default())
+            .red
+            .is_empty()
+        {
             true => None,
             false => Some(self.forge.workflows(&self.repo)?),
         };
-        Ok(Runs { runs, workflows })
+        let closed = (self.red.iter().filter_map(RedWorkflow::fix))
+            .filter(|&fix| self.tickets.issue(&self.repo, fix).is_ok_and(|i| !i.open))
+            .collect();
+        Ok(Runs {
+            runs,
+            workflows,
+            closed,
+        })
     }
 }
 
@@ -138,6 +153,7 @@ impl Runner {
         }
         Some(MainCiJob {
             forge: Arc::clone(&self.ports.forge),
+            tickets: Arc::clone(&self.ports.tickets),
             repo: self.remote.clone(),
             branch: self.settings.git.base().to_owned(),
             red: self.state.red.clone(),
@@ -173,11 +189,13 @@ impl Runner {
     // Works the red workflows out again on the state as it is now and acts on them with `done`
     fn finish_main_ci(&mut self, runs: Runs, mut done: Done) {
         let now = self.ports.clock.now();
+        self.pm_fixes_closed(&runs.closed);
         let Ok(read) = self.red_after(&runs) else {
             return;
         };
         let mut next = self.state.clone();
         next.red = read.red;
+        let reopened = read.reopened;
         let notices =
             Runner::act_on_reds(&read.failing, &mut next.red, &read.cleared, &mut done, now);
         next.notices.extend(notices);
@@ -185,7 +203,10 @@ impl Runner {
             return;
         }
         match self.save(next) {
-            Ok(()) => self.board_changed(),
+            Ok(()) => {
+                self.pm_forget_reds(&reopened);
+                self.board_changed();
+            }
             Err(e) => eprintln!("cannot save the red workflows on main: {e}"),
         }
     }
@@ -193,7 +214,12 @@ impl Runner {
     // The red workflows after `runs`, worked out on the state as it is now, which the forge's
     // list of workflows then thins.
     fn red_after(&self, runs: &Runs) -> Result<Read, ForgeError> {
-        let mut read = still_red(&self.state.red, &runs.runs);
+        let settled = self.pm_settled_fixes(&runs.closed, FIX_CLOSED_GRACE);
+        let closed = Closed {
+            now: &runs.closed,
+            settled: &settled,
+        };
+        let mut read = still_red(&self.state.red, &runs.runs, closed);
         if read.red.is_empty() {
             return Ok(read);
         }

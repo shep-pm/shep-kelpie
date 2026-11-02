@@ -34,6 +34,13 @@ impl Runner {
         if named.number == issue {
             return Cover::No("it is the issue itself".to_owned());
         }
+        if self.is_red_fix(issue) {
+            return Cover::No(
+                "the issue is the fix work item of a workflow red on main, which stays open \
+                 whatever covers it"
+                    .to_owned(),
+            );
+        }
         if !shown.contains(&named.number) {
             return Cover::No(
                 "no issue or pull request of that number was in its listing".to_owned(),
@@ -63,9 +70,25 @@ impl Runner {
         }
     }
 
+    // Whether a red workflow's record names `issue` as its fix work item. The record wins
+    // against any cover the research names, and the older issue is the one closed.
+    fn is_red_fix(&self, issue: u64) -> bool {
+        let fix = super::ticket(issue).ok();
+        fix.is_some() && self.state.red.iter().any(|r| r.fix() == fix)
+    }
+
     // Closes `issue` as a duplicate of `of`, from a record at the `closed`
     // step: what a restart leaves after the comment is already up
     pub(super) fn close_duplicate(&mut self, issue: u64, of: u64) -> Result<(), StateError> {
+        if self.is_red_fix(issue) {
+            self.notes.push(format!(
+                "triage #{issue}: it became a red workflow's fix work item after it was to be \
+                 closed as a duplicate of #{of}, so it stays open"
+            ));
+            self.triage_stepped(issue, TriageStep::Done)?;
+            self.triage_tries.remove(&issue);
+            return Ok(());
+        }
         let closed = super::ticket(issue).and_then(|ticket| {
             self.ports
                 .tickets
