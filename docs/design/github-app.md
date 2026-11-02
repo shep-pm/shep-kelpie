@@ -10,7 +10,7 @@ Per-user App: tokens, posting, answering rulings on GitHub. Who answers a ruling
 - Token reaches worker as a `gh` config file, not a variable (every process shows those); git credential helpers emptied. #420, #429
 - Covered worker writes `pull-request.md`; kelpie opens and edits the PR, refusing a non-conventional title. Files read/written without following links. #420, #439, #898, `crates/worker_folder/`
 - A fork worker only commits; kelpie pushes. #633, `contribution-push.md`
-- Workers push any branch: `doctor` says protect `main`. Kelpie reads covered workers' failed CI logs (3 runs, 6000 bytes each, noise dropped) rather than widen token. #420
+- Workers push any branch: `doctor` says protect `main`. Kelpie reads covered workers' failed CI logs (3 runs, 6000 bytes each, noise dropped, a log over that led by its failure lines and their next 15 lines) rather than widen token. #420
 - Worker token renewed every 30 min (1h life). `runner/login_refresh.rs`
 - `shep kelpie github setup` registers an App from 127.0.0.1 with random `state`, refusing other hosts. #396
 - App under `<kelpie home>/github/<owner>/`, key 0600 (an owner-only ACL on Windows, `docs/design/windows.md`), never in argument or variable (like TOTP secret). #396
