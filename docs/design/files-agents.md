@@ -17,6 +17,7 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | fence-git.md | a worker's git: worktree, clone | `core/profile/`, `adapters/harness/policy.rs` |
 | fence-reads.md | reads | `core/dep_sources.rs`, `adapters/harness/`, `runner/turn/` |
 | fence-reach.md | hosts | `core/package_managers/` |
+| fence-install.md | the package install before a first turn | `runner/git_reads.rs`, `runner/dev_server/install/`, `core/fence/` |
 | browser.md | a worker's browser: bridge, filter, tools | `core/{bridge,browse,settings/browser}.rs`, `adapters/bridge/`, `runner/browser.rs`, `process/tools/` |
 | browser-proxy.md | the browser's proxy | `adapters/{bridge/proxy/,forwarder/http.rs}` |
 | browser-dev-server.md | a worker's dev server | `runner/dev_server/`, `core/ports/dev_server.rs`, `adapters/dev_server/` |

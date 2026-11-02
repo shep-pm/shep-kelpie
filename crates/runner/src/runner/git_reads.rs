@@ -467,9 +467,13 @@ impl Runner {
         for (variable, folder) in plan.env {
             fence.env.entry(variable).or_insert(folder);
         }
+        install::relax(fence, &item.worktree);
         let run = TestRun {
             command: plan.command,
-            cwd: item.worktree.clone(),
+            // The sandbox refuses `.vscode`, `.idea` and `.claude/commands` below the folder it
+            // starts in whatever its settings say, and a package ships them. The plan's command
+            // `cd`s into each folder it installs.
+            cwd: item.build.clone(),
             reach,
             settings: (self.paths.worker).join(format!("install-{}.sandbox.json", item.issue)),
             door: None,
@@ -527,5 +531,66 @@ impl Runner {
             branch: item.branch.clone(),
             base: self.item_base(item).to_owned(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+    use crate::ports::{Cost, Usage};
+    use crate::runner::step;
+    use crate::test::{Rig, Scripted};
+
+    // The install of issue 7's worktree, which keeps a pnpm lockfile, as the runner ran it.
+    fn install_of_a_pnpm_worktree() -> (Rig, Mutex<Runner>, TestRun) {
+        let rig = Rig::new("shep");
+        rig.land("pnpm-lock.yaml", "");
+        let runner = rig.open().unwrap();
+        rig.ask(&runner, "add", Some("7"));
+        let usage = Usage {
+            input: 1,
+            cache_write: 10,
+            cache_write_5m: 0,
+            cache_read: 100,
+            output: 1000,
+        };
+        rig.claude.script([Scripted::Reply(usage, Cost(1))]);
+        step(&runner).unwrap();
+        let [ran] = rig.tests.ran().try_into().unwrap();
+        (rig, runner, ran.run)
+    }
+
+    #[test]
+    fn the_install_policy_lets_a_package_write_a_claude_or_vscode_folder_under_node_modules() {
+        let (rig, _runner, run) = install_of_a_pnpm_worktree();
+        let worktree = rig.home.path().join("shep/kelpie/shep/worktrees/7");
+        let build = rig.home.path().join("shep/kelpie/shep/builds/7");
+
+        assert_eq!(run.cwd, build, "the sandbox's own working folder");
+        assert!(
+            run.command
+                .contains(&format!("cd '{}'", worktree.display())),
+            "{}",
+            run.command
+        );
+        let fence = run.reach.fence.as_deref().expect("the worker's fence");
+        let denied = |path: &PathBuf| fence.no_write.contains(path);
+        assert!(denied(&worktree.join(".claude")), "{:?}", fence.no_write);
+        assert!(denied(&worktree.join(".mcp.json")), "{:?}", fence.no_write);
+        assert!(
+            fence
+                .no_write
+                .iter()
+                .all(|path| !path.to_string_lossy().contains("**")),
+            "{:?}",
+            fence.no_write
+        );
+        assert!(
+            fence.write.contains(&worktree),
+            "the install writes the worktree: {:?}",
+            fence.write
+        );
     }
 }
