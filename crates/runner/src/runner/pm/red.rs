@@ -169,6 +169,31 @@ impl Runner {
         }
     }
 
+    // Notes `closed`, the fix work items a read found closed, with when each was first read so,
+    // and forgets any that is not
+    pub(in crate::runner) fn pm_fixes_closed(&mut self, closed: &[TicketId]) {
+        let now = self.ports.clock.now();
+        self.pm.fixes_closed.retain(|t, _| closed.contains(t));
+        for &ticket in closed {
+            self.pm.fixes_closed.entry(ticket).or_insert(now);
+        }
+    }
+
+    // The fix work items of `closed` that were first read closed `grace` ago or more
+    pub(in crate::runner) fn pm_settled_fixes(
+        &self,
+        closed: &[TicketId],
+        grace: std::time::Duration,
+    ) -> Vec<TicketId> {
+        let now = self.ports.clock.now();
+        (closed.iter().copied())
+            .filter(|t| {
+                (self.pm.fixes_closed.get(t))
+                    .is_some_and(|since| now.0.saturating_sub(since.0) >= grace.as_secs())
+            })
+            .collect()
+    }
+
     // Lets the project manager be woken again for the heads of `workflows`, whose fix work
     // item closed while they stayed red
     pub(in crate::runner) fn pm_forget_reds(&mut self, workflows: &[String]) {

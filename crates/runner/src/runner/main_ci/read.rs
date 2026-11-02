@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use super::{Read, still_red};
+use super::{Closed, FIX_CLOSED_GRACE, Read, still_red};
 use crate::ports::{BranchRun, Forge, ForgeError, Rerun, Tickets, Workflow, WorkflowState};
 use crate::runner::Runner;
 use crate::runner::trigger::lock;
@@ -126,7 +126,10 @@ impl MainCiJob {
     // is what drops one that can no longer run.
     fn run(self) -> Result<Runs, ForgeError> {
         let runs = self.forge.branch_runs(&self.repo, &self.branch)?;
-        let workflows = match still_red(&self.red, &runs, &[]).red.is_empty() {
+        let workflows = match still_red(&self.red, &runs, Closed::default())
+            .red
+            .is_empty()
+        {
             true => None,
             false => Some(self.forge.workflows(&self.repo)?),
         };
@@ -186,6 +189,7 @@ impl Runner {
     // Works the red workflows out again on the state as it is now and acts on them with `done`
     fn finish_main_ci(&mut self, runs: Runs, mut done: Done) {
         let now = self.ports.clock.now();
+        self.pm_fixes_closed(&runs.closed);
         let Ok(read) = self.red_after(&runs) else {
             return;
         };
@@ -210,7 +214,12 @@ impl Runner {
     // The red workflows after `runs`, worked out on the state as it is now, which the forge's
     // list of workflows then thins.
     fn red_after(&self, runs: &Runs) -> Result<Read, ForgeError> {
-        let mut read = still_red(&self.state.red, &runs.runs, &runs.closed);
+        let settled = self.pm_settled_fixes(&runs.closed, FIX_CLOSED_GRACE);
+        let closed = Closed {
+            now: &runs.closed,
+            settled: &settled,
+        };
+        let mut read = still_red(&self.state.red, &runs.runs, closed);
         if read.red.is_empty() {
             return Ok(read);
         }

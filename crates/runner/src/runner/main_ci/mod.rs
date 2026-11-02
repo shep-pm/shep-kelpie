@@ -17,6 +17,11 @@ use crate::ports::{BranchRun, ForgeError, Timestamp};
 use crate::state::{MainNotice, Notice, RedWorkflow};
 use crate::ticket::TicketId;
 
+/// How long a fix work item stays read closed before the head it was filed for is settled
+/// again. Its merge starts a run of `main` that is not completed, so until then `main` shows
+/// the old red run, and a new head settles it at once.
+pub(super) const FIX_CLOSED_GRACE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
 /// A workflow red on `main`, as `status` shows it
 #[derive(Debug, Serialize)]
 pub struct RedStatus {
@@ -173,6 +178,15 @@ struct Read {
     reopened: Vec<String>,
 }
 
+/// The fix work items read closed
+#[derive(Clone, Copy, Default)]
+struct Closed<'a> {
+    /// Every one read closed now: a new head settles its workflow again at once
+    now: &'a [TicketId],
+    /// Those that have been closed for [`FIX_CLOSED_GRACE`], which settle the same head again
+    settled: &'a [TicketId],
+}
+
 /// A workflow that went green
 struct Cleared {
     /// How it stood when it was red
@@ -185,7 +199,7 @@ struct Cleared {
 // run keeps or adds its workflow, a successful one drops it. A red
 // workflow's run from before the one kelpie reran is not its latest. While
 // the rerun's jobs go the run is not completed, and an older run shows.
-fn still_red(red: &[RedWorkflow], runs: &[BranchRun], closed: &[TicketId]) -> Read {
+fn still_red(red: &[RedWorkflow], runs: &[BranchRun], closed: Closed) -> Read {
     let mut next = red.to_vec();
     let mut failing = Vec::new();
     let mut cleared = Vec::new();
@@ -194,7 +208,7 @@ fn still_red(red: &[RedWorkflow], runs: &[BranchRun], closed: &[TicketId]) -> Re
     // one of `closed`, so one failure has one fix however many commits land on top.
     for red in next
         .iter_mut()
-        .filter(|r| r.fix().is_some_and(|t| closed.contains(&t)))
+        .filter(|r| r.fix().is_some_and(|t| closed.settled.contains(&t)))
     {
         red.handled = None;
         reopened.push(red.workflow.clone());
@@ -220,7 +234,7 @@ fn still_red(red: &[RedWorkflow], runs: &[BranchRun], closed: &[TicketId]) -> Re
             let red = &mut next[at];
             if red.head != run.head {
                 red.again = false;
-                if red.fix().is_none() {
+                if red.fix().is_none_or(|t| closed.now.contains(&t)) {
                     red.handled = None;
                 }
             }

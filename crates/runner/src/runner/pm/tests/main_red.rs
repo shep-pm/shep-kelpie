@@ -8,6 +8,7 @@ use serde_json::json;
 
 use super::{answered, dispatched, pm_on, pm_seen, step_until};
 use crate::ports::{BranchRun, Timestamp};
+use crate::runner::main_ci::FIX_CLOSED_GRACE;
 use crate::runner::{BOARD_POLL, MAIN_CI_POLL, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, ticket};
 
@@ -339,17 +340,42 @@ fn a_new_red_head_after_its_fix_work_item_closed_is_the_project_managers_again()
     );
 }
 
-#[test]
-fn a_fix_work_item_that_closes_while_the_head_stays_red_is_settled_again() {
+// `test` red at head91 with fix #900 filed, then the fix closed and read closed once
+fn fix_closed_once() -> (Rig, Mutex<Runner>) {
     let (rig, runner) = rerun();
     rig.claude.script([Scripted::Say(FIX)]);
     rig.clock.advance(MAIN_CI_POLL.as_secs());
     step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
     assert_eq!(rig.forge.created().len(), 1);
     rig.forge.close_issue(900);
+    // A second call would file a second fix, were the project manager woken again.
     rig.claude.script([Scripted::Say(FIX)]);
-
     rig.clock.advance(MAIN_CI_POLL.as_secs());
+    for _ in 0..3 {
+        step(&runner).unwrap();
+        std::thread::yield_now();
+    }
+    (rig, runner)
+}
+
+#[test]
+fn a_fix_work_item_that_just_closed_leaves_the_head_alone_while_the_merges_run_may_be_out() {
+    let (rig, runner) = fix_closed_once();
+
+    // main still shows the old red run: the run of the merge that closed the fix
+    // is not completed, so a second fix would be one for a failure being fixed.
+    assert_eq!(rig.forge.created().len(), 1);
+    assert_eq!(
+        ask(&rig, &runner, "red_workflows")[0]["doing"],
+        json!("the project manager opened fix work item #900 at the front of the board")
+    );
+}
+
+#[test]
+fn a_fix_work_item_that_stays_closed_while_the_head_stays_red_is_settled_again() {
+    let (rig, runner) = fix_closed_once();
+
+    rig.clock.advance(FIX_CLOSED_GRACE.as_secs());
     let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
 
     let StepReport::PmAnswered { acted, .. } = report else {
