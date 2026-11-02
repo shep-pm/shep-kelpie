@@ -134,6 +134,12 @@ impl Runner {
         }
     }
 
+    // Lets the project manager be woken again for the heads of `workflows`, whose fix work
+    // item closed while they stayed red
+    pub(in crate::runner) fn pm_forget_reds(&mut self, workflows: &[String]) {
+        self.pm.red_woken.retain(|(w, _)| !workflows.contains(w));
+    }
+
     // What on this machine `texts` name, which nothing kelpie posts may.
     fn names_machine<'a>(&self, texts: impl IntoIterator<Item = &'a String>) -> Option<String> {
         texts

@@ -33,7 +33,9 @@ pub struct RedWorkflow {
     /// which is when the project manager may open a fix or ask
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub again: bool,
-    /// What the project manager did about `head` once it was red again
+    /// What the project manager did about `head` once it was red again. A fix
+    /// work item stays here through the heads that land on top of it, until the
+    /// item is closed or merged, so one failure has one fix.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handled: Option<Handled>,
     /// Whether the maintainer was told it stayed red, so a red stretch is
@@ -54,6 +56,14 @@ pub enum Handled {
 }
 
 impl RedWorkflow {
+    /// The fix work item the project manager opened for this workflow, once it has
+    pub fn fix(&self) -> Option<TicketId> {
+        match self.handled {
+            Some(Handled::Fix(ticket)) => Some(ticket),
+            _ => None,
+        }
+    }
+
     /// Whether `head` has had its rerun, or its refusal. A state file from
     /// before `reran_head` holds only `reran`, the run it reran: when that is
     /// the latest red run, its head was rerun, and a newer run is a head that

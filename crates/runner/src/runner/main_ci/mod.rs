@@ -15,6 +15,7 @@ use self::read::Done;
 use super::Runner;
 use crate::ports::{BranchRun, ForgeError, Timestamp};
 use crate::state::{MainNotice, Notice, RedWorkflow};
+use crate::ticket::TicketId;
 
 /// A workflow red on `main`, as `status` shows it
 #[derive(Debug, Serialize)]
@@ -167,6 +168,9 @@ struct Read {
     failing: Vec<String>,
     /// The workflows a successful run took out of `red`
     cleared: Vec<Cleared>,
+    /// The workflows whose fix work item had closed while they were still red,
+    /// so they are the project manager's again
+    reopened: Vec<String>,
 }
 
 /// A workflow that went green
@@ -180,11 +184,21 @@ struct Cleared {
 // `red` holds the latest completed run of each workflow and event. A red
 // run keeps or adds its workflow, a successful one drops it. A red
 // workflow's run from before the one kelpie reran is not its latest. While
-// the rerun's jobs go the run is not completed, and an older run shows.
-fn still_red(red: &[RedWorkflow], runs: &[BranchRun]) -> Read {
+// the rerun's jobs go the run is not completed, and an older run shows. A fix
+// work item stays a workflow's through every new head until it is one of
+// `closed`, so one failure has one fix however many commits land on top of it.
+fn still_red(red: &[RedWorkflow], runs: &[BranchRun], closed: &[TicketId]) -> Read {
     let mut next = red.to_vec();
     let mut failing = Vec::new();
     let mut cleared = Vec::new();
+    let mut reopened = Vec::new();
+    for red in next
+        .iter_mut()
+        .filter(|r| r.fix().is_some_and(|t| closed.contains(&t)))
+    {
+        red.handled = None;
+        reopened.push(red.workflow.clone());
+    }
     for run in on_main(runs) {
         let at = next.iter().position(|r| r.workflow == run.workflow);
         let older =
@@ -206,7 +220,9 @@ fn still_red(red: &[RedWorkflow], runs: &[BranchRun]) -> Read {
             let red = &mut next[at];
             if red.head != run.head {
                 red.again = false;
-                red.handled = None;
+                if red.fix().is_none() {
+                    red.handled = None;
+                }
             }
             red.run = run.id;
             red.head.clone_from(&run.head);
@@ -229,6 +245,7 @@ fn still_red(red: &[RedWorkflow], runs: &[BranchRun]) -> Read {
         red: next,
         failing,
         cleared,
+        reopened,
     }
 }
 

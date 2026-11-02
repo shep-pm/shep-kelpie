@@ -251,6 +251,7 @@ fn a_head_is_settled_once_and_a_new_red_head_is_the_project_managers_again() {
     );
     assert_eq!(rig.forge.created().len(), 1);
 
+    rig.forge.close_issue(900);
     rig.forge
         .set_branch_runs("main", vec![run(95, Rig::EPOCH + 3600)]);
     rig.clock.advance(MAIN_CI_POLL.as_secs());
@@ -259,6 +260,72 @@ fn a_head_is_settled_once_and_a_new_red_head_is_the_project_managers_again() {
         ask(&rig, &runner, "red_workflows")[0]["doing"],
         json!("kelpie reran its failed jobs and waits for the result")
     );
+}
+
+/// Reads head95 red, then its rerun red again, with the clock moved past each read
+fn new_head_red_again(rig: &Rig, runner: &Mutex<Runner>) {
+    rig.forge
+        .set_branch_runs("main", vec![run(95, Rig::EPOCH + 3600)]);
+    for _ in 0..2 {
+        rig.clock.advance(MAIN_CI_POLL.as_secs());
+        step(runner).unwrap();
+    }
+}
+
+#[test]
+fn a_new_red_head_keeps_the_fix_work_item_that_is_still_open() {
+    let (rig, runner) = red_again();
+    answers(&rig, &runner, FIX);
+    assert_eq!(rig.forge.created().len(), 1);
+    // A second call would file a second fix, were the project manager woken for head95.
+    rig.claude.script([Scripted::Say(FIX)]);
+
+    new_head_red_again(&rig, &runner);
+
+    let red = ask(&rig, &runner, "red_workflows");
+    assert_eq!(red[0]["head"], "head95", "{red}");
+    assert_eq!(
+        red[0]["doing"],
+        json!("the project manager opened fix work item #900 at the front of the board")
+    );
+    assert_eq!(rig.forge.created().len(), 1);
+}
+
+#[test]
+fn a_new_red_head_after_its_fix_work_item_closed_is_the_project_managers_again() {
+    let (rig, runner) = red_again();
+    answers(&rig, &runner, FIX);
+    rig.forge.close_issue(900);
+
+    new_head_red_again(&rig, &runner);
+
+    assert_eq!(
+        ask(&rig, &runner, "red_workflows")[0]["doing"],
+        json!("red again after its rerun; the project manager opens a fix or asks")
+    );
+}
+
+#[test]
+fn a_fix_work_item_that_closes_while_the_head_stays_red_is_settled_again() {
+    let (rig, runner) = rerun();
+    rig.claude.script([Scripted::Say(FIX)]);
+    rig.clock.advance(MAIN_CI_POLL.as_secs());
+    step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    assert_eq!(rig.forge.created().len(), 1);
+    rig.forge.close_issue(900);
+    rig.claude.script([Scripted::Say(FIX)]);
+
+    rig.clock.advance(MAIN_CI_POLL.as_secs());
+    let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+
+    let StepReport::PmAnswered { acted, .. } = report else {
+        panic!("not an answer: {report:?}");
+    };
+    assert_eq!(
+        acted,
+        ["opened fix work item #901 at the front of the board for test"]
+    );
+    assert_eq!(rig.forge.created().len(), 2);
 }
 
 #[test]
