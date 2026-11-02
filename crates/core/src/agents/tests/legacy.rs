@@ -436,3 +436,28 @@ fn a_bare_stub_of_the_issue_writer_is_deleted_and_any_other_file_of_it_left_and_
     assert_eq!(read(&dir, "mine.md"), more);
     assert_eq!(read(&dir, "scribe.md"), own);
 }
+
+#[test]
+fn a_file_written_out_from_a_bare_stub_is_the_agent_kelpie_once_shipped_and_an_edit_is_not() {
+    let dir = folder(&[
+        ("iq3-xxs-review.md", &stub("iq3-xxs-review")),
+        ("opus-high.md", &stub("opus-high")),
+    ]);
+    legacy::migrate(dir.path()).unwrap();
+    let agents = Agents::load(dir.path()).unwrap();
+    let once = |n: &str| legacy::is_once_shipped(&name(n), agents.get(&name(n)).unwrap());
+    assert!(once("iq3-xxs-review") && once("opus-high"));
+
+    // A file of the same name that says more, or one kelpie never shipped under that name, is not.
+    let edited = FORMER_OPUS_HIGH.replace("effort: high", "effort: low");
+    let agents = agents.with("opus-high", &edited);
+    assert!(!legacy::is_once_shipped(
+        &name("opus-high"),
+        agents.get(&name("opus-high")).unwrap()
+    ));
+    let mine = agents.with("mine", &edited);
+    assert!(!legacy::is_once_shipped(
+        &name("mine"),
+        mine.get(&name("mine")).unwrap()
+    ));
+}

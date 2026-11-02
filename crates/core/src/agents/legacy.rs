@@ -12,7 +12,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use super::{AgentsError, create_temp, extends, failed, front};
+use super::{Agent, AgentsError, create_temp, extends, failed, front};
 use crate::settings::AgentName;
 
 /// The binding one baseline shipped with
@@ -411,6 +411,16 @@ fn judge(text: &str) -> Judged {
         added,
         whole: None,
     }
+}
+
+/// Whether `agent` is `name` exactly as kelpie once shipped it whole, which [`migrate`] writes
+/// out for a bare stub of it
+///
+/// A project that never chose it has it in its folder all the same, so it is not in use.
+pub fn is_once_shipped(name: &AgentName, agent: &Agent) -> bool {
+    removed(name.as_str())
+        .and_then(|(_, whole)| front::parse_named(name.as_str(), whole).ok())
+        .is_some_and(|shipped| shipped == *agent)
 }
 
 // The agent kelpie once shipped whole that `name` names.

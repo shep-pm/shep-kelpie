@@ -525,6 +525,29 @@ impl Settings {
         Ok(RoleAgents { pm })
     }
 
+    /// Refuses a project that has no implementer to pick, since no work item could open
+    ///
+    /// Kelpie ships no implementer, so a new install holds none until a lineup is written.
+    ///
+    /// # Errors
+    ///
+    /// [`SettingsError::Invalid`] naming `agents.allow` when no agent file whose role is
+    /// `implementer` is there for it to hold, with the commands that write one.
+    pub fn require_implementer(&self, agents: &Agents) -> Result<(), SettingsError> {
+        if !self.allowed_implementers(agents).is_empty() {
+            return Ok(());
+        }
+        Err(SettingsError::Invalid {
+            setting: "agents.allow",
+            reason: format!(
+                "this project has no implementer: no agent file in `{FOLDER}` whose role is \
+                 `implementer` is there, or `agents.allow` leaves each one out. Write a lineup \
+                 with `shep kelpie agents init <harness>`, or one agent with \
+                 `shep kelpie agents new implementer`, or add an implementer to `agents.allow`"
+            ),
+        })
+    }
+
     /// The representative the project names in `agents.representative`
     ///
     /// # Errors

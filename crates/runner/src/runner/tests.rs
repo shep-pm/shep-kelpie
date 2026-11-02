@@ -175,11 +175,7 @@ fn a_repo_that_does_not_exist_stops_the_runner() {
 }
 
 fn open_named(rig: &Rig, names: &[&str]) -> Result<Mutex<Runner>, OpenError> {
-    let mut settings = rig.settings();
-    let name = |n: &&str| crate::settings::AgentName::try_from((*n).to_owned()).unwrap();
-    let names: Vec<_> = names.iter().map(name).collect();
-    settings.agents.allow = Some(names.into());
-    rig.open_settings(settings)
+    rig.open_allowing(names)
 }
 
 #[test]

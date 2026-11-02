@@ -73,6 +73,7 @@ impl Runner {
         let gpu_metrics_url = kelpie.gpu_metrics_url.clone();
         let mut book = Agents::load(&self.paths.agents)?;
         book.hold_for(self.state.work_items.iter().map(|item| &item.agent))?;
+        settings.require_implementer(&book)?;
         let mut agents = settings.role_agents(&book)?;
         let gateways = kelpie.gateways();
         let lineup = settings.lineup(&book, &gateways, &self.home);
@@ -125,6 +126,12 @@ impl Runner {
         };
         if settings.triage != self.settings.triage {
             open_checks::triage(&settings, self.ports.voice.as_ref(), &self.remote, &book)?;
+        }
+        // Both tables name the representative in `agents`, so its change is checked as theirs are,
+        // while either is on. A start refuses what is unset or has no file.
+        let on = !settings.contributions.is_off() || !settings.triage.is_off();
+        if on && settings.agents.representative != self.settings.agents.representative {
+            settings.representative(&book)?;
         }
         // `allow` and `slack` are read live, so a change to either must replace the settings
         let (was, now) = (&self.settings.agents, &settings.agents);

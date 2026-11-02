@@ -116,3 +116,27 @@ async fn an_old_reviewers_list_is_named_as_an_old_key() {
     );
     assert!(!subjects(&report).contains(&"koji: old keys"));
 }
+
+#[tokio::test]
+async fn a_stub_of_iq3_xxs_review_written_out_by_migrate_is_no_line_where_no_project_lists_it() {
+    // The old `add` wrote the stub everywhere, and `migrate` writes it out as the whole file
+    // on `paddock`. A project that never chose it, on a kelpie with no such gateway, is
+    // told nothing of it, as it was before the file was written out.
+    let scene = Scene::new().await;
+    scene.runs("golbat", |_| {});
+    let folder = scene.kelpie_home.join("agents");
+    crate::test::write_in(
+        &folder,
+        "iq3-xxs-review.md",
+        "---\nextends: kelpie:iq3-xxs-review\n---\n",
+    );
+    crate::agents::legacy::migrate(&folder).unwrap();
+
+    let report = scene.report().await;
+
+    let lines = subjects(&report);
+    assert!(
+        lines.iter().all(|s| *s != "agent iq3-xxs-review"),
+        "{lines:?}"
+    );
+}

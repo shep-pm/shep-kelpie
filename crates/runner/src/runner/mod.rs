@@ -476,6 +476,7 @@ impl Runner {
         ));
         notes.extend(e2e::dog_cannot_find(settings.e2e.as_ref(), paths));
         told.extend(notes);
+        settings.require_implementer(&book)?;
         let agents = settings.role_agents(&book)?;
         let gateways = kelpie_settings.gateways();
         // A candidate names a gateway kelpie can route and holds the key for, or

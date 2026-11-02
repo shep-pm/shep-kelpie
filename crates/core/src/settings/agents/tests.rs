@@ -679,3 +679,35 @@ fn an_implementer_no_turn_can_run_on_is_refused_with_why_and_the_rest_are_not() 
         "{why}"
     );
 }
+
+#[test]
+fn a_project_with_no_implementer_is_refused_naming_agents_init() {
+    let bare = bound(Agents::load(tempfile::tempdir().unwrap().path()).unwrap());
+    let err = project("").require_implementer(&bare).unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            SettingsError::Invalid {
+                setting: "agents.allow",
+                ..
+            }
+        ),
+        "{err}"
+    );
+    assert!(
+        err.to_string()
+            .contains("`shep kelpie agents init <harness>`"),
+        "{err}"
+    );
+
+    // An implementer `agents.allow` leaves out is no implementer the project has.
+    let left_out = project("allow = [\"pm\"]\n").require_implementer(&book());
+    assert!(left_out.is_err(), "{left_out:?}");
+}
+
+#[test]
+fn a_project_with_an_implementer_is_not_refused() {
+    project("").require_implementer(&book()).unwrap();
+    let some = project("allow = [\"qwen\"]\n");
+    some.require_implementer(&book()).unwrap();
+}

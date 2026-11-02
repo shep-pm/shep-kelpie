@@ -3,6 +3,7 @@ mod contributions;
 mod dependencies;
 mod e2e;
 mod hooks;
+mod lineup;
 mod tickets;
 mod triage;
 

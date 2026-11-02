@@ -8,15 +8,15 @@
 use std::collections::BTreeSet;
 
 use super::Line;
-use crate::agents::{Agent, Agents};
+use crate::agents::{Agent, Agents, legacy};
 use crate::forwarder::Upstream;
 use crate::ports::KeyCheck;
 use crate::settings::{AgentName, Gateway, Gateways};
 
 /// A line for each gateway's reach and key, and for each agent's model on one
 ///
-/// A shipped agent as kelpie ships it is in use only where a project `listed` it, so an
-/// unlisted one gets no line, whatever its gateway serves or lacks.
+/// A shipped agent as kelpie ships it, or once shipped it, is in use only where a project
+/// `listed` it, so an unlisted one gets no line, whatever its gateway serves or lacks.
 pub(super) fn checks(
     gateways: &Gateways,
     agents: &Agents,
@@ -24,7 +24,8 @@ pub(super) fn checks(
 ) -> Vec<Line> {
     let shipped = Agents::embedded();
     let idle = |name: &AgentName, agent: &Agent| {
-        !listed.contains(name) && shipped.get(name) == Some(agent)
+        let as_shipped = shipped.get(name) == Some(agent) || legacy::is_once_shipped(name, agent);
+        !listed.contains(name) && as_shipped
     };
     let mut lines = Vec::new();
     for (name, gateway) in gateways.iter() {

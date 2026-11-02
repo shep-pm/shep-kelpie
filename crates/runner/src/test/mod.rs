@@ -421,11 +421,12 @@ impl Rig {
 
     /// Starts a runner whose settings name `names` in `agents.allow`, so each
     /// is a reviewer the project asked for and is held to what a round cannot
-    /// work around
+    /// work around. The rig's `sonnet-high` is allowed too, since a project
+    /// with no implementer does not start.
     pub fn open_allowing(&self, names: &[&str]) -> Result<Mutex<Runner>, OpenError> {
         let mut settings = self.settings();
         let name = |n: &&str| crate::settings::AgentName::try_from((*n).to_owned()).unwrap();
-        let names: Vec<_> = names.iter().map(name).collect();
+        let names: Vec<_> = names.iter().chain(&["sonnet-high"]).map(name).collect();
         settings.agents.allow = Some(names.into());
         self.open_settings(settings)
     }
