@@ -182,7 +182,7 @@ mod tests {
                                       gateway: paddock\nmodel: coder\ncontext: 32768\n---\n";
 
     // A reviewer on the model `iq3_xxs`, the one the lineup these tests were built on put on paddock
-    const IQ3_XXS_REVIEW: &str = "---\nrole: reviewer\nharness: endpoint\n\
+    const PADDOCK_REVIEWER: &str = "---\nrole: reviewer\nharness: endpoint\n\
                                   gateway: paddock\nmodel: iq3_xxs\ncontext: 262144\n---\n";
 
     fn named(names: &[&str]) -> BTreeSet<AgentName> {
@@ -209,7 +209,7 @@ mod tests {
         let book = agents(&[
             ("local.md", ON_PADDOCK),
             ("box.md", REVIEWS_ON_PADDOCK),
-            ("iq3-xxs-review.md", IQ3_XXS_REVIEW),
+            ("iq3-xxs-review.md", PADDOCK_REVIEWER),
         ]);
         let lines = checks(
             &gateways(server.host(), |_| Some("pk-right".into())),
@@ -289,7 +289,7 @@ mod tests {
         let gateways = gateways(server.host(), |_| Some("pk-right".into()));
         let book = agents(&[
             ("local.md", ON_PADDOCK),
-            ("iq3-xxs-review.md", IQ3_XXS_REVIEW),
+            ("iq3-xxs-review.md", PADDOCK_REVIEWER),
         ]);
 
         let lines = checks(&gateways, &book, &named(&[]));
@@ -311,7 +311,7 @@ mod tests {
             StandInEndpoint::start([]).like_openai("sk-right", &["qwen3.8:27b", "iq3_xxs"]);
         let book = agents(&[
             ("local.md", ON_PADDOCK),
-            ("iq3-xxs-review.md", IQ3_XXS_REVIEW),
+            ("iq3-xxs-review.md", PADDOCK_REVIEWER),
         ]);
         let lines = checks(
             &openai(server.host(), |_| Some("sk-right".into())),

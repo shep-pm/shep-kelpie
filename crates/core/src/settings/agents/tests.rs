@@ -711,3 +711,52 @@ fn a_project_with_an_implementer_is_not_refused() {
     let some = project("allow = [\"qwen\"]\n");
     some.require_implementer(&book()).unwrap();
 }
+
+#[test]
+fn no_representative_triager_or_security_reviewer_is_required_while_their_features_are_off() {
+    let off = project("");
+    assert!(off.contributions.is_off() && off.triage.is_off());
+    assert!(off.agents.representative.is_none());
+    assert!(off.triage.agent.is_none());
+    assert!(off.contributions.security_reviewer.is_none());
+    off.role_agents(&book()).unwrap();
+    off.require_implementer(&book()).unwrap();
+}
+
+#[test]
+fn an_unset_triager_or_security_reviewer_is_refused_by_name_pointing_at_agents_init() {
+    let off = project("");
+    for (setting, err) in [
+        (
+            "agents.representative",
+            off.representative(&book()).unwrap_err(),
+        ),
+        ("triage.agent", off.triager(&book()).unwrap_err()),
+        (
+            "contributions.security_reviewer",
+            off.security_reviewer(&book()).map(|_| ()).unwrap_err(),
+        ),
+    ] {
+        let said = err.to_string();
+        assert!(said.contains(&format!("`{setting}` is not set")), "{said}");
+        assert!(said.contains("agents init"), "{said}");
+    }
+
+    let named = naming_all("");
+    named.representative(&book()).unwrap();
+    named.triager(&book()).unwrap();
+    named.security_reviewer(&book()).unwrap();
+}
+
+#[test]
+fn an_empty_reviewers_list_loads_beside_a_lineup_and_runs_no_review() {
+    let settings = allowing("", "pick = \"all\"\nreviewers = []\n");
+    settings.require_implementer(&book()).unwrap();
+    assert_eq!(settings.contributions.reviewers, Some(Vec::new()));
+    assert!(
+        settings
+            .contribution_lineup(&book(), Path::new("/h"))
+            .unwrap()
+            .is_empty()
+    );
+}

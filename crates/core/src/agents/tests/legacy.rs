@@ -2,7 +2,7 @@
 
 use super::{folder, name};
 use crate::agents::legacy::{self, Report};
-use crate::agents::{Agents, baseline};
+use crate::agents::{Agents, Role, Runs, baseline};
 
 // Each baseline's binding as `git show a22137eb:agents/<name>.md` has it, before the
 // baselines dropped their models: (name, harness, model, effort, second_look).
@@ -302,6 +302,64 @@ fn a_bare_stub_of_an_agent_kelpie_no_longer_ships_is_written_out_once() {
         ("claude-opus-5-5", crate::settings::Effort::High)
     );
     assert_eq!(legacy::migrate(dir.path()).unwrap(), Report::default());
+}
+
+#[test]
+fn a_bare_stub_of_each_of_the_five_removed_agents_is_written_out_whole_once_and_loads() {
+    let removed = [
+        "sonnet-high",
+        "opus-high",
+        "defect-hunter-lite",
+        "iq3-xxs-review",
+        "qwen",
+    ];
+    let stubs: Vec<(String, String)> = (removed.iter())
+        .map(|n| (format!("{n}.md"), stub(n)))
+        .collect();
+    let files: Vec<(&str, &str)> = (stubs.iter())
+        .map(|(file, text)| (file.as_str(), text.as_str()))
+        .collect();
+    let dir = folder(&files);
+
+    let report = legacy::migrate(dir.path()).unwrap();
+
+    assert_eq!(wrote(&report).len(), 5, "{report:?}");
+    assert_eq!(legacy::migrate(dir.path()).unwrap(), Report::default());
+    let agents = Agents::load(dir.path()).unwrap();
+    assert!(agents.broken(&name("qwen")).is_none());
+    let get = |n: &str| {
+        agents
+            .get(&name(n))
+            .unwrap_or_else(|| panic!("{n} does not load"))
+    };
+
+    let sonnet = get("sonnet-high");
+    assert_eq!(sonnet.role, Role::Implementer);
+    assert_eq!(
+        super::pair(sonnet),
+        ("claude-sonnet-5-5", crate::settings::Effort::High)
+    );
+    let opus = get("opus-high");
+    assert_eq!(opus.role, Role::Implementer);
+    assert_eq!(
+        super::pair(opus),
+        ("claude-opus-5-5", crate::settings::Effort::High)
+    );
+    let lite = get("defect-hunter-lite");
+    assert_eq!(lite.role, Role::Reviewer);
+    assert!(!lite.second_look);
+    assert_eq!(
+        super::pair(lite),
+        ("claude-opus-5-5", crate::settings::Effort::Medium)
+    );
+    assert!(lite.prompt.as_deref().unwrap().contains("{{DIFF}}"));
+    let iq3 = get("iq3-xxs-review");
+    assert_eq!(iq3.role, Role::Reviewer);
+    let (gateway, model) = iq3.runs.gateway().unwrap();
+    assert_eq!((gateway.as_str(), model), ("paddock", "iq3_xxs"));
+    let qwen = get("qwen");
+    assert_eq!(qwen.role, Role::Reviewer);
+    assert!(matches!(qwen.runs, Runs::Command(_)));
 }
 
 #[test]

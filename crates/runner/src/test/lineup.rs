@@ -12,12 +12,12 @@ const OPUS_HIGH: &str = "---\nrole: implementer\nharness: claude-code\nmodel: cl
                          description: Builds work that is hard to undo, such as a data migration, a release step or a change to a public interface.\n\
                          tier: heavy\n---\n";
 
-const DEFECT_HUNTER_LITE: &str = "---\nextends: kelpie:defect-hunter\nharness: claude-code\n\
+const LITE_HUNTER: &str = "---\nextends: kelpie:defect-hunter\nharness: claude-code\n\
                                   model: claude-opus-5-5\neffort: medium\nsecond_look: false\n\
                                   description: Reads a pull request once for defects a careful maintainer would block the merge for.\n\
                                   tier: standard\n---\n";
 
-const QWEN: &str = "---\nrole: reviewer\nharness: command\ncommand: ~/.claude/scripts/qwen-review.sh\n\
+const LOCAL_SCRIPT: &str = "---\nrole: reviewer\nharness: command\ncommand: ~/.claude/scripts/qwen-review.sh\n\
                     description: Reads a diff for defects with the maintainer's local qwen-review script, as a first pass.\n\
                     tier: light\n---\n";
 
@@ -26,7 +26,7 @@ impl Rig {
     pub(super) fn write_lineup(&self) {
         self.write_agent("sonnet-high", SONNET_HIGH);
         self.write_agent("opus-high", OPUS_HIGH);
-        self.write_agent("defect-hunter-lite", DEFECT_HUNTER_LITE);
-        self.write_agent("qwen", QWEN);
+        self.write_agent("defect-hunter-lite", LITE_HUNTER);
+        self.write_agent("qwen", LOCAL_SCRIPT);
     }
 }
