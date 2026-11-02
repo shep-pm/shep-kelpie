@@ -379,7 +379,9 @@ fn a_log_keeps_its_end_from_a_line_start_and_never_splits_a_character() {
 }
 
 // A monorepo's test step runs every package at once: the failing package's
-// block comes early and more than `LOG_BYTES` of a sibling passing follows it
+// block comes early and more than `LOG_BYTES` of a sibling passing follows it.
+// The log is synthetic, written by hand in the shape of vitest output under
+// `gh run view --log-failed`, since the real runs seen are not kept.
 const INTERLEAVED: &str = include_str!("../../../../../../fixtures/gh-run-log-interleaved.txt");
 
 #[test]
@@ -465,6 +467,9 @@ fn every_kind_of_failure_line_is_found() {
     for line in [
         " FAIL  a > b",
         "Error: boom",
+        "error[E0061]: this function takes 2 arguments but 1 argument was supplied",
+        "error: could not compile `foo` (lib) due to 1 previous error",
+        "error: test failed, to rerun pass `--lib`",
         "AssertionError: left != right",
         "src/a.ts(1,2): error TS2322: no",
         "##[error]The operation was canceled.",

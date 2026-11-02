@@ -455,6 +455,9 @@ fn is_failure(line: &str) -> bool {
         || [
             " FAIL ",
             "Error:",
+            "error[E",
+            "error: could not compile",
+            "error: test failed",
             "AssertionError",
             "error TS",
             "##[error]",
