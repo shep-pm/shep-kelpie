@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::settings::RulingName;
+use crate::test::Rig;
 
 impl Scene {
     async fn migrate(&self) -> Result<Vec<String>, String> {
@@ -156,7 +157,10 @@ async fn a_table_whose_map_is_whole_has_the_panels_key_deleted_alone() {
         "decide = \"shadow\"\npm_decides = {{ {} }}",
         whole.join(", ")
     );
-    let table = TABLE.replace("reviewers = [\"standards\"]\n", "");
+    let table = TABLE.replace("reviewers = [\"standards\"]\n", "").replace(
+        "[contributions]\n",
+        "[contributions]\nreviewers = [\"spec\"]\n",
+    );
     let scene = Scene::holding(&format!("{table}\n[rulings]\n{lines}\n")).await;
 
     let said = scene.migrate().await.unwrap();
@@ -437,4 +441,106 @@ async fn a_migrated_project_still_runs_the_reviewers_it_named_on_a_contribution(
         ["standards"],
         "the pass runs the reviewers the project named, not kelpie's defaults"
     );
+}
+
+// `TABLE` with none of the four agents kelpie once named for a project
+fn nothing_named() -> String {
+    TABLE
+        .replace("representative = \"representative\"\n", "")
+        .replace("reviewers = [\"standards\"]\n", "")
+        .replace("[triage]\nagent = \"triager\"\n", "")
+        .replace("security_reviewer = \"security-reviewer\"\n", "")
+}
+
+#[tokio::test]
+async fn a_project_naming_none_of_the_four_gets_the_names_kelpie_ran_it_on() {
+    let scene = Scene::holding(&nothing_named()).await;
+
+    let said = scene.migrate().await.unwrap();
+
+    assert!(
+        said[1].contains(
+            "agents.representative = \"representative\", triage.agent = \"triager\", \
+             contributions.security_reviewer = \"security-reviewer\", \
+             contributions.reviewers = [\"defect-hunter-lite\"]"
+        ),
+        "{said:?}"
+    );
+    let table = scene.table();
+    assert_eq!(table["agents"]["representative"], "representative");
+    assert_eq!(table["triage"]["agent"], "triager");
+    assert_eq!(
+        table["contributions"]["security_reviewer"],
+        "security-reviewer"
+    );
+    assert_eq!(
+        table["contributions"]["reviewers"],
+        serde_json::json!(["defect-hunter-lite"])
+    );
+    let again = scene.migrate().await.unwrap();
+    assert_eq!(again, ["nothing to migrate"], "a second run writes nothing");
+}
+
+#[tokio::test]
+async fn where_kelpie_holds_a_paddock_gateway_the_local_reviewer_comes_first() {
+    let scene = Scene::holding(&nothing_named()).await;
+    scene.shepherd.holds_section(GATEWAY);
+
+    scene.migrate().await.unwrap();
+
+    assert_eq!(
+        scene.table()["contributions"]["reviewers"],
+        serde_json::json!(["iq3-xxs-review", "defect-hunter-lite"])
+    );
+}
+
+#[tokio::test]
+async fn a_project_that_names_one_of_the_four_keeps_it() {
+    let named = nothing_named()
+        .replace("[agents]\n", "[agents]\nrepresentative = \"mine\"\n")
+        .replace("[contributions]\n", "[contributions]\nreviewers = []\n");
+    let scene = Scene::holding(&named).await;
+
+    scene.migrate().await.unwrap();
+
+    let table = scene.table();
+    assert_eq!(table["agents"]["representative"], "mine");
+    assert_eq!(
+        table["contributions"]["reviewers"],
+        serde_json::json!([]),
+        "a list left empty on purpose stays empty"
+    );
+    assert_eq!(table["triage"]["agent"], "triager");
+}
+
+#[tokio::test]
+async fn a_migrated_project_with_contributions_on_opens_a_runner() {
+    let on = nothing_named().replace("[contributions]\n", "[contributions]\npick = \"all\"\n");
+    let scene = Scene::holding(&on).await;
+    scene.migrate().await.unwrap();
+    let migrated = scene.table();
+
+    let rig = Rig::new("shep");
+    rig.with_app();
+    let entry = std::fs::read_to_string(rig.settings_file()).unwrap();
+    let mut table = crate::test::project_table(&entry);
+    for (section, key) in [
+        ("agents", "representative"),
+        ("triage", "agent"),
+        ("contributions", "security_reviewer"),
+        ("contributions", "reviewers"),
+    ] {
+        let at = table
+            .entry(section)
+            .or_insert_with(|| serde_json::json!({}));
+        at[key] = migrated[section][key].clone();
+    }
+    table["contributions"]["pick"] = migrated["contributions"]["pick"].clone();
+    let paths = rig.paths();
+    let home = rig.home.path();
+    let settings = Settings::from_table(&table, "shep", home, &paths.folder).unwrap();
+
+    let opened = rig.open_settings(settings);
+
+    assert!(opened.is_ok(), "{:?}", opened.err().map(|e| e.to_string()));
 }

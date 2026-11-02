@@ -29,7 +29,11 @@ pending_rulings = 2
 per_item_usd = 10
 
 [agents]
+representative = "representative"
 reviewers = ["standards"]
+
+[triage]
+agent = "triager"
 
 [contributions]
 security_reviewer = "security-reviewer"
