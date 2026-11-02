@@ -7,7 +7,8 @@
 //! title and the new body. Its labels are the pass's start and its own.
 
 use super::super::Runner;
-use crate::board::{self, check};
+use crate::board::check::{self, Failure};
+use crate::board::{self};
 use crate::ports::NewLabel;
 
 /// The kind label `name`, as `kind:feat`, as kelpie makes it on a repo that lacks it
@@ -17,6 +18,43 @@ pub(in crate::runner) fn new_kind_label(name: &str) -> NewLabel<'_> {
         color: "c5def5",
         description: "The kind of work, as a conventional commit type",
     }
+}
+
+/// What the issue check refuses in `body` under `title`, in its own words. The
+/// labels are not the draft's to mend, so a refusal that names one is left out.
+pub(in crate::runner) fn refusals(title: &str, body: &str) -> Vec<String> {
+    (check::check(title, body, &[]).into_iter())
+        .filter(|f| {
+            !matches!(
+                f,
+                Failure::NoTitle
+                    | Failure::NoPriority
+                    | Failure::Priorities(_)
+                    | Failure::NoKind
+                    | Failure::UnknownKind(_)
+                    | Failure::Kinds(_)
+            )
+        })
+        .map(|f| f.to_string())
+        .collect()
+}
+
+/// What the triager is asked when the issue check refused its `body`: the
+/// check's reasons, and the shape the check reads
+pub(in crate::runner) fn redraft_prompt(reasons: &[String]) -> String {
+    let listed: Vec<String> = reasons.iter().map(|r| format!("- {r}")).collect();
+    format!(
+        "Kelpie's issue check refused the `body` of your reply:\n{}\n\nThe check reads a \
+         `{}` line naming the files the issue changes, each path in backticks, then a `## {}` \
+         section and a `## {}` section of `- [ ]` items. It reads no other heading for them. \
+         Reply again with the corrected object, exactly one JSON object in the same shape and \
+         nothing else. Keep every value you found, and change only `body`, so that it passes. \
+         Research nothing again.",
+        listed.join("\n"),
+        check::TOUCHES,
+        check::WHAT_TO_BUILD,
+        check::CRITERIA,
+    )
 }
 
 impl Runner {
