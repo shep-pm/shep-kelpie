@@ -59,6 +59,13 @@ fn answers(rig: &Rig, runner: &Mutex<Runner>, say: &'static str) -> StepReport {
 }
 
 const FIX: &str = "{\"pick\": null, \"red\": {\"workflow\": \"test\", \"call\": \"fix\", \
+    \"title\": \"Fix e2e::checkout on main\", \"body\": \"Touches: `tests/e2e/checkout.rs`\\n\\n\
+    ## What to build\\n\\n`test` fails in e2e::checkout: `times out after 3 tries`. Suspect: the \
+    merge of #323.\\n\\n## Acceptance criteria\\n\\n- [ ] `test` is green on `main`\\n\", \
+    \"why\": \"a real break\"}}";
+
+/// A fix whose body names no file, no work and no criterion, which the issue check refuses
+const BARE_FIX: &str = "{\"pick\": null, \"red\": {\"workflow\": \"test\", \"call\": \"fix\", \
     \"title\": \"Fix e2e::checkout on main\", \"body\": \"`test` fails in e2e::checkout: \
     `times out after 3 tries`. Suspect: the merge of #323.\", \"why\": \"a real break\"}}";
 
@@ -163,6 +170,33 @@ fn a_fix_call_opens_an_issue_with_what_it_read_and_it_starts_ahead_of_the_board(
     // The forge lists it ready at the end of the queue, and the board starts it first.
     rig.forge.list_ready(900, false);
     assert_eq!(dispatched(step(&runner).unwrap()), ticket(900));
+}
+
+#[test]
+fn a_fix_body_the_issue_check_refuses_is_asked_of_the_maintainer_and_never_filed() {
+    let (rig, runner) = red_again();
+
+    let report = answers(&rig, &runner, BARE_FIX);
+
+    let StepReport::PmAnswered { acted, reply, .. } = report else {
+        panic!("not an answer: {report:?}");
+    };
+    assert_eq!(
+        acted,
+        [
+            "asked the maintainer about test red on main, since the fix I drafted fails the issue check"
+        ]
+    );
+    let reply = reply.expect("the question went to the maintainer");
+    assert!(reply.contains("fails the issue check"), "{reply}");
+    assert!(reply.contains("no `Touches:` line"), "{reply}");
+    assert!(reply.contains("Fix e2e::checkout on main"), "{reply}");
+    assert!(reply.contains("`times out after 3 tries`"), "{reply}");
+    assert!(rig.forge.created().is_empty());
+    assert_eq!(
+        ask(&rig, &runner, "red_workflows")[0]["doing"],
+        json!("the project manager asked the maintainer, with the log lines it read")
+    );
 }
 
 #[test]

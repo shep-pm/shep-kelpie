@@ -105,7 +105,10 @@ macro_rules! reds {
          main was last green, it differs from run to run, the tests passed on the pull \
          request) from a break. For a break, `call` `fix` opens a fix work item first on \
          the board, and its `body` names the failing check, the log lines you read and \
-         the suspect merge. Where you cannot tell, `call` `ask` puts the log lines you \
+         the suspect merge, in the issue format: a `Touches:` line naming the files to \
+         change in backticks, a `## What to build` section and a `## Acceptance criteria` \
+         section with a `- [ ]` item. Kelpie puts a body that fails the issue check to \
+         the maintainer as a question instead of filing it. Where you cannot tell, `call` `ask` puts the log lines you \
          read in `log` to the maintainer, so they need not read the log themself. Kelpie \
          drops a `red` call for a head whose rerun has not come back red, or that one \
          already settled. While main is red you may still pick an issue that does not \

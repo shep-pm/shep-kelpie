@@ -9,8 +9,8 @@
 use super::Wake;
 use super::act::{WORDS, plain};
 use super::answer::{RedCall, RedHow};
-use crate::board::READY;
 use crate::board::briefing::ticket_ref;
+use crate::board::{READY, check};
 use crate::local_paths::Surface;
 use crate::runner::Runner;
 use crate::state::{Handled, StateError};
@@ -18,6 +18,12 @@ use crate::ticket::TicketId;
 
 /// The most of an issue's title kept, in characters
 const TITLE: usize = 120;
+
+// The labels a fix is checked with besides its text. A triage pass puts the priority and kind on,
+// so the check here reads only the title and body, which are the project manager's to write.
+fn stood_in() -> [String; 2] {
+    ["priority: P0".to_owned(), "kind:fix".to_owned()]
+}
 
 /// What a call about a red workflow did
 pub(super) enum Settled {
@@ -72,6 +78,22 @@ impl Runner {
                     "{body}\n\n`{named}` is red on `main` at `{head}` after a rerun of its \
                      failed jobs: {url}\n"
                 );
+                let failures = check::check(&title, &body, &stood_in());
+                if !failures.is_empty() {
+                    let failures: Vec<String> = failures.iter().map(ToString::to_string).collect();
+                    let message = format!(
+                        "{named} is red on main at {} after a rerun, and I would open a fix \
+                         for it, but the fix fails the issue check, so I did not file it: \
+                         {}. {url}\nThe fix I drafted, {title}:\n{body}\nWhy: {why}",
+                        short(&head),
+                        failures.join("; ")
+                    );
+                    let said = format!(
+                        "asked the maintainer about {named} red on main, since the fix I drafted \
+                         fails the issue check"
+                    );
+                    return self.settled_by(named, Handled::Asked, Settled::Asked(message), said);
+                }
                 let ticket = match self.file_ticket(&title, &body, &[READY]) {
                     Ok(ticket) => ticket,
                     Err(e) => return Ok(Err(format!("red {named}: cannot open the fix: {e}"))),
@@ -95,12 +117,24 @@ impl Runner {
                 (Handled::Asked, Settled::Asked(message), said)
             }
         };
+        self.settled_by(named, handled, settled, said)
+    }
+
+    // Saves that `call`'s workflow is settled as `handled`, with the fix at the front of the board
+    // where it opened one
+    fn settled_by(
+        &mut self,
+        named: &str,
+        handled: Handled,
+        settled: Settled,
+        said: String,
+    ) -> Result<Result<(String, Settled), String>, StateError> {
         let mut next = self.state.clone();
         if let Settled::Fixed(ticket) = settled {
             next.order.retain(|&t| t != ticket);
             next.order.insert(0, ticket);
         }
-        if let Some(red) = next.red.iter_mut().find(|r| &r.workflow == named) {
+        if let Some(red) = next.red.iter_mut().find(|r| r.workflow == named) {
             red.handled = Some(handled);
         }
         self.save(next)?;
