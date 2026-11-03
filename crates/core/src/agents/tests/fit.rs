@@ -196,7 +196,7 @@ fn every_shipped_implementer_and_reviewer_but_security_reviewer_has_a_descriptio
     let shipped = shipped();
 
     let names: Vec<_> = shipped.iter().map(|(name, _)| name.as_str()).collect();
-    for expected in ["defect-hunter", "standards", "spec", "sonnet-high", "codex"] {
+    for expected in ["defect-hunter", "standards", "spec", "codex"] {
         assert!(
             names.contains(&expected),
             "{expected} is not listed: {names:?}"
@@ -225,11 +225,6 @@ fn no_shipped_description_uses_a_cost_word() {
 fn the_shipped_whole_agents_hold_the_tiers_listed_above() {
     let agents = Agents::embedded();
     let expected = [
-        ("sonnet-high", Tier::Standard),
-        ("opus-high", Tier::Heavy),
-        ("defect-hunter-lite", Tier::Standard),
-        ("iq3-xxs-review", Tier::Light),
-        ("qwen", Tier::Light),
         ("coderabbit", Tier::Standard),
         ("cubic", Tier::Standard),
         ("codex", Tier::Standard),

@@ -73,11 +73,10 @@ impl Runner {
         let gpu_metrics_url = kelpie.gpu_metrics_url.clone();
         let mut book = Agents::load(&self.paths.agents)?;
         book.hold_for(self.state.work_items.iter().map(|item| &item.agent))?;
+        settings.require_implementer(&book)?;
         let mut agents = settings.role_agents(&book)?;
         let gateways = kelpie.gateways();
         let lineup = settings.lineup(&book, &gateways, &self.home);
-        // The gateways the agents in use were listed under.
-        let mut in_use = &gateways;
         // The gateways must hold as a start checks them. A key is not a shape: a
         // reviewer without one is left out below, so it must not hide a missing gateway.
         check_gateway_shapes(&gateways, &book, &lineup)?;
@@ -91,7 +90,6 @@ impl Runner {
             book.clone_from(&self.book);
             // The agents the runner has, under the new settings as a start reads them.
             agents = settings.role_agents(&book)?;
-            in_use = &self.gateways;
         }
         // The adapters route with the gateways the runner has, so those hold the keys.
         let lineup = settings.lineup_with_keys(&book, &self.gateways, &self.home);
@@ -118,16 +116,22 @@ impl Runner {
                 &settings,
                 self.ports.voice.as_ref(),
                 &self.remote,
-                (&book, in_use),
+                &book,
                 &self.home,
             )?
         } else if settings.contributions.is_off() {
             Vec::new()
         } else {
-            settings.contribution_lineup(&book, in_use, &self.home)?
+            settings.contribution_lineup(&book, &self.home)?
         };
         if settings.triage != self.settings.triage {
             open_checks::triage(&settings, self.ports.voice.as_ref(), &self.remote, &book)?;
+        }
+        // Both tables name the representative in `agents`, so its change is checked as theirs are,
+        // while either is on. A start refuses what is unset or has no file.
+        let on = !settings.contributions.is_off() || !settings.triage.is_off();
+        if on && settings.agents.representative != self.settings.agents.representative {
+            settings.representative(&book)?;
         }
         // `allow` and `slack` are read live, so a change to either must replace the settings
         let (was, now) = (&self.settings.agents, &settings.agents);

@@ -22,4 +22,22 @@ mod test {
         EPOCH, FakeClock, FakeMeter, FakeShepherd, LeaseReads, RecordedSink, utilization,
     };
     pub use shep_kelpie_test_support::{CALL_PATIENCE, write_in, write_script};
+
+    /// The agents the dog's tests have run on since kelpie stopped shipping any that names a
+    /// model: `sonnet-high` and `opus-high`, two Claude Code implementers, in a folder of their own
+    pub fn claude_implementers() -> (tempfile::TempDir, crate::agents::Agents) {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, model, tier) in [
+            ("sonnet-high", "claude-sonnet-5-5", "standard"),
+            ("opus-high", "claude-opus-5-5", "heavy"),
+        ] {
+            let text = format!(
+                "---\nrole: implementer\nharness: claude-code\nmodel: {model}\neffort: high\n\
+                 tier: {tier}\n---\n"
+            );
+            write_in(dir.path(), &format!("{name}.md"), &text);
+        }
+        let agents = crate::agents::Agents::load(dir.path()).unwrap();
+        (dir, agents)
+    }
 }

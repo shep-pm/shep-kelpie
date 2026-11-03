@@ -47,10 +47,8 @@ impl Scene {
             let agents = scene.kelpie_home.join("agents");
             crate::test::write_in(&agents, &format!("{name}.md"), text);
             let book = crate::agents::Agents::load(&agents).unwrap();
-            // `iq3-xxs-review` is left out too: a project that names a reviewer on a
-            // gateway kelpie's settings hold none of is the reviewers line's to refuse.
             let rest: Vec<&str> = (book.iter().map(|(n, _)| n.as_str()))
-                .filter(|n| *n != name && *n != crate::agents::IQ3_XXS_REVIEW)
+                .filter(|n| *n != name)
                 .collect();
             t["agents"]["allow"] = json!(rest);
         })

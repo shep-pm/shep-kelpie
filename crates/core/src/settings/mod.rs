@@ -65,7 +65,7 @@ pub use hooks::{HookPoint, PointKind, ProjectHook};
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use local_rounds::{KeepDays, LocalRounds, RoundsFolder};
 pub use repo_setup::{CallRole, MarketplaceSource, Part, PluginId, RepoSetup};
-pub use reviewers::{ListedReviewer, default_reviewers};
+pub use reviewers::ListedReviewer;
 pub use reviews::Reviews;
 pub use rulings::{PM_ALONE, PM_DECIDES, RulingName, Rulings};
 pub use skills::{SkillChoice, SkillName, StepSkills};
@@ -266,8 +266,8 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "models.worker",
         because: AGENT_FILES,
-        fix: "write an agent file whose role is `implementer`, such as kelpie's own \
-              `sonnet-high`, which is Sonnet 5.5 at high",
+        fix: "write an agent file whose role is `implementer`, which \
+              `shep kelpie agents init <harness>` does for your harness",
     },
     Removed {
         key: "models.labels",

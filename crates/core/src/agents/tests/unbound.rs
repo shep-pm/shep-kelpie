@@ -58,18 +58,9 @@ fn a_stub_that_adds_harness_model_and_effort_loads_with_the_baselines_prompt() {
 }
 
 #[test]
-fn the_review_bots_and_the_five_shipped_bindings_still_load_whole() {
+fn the_review_bots_and_the_codex_agent_still_load_whole() {
     let agents = Agents::load(tempfile::tempdir().unwrap().path()).unwrap();
-    for whole in [
-        "sonnet-high",
-        "opus-high",
-        "defect-hunter-lite",
-        "iq3-xxs-review",
-        "qwen",
-        "coderabbit",
-        "cubic",
-        "codex",
-    ] {
+    for whole in ["coderabbit", "cubic", "codex"] {
         assert!(agents.get(&name(whole)).is_some(), "{whole}");
     }
     assert!(agents.unbound().is_empty());
@@ -86,7 +77,7 @@ fn extends_resolves_in_the_whole_agents_and_in_the_baselines() {
     let both = "---\nextends: kelpie:nope\n---\n";
     let err = refused(&[("mine.md", both)]);
     assert!(
-        err.contains("defect-hunter") && err.contains("opus-high"),
+        err.contains("defect-hunter") && err.contains("codex"),
         "{err}"
     );
 }

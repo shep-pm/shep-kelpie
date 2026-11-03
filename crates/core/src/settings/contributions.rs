@@ -7,7 +7,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{AgentName, SettingsError};
-use crate::agents::SECURITY_REVIEWER;
 
 /// Which pull requests from other people kelpie picks up
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -32,15 +31,14 @@ pub struct Contributions {
     #[serde(default)]
     pub pick: Pick,
     /// The reviewers' agent files for a contribution, in the order the
-    /// review runs them, each once. Review bots are welcome. Kelpie's default
-    /// pass when absent: `iq3-xxs-review` where kelpie holds a `paddock`
-    /// gateway, then `defect-hunter-lite`.
+    /// review runs them, each once. Review bots are welcome. Needed while
+    /// `pick` is not `off`.
     #[serde(default)]
     pub reviewers: Option<Vec<AgentName>>,
     /// The agent file whose role is `reviewer` that reads a contribution
-    /// for security. `security-reviewer` when absent.
-    #[serde(default = "default_security_reviewer")]
-    pub security_reviewer: AgentName,
+    /// for security. Needed while `pick` is not `off`.
+    #[serde(default)]
+    pub security_reviewer: Option<AgentName>,
     /// Whole days without a word from the author before a contribution counts
     /// as quiet, above 0. 7 when absent.
     #[serde(default = "default_quiet_days")]
@@ -56,15 +54,11 @@ impl Default for Contributions {
         Self {
             pick: Pick::default(),
             reviewers: None,
-            security_reviewer: default_security_reviewer(),
+            security_reviewer: None,
             quiet_days: default_quiet_days(),
             nudge_days: default_nudge_days(),
         }
     }
-}
-
-fn default_security_reviewer() -> AgentName {
-    AgentName::kelpies(SECURITY_REVIEWER)
 }
 
 fn default_quiet_days() -> NonZeroU32 {

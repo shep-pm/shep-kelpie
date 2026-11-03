@@ -16,6 +16,16 @@ const HAIKU: &str = "---\nrole: implementer\nharness: claude-code\nmodel: claude
 const QWEN: &str = "---\nrole: implementer\nharness: pi\nmodel: qwen3.8:27b\neffort: low\n\
                     url: http://box:11434/v1\ncontext: 65536\n---\n";
 
+// The agents kelpie shipped whole before it stopped naming any, which a project may still write.
+const SONNET_HIGH: &str = "---\nrole: implementer\nharness: claude-code\nmodel: claude-sonnet-5-5\n\
+                           effort: high\n---\n";
+
+const OPUS_HIGH: &str = "---\nrole: implementer\nharness: claude-code\nmodel: claude-opus-5-5\n\
+                         effort: high\n---\n";
+
+const LITE: &str = "---\nrole: reviewer\nharness: claude-code\nmodel: claude-opus-5-5\n\
+                    effort: medium\nsecond_look: false\n---\nRead it for defects.\n";
+
 const GPT: &str = "---\nrole: implementer\nharness: codex\nmodel: gpt-6-sol\neffort: medium\n---\n";
 
 const BOX: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-coder\neffort: low\n\
@@ -29,6 +39,9 @@ fn book() -> Agents {
     bound(Agents::embedded())
         .with("haiku", HAIKU)
         .with("qwen", QWEN)
+        .with("sonnet-high", SONNET_HIGH)
+        .with("opus-high", OPUS_HIGH)
+        .with("defect-hunter-lite", LITE)
         .with("gpt", GPT)
         .with("box", BOX)
 }
@@ -311,11 +324,15 @@ fn a_project_manager_is_named_by_its_file_and_none_is_the_default() {
 }
 
 #[test]
-fn agents_representative_defaults_to_representative() {
+fn agents_representative_is_the_file_it_names_and_unset_is_refused() {
     let unset = project("");
+    assert_eq!(unset.agents.representative, None);
+    let err = unset.representative(&book()).unwrap_err().to_string();
+    assert!(err.contains("`agents.representative` is not set"), "{err}");
+    assert!(err.contains("agents init"), "{err}");
 
-    assert_eq!(unset.agents.representative.as_str(), "representative");
-    let agent = unset.representative(&book()).unwrap();
+    let named = project("representative = \"representative\"\n");
+    let agent = named.representative(&book()).unwrap();
     assert_eq!(agent.name.as_str(), "representative");
     assert_eq!(pair(&agent.model), ("claude-opus-5-5", Effort::Low));
     assert_eq!(agent.limit, Limit::Account(Account::Claude));
@@ -431,6 +448,14 @@ fn allowing(names: &str, contributions: &str) -> Settings {
     Settings::from_table(&table, "shep", Path::new("/h"), Path::new("/p")).unwrap()
 }
 
+// [`allowing`], with the representative, the triager and the security reviewer named.
+fn naming_all(names: &str) -> Settings {
+    allowing(
+        &format!("{names}representative = \"representative\"\n"),
+        "security_reviewer = \"security-reviewer\"\n\n[app.dogs.kelpie.triage]\nagent = \"triager\"\n",
+    )
+}
+
 fn lineup(settings: &Settings) -> Vec<String> {
     let lineup = settings.lineup(&book(), &Gateways::default(), Path::new("/h"));
     lineup.iter().map(|r| r.name.to_string()).collect()
@@ -449,7 +474,7 @@ const EVERY_REVIEWER: [&str; 7] = [
 
 #[test]
 fn an_absent_allow_lets_every_agent_through_as_before() {
-    let settings = project("pm = \"pm\"\n");
+    let settings = naming_all("pm = \"pm\"\n");
     assert_eq!(settings.agents.allow, None);
     let agents = settings.role_agents(&book()).unwrap();
     assert!(names(&settings).len() > 2);
@@ -462,7 +487,7 @@ fn an_absent_allow_lets_every_agent_through_as_before() {
 
 #[test]
 fn an_empty_allow_allows_every_agent_as_an_absent_one_does() {
-    let settings = project("allow = []\npm = \"pm\"\n");
+    let settings = naming_all("allow = []\npm = \"pm\"\n");
     let agents = settings.role_agents(&book()).unwrap();
     assert_eq!(names(&settings), names(&project("")));
     assert!(agents.pm.is_some());
@@ -522,30 +547,33 @@ fn an_implementer_allow_leaves_out_is_no_pick_for_the_board() {
 
 #[test]
 fn an_old_reviewers_list_loads_and_is_read_by_nothing() {
-    let old = project("reviewers = [\"opus-high\", \"fable\", \"sonnet-high\"]\n");
+    let old = allowing(
+        "reviewers = [\"opus-high\", \"fable\", \"sonnet-high\"]\n",
+        "security_reviewer = \"security-reviewer\"\n",
+    );
     assert_eq!(old.agents.gone_keys(), ["agents.reviewers"]);
     assert_eq!(lineup(&old), EVERY_REVIEWER, "the list names no reviewer");
-    let default = old
-        .contribution_lineup(&book(), &Gateways::default(), Path::new("/h"))
-        .unwrap();
-    assert_eq!(
-        default.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
-        ["defect-hunter-lite"],
-        "a contribution takes kelpie's default, not the old list"
+    let err = (old.contribution_lineup(&book(), Path::new("/h"))).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("`contributions.reviewers` is not set"),
+        "a contribution takes its own list, not the old one: {err}"
     );
     assert_eq!(project("").agents.gone_keys(), Vec::<&str>::new());
 }
 
 #[test]
-fn a_reviewer_or_a_contributions_default_allow_leaves_out_is_refused() {
-    let only = project("allow = [\"sonnet-high\"]\n");
+fn a_reviewer_allow_leaves_out_is_refused() {
+    let only = allowing(
+        "allow = [\"sonnet-high\"]\n",
+        "reviewers = [\"defect-hunter-lite\"]\n",
+    );
     assert_eq!(
         lineup(&only),
         Vec::<String>::new(),
         "a pass picks only from the reviewers allowed"
     );
-    let err =
-        (only.contribution_lineup(&book(), &Gateways::default(), Path::new("/h"))).unwrap_err();
+    let err = (only.contribution_lineup(&book(), Path::new("/h"))).unwrap_err();
     assert_eq!(
         err.to_string(),
         "setting `agents`: `contributions.reviewers` names defect-hunter-lite, which \
@@ -559,10 +587,10 @@ fn a_reviewer_or_a_contributions_default_allow_leaves_out_is_refused() {
     assert_eq!(
         lineup(&own),
         ["defect-hunter-lite"],
-        "the default is allowed"
+        "the reviewer it allows"
     );
     let err = own
-        .contribution_lineup(&book(), &Gateways::default(), Path::new("/h"))
+        .contribution_lineup(&book(), Path::new("/h"))
         .unwrap_err();
     assert_eq!(
         err.to_string(),
@@ -573,7 +601,7 @@ fn a_reviewer_or_a_contributions_default_allow_leaves_out_is_refused() {
 
 #[test]
 fn the_project_manager_representative_triager_and_security_reviewer_are_held_to_allow() {
-    let holds = |allow: &str| project(&format!("allow = [{allow}]\npm = \"pm\"\n"));
+    let holds = |allow: &str| naming_all(&format!("allow = [{allow}]\npm = \"pm\"\n"));
     let only = holds("\"sonnet-high\"");
     let left_out = |at: &str, name: &str, err: String| {
         let said = format!("`{at}` names {name}, which `agents.allow` leaves out");
@@ -649,5 +677,86 @@ fn an_implementer_no_turn_can_run_on_is_refused_with_why_and_the_rest_are_not() 
     assert!(
         why.starts_with("implementer local runs on pi, which cannot run"),
         "{why}"
+    );
+}
+
+#[test]
+fn a_project_with_no_implementer_is_refused_naming_agents_init() {
+    let bare = bound(Agents::load(tempfile::tempdir().unwrap().path()).unwrap());
+    let err = project("").require_implementer(&bare).unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            SettingsError::Invalid {
+                setting: "agents.allow",
+                ..
+            }
+        ),
+        "{err}"
+    );
+    assert!(
+        err.to_string()
+            .contains("`shep kelpie agents init <harness>`"),
+        "{err}"
+    );
+
+    // An implementer `agents.allow` leaves out is no implementer the project has.
+    let left_out = project("allow = [\"pm\"]\n").require_implementer(&book());
+    assert!(left_out.is_err(), "{left_out:?}");
+}
+
+#[test]
+fn a_project_with_an_implementer_is_not_refused() {
+    project("").require_implementer(&book()).unwrap();
+    let some = project("allow = [\"qwen\"]\n");
+    some.require_implementer(&book()).unwrap();
+}
+
+#[test]
+fn no_representative_triager_or_security_reviewer_is_required_while_their_features_are_off() {
+    let off = project("");
+    assert!(off.contributions.is_off() && off.triage.is_off());
+    assert!(off.agents.representative.is_none());
+    assert!(off.triage.agent.is_none());
+    assert!(off.contributions.security_reviewer.is_none());
+    off.role_agents(&book()).unwrap();
+    off.require_implementer(&book()).unwrap();
+}
+
+#[test]
+fn an_unset_triager_or_security_reviewer_is_refused_by_name_pointing_at_agents_init() {
+    let off = project("");
+    for (setting, err) in [
+        (
+            "agents.representative",
+            off.representative(&book()).unwrap_err(),
+        ),
+        ("triage.agent", off.triager(&book()).unwrap_err()),
+        (
+            "contributions.security_reviewer",
+            off.security_reviewer(&book()).map(|_| ()).unwrap_err(),
+        ),
+    ] {
+        let said = err.to_string();
+        assert!(said.contains(&format!("`{setting}` is not set")), "{said}");
+        assert!(said.contains("agents init"), "{said}");
+    }
+
+    let named = naming_all("");
+    named.representative(&book()).unwrap();
+    named.triager(&book()).unwrap();
+    named.security_reviewer(&book()).unwrap();
+}
+
+#[test]
+fn an_empty_reviewers_list_loads_beside_a_lineup_and_runs_no_review() {
+    let settings = allowing("", "pick = \"all\"\nreviewers = []\n");
+    settings.require_implementer(&book()).unwrap();
+    assert_eq!(settings.contributions.reviewers, Some(Vec::new()));
+    assert!(
+        settings
+            .contribution_lineup(&book(), Path::new("/h"))
+            .unwrap()
+            .is_empty()
     );
 }

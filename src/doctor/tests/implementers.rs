@@ -112,3 +112,26 @@ async fn a_paddock_key_the_dog_s_shep_toml_entry_lacks_is_unsure() {
         "`[daemon.adopted_dogs.kelpie]` in shep.toml sets no KELPIE_TEST_KEY_NEVER_SET"
     );
 }
+
+#[tokio::test]
+async fn a_project_with_no_lineup_is_missing_and_told_to_run_agents_init() {
+    let scene = Scene::new().await;
+    let agents = scene.kelpie_home.join("agents");
+    for gone in ["sonnet-high.md", "opus-high.md"] {
+        std::fs::remove_file(agents.join(gone)).unwrap();
+    }
+    scene.runs("golbat", |t| {
+        t["agents"].as_object_mut().unwrap().remove("allow");
+    });
+
+    let report = scene.report().await;
+
+    let Verdict::Missing { what, fix } = verdict(&report, "golbat: implementers") else {
+        panic!("{:#?}", report.render());
+    };
+    assert_eq!(
+        what,
+        "no agent file whose role is `implementer` is one `agents.allow` holds"
+    );
+    assert!(fix.contains("`shep kelpie agents init <harness>`"), "{fix}");
+}

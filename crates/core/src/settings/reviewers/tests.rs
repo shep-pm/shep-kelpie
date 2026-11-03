@@ -27,6 +27,19 @@ const EVERY_REVIEWER: [&str; 11] = [
 const OPUS: &str = "---\nrole: reviewer\nharness: claude-code\nmodel: claude-opus-5-5\n\
                     effort: high\npaths: [\"src/runner/merge/**\"]\n---\nRead it for defects.\n";
 
+// The agents kelpie shipped whole before it stopped naming any, which a project may still write.
+const SONNET: &str = "---\nrole: implementer\nharness: claude-code\nmodel: claude-sonnet-5-5\n\
+                      effort: high\n---\n";
+
+const LITE: &str = "---\nrole: reviewer\nharness: claude-code\nmodel: claude-opus-5-5\n\
+                    effort: medium\nsecond_look: false\n---\nRead it for defects.\n";
+
+const QWEN: &str =
+    "---\nrole: reviewer\nharness: command\ncommand: ~/.claude/scripts/qwen-review.sh\n---\n";
+
+const IQ3: &str = "---\nrole: reviewer\nharness: endpoint\ngateway: paddock\nmodel: iq3_xxs\n\
+                   context: 262144\n---\n";
+
 const GPU_BOX: &str = "---\nrole: reviewer\nharness: endpoint\nurl: http://gpu-box:11434/v1\n\
                        model: coder\ncontext: 32768\n---\n";
 
@@ -38,6 +51,10 @@ fn book() -> Agents {
     bound(Agents::embedded())
         .with("opus", OPUS)
         .with("gpu-box", GPU_BOX)
+        .with("sonnet-high", SONNET)
+        .with("defect-hunter-lite", LITE)
+        .with("qwen", QWEN)
+        .with("iq3-xxs-review", IQ3)
 }
 
 // `agents` with each baseline bound to Opus 5.5 at high effort.
@@ -46,16 +63,18 @@ fn bound(agents: Agents) -> Agents {
 }
 
 // The example's project, with `agents` added to its `[agents]` table and
-// `contribution` as its contributions reviewers, and its home.
+// `contribution` as its contributions reviewers, and its home. It names
+// `security-reviewer` as its security reviewer, which the example leaves unset.
 fn project(agents: &str, contribution: Option<&str>) -> (Settings, tempfile::TempDir) {
     assert!(EXAMPLE.contains(GONE), "the example's reviewers key moved");
-    let mut entry = EXAMPLE.replace(GONE, &format!("{GONE}{agents}"));
-    if let Some(list) = contribution {
-        entry = crate::test::with_tables(
-            &entry,
-            &format!("[app.dogs.kelpie.contributions]\nreviewers = {list}\n"),
-        );
-    }
+    let entry = EXAMPLE.replace(GONE, &format!("{GONE}{agents}"));
+    let reviewers = contribution.map_or_else(String::new, |list| format!("reviewers = {list}\n"));
+    let entry = crate::test::with_tables(
+        &entry,
+        &format!(
+            "[app.dogs.kelpie.contributions]\nsecurity_reviewer = \"security-reviewer\"\n{reviewers}"
+        ),
+    );
     let home = tempfile::tempdir().unwrap();
     let table = crate::test::project_table(&entry);
     let settings = Settings::from_table(&table, "shep", home.path(), Path::new("/p")).unwrap();
@@ -74,9 +93,7 @@ fn names(lineup: &[ListedReviewer]) -> Vec<&str> {
 #[test]
 fn a_contributions_list_runs_its_reviewers_in_order_each_once() {
     let (settings, home) = contributing(r#"["opus", "qwen", "gpu-box", "opus"]"#);
-    let lineup = settings
-        .contribution_lineup(&book(), &Gateways::default(), home.path())
-        .unwrap();
+    let lineup = settings.contribution_lineup(&book(), home.path()).unwrap();
     assert_eq!(names(&lineup), ["opus", "qwen", "gpu-box"]);
 
     let opus = &lineup[0];
@@ -103,16 +120,14 @@ fn a_contributions_list_runs_its_reviewers_in_order_each_once() {
 #[test]
 fn an_empty_contributions_list_runs_no_review() {
     let (settings, home) = contributing("[]");
-    let lineup = settings
-        .contribution_lineup(&book(), &Gateways::default(), home.path())
-        .unwrap();
+    let lineup = settings.contribution_lineup(&book(), home.path()).unwrap();
     assert_eq!(names(&lineup), Vec::<&str>::new());
 }
 
 #[test]
 fn a_contributions_reviewer_with_no_file_or_an_implementers_is_refused_naming_it() {
     let (settings, home) = contributing(r#"["fable"]"#);
-    let err = (settings.contribution_lineup(&book(), &Gateways::default(), home.path()))
+    let err = (settings.contribution_lineup(&book(), home.path()))
         .unwrap_err()
         .to_string();
     assert_eq!(
@@ -121,7 +136,7 @@ fn a_contributions_reviewer_with_no_file_or_an_implementers_is_refused_naming_it
          write `agents/fable.md` in kelpie's home"
     );
     let (settings, home) = contributing(r#"["sonnet-high"]"#);
-    let err = (settings.contribution_lineup(&book(), &Gateways::default(), home.path()))
+    let err = (settings.contribution_lineup(&book(), home.path()))
         .unwrap_err()
         .to_string();
     assert!(
@@ -169,7 +184,7 @@ fn a_commands_leading_tilde_is_the_home_folder_and_an_absolute_path_stays() {
 fn a_bot_that_reviews_on_ready_is_refused_after_another_bot_only_in_a_contributions_list() {
     let book = book().with("codex", CODEX_ON_READY);
     let (settings, home) = contributing(r#"["defect-hunter", "coderabbit", "codex"]"#);
-    let err = (settings.contribution_lineup(&book, &Gateways::default(), home.path()))
+    let err = (settings.contribution_lineup(&book, home.path()))
         .unwrap_err()
         .to_string();
     assert_eq!(
@@ -179,9 +194,7 @@ fn a_bot_that_reviews_on_ready_is_refused_after_another_bot_only_in_a_contributi
          which draws Codex's own review outside its lease"
     );
     let (settings, home) = contributing(r#"["codex", "defect-hunter", "coderabbit"]"#);
-    let lineup = settings
-        .contribution_lineup(&book, &Gateways::default(), home.path())
-        .unwrap();
+    let lineup = settings.contribution_lineup(&book, home.path()).unwrap();
     assert_eq!(names(&lineup), ["codex", "defect-hunter", "coderabbit"]);
 
     // A pass's candidates are kelpie's own files in their own order, which no
@@ -251,9 +264,25 @@ fn the_candidates_are_every_reviewer_file_allow_holds_but_the_security_reviewer(
     let allowed = settings.lineup(&book(), &paddock, home.path());
     assert_eq!(names(&allowed), ["opus", "spec"]);
 
-    settings.contributions.security_reviewer = AgentName::kelpies("spec");
+    settings.contributions.security_reviewer = Some(AgentName::kelpies("spec"));
     let moved = settings.lineup(&book(), &paddock, home.path());
     assert_eq!(names(&moved), ["opus"]);
+}
+
+#[test]
+fn an_unset_security_reviewer_keeps_the_shipped_one_out_of_the_candidates() {
+    let (mut settings, home) = project("", None);
+    settings.contributions.security_reviewer = None;
+    let lineup = settings.lineup(&book(), &Gateways::default(), home.path());
+    assert!(!names(&lineup).contains(&"security-reviewer"));
+    assert_eq!(
+        names(&lineup),
+        names(
+            &project("", None)
+                .0
+                .lineup(&book(), &Gateways::default(), home.path())
+        )
+    );
 }
 
 #[test]
@@ -313,31 +342,32 @@ fn the_candidates_ignore_an_old_reviewers_list() {
 }
 
 #[test]
-fn a_contribution_with_no_list_gets_the_default_lineup() {
-    let paddock = gateways_with("paddock", GatewayKind::Paddock);
+fn a_contribution_with_no_list_is_refused_naming_the_setting() {
     let (settings, home) = project("", None);
-    let lineup = (settings.contribution_lineup(&book(), &paddock, home.path())).unwrap();
-    assert_eq!(names(&lineup), ["iq3-xxs-review", "defect-hunter-lite"]);
-
-    let (settings, home) = project("", None);
-    let lineup =
-        (settings.contribution_lineup(&book(), &Gateways::default(), home.path())).unwrap();
-    assert_eq!(
-        names(&lineup),
-        ["defect-hunter-lite"],
-        "no paddock gateway, no local reviewer"
+    let err = (settings.contribution_lineup(&book(), home.path()))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("`contributions.reviewers` is not set"),
+        "{err}"
     );
+    assert!(err.contains("agents init"), "{err}");
 
     // An old `agents.reviewers` list is read by nothing here either.
     let (old, home) = project("reviewers = [\"opus\"]\n", None);
-    let lineup = (old.contribution_lineup(&book(), &paddock, home.path())).unwrap();
-    assert_eq!(names(&lineup), ["iq3-xxs-review", "defect-hunter-lite"]);
+    let err = (old.contribution_lineup(&book(), home.path()))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("`contributions.reviewers` is not set"),
+        "{err}"
+    );
 }
 
 #[test]
-fn a_default_reviewer_that_allow_leaves_out_is_refused_naming_the_contribution_key() {
-    let (settings, home) = project("allow = [\"opus\"]\n", None);
-    let err = (settings.contribution_lineup(&book(), &Gateways::default(), home.path()))
+fn a_contributions_reviewer_that_allow_leaves_out_is_refused_naming_the_contribution_key() {
+    let (settings, home) = project("allow = [\"opus\"]\n", Some(r#"["defect-hunter-lite"]"#));
+    let err = (settings.contribution_lineup(&book(), home.path()))
         .unwrap_err()
         .to_string();
     assert_eq!(

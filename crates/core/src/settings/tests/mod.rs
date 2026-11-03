@@ -454,8 +454,8 @@ fn the_worker_settings_agent_files_replace_are_refused_saying_what_replaces_each
             format!(
                 "{EXAMPLE}\n[app.dogs.kelpie.models.worker]\nmodel = \"m\"\neffort = \"low\"\n"
             ),
-            "write an agent file whose role is `implementer`, such as kelpie's own \
-             `sonnet-high`, which is Sonnet 5.5 at high",
+            "write an agent file whose role is `implementer`, which \
+             `shep kelpie agents init <harness>` does for your harness",
         ),
     ];
     for (key, text, fix) in removed {

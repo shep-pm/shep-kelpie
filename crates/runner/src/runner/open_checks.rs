@@ -6,7 +6,7 @@ use std::path::Path;
 use super::OpenError;
 use crate::agents::Agents;
 use crate::ports::Voice;
-use crate::settings::{ForgeSlug, Gateways, ListedReviewer, Settings, SettingsError};
+use crate::settings::{ForgeSlug, ListedReviewer, Settings, SettingsError};
 
 // The refusal when `setting` picks up other people's work and the App does not
 // cover `remote`, which would make `who` post as the maintainer.
@@ -33,7 +33,7 @@ pub(super) fn contributions(
     settings: &Settings,
     voice: &dyn Voice,
     remote: &ForgeSlug,
-    (book, gateways): (&Agents, &Gateways),
+    book: &Agents,
     home: &Path,
 ) -> Result<Vec<ListedReviewer>, OpenError> {
     if settings.contributions.is_off() {
@@ -46,7 +46,7 @@ pub(super) fn contributions(
             remote,
         ));
     }
-    let lineup = settings.contribution_lineup(book, gateways, home)?;
+    let lineup = settings.contribution_lineup(book, home)?;
     settings.security_reviewer(book)?;
     settings.representative(book)?;
     Ok(lineup)

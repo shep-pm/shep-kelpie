@@ -102,15 +102,15 @@ pub(super) fn shipped_text(
     baselines: &[Baseline],
 ) -> Result<extends::ParentText<'static>, String> {
     (DEFAULTS.iter())
-        .find(|(default, ..)| *default == shipped)
-        .map(|(_, text, _)| *text)
+        .find(|(default, _)| *default == shipped)
+        .map(|(_, text)| *text)
         .or_else(|| baselines.iter().find(|b| b.name == shipped).map(|b| b.text))
         .map(extends::ParentText::Default)
         .ok_or_else(|| {
             if let Some(why) = front::gone(shipped) {
                 return format!("`extends: {extends}`: {why}");
             }
-            let own: Vec<&str> = (DEFAULTS.iter().map(|(name, ..)| *name))
+            let own: Vec<&str> = (DEFAULTS.iter().map(|(name, _)| *name))
                 .chain(baselines.iter().map(|b| b.name))
                 .collect();
             format!(

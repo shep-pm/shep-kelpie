@@ -476,6 +476,7 @@ impl Runner {
         ));
         notes.extend(e2e::dog_cannot_find(settings.e2e.as_ref(), paths));
         told.extend(notes);
+        settings.require_implementer(&book)?;
         let agents = settings.role_agents(&book)?;
         let gateways = kelpie_settings.gateways();
         // A candidate names a gateway kelpie can route and holds the key for, or
@@ -499,13 +500,8 @@ impl Runner {
         if let Some(refused) = settings.rulings.refusal() {
             return Err(refused.into());
         }
-        let contribution_lineup = open_checks::contributions(
-            &settings,
-            ports.voice.as_ref(),
-            &remote,
-            (&book, &gateways),
-            home,
-        )?;
+        let contribution_lineup =
+            open_checks::contributions(&settings, ports.voice.as_ref(), &remote, &book, home)?;
         open_checks::triage(&settings, ports.voice.as_ref(), &remote, &book)?;
         // What the project's `publish` hooks judge is every text bound for the forge.
         let metrics = Arc::new(crate::metrics::Recorder::new(Arc::clone(&ports.metrics)));

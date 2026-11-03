@@ -429,7 +429,8 @@ fn implementers(
         Ok(_) if allowed.is_empty() => Line::missing(
             subject,
             "no agent file whose role is `implementer` is one `agents.allow` holds",
-            "add an implementer to `agents.allow`, or write one with \
+            "add an implementer to `agents.allow`, or write a lineup with \
+             `shep kelpie agents init <harness>`, or one agent with \
              `shep kelpie agents new implementer`",
         ),
         Ok(_) if usable.is_empty() => Line::missing(
@@ -541,7 +542,7 @@ fn spends_on(
     if settings.contributions.pick != Pick::Off {
         reviewers.extend(
             settings
-                .contribution_lineup(book, gateways, here.home)
+                .contribution_lineup(book, here.home)
                 .unwrap_or_default(),
         );
         security = settings.security_reviewer(book).ok();

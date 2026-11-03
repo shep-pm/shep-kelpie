@@ -211,7 +211,7 @@ It runs a fresh session on a harness, whose file's body is its
 prompt, or a command, or kelpie's own endpoint reviewer. One with a
 **second look** reads twice, the second time shown what it found the first
 and asked only for what it missed, before its one fix turn. Kelpie ships
-`defect-hunter`, which does, and `defect-hunter-lite`, which does not. A **local reviewer** is a command or an
+`defect-hunter`, which does. A file can turn it off with `second_look: false`. A **local reviewer** is a command or an
 endpoint, run on a model of the maintainer's own.
 _Avoid_: judge, round guard, deep round, pull request reviewer
 
