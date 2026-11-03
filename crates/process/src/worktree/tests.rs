@@ -83,6 +83,9 @@ fn a_link_in_the_build_folder_leaves_what_it_points_at_alone() {
 #[cfg(unix)]
 const SLEEPER_STARTED: &str = "sleeper started";
 
+#[cfg(unix)]
+const SLEEPER_TEST: &str = "worktree::tests::sleeper_for_the_build_removal_tests";
+
 // Says it started and sleeps for a minute when a copy of this test binary runs
 // it with `SLEEPER` set, and does nothing in a normal run. System binaries
 // cannot be copied and run on macOS, so the copy is of this one.
@@ -102,17 +105,51 @@ fn sleep_from(folder: &Path, shell_prefix: &str) -> std::process::Child {
     std::fs::create_dir_all(folder).unwrap();
     let copy = folder.join("sleeper");
     std::fs::copy(std::env::current_exe().unwrap(), &copy).unwrap();
-    let mut child = std::process::Command::new("sh")
+    let child = std::process::Command::new("sh")
         .arg("-c")
         .arg(format!(
-            "{shell_prefix}exec \"$0\" --exact --nocapture worktree::tests::sleeper_for_the_build_removal_tests"
+            "{shell_prefix}exec \"$0\" --exact --nocapture {SLEEPER_TEST}"
         ))
         .arg(&copy)
         .env("SLEEPER", "1")
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    // Until the copy says so, it may still be the shell, which no folder holds.
+    started(child)
+}
+
+// The sleeper run straight from `program`, with no shell to start it: from
+// `dir` under the name `./sleeper` when `relative`, and with `argv0` for its
+// first argument when there is one.
+#[cfg(unix)]
+fn sleep_as(program: &Path, relative: bool, argv0: Option<&Path>) -> std::process::Child {
+    use std::os::unix::process::CommandExt;
+    let folder = program.parent().unwrap();
+    std::fs::create_dir_all(folder).unwrap();
+    std::fs::copy(std::env::current_exe().unwrap(), program).unwrap();
+    let mut command = if relative {
+        let mut command = std::process::Command::new("./sleeper");
+        command.current_dir(folder);
+        command
+    } else {
+        std::process::Command::new(program)
+    };
+    if let Some(argv0) = argv0 {
+        command.arg0(argv0);
+    }
+    let child = command
+        .args(["--exact", "--nocapture", SLEEPER_TEST])
+        .env("SLEEPER", "1")
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    started(child)
+}
+
+// Waits for the child to say it is the sleeper. Until it does, it may still be
+// the shell, which no folder holds.
+#[cfg(unix)]
+fn started(mut child: std::process::Child) -> std::process::Child {
     let mut lines = std::io::BufReader::new(child.stdout.as_mut().unwrap());
     let mut line = String::new();
     while line.trim() != SLEEPER_STARTED {
@@ -163,6 +200,54 @@ fn removing_a_build_kills_a_process_that_ignores_sigterm() {
     let ended = ended_within_ten_seconds(&mut child);
     let _ = child.kill();
     assert!(ended);
+}
+
+#[cfg(unix)]
+#[test]
+fn removing_a_build_ends_a_process_started_by_a_relative_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let build = dir.path().join("build");
+    let mut child = sleep_as(&build.join("debug/sleeper"), true, None);
+
+    remove_build(dir.path(), &build).unwrap();
+    let ended = ended_within_ten_seconds(&mut child);
+    let _ = child.kill();
+    assert!(ended);
+}
+
+#[cfg(unix)]
+#[test]
+fn removing_a_build_ends_a_process_whose_argv0_was_rewritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let build = dir.path().join("build");
+    let mut child = sleep_as(
+        &build.join("debug/sleeper"),
+        false,
+        Some(Path::new("/elsewhere/not-the-sleeper")),
+    );
+
+    remove_build(dir.path(), &build).unwrap();
+    let ended = ended_within_ten_seconds(&mut child);
+    let _ = child.kill();
+    assert!(ended);
+}
+
+#[cfg(unix)]
+#[test]
+fn removing_a_build_spares_a_process_that_only_names_a_path_in_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let build = dir.path().join("build");
+    std::fs::create_dir_all(&build).unwrap();
+    let mut outside = sleep_as(
+        &dir.path().join("elsewhere/sleeper"),
+        false,
+        Some(&build.join("debug/sleeper")),
+    );
+
+    remove_build(dir.path(), &build).unwrap();
+    let running = outside.try_wait().unwrap().is_none();
+    let _ = outside.kill();
+    assert!(running);
 }
 
 #[cfg(unix)]
