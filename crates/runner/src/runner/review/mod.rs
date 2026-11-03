@@ -24,6 +24,8 @@ pub(super) mod reads;
 pub(in crate::runner) use keep::prune_at_start;
 pub(in crate::runner) use ran::{record_spent, run_review_call};
 pub(super) mod disputes;
+#[cfg(test)]
+mod disputes_tests;
 pub(super) mod findings;
 #[cfg(test)]
 mod foreign;
