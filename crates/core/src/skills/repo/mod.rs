@@ -498,11 +498,7 @@ fn settings_on_default_branch(
 /// The default branch's commit as the checkout last fetched it, which a
 /// runner compares to know the plugins may have changed
 pub fn default_head(checkout: &Path, base: &str) -> Option<String> {
-    use crate::worktree::{git, loose_commit_in};
-    let tracking = format!("refs/remotes/origin/{base}");
-    let spec = format!("origin/{base}");
-    loose_commit_in(checkout, &tracking)
-        .or_else(|| git(checkout, ["rev-parse", "--verify", "--quiet", &spec]).ok())
+    crate::worktree::commit_of(checkout, &format!("refs/remotes/origin/{base}")).ok()
 }
 
 // Where marketplace `name`'s repo is on disk, fetched first where it is a

@@ -16,7 +16,7 @@ use std::process::{Command, Stdio};
 use super::patch;
 use crate::board::briefing::{Merge, named_paths};
 use crate::ticket::TicketId;
-use crate::worktree::{clone, in_repo, loose_commit_in};
+use crate::worktree::{clone, commit_of, in_repo, tree_files};
 
 /// Git's answers so far, by the commits they were read at
 #[derive(Debug, Default)]
@@ -134,8 +134,7 @@ impl GitJob {
             patches,
         } = self;
         let main_ref = format!("refs/remotes/origin/{base}");
-        let main = loose_commit_in(&repo.path, &main_ref)
-            .or_else(|| commits(&repo, [&main_ref]).remove(&main_ref));
+        let main = commit_of(&repo.path, &main_ref).ok();
         let heads: Vec<(TicketId, String)> = (branches.iter())
             .filter_map(|(ticket, branch)| {
                 let worktree = worktrees
@@ -223,8 +222,7 @@ impl Git {
     /// `origin/main`'s commit, as last fetched
     fn main(repo: &Reading, base: &str) -> Option<String> {
         let tracking = format!("refs/remotes/origin/{base}");
-        loose_commit_in(&repo.path, &tracking)
-            .or_else(|| read(repo, &["rev-parse", "--verify", "--quiet", &tracking]).map(trimmed))
+        commit_of(&repo.path, &tracking).ok()
     }
 
     /// Every file on `main`
@@ -341,6 +339,9 @@ pub(in crate::runner) fn files_on(repo: &Path, base: &str) -> Vec<String> {
 
 // Every file at commit `at`.
 fn files_at(repo: &Reading, at: &str) -> Vec<String> {
+    if let Some(files) = tree_files(&repo.path, at, &[]) {
+        return unique(files.iter().map(|file| file.path.as_str()));
+    }
     let files = read(repo, &["ls-tree", "-r", "--name-only", "-z", at]);
     files.map(names).unwrap_or_default()
 }
@@ -365,14 +366,15 @@ fn run(repo: &Reading, args: &[&str]) -> Option<(i32, String)> {
     Some((code, String::from_utf8_lossy(&output.stdout).into_owned()))
 }
 
-fn trimmed(text: String) -> String {
-    text.trim().to_owned()
-}
-
 // The names in git's `-z` output, each once, in order
 fn names(out: String) -> Vec<String> {
+    unique(out.split('\0'))
+}
+
+// The names, each once, in order, and none that is empty
+fn unique<'a>(listed: impl Iterator<Item = &'a str>) -> Vec<String> {
     let mut seen = BTreeSet::new();
-    out.split('\0')
+    listed
         .filter(|name| !name.is_empty() && seen.insert(name.to_owned()))
         .map(str::to_owned)
         .collect()
