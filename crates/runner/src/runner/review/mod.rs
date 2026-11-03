@@ -112,8 +112,8 @@ impl Runner {
             ReviewStage::Round => {
                 // First, since who reviews is chosen from the worktree's diff.
                 let mut review = review;
-                // A head caught up with `main` is read from `before_round` on,
-                // and any step of the round may end this one before its run is judged.
+                // Any step below may end this one before the run on `reading`
+                // is judged, as a caught-up head's is.
                 if let Some(begin) = self.red_before_round(&mut review)? {
                     return Ok(begin);
                 }
