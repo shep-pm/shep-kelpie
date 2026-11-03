@@ -183,7 +183,7 @@ fn under_auto_a_bots_unaddressed_threads_raise_the_merge_ruling_instead_of_mergi
         panic!("merged with a thread nothing addressed");
     };
     assert!(
-        question.contains("Review bot threads are still open on it: 1 from cubic."),
+        question.contains("cubic left 1 P2 thread open."),
         "{question}"
     );
     assert_eq!(rig.claude.calls().len(), worker_turns, "no fix turn");
