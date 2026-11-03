@@ -146,6 +146,10 @@ impl Runner {
             let Some(Err(checks)) = verdict else {
                 return Ok(None);
             };
+            // A fork worker's commit not yet pushed replaces this head.
+            if let Some(held) = self.fork_commits_held()? {
+                return Ok(Some(held));
+            }
             self.ci_settled(issue, number, &head, conclusion, &failed);
             return self.ci_failed(number, head, checks, Some(back)).map(Some);
         }
