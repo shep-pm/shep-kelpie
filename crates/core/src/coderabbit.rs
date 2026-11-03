@@ -267,22 +267,17 @@ fn after<'a>(text: &'a str, marker: &str) -> Option<&'a str> {
 /// HTML comments: Critical and Major are high, Minor is medium, Trivial and
 /// Nitpick are nits. The title is the bold paragraph after it.
 pub fn finding(thread: &Thread) -> Finding {
-    let shown = strip(
-        &strip(&thread.body, "<!--", "-->"),
-        "<picture>",
-        "</picture>",
-    );
-    let prose = outside_details(&shown);
-    let paragraphs: Vec<&str> = prose
+    // The collapsed blocks go first, since a script shown in one may hold
+    // a stray `<!--` that would swallow the title after it.
+    let prose = outside_details(&thread.body);
+    let shown = strip(&strip(&prose, "<!--", "-->"), "<picture>", "</picture>");
+    let paragraphs: Vec<&str> = shown
         .split("\n\n")
         .map(str::trim)
         .filter(|p| !p.is_empty())
         .collect();
-    let label = paragraphs.first().and_then(|p| {
-        let line = p.lines().next()?;
-        NAMES.iter().find(|(name, _)| line.contains(name))
-    });
-    let severity = label.map_or(Severity::Medium, |(_, severity)| *severity);
+    let label = paragraphs.first().and_then(|p| label(p));
+    let severity = label.unwrap_or(Severity::Medium);
     // Past the label the title is the first bold paragraph. Without a bold
     // title the worker still gets the text, past the first paragraph.
     let body = &paragraphs[usize::from(label.is_some()).min(paragraphs.len())..];
@@ -303,6 +298,22 @@ pub fn finding(thread: &Thread) -> Finding {
         what,
         why,
     )
+}
+
+// The severity a paragraph's first line reads as when that line is a label.
+// A label line is joined by `|` or `·`, whatever word it names, or is plain
+// text naming a severity. A bold line is a title, even one naming a severity.
+fn label(paragraph: &str) -> Option<Severity> {
+    let line = paragraph.lines().next()?;
+    let named = NAMES.iter().find(|(name, _)| line.contains(name));
+    let severity = named.map(|(_, severity)| *severity);
+    if line.contains(" | ") || line.contains(" \u{b7} ") {
+        Some(severity.unwrap_or(Severity::Medium))
+    } else if line.starts_with("**") {
+        None
+    } else {
+        severity
+    }
 }
 
 // The words of CodeRabbit's label and the severity each is read as.

@@ -491,6 +491,45 @@ fn the_october_label_line_still_reads() {
 }
 
 #[test]
+fn a_current_label_naming_no_known_severity_is_skipped_and_read_as_medium() {
+    let body = "<!-- coderabbit-ai-generated:v1 -->\n\n**<picture><img src=\"x/info.svg\" \
+                alt=\"\"></picture> Info** \u{b7} **Style** \u{b7} **Quick win**\n\n\
+                **Rename it.**\n\nIt reads badly.";
+    let found = finding(&thread_of(body));
+    assert_eq!(found.severity, Severity::Medium);
+    assert_eq!(
+        (found.what.as_str(), found.why.as_str()),
+        ("Rename it.", "It reads badly.")
+    );
+}
+
+#[test]
+fn a_bold_title_naming_a_severity_is_a_title_not_a_label() {
+    let found = finding(&thread_of(
+        "**Minor typo in the error text.**\n\nIt says \"fial\".",
+    ));
+    assert_eq!(found.severity, Severity::Medium);
+    assert_eq!(
+        (found.what.as_str(), found.why.as_str()),
+        ("Minor typo in the error text.", "It says \"fial\".")
+    );
+}
+
+#[test]
+fn a_stray_comment_opener_in_a_collapsed_block_leaves_the_title_alone() {
+    let body = "<!-- coderabbit-ai-generated:v1 -->\n\n**Major** \u{b7} **Style**\n\n\
+                <details>\n<summary>Script</summary>\n\n```\nsed -n 1,9p page.html  # <!-- \n```\n\n\
+                </details>\n\n**Close the tag.**\n\nIt stays open.\n\n\
+                <!-- ai-agent-prompt:start -->\n<details>\n<summary>Prompt</summary>\n</details>";
+    let found = finding(&thread_of(body));
+    assert_eq!(found.severity, Severity::High);
+    assert_eq!(
+        (found.what.as_str(), found.why.as_str()),
+        ("Close the tag.", "It stays open.")
+    );
+}
+
+#[test]
 fn a_running_review_is_processing_not_done() {
     // No run in progress was ever recorded, since the comment is edited
     // over; the shape is the one the maintainer's review driver reads.
