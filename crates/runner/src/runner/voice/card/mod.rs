@@ -519,6 +519,11 @@ fn stuck(reason: &Stuck) -> (&'static str, &'static str, Option<&'static str>) {
             "Kelpie looks at CI again",
             Some(SENDS_BACK),
         ),
+        Stuck::CheckQueued { run: None, .. } => (
+            "A check from an app never finished. Wait again?",
+            "Waits another while, since kelpie cannot rerun a check an app posted",
+            Some("Waits another while, since kelpie cannot rerun a check an app posted"),
+        ),
         Stuck::CheckQueued { .. } => (
             "A check is stuck queued. Rerun its run?",
             "Reruns the run once more and kelpie waits again",

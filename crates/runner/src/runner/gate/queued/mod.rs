@@ -1,13 +1,12 @@
 //! A check stuck at queued or in progress on a finished run
 //!
-//! GitHub sometimes leaves one job of a finished run queued. The run reads
+//! GitHub sometimes leaves one job of a finished run queued: the run reads
 //! completed, the job never starts, and its check never concludes. The
-//! rollup cannot tell a running job from a stuck one. Both are waited on
+//! rollup cannot tell a running job from a stuck one, so both are waited on
 //! past `ci.queued_minutes`. Past that the run is rerun whole, once per head.
-//! The forge refuses a rerun of a run still going. That is how a running one
-//! is told, and it waits another cap. Still stuck, the item is parked on a
-//! `check-queued` ruling, unless every check left is running. The rerun is
-//! kept in memory, like `held_up`: a restart may spend one more.
+//! A refused rerun means the run is still going, and it waits another cap.
+//! Still stuck, the item is parked on a `check-queued` ruling, unless every
+//! check left is running. A check with no run is ruled on past `JOB_TIMEOUT`.
 
 use std::collections::HashMap;
 
@@ -65,11 +64,11 @@ impl Runner {
         if now.0.saturating_sub(since.0) < cap {
             return Ok(None);
         }
-        // A check with no run to name cannot be rerun, so it is waited on.
-        let Some(first) = queued.iter().find_map(|check| check.run) else {
-            return Ok(None);
-        };
         let issue = self.current().expect("CI runs on a work item").issue;
+        if queued.is_empty() {
+            return Ok(None);
+        }
+        let first = queued.iter().find_map(|check| check.run);
         let mut runs = Vec::new();
         for run in queued.iter().filter_map(|check| check.run) {
             if !runs.contains(&run) && !self.queued_reruns.done(issue, head, run) {
@@ -80,16 +79,25 @@ impl Runner {
             // A rerun run's job that is running ends at its own timeout, so
             // it is ruled on only past the longest a hosted job runs.
             let running = queued.iter().all(|check| check.running);
-            if running && now.0.saturating_sub(since.0) < JOB_TIMEOUT {
+            // A check with no run cannot be rerun, so it is waited on to the
+            // same limit whether it is queued or running.
+            if (running || first.is_none()) && now.0.saturating_sub(since.0) < JOB_TIMEOUT {
                 return Ok(None);
             }
-            let url = format!(
-                "https://github.com/{}/actions/runs/{first}",
-                self.remote.as_str()
-            );
+            let remote = self.remote.as_str();
+            let (checks, url) = match first {
+                Some(run) => (
+                    named(queued, Some(run)),
+                    format!("https://github.com/{remote}/actions/runs/{run}"),
+                ),
+                None => (
+                    named(queued, None),
+                    format!("https://github.com/{remote}/pull/{number}/checks"),
+                ),
+            };
             let stuck = Stuck::CheckQueued {
                 head: head.to_owned(),
-                checks: named(queued, first),
+                checks,
                 run: first,
                 url,
                 review: review.cloned(),
@@ -131,15 +139,15 @@ impl Runner {
             issue,
             pull_request: number,
             head: head.to_owned(),
-            checks: named(queued, run),
+            checks: named(queued, Some(run)),
         })))
     }
 }
 
-// The queued checks that belong to `run`
-fn named(queued: &[Queued], run: u64) -> Vec<String> {
+// The queued checks that belong to `run`, or that have none
+fn named(queued: &[Queued], run: Option<u64>) -> Vec<String> {
     (queued.iter())
-        .filter(|check| check.run == Some(run))
+        .filter(|check| check.run == run)
         .map(|check| check.name.clone())
         .collect()
 }

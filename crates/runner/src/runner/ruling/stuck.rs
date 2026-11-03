@@ -40,6 +40,16 @@ pub(in crate::runner) fn stuck_comment(reason: &Stuck) -> String {
             checks.join(", "),
             fix_turns_had(*turns)
         ),
+        Stuck::CheckQueued {
+            head,
+            checks,
+            run: None,
+            ..
+        } => format!(
+            "A check from an app never finished at {}: {}.",
+            short(head),
+            checks.join(", ")
+        ),
         Stuck::CheckQueued { head, checks, .. } => format!(
             "A check stayed queued at {} after its run was rerun: {}.",
             short(head),

@@ -94,7 +94,7 @@ fn the_file_format_is_pinned() {
         RulingKind::from(Stuck::CheckQueued {
             head: "c0ffee".into(),
             checks: vec!["windows-gnu".into()],
-            run: 39_697_676_985,
+            run: Some(39_697_676_985),
             url: "https://github.com/shep-pm/shep/actions/runs/39697676985".into(),
             review: None,
         }),
@@ -227,4 +227,35 @@ fn the_file_format_is_pinned() {
             "replies": { "last": { "id": "W3EqiUm5rsNq", "time": 5 } },
         })
     );
+}
+
+#[test]
+fn a_check_queued_written_with_a_run_or_without_one_is_read() {
+    let with_run = serde_json::json!({
+        "reason": "check-queued",
+        "head": "c0ffee",
+        "checks": ["windows-gnu"],
+        "run": 39_697_676_985_u64,
+        "url": "https://github.com/shep-pm/shep/actions/runs/39697676985",
+    });
+    let runless = serde_json::json!({
+        "reason": "check-queued",
+        "head": "c0ffee",
+        "checks": ["Cloudflare Pages"],
+        "url": "https://github.com/shep-pm/shep/pull/71/checks",
+    });
+
+    let read = |value| serde_json::from_value::<Stuck>(value).unwrap();
+
+    assert!(matches!(
+        read(with_run),
+        Stuck::CheckQueued {
+            run: Some(39_697_676_985),
+            ..
+        }
+    ));
+    assert!(matches!(
+        read(runless),
+        Stuck::CheckQueued { run: None, .. }
+    ));
 }
