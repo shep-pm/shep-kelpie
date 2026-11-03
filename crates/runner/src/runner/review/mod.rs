@@ -112,6 +112,11 @@ impl Runner {
             ReviewStage::Round => {
                 // First, since who reviews is chosen from the worktree's diff.
                 let mut review = review;
+                // Any step below may end this one before the run on `reading`
+                // is judged, as a caught-up head's is.
+                if let Some(begin) = self.red_before_round(&mut review)? {
+                    return Ok(begin);
+                }
                 if let Some(begin) = self.before_round(&mut review)? {
                     return Ok(begin);
                 }
