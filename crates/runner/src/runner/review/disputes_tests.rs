@@ -521,3 +521,139 @@ fn disputes_that_cannot_be_posted_hold_an_auto_merge() {
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["work_item"]["phase"]["state"], "ci");
 }
+
+// Pull request 71 with the App covering the repo and merging on `ask`, where the
+// last reviewer found `found()` and the worker's fix turn disputed it, giving the
+// reason `reason` makes of the rig, and pushed nothing. The dispute is taken, so
+// CI is next.
+fn disputed_by_the_last_reviewer(reason: impl FnOnce(&Rig) -> String) -> (Rig, Mutex<Runner>) {
+    let (rig, runner) = at_round_1_with_app();
+    step(&runner).unwrap(); // round 1, qwen: clean by default
+    rig.claude.script([Scripted::Text(FOUND_LINE)]);
+    step(&runner).unwrap(); // round 2, claude, the last reviewer, finds it
+    step(&runner).unwrap(); // the finding goes to the worker
+    dispute(&rig, &format!("{FOUND_LINE}  {}\n", reason(&rig)));
+    rig.claude.script([Scripted::Say("The finding is wrong.")]);
+    step(&runner).unwrap(); // the fix turn ends with nothing pushed
+    step(&runner).unwrap(); // the dispute is taken: no reviewer is left
+    (rig, runner)
+}
+
+fn disputes_posted(rig: &Rig) -> Vec<String> {
+    let comments = rig.github.comments();
+    let posted = comments.into_iter().map(|(_, text)| text);
+    posted.filter(|text| text.contains("disputed")).collect()
+}
+
+// Whether each dispute the state file keeps has been shown to a reader
+fn disputes_shown(rig: &Rig) -> Vec<bool> {
+    let text = std::fs::read_to_string(rig.paths().state).unwrap();
+    let state: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let item = &state["work_items"][0];
+    let disputes = item["disputes"].as_array().expect("its disputes");
+    disputes
+        .iter()
+        .map(|d| d["shown"].as_bool().unwrap_or(false))
+        .collect()
+}
+
+fn a_ruling_for_the_refused_post(rig: &Rig, runner: &Mutex<Runner>) -> String {
+    let question = merge_question(rig, runner);
+    assert_eq!(
+        rig.ask(runner, "status", None)["rulings"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    question
+}
+
+#[test]
+fn a_dispute_naming_a_build_file_is_posted_with_its_name() {
+    let (rig, runner) = disputed_by_the_last_reviewer(|rig| {
+        let file = rig.build_7().join("maintainer-review.md");
+        format!("{} shows the closure reads two values", file.display())
+    });
+
+    let question = merge_question(&rig, &runner);
+
+    let posted = disputes_posted(&rig);
+    let [text] = posted.as_slice() else {
+        panic!("one comment for the disputes: {posted:?}");
+    };
+    assert!(
+        text.contains(
+            "The worker's reason: maintainer-review.md shows the closure reads two values"
+        ),
+        "the file by its name: {text}"
+    );
+    let build = rig.build_7().display().to_string();
+    assert!(
+        !text.contains(&build),
+        "the build folder is left out: {text}"
+    );
+    assert!(
+        question.contains("comment"),
+        "the ruling says where: {question}"
+    );
+    assert_eq!(disputes_shown(&rig), [true]);
+}
+
+#[test]
+fn a_dispute_naming_another_local_path_raises_a_ruling() {
+    let (rig, runner) = disputed_by_the_last_reviewer(|rig| {
+        let notes = rig.paths().folder.join("notes.md");
+        format!("{} shows the closure reads two values", notes.display())
+    });
+
+    let question = a_ruling_for_the_refused_post(&rig, &runner);
+
+    assert_eq!(
+        disputes_posted(&rig),
+        Vec::<String>::new(),
+        "nothing is posted"
+    );
+    assert!(question.contains("not posted"), "the refusal: {question}");
+    assert!(question.contains("a path on this machine"), "{question}");
+    assert_eq!(disputes_shown(&rig), [false]);
+}
+
+#[test]
+fn a_yes_on_the_refused_post_marks_the_disputes_shown() {
+    let (rig, runner) = disputed_by_the_last_reviewer(|rig| {
+        let notes = rig.paths().folder.join("notes.md");
+        format!("{} shows the closure reads two values", notes.display())
+    });
+    a_ruling_for_the_refused_post(&rig, &runner);
+
+    rig.ask(&runner, "rule", Some("71 yes"));
+
+    assert_eq!(disputes_shown(&rig), [true]);
+    assert_eq!(
+        disputes_posted(&rig),
+        Vec::<String>::new(),
+        "still nothing posted"
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"], json!([]));
+    assert_eq!(status["work_item"]["phase"]["state"], "merge");
+}
+
+#[test]
+fn a_forge_outage_still_retries() {
+    let (rig, runner) = disputed_by_the_last_reviewer(|_| "the closure reads two values".into());
+    rig.github.refuse_comments(ApiError::Refused(502));
+
+    rig.ci_on_now(&runner);
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_checks(&head, Checks::Passed);
+    let report = rig.verdict(&runner);
+
+    assert!(
+        matches!(report, Some(StepReport::GateFailed { .. })),
+        "{report:?}"
+    );
+    assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
+    assert_eq!(disputes_shown(&rig), [false]);
+}

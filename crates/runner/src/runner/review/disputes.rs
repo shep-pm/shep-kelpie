@@ -8,7 +8,7 @@ use std::path::Path;
 
 use super::findings::{self, Sent};
 use super::{Review, Unfixed};
-use crate::ports::Finding;
+use crate::ports::{Finding, ForgeError};
 use crate::runner::Runner;
 use crate::runner::voice::finding_line;
 use crate::state::StateError;
@@ -254,25 +254,38 @@ impl Runner {
     }
 }
 
+/// How posting the disputes ended
+#[derive(Debug, PartialEq, Eq)]
+pub(in crate::runner) enum Posted {
+    /// They are posted, or there are none to post: what the merge ruling says of them
+    Told(Option<String>),
+    /// The forge could not take them just now, with why: the step tries again
+    Retry(String),
+    /// Kelpie's guard or a project's hook refused the comment, so asking again would be
+    /// refused the same: what the merge ruling says of them
+    Refused(String),
+}
+
 impl Runner {
     /// Posts the disputes no reviewer was shown on pull request `number` as
-    /// one comment, as the App where one covers the repo, and says where they
-    /// are for the merge ruling; none when the worker disputed nothing, and
-    /// why not when the comment could not be posted, for the step to try again
+    /// one comment, as the App where one covers the repo
+    ///
+    /// The comment names a file of the work item's build folder by its name
+    /// alone. A guard's or a hook's refusal is [`Posted::Refused`], and any
+    /// other failure [`Posted::Retry`].
     ///
     /// # Errors
     ///
     /// [`StateError`] when the state file cannot be written.
-    pub(in crate::runner) fn post_disputes(
-        &mut self,
-        number: u64,
-    ) -> Result<Result<Option<String>, String>, StateError> {
+    pub(in crate::runner) fn post_disputes(&mut self, number: u64) -> Result<Posted, StateError> {
         let item = self.current().expect("a dispute is a work item's");
         let unshown: Vec<&Dispute> = item.disputes.iter().filter(|d| !d.shown).collect();
         if unshown.is_empty() {
-            return Ok(Ok((item.disputes_comment).map(|id| told(None, number, id))));
+            return Ok(Posted::Told(
+                (item.disputes_comment).map(|id| told(None, number, id)),
+            ));
         }
-        let body = comment(&unshown);
+        let body = by_file_name(comment(&unshown), &item.build);
         let count = unshown.len();
         let posted = match self.app_covers() {
             true => (self.ports.voice.post(&self.remote, number, &body)).map(|posted| posted.id),
@@ -284,14 +297,37 @@ impl Runner {
                     mark_shown(item);
                     item.disputes_comment = Some(id);
                 })?;
-                Ok(Ok(Some(told(Some(count), number, id))))
+                Ok(Posted::Told(Some(told(Some(count), number, id))))
             }
-            Err(e) => Ok(Err(format!(
+            Err(e @ (ForgeError::LocalPath { .. } | ForgeError::Hook { .. })) => {
+                Ok(Posted::Refused(format!(
+                    "The worker disputed {} that no reviewer read again, and they were not posted on #{number}: {e}. \
+                     A yes merges without them posted.",
+                    findings_of(count)
+                )))
+            }
+            Err(e) => Ok(Posted::Retry(format!(
                 "cannot post the worker's {} disputes on #{number}: {e}",
                 findings_of(count)
             ))),
         }
     }
+}
+
+// A file of `build` is named by its name alone, so a reason that quotes the
+// full path the fix turn's prompt gave posts nothing of this machine's. Any
+// other path is left for the guard.
+fn by_file_name(body: String, build: &Path) -> String {
+    let mut folders = vec![build.to_string_lossy().into_owned()];
+    if let Ok(canonical) = std::fs::canonicalize(build) {
+        folders.push(canonical.to_string_lossy().into_owned());
+    }
+    folders.sort_by_key(|folder| std::cmp::Reverse(folder.len()));
+    folders.dedup();
+    folders.iter().fold(body, |body, folder| {
+        let body = body.replace(&format!("{folder}/"), "");
+        body.replace(&format!("{folder}{}", std::path::MAIN_SEPARATOR), "")
+    })
 }
 
 fn findings_of(count: usize) -> String {
