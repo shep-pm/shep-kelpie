@@ -72,6 +72,7 @@ fn a_saved_state_loads_back_whole() {
                 note_fix: false,
                 late_fix: false,
                 nits: None,
+                open_found: Vec::new(),
                 disputes: None,
                 rivals: Vec::new(),
             },

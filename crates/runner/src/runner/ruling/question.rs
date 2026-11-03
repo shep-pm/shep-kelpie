@@ -7,6 +7,7 @@ use crate::runner::agent_fit;
 use crate::runner::contributions::flagged_lines;
 use crate::runner::gate::short;
 use crate::runner::review::pushed::off_text;
+use crate::runner::voice::{has_high, open_lines, open_summaries};
 use crate::state::{Fix, Held, RulingKind, Stuck};
 use crate::ticket::TicketId;
 use crate::work_item::{Phase, raised_cap};
@@ -40,6 +41,7 @@ pub(in crate::runner) fn question(
             note_fix,
             late_fix,
             nits,
+            open_found,
             disputes,
             rivals,
             ..
@@ -65,7 +67,19 @@ pub(in crate::runner) fn question(
             let mut open = open_threads.as_ref().map_or_else(String::new, |open| {
                 format!(" Review bot threads are still open on it: {open}.")
             });
-            if let Some(nits) = nits {
+            if !open_found.is_empty() {
+                // Listed with the threads above a nit, so the nits are not named apart.
+                open = format!(
+                    " {}\n{}\n",
+                    open_summaries(open_found).join(" "),
+                    open_lines(kind).join("\n")
+                );
+                if has_high(kind) {
+                    open.push_str(&format!(
+                        "A high thread is open, so kelpie recommends {no}.\n"
+                    ));
+                }
+            } else if let Some(nits) = nits {
                 open.push_str(&format!(" {nits}."));
             }
             if let Some(disputes) = disputes {

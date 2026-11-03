@@ -31,6 +31,7 @@ fn the_file_format_is_pinned() {
                 note_fix: false,
                 late_fix: true,
                 nits: Some("2 nits left open (cubic)".into()),
+                open_found: Vec::new(),
                 disputes: None,
                 rivals: Vec::new(),
             },

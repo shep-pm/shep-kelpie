@@ -116,6 +116,35 @@ fn reviewed(item: &WorkItem, kind: &RulingKind) -> Option<String> {
         } => return Some("No review round read this head.".to_owned()),
         _ => {}
     }
+    let said = read_by(item);
+    match (said, open_bots(kind)) {
+        (Some(said), Some(open)) => Some(format!("{said} {open}")),
+        (said, open) => said.or(open),
+    }
+}
+
+// The bots with threads open on a merge ruling's head, as option A names them
+fn open_bots(kind: &RulingKind) -> Option<String> {
+    let RulingKind::Merge { open_found, .. } = kind else {
+        return None;
+    };
+    let mut bots: Vec<(&str, usize)> = Vec::new();
+    for thread in open_found {
+        match bots.iter_mut().find(|(bot, _)| *bot == thread.bot) {
+            Some((_, n)) => *n += 1,
+            None => bots.push((&thread.bot, 1)),
+        }
+    }
+    let said: Vec<String> = (bots.into_iter())
+        .map(|(bot, n)| match n {
+            1 => format!("{bot} left 1 thread open on it."),
+            n => format!("{bot} left {n} threads open on it."),
+        })
+        .collect();
+    (!said.is_empty()).then(|| said.join(" "))
+}
+
+fn read_by(item: &WorkItem) -> Option<String> {
     let rounds = match item.counts.review_rounds {
         0 => None,
         1 => Some("1 review round".to_owned()),
@@ -165,4 +194,77 @@ fn join<const N: usize>(sentences: [Option<String>; N]) -> String {
         .flatten()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::reviewed;
+    use crate::ports::{SessionId, Severity};
+    use crate::review_bot::Bot;
+    use crate::state::{OpenThread, RulingKind};
+    use crate::test::ticket;
+    use crate::work_item::WorkItem;
+
+    // A work item two review rounds and CodeRabbit read
+    fn read_by_coderabbit() -> WorkItem {
+        let mut item = WorkItem::new(
+            ticket(7),
+            "Title of #7",
+            "kelpie/7",
+            PathBuf::from("wt"),
+            PathBuf::from("build"),
+            "sonnet-high".to_owned().try_into().unwrap(),
+            SessionId("s".to_owned()),
+        );
+        item.counts.review_rounds = 2;
+        item.bot_reads.insert(Bot::Coderabbit, 1);
+        item
+    }
+
+    fn merge_with(open_found: Vec<OpenThread>) -> RulingKind {
+        RulingKind::Merge {
+            head: "6b0606e".into(),
+            unreviewed: None,
+            open_threads: Some("2 from cubic".into()),
+            held_by: Vec::new(),
+            unread_head: false,
+            note_fix: false,
+            late_fix: false,
+            nits: None,
+            open_found,
+            disputes: None,
+            rivals: Vec::new(),
+        }
+    }
+
+    fn thread(bot: &str) -> OpenThread {
+        OpenThread {
+            bot: bot.into(),
+            level: Some("P1".into()),
+            severity: Severity::High,
+            file: "src/a.rs".into(),
+            line: 4,
+            what: "A token is shared.".into(),
+        }
+    }
+
+    #[test]
+    fn option_a_names_the_bot_whose_threads_are_open_beside_the_bot_that_read() {
+        let kind = merge_with(vec![thread("cubic"), thread("cubic")]);
+
+        assert_eq!(
+            reviewed(&read_by_coderabbit(), &kind).as_deref(),
+            Some("2 review rounds and coderabbit read it. cubic left 2 threads open on it.")
+        );
+    }
+
+    #[test]
+    fn option_a_says_who_read_alone_when_no_thread_is_listed() {
+        assert_eq!(
+            reviewed(&read_by_coderabbit(), &merge_with(Vec::new())).as_deref(),
+            Some("2 review rounds and coderabbit read it.")
+        );
+    }
 }

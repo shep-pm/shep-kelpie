@@ -69,7 +69,62 @@ impl Runner {
                 read: now,
                 open: open_ids(&activity),
             };
-            self.late_round(reviewer, head, stage)?;
+            self.late_round(reviewer, head, stage, true)?;
+            return Ok(Some(Begin::Idle));
+        }
+        Ok(None)
+    }
+
+    /// Starts a round for a listed bot that had none this pass, though it
+    /// left threads above a nit open on the pull request
+    ///
+    /// A bot that reviews every push on its own can post before the pass
+    /// reaches its round, and the pass ends once `reviews.need` reviewers
+    /// have read. Its threads would only be named in the merge ruling and
+    /// never reach the worker. `None` when no bot is in that case.
+    pub(in crate::runner) fn unsent_review(&mut self) -> Result<Option<Begin>, StateError> {
+        let Some(item) = self.current() else {
+            return Ok(Some(Begin::Idle));
+        };
+        let Some(number) = item.pull_request else {
+            return Ok(Some(Begin::Idle));
+        };
+        let candidates: Vec<_> = (self.lineup.iter())
+            .filter_map(|r| Some((r.name.clone(), r.bot()?.bot)))
+            .filter(|(name, bot)| {
+                let item = self.item();
+                !item.bot_reads.contains_key(bot)
+                    && !item.summons_owed.contains(bot)
+                    && !item.bots_skipped.iter().any(|s| s.reviewer() == name)
+            })
+            .collect();
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+        let head = match self.pushed_head() {
+            Ok(head) => head,
+            Err(begin) => return Ok(Some(*begin)),
+        };
+        for (reviewer, bot) in candidates {
+            let activity = match self.read_activity(bot, number) {
+                Ok(activity) => activity,
+                Err(begin) => return Ok(Some(*begin)),
+            };
+            if self
+                .threads_in(&[(bot, activity.clone())])
+                .holding
+                .is_none()
+            {
+                continue;
+            }
+            let now = self.ports.clock.now();
+            let stage = ReviewStage::Settling {
+                bot,
+                since: now,
+                read: now,
+                open: open_ids(&activity),
+            };
+            self.late_round(reviewer, head, stage, false)?;
             return Ok(Some(Begin::Idle));
         }
         Ok(None)
@@ -82,6 +137,7 @@ impl Runner {
         reviewer: AgentName,
         head: String,
         stage: ReviewStage,
+        reads_head: bool,
     ) -> Result<(), StateError> {
         let parked = match self.item().phase {
             Phase::Ruling { id } => Some(id),
@@ -94,7 +150,9 @@ impl Runner {
         let item = self
             .current_in(&mut next)
             .expect("a late round is a work item's");
-        item.reviewed(head.clone());
+        if reads_head {
+            item.reviewed(head.clone());
+        }
         item.bots_skipped.retain(|s| s.reviewer() != &reviewer);
         match &mut item.phase {
             Phase::Review(review) => {

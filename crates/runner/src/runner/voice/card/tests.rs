@@ -1,7 +1,7 @@
 use super::*;
 use crate::ports::{Finding, Severity};
 use crate::runner::ruling::question;
-use crate::state::{AgentFit, AgentMeasure, Resume, Ruling, RulingKind, Stuck};
+use crate::state::{AgentFit, AgentMeasure, OpenThread, Resume, Ruling, RulingKind, Stuck};
 use crate::test::ticket;
 use crate::work_item::{Known, Phase};
 
@@ -33,6 +33,40 @@ fn merge() -> RulingKind {
         note_fix: false,
         late_fix: false,
         nits: None,
+        open_found: Vec::new(),
+        disputes: None,
+        rivals: Vec::new(),
+    }
+}
+
+// cubic's thread on `file:line`, at the level it wrote
+fn cubic(level: &str, severity: Severity, file: &str, line: u32, what: &str) -> OpenThread {
+    OpenThread {
+        bot: "cubic".into(),
+        level: Some(level.into()),
+        severity,
+        file: file.into(),
+        line,
+        what: what.into(),
+    }
+}
+
+// A merge ruling whose head has `found` open, and `nits` named apart
+fn merge_with(found: Vec<OpenThread>, nits: Option<&str>) -> RulingKind {
+    let above = found.iter().any(OpenThread::above_a_nit);
+    let RulingKind::Merge { head, .. } = merge() else {
+        unreachable!("merge() is a merge ruling");
+    };
+    RulingKind::Merge {
+        head,
+        unreviewed: None,
+        open_threads: above.then(|| "1 from cubic".into()),
+        held_by: Vec::new(),
+        unread_head: false,
+        note_fix: false,
+        late_fix: false,
+        nits: nits.map(Into::into),
+        open_found: found,
         disputes: None,
         rivals: Vec::new(),
     }
@@ -72,6 +106,7 @@ fn a_merge_ruling_that_warns_says_what_it_warns_of_and_offers_no_separate_rework
         note_fix: false,
         late_fix: false,
         nits: None,
+        open_found: Vec::new(),
         disputes: None,
         rivals: Vec::new(),
     };
@@ -101,6 +136,7 @@ fn an_unmentioned_ruling_names_only_the_terminal_answers_its_options_allow() {
         note_fix: false,
         late_fix: false,
         nits: None,
+        open_found: Vec::new(),
         disputes: None,
         rivals: Vec::new(),
     };
@@ -512,4 +548,95 @@ fn a_contribution_merge_card_offers_no_rework_when_the_fork_cannot_be_pushed_to(
     assert!(!card.contains("Rework"), "{card}");
     assert!(card.contains("Merge"), "{card}");
     assert!(card.contains("| No |"), "{card}");
+}
+
+#[test]
+fn a_merge_ruling_lists_the_open_threads_above_a_nit_with_their_levels_and_places() {
+    let found = vec![
+        cubic(
+            "P1",
+            Severity::High,
+            ".github/workflows/dog-release.yml",
+            102,
+            "A build script can swap the gh that runs next.",
+        ),
+        cubic(
+            "P3",
+            Severity::Low,
+            "scripts/test_dog_index_update.py",
+            198,
+            "The test name claims more than it checks.",
+        ),
+    ];
+    let comment = rendered(&ruling(
+        ticket(1),
+        merge_with(found, Some("1 nit left open (cubic)")),
+    ));
+
+    assert!(
+        comment.contains("cubic left 1 P1 and 1 P3 threads open"),
+        "{comment}"
+    );
+    assert!(
+        comment.contains("P1 `.github/workflows/dog-release.yml:102`"),
+        "{comment}"
+    );
+    assert!(
+        comment.contains("A build script can swap the gh that runs next."),
+        "{comment}"
+    );
+    assert!(
+        comment.contains("P3 `scripts/test_dog_index_update.py:198`"),
+        "{comment}"
+    );
+    assert!(!comment.contains("never hold a merge"), "{comment}");
+}
+
+#[test]
+fn a_merge_ruling_with_only_open_nits_keeps_its_wording_with_the_count() {
+    let kind = merge_with(Vec::new(), Some("2 nits left open (cubic)"));
+    let comment = rendered(&ruling(ticket(1), kind));
+
+    assert!(
+        comment.contains(
+            "Review bots left nits on it, which never hold a merge: 2 nits left open (cubic)."
+        ),
+        "{comment}"
+    );
+    assert!(!comment.contains("threads open"), "{comment}");
+}
+
+#[test]
+fn an_open_high_thread_makes_the_merge_ruling_lead_with_it_and_recommend_b() {
+    let found = vec![
+        cubic(
+            "P2",
+            Severity::Medium,
+            "src/a.rs",
+            4,
+            "A rerun leaves stale assets.",
+        ),
+        cubic(
+            "P1",
+            Severity::High,
+            "src/b.rs",
+            9,
+            "The token is shared with the build.",
+        ),
+    ];
+    let comment = rendered(&ruling(ticket(1), merge_with(found, None)));
+
+    let lead = comment.find("high").expect("a high thread leads");
+    assert!(lead < comment.find("cubic left").unwrap(), "{comment}");
+    assert!(comment.contains("recommends B"), "{comment}");
+
+    let calm = vec![cubic(
+        "P2",
+        Severity::Medium,
+        "src/a.rs",
+        4,
+        "A rerun leaves stale assets.",
+    )];
+    let comment = rendered(&ruling(ticket(1), merge_with(calm, None)));
+    assert!(!comment.contains("recommends"), "{comment}");
 }

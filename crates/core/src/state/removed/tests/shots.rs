@@ -141,6 +141,7 @@ fn a_merge_ruling_and_a_notice_lose_whether_the_shots_failed() {
             note_fix: false,
             late_fix: false,
             nits: None,
+            open_found: Vec::new(),
             disputes: None,
             rivals: Vec::new(),
         }

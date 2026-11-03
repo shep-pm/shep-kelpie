@@ -9,7 +9,7 @@ use super::super::Runner;
 use super::super::report::Begin;
 use crate::ports::{Finding, Timestamp};
 use crate::review_bot::{Activity, Bot, Profile, Thread};
-use crate::state::StateError;
+use crate::state::{OpenThread, StateError};
 use crate::work_item::ReviewStage;
 
 // CodeRabbit's two threads on shep#703 were missing two seconds after its
@@ -124,7 +124,7 @@ impl Runner {
     }
 
     // The unaddressed threads in what each listed bot posted
-    fn threads_in(&self, read: &[(Bot, Activity)]) -> OpenThreads {
+    pub(super) fn threads_in(&self, read: &[(Bot, Activity)]) -> OpenThreads {
         // A thread sent to a fix turn is the worker's, and one the
         // maintainer merged past with a yes holds nothing again.
         let passed: Vec<String> = (self.current().into_iter())
@@ -132,10 +132,14 @@ impl Runner {
             .cloned()
             .collect();
         let (mut holding, mut held_by, mut nits) = (Vec::new(), Vec::new(), Vec::new());
+        let mut listed = Vec::new();
         for (bot, activity) in read {
             let profile = self.profile(*bot);
-            let open = activity.open_threads();
-            let read = read_threads(profile.as_ref(), open.filter(|t| !passed.contains(&t.id)));
+            let open: Vec<&Thread> = (activity.open_threads())
+                .filter(|t| !passed.contains(&t.id))
+                .collect();
+            listed.extend(open.iter().map(|t| open_thread(profile.as_ref(), t)));
+            let read = read_threads(profile.as_ref(), open.into_iter());
             let (low, above) = (read.nits, read.above);
             let name = profile.name();
             if !above.is_empty() {
@@ -149,10 +153,16 @@ impl Runner {
             }
         }
         let joined = |named: Vec<String>| (!named.is_empty()).then(|| named.join(", "));
+        // Listed only when one is above a nit: nits alone are named by count.
+        let found = match listed.iter().any(OpenThread::above_a_nit) {
+            true => listed,
+            false => Vec::new(),
+        };
         OpenThreads {
             holding: joined(holding),
             held_by,
             nits: joined(nits),
+            found,
         }
     }
 }
@@ -166,6 +176,25 @@ pub(in crate::runner) struct OpenThreads {
     pub(in crate::runner) held_by: Vec<String>,
     /// The nits, which hold nothing, if any
     pub(in crate::runner) nits: Option<String>,
+    /// Every open thread with its bot, level and place, nits included, when
+    /// any is above a nit
+    pub(in crate::runner) found: Vec<OpenThread>,
+}
+
+// `thread` as a merge ruling lists it: its first sentence, with the bot's
+// own level where it writes one
+fn open_thread(profile: &dyn Profile, thread: &Thread) -> OpenThread {
+    let finding = profile.finding(thread);
+    let what = finding.what.trim();
+    let first = what.split_inclusive(". ").next().unwrap_or(what).trim();
+    OpenThread {
+        bot: profile.name().to_owned(),
+        level: profile.level(thread),
+        severity: finding.severity,
+        file: finding.file,
+        line: finding.line,
+        what: first.to_owned(),
+    }
 }
 
 /// A bot's open threads read as findings: those above a nit, and the nits
