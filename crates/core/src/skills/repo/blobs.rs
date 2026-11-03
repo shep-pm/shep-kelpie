@@ -182,4 +182,32 @@ mod tests {
             Ok(Vec::new())
         );
     }
+
+    #[test]
+    fn a_sha256_repo_gix_cannot_read_is_read_by_git() {
+        let dir = tempfile::tempdir().unwrap();
+        git(
+            dir.path(),
+            &["init", "--quiet", "-b", "main", "--object-format=sha256"],
+        );
+        write_in(dir.path(), ".claude/skills/a/SKILL.md", "a\n");
+        git(dir.path(), &["add", "--all"]);
+        git(dir.path(), &["commit", "--quiet", "-m", "first"]);
+        git(
+            dir.path(),
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        );
+
+        let files = files_under(dir.path(), "main", &[Path::new(".claude/skills")]);
+
+        assert_eq!(
+            files,
+            Ok(vec![(
+                PathBuf::from(".claude/skills/a/SKILL.md"),
+                b"a\n".to_vec()
+            )])
+        );
+        let read = read(dir.path(), &["origin/main:.claude/skills/a/SKILL.md"]);
+        assert_eq!(read, Ok(vec![Some(b"a\n".to_vec())]));
+    }
 }
