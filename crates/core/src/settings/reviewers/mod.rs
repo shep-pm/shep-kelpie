@@ -1,19 +1,19 @@
 //! The reviewers a review pass may pick from, by name
 //!
 //! A project names no reviewers. Every reviewer file `agents.allow` holds is a
-//! candidate, but the one `contributions.security_reviewer` names. The agent
+//! candidate, but the security reviewer (see [`Settings::lineup`]). The agent
 //! board picks each round's reviewer. A project naming no agent is held to none
 //! of its candidates, so one `gateways` cannot route is left out; one naming the
 //! agents it may use keeps each, and a start, a reread and `doctor` refuse one
 //! on a gateway the settings lack. The runner leaves out one whose gateway key
-//! it lacks, and logs it. A contribution's pass runs `contributions.reviewers`
-//! when it names them, else `iq3-xxs-review` where a gateway is `paddock`.
+//! it lacks, and logs it. A contribution's pass runs `contributions.reviewers`,
+//! which a project that picks contributions must set.
 
 use std::path::Path;
 
-use super::agents::{Allow, find, left_out, refusal_reason};
+use super::agents::{Allow, find, refusal_reason, unset};
 use super::{AgentName, Gateways, NonBlank, Settings, SettingsError};
-use crate::agents::{Agent, Agents, DEFECT_HUNTER_LITE, IQ3_XXS_REVIEW, Role, Runs};
+use crate::agents::{Agent, Agents, Role, Runs, SECURITY_REVIEWER};
 use crate::review_bot::BotReviewer;
 
 /// Where a project lists the reviewers a contribution reads, as a refusal names it
@@ -60,11 +60,11 @@ impl Settings {
     /// The reviewers a pass may pick from
     ///
     /// Every agent file whose role is `reviewer` that `agents.allow` holds, but
-    /// the agent `contributions.security_reviewer` names. Their order does not
-    /// matter. Agents come from `agents`, and `~/` in a command expands against
-    /// `home`. A project that names no agent in `agents.allow` takes only the
-    /// candidates `gateways` can route, since it asked for none of them and a
-    /// round passes over one it cannot run.
+    /// the security reviewer: the agent `contributions.security_reviewer` names,
+    /// or kelpie's own `security-reviewer` where it names none. Their order does
+    /// not matter. Agents come from `agents`, and `~/` in a command expands
+    /// against `home`. A project that names no agent in `agents.allow` takes only
+    /// the candidates `gateways` can route, as a round passes over one it cannot run.
     pub fn lineup(&self, agents: &Agents, gateways: &Gateways, home: &Path) -> Vec<ListedReviewer> {
         self.candidates(agents, gateways, home, false)
     }
@@ -97,7 +97,7 @@ impl Settings {
         };
         (held(
             self.agents.allow.as_ref(),
-            &self.contributions.security_reviewer,
+            self.contributions.security_reviewer.as_ref(),
             agents,
         ))
         .filter(|(name, _)| kept(name))
@@ -114,7 +114,7 @@ impl Settings {
     ) -> Vec<(AgentName, String)> {
         let candidates = held(
             self.agents.allow.as_ref(),
-            &self.contributions.security_reviewer,
+            self.contributions.security_reviewer.as_ref(),
             agents,
         );
         let why = |name: &AgentName| {
@@ -139,36 +139,25 @@ impl Settings {
 
     /// The reviewers a contribution gets, in order, each once
     ///
-    /// `contributions.reviewers` when set, else the default reviewers for
-    /// `gateways`: a contribution's pass runs them all, so it does not take
-    /// every reviewer file.
+    /// `contributions.reviewers`: a contribution's pass runs them all, so it
+    /// does not take every reviewer file.
     ///
     /// # Errors
     ///
-    /// [`SettingsError::Invalid`] naming a reviewer `contributions.reviewers`
-    /// lists, or one of kelpie's default reviewers where it names none, that has
-    /// no agent file, whose file is an implementer's, that `agents.allow` leaves
-    /// out, or a bot that reviews on ready listed after another bot.
+    /// [`SettingsError::Invalid`] naming `contributions.reviewers` when it is
+    /// absent, or a reviewer it lists that has no agent file, whose file is an
+    /// implementer's, that `agents.allow` leaves out, or a bot that reviews on
+    /// ready listed after another bot.
     pub fn contribution_lineup(
         &self,
         agents: &Agents,
-        gateways: &Gateways,
         home: &Path,
     ) -> Result<Vec<ListedReviewer>, SettingsError> {
+        let Some(names) = &self.contributions.reviewers else {
+            return Err(unset(CONTRIBUTION_SETTING, Role::Reviewer));
+        };
         let allow = self.agents.allow.as_ref();
-        if let Some(names) = &self.contributions.reviewers {
-            return listed(names.clone(), agents, home, CONTRIBUTION_SETTING, allow);
-        }
-        let names = default_reviewers(gateways);
-        if let Some(refusal) =
-            (names.iter()).find_map(|n| left_out(allow, n, CONTRIBUTION_SETTING, "name another"))
-        {
-            return Err(SettingsError::Invalid {
-                setting: "agents",
-                reason: refusal,
-            });
-        }
-        listed(names, agents, home, CONTRIBUTION_SETTING, allow)
+        listed(names.clone(), agents, home, CONTRIBUTION_SETTING, allow)
     }
 
     /// The reviewers the project named: every reviewer file a non-empty
@@ -179,7 +168,7 @@ impl Settings {
         match self.names_reviewers() {
             true => (held(
                 self.agents.allow.as_ref(),
-                &self.contributions.security_reviewer,
+                self.contributions.security_reviewer.as_ref(),
                 agents,
             ))
             .map(|(name, agent)| reviewer(name.clone(), agent, home))
@@ -193,11 +182,12 @@ impl Settings {
     /// # Errors
     ///
     /// [`SettingsError::Invalid`] naming `contributions.security_reviewer`
-    /// when it has no agent file, its file is not a reviewer's, or the
+    /// when it is absent, has no agent file, its file is not a reviewer's, or the
     /// reviewer is not one that runs sessions: the diff is read in a session
     /// of its own, which a command, an endpoint and a bot cannot be given.
     pub fn security_reviewer<'a>(&self, agents: &'a Agents) -> Result<&'a Agent, SettingsError> {
-        let name = &self.contributions.security_reviewer;
+        let name = (self.contributions.security_reviewer.as_ref())
+            .ok_or_else(|| unset(SECURITY_SETTING, Role::Reviewer))?;
         let agent = find(
             agents,
             name,
@@ -219,16 +209,18 @@ impl Settings {
     }
 }
 
-// Every reviewer file `allow` holds, but the one `security` names. An absent or
-// empty `allow` holds every agent with a file.
+// Every reviewer file `allow` holds, but the one `security` names, or kelpie's own
+// security reviewer where it names none. An absent or empty `allow` holds every
+// agent with a file.
 fn held<'a>(
     allow: Option<&'a Allow>,
-    security: &'a AgentName,
+    security: Option<&'a AgentName>,
     agents: &'a Agents,
 ) -> impl Iterator<Item = (&'a AgentName, &'a Agent)> + 'a {
+    let security = security.map_or(SECURITY_REVIEWER, AgentName::as_str);
     (agents.iter()).filter(move |(name, agent)| {
         agent.role == Role::Reviewer
-            && *name != security
+            && name.as_str() != security
             && allow.is_none_or(|allow| allow.holds(name))
     })
 }
@@ -306,14 +298,6 @@ fn on_ready_first(lineup: &[ListedReviewer], setting: &'static str) -> Result<()
         before = before.or(Some(&reviewer.name));
     }
     Ok(())
-}
-
-/// `iq3-xxs-review` where `gateways` hold a gateway named `paddock`,
-/// then `defect-hunter-lite`
-pub fn default_reviewers(gateways: &Gateways) -> Vec<AgentName> {
-    let local = gateways.has_paddock().then_some(IQ3_XXS_REVIEW);
-    let names = local.into_iter().chain([DEFECT_HUNTER_LITE]);
-    names.map(AgentName::kelpies).collect()
 }
 
 #[cfg(test)]

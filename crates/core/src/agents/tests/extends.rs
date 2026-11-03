@@ -107,10 +107,34 @@ fn an_unknown_shipped_name_is_refused_naming_the_shipped_agents() {
         "{err}"
     );
     assert!(
-        err.contains("sonnet-high, opus-high, defect-hunter"),
+        err.contains("coderabbit, cubic, codex, defect-hunter"),
         "{err}"
     );
     assert!(err.ends_with("representative, triager"), "{err}");
+}
+
+#[test]
+fn a_file_still_extending_a_removed_agent_is_refused_naming_the_shipped_agents_left() {
+    for gone in [
+        "sonnet-high",
+        "opus-high",
+        "defect-hunter-lite",
+        "iq3-xxs-review",
+        "qwen",
+    ] {
+        let stub = format!("---\nextends: kelpie:{gone}\n---\n");
+        let err = refused(&[("mine.md", &stub)]);
+        assert!(err.contains("mine.md"), "{err}");
+        assert!(
+            err.contains(&format!("`extends: kelpie:{gone}` names no shipped agent")),
+            "{err}"
+        );
+        assert!(
+            err.contains("coderabbit, cubic, codex, defect-hunter"),
+            "{err}"
+        );
+        assert!(err.ends_with("representative, triager"), "{err}");
+    }
 }
 
 #[test]

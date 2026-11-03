@@ -29,7 +29,14 @@ pending_rulings = 2
 per_item_usd = 10
 
 [agents]
+representative = "representative"
 reviewers = ["standards"]
+
+[triage]
+agent = "triager"
+
+[contributions]
+security_reviewer = "security-reviewer"
 
 [pacing]
 enabled = true
@@ -60,13 +67,11 @@ const ON_ELSEWHERE: &str = "---\nrole: reviewer\nharness: pi\nmodel: qwen3.8:27b
                             effort: medium\ngateway: elsewhere\ncontext: 65536\n---\nReview {{DIFF}}.\n";
 
 // Every reviewer file a scene's agent folder holds that needs no gateway, in name order
-const EVERY_REVIEWER: [&str; 8] = [
+const EVERY_REVIEWER: [&str; 6] = [
     "coderabbit",
     "codex",
     "cubic",
     "defect-hunter",
-    "defect-hunter-lite",
-    "qwen",
     "spec",
     "standards",
 ];
@@ -335,8 +340,8 @@ async fn an_old_reviewers_key_loads_and_is_read_by_nothing() {
     assert_eq!(
         scene.candidates("koji"),
         EVERY_REVIEWER,
-        "the key names no reviewer: every reviewer file is a candidate, and \
-         `iq3-xxs-review` names a gateway kelpie's settings hold none of"
+        "the key names no reviewer: every reviewer file is a candidate, but the \
+         security reviewer"
     );
 }
 
@@ -525,10 +530,7 @@ async fn a_reviewer_on_a_gateway_kelpie_has_none_of_is_no_candidate_when_the_pro
             "codex",
             "cubic",
             "defect-hunter",
-            "defect-hunter-lite",
-            "iq3-xxs-review",
             "local",
-            "qwen",
             "spec",
             "standards",
         ],

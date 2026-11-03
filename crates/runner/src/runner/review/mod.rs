@@ -58,7 +58,6 @@ use super::retro::journal::Entry;
 use super::review_bot::Answered;
 use super::talk::At;
 use super::voice::Round;
-use crate::agents::{DEFECT_HUNTER, QWEN};
 use crate::pacer::Scope;
 use crate::ports::{Finding, RoundEnd};
 use crate::settings::{AgentName, ListedReviewer};
@@ -763,10 +762,9 @@ impl Runner {
             result => (result, Vec::new()),
         };
         // An older state file names no reviewer for its round.
-        let reviewer = review
-            .reviewer
-            .clone()
-            .unwrap_or_else(|| AgentName::kelpies(if local_round { QWEN } else { DEFECT_HUNTER }));
+        let reviewer = (review.reviewer.clone()).unwrap_or_else(|| {
+            AgentName::kelpies(if local_round { "qwen" } else { "defect-hunter" })
+        });
         let unreviewed: Vec<String> = unreviewed.into_iter().map(|f: Finding| f.file).collect();
         let reviewer_name = reviewer.as_str().to_owned();
         let kept_reviewer = reviewer.clone();

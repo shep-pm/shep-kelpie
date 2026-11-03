@@ -198,7 +198,7 @@ pub async fn add(
         }
 
         let folder = place.agents.display();
-        match crate::agents::write_defaults(place.agents, place.home).map_err(|e| e.to_string())? {
+        match crate::agents::write_defaults(place.agents).map_err(|e| e.to_string())? {
             written if written.is_empty() => {
                 done.push(format!("agent files: kelpie's own already in {folder}"));
             }

@@ -26,6 +26,7 @@ mod claude;
 mod fork;
 mod held_git;
 mod home;
+mod lineup;
 mod reads;
 mod registered_app;
 mod rig_settings;
@@ -237,6 +238,7 @@ impl Rig {
         std::fs::write(rig.settings_file(), settings).unwrap();
         rig.reviewers(RIG_REVIEWERS);
         rig.write_agent("claude", CLAUDE_REVIEWER);
+        rig.write_lineup();
         // Kelpie's own agents bind nothing, so each runs as the file the maintainer binds.
         crate::agents::write_bound_stubs(
             &paths.agents,
@@ -419,11 +421,12 @@ impl Rig {
 
     /// Starts a runner whose settings name `names` in `agents.allow`, so each
     /// is a reviewer the project asked for and is held to what a round cannot
-    /// work around
+    /// work around. The rig's `sonnet-high` is allowed too, since a project
+    /// with no implementer does not start.
     pub fn open_allowing(&self, names: &[&str]) -> Result<Mutex<Runner>, OpenError> {
         let mut settings = self.settings();
         let name = |n: &&str| crate::settings::AgentName::try_from((*n).to_owned()).unwrap();
-        let names: Vec<_> = names.iter().map(name).collect();
+        let names: Vec<_> = names.iter().chain(&["sonnet-high"]).map(name).collect();
         settings.agents.allow = Some(names.into());
         self.open_settings(settings)
     }

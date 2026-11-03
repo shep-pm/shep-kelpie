@@ -22,12 +22,12 @@ fn with_spam(lines: &str) -> String {
 }
 
 #[test]
-fn an_absent_triage_table_means_pick_off_wait_7_questions_10_agent_triager() {
+fn an_absent_triage_table_means_pick_off_wait_7_questions_10_and_no_agent() {
     let t = parse(EXAMPLE).unwrap().triage;
     assert_eq!(t.pick, TriagePick::Off);
     assert_eq!(t.wait_days, NonZeroU32::new(7).unwrap());
     assert_eq!(t.max_questions.get(), 10);
-    assert_eq!(t.agent.as_str(), "triager");
+    assert_eq!(t.agent, None);
     assert_eq!(parse(&with("")).unwrap().triage, t, "an empty table");
     let partial = parse(&with("pick = \"all\"\n")).unwrap().triage;
     assert_eq!(

@@ -290,7 +290,9 @@ impl Rig {
         let entry = std::fs::read_to_string(self.settings_file()).unwrap();
         let folder = &paths.folder;
         let (project, home) = (self.project.as_str(), self.home.path());
-        Settings::from_table(&project_table(&entry), project, home, folder)
+        let mut table = project_table(&entry);
+        name_the_experts(&mut table);
+        Settings::from_table(&table, project, home, folder)
     }
 
     /// Answers the gateway's lease reads with nothing, and counts them, so a
@@ -318,5 +320,30 @@ impl Rig {
             .clone()
             .map(|reads| reads as Arc<dyn LocalLeases>)
             .unwrap_or_else(|| Arc::new(self.local_leases.clone()))
+    }
+}
+
+// The agents the example leaves unset, which kelpie no longer names for a
+// project: the rig's own are kelpie's baselines, bound by `Rig::new`, and the
+// lite defect hunter its lineup writes. A test that sets one keeps it.
+fn name_the_experts(table: &mut serde_json::Map<String, serde_json::Value>) {
+    use serde_json::{Map, Value, json};
+
+    for (section, key, agent) in [
+        ("agents", "representative", json!("representative")),
+        ("triage", "agent", json!("triager")),
+        (
+            "contributions",
+            "security_reviewer",
+            json!("security-reviewer"),
+        ),
+        ("contributions", "reviewers", json!(["defect-hunter-lite"])),
+    ] {
+        let at = table
+            .entry(section)
+            .or_insert_with(|| Value::Object(Map::new()));
+        if let Some(at) = at.as_object_mut() {
+            at.entry(key).or_insert(agent);
+        }
     }
 }

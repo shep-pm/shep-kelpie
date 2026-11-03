@@ -8,15 +8,15 @@
 use std::collections::BTreeSet;
 
 use super::Line;
-use crate::agents::{Agent, Agents};
+use crate::agents::{Agent, Agents, legacy};
 use crate::forwarder::Upstream;
 use crate::ports::KeyCheck;
 use crate::settings::{AgentName, Gateway, Gateways};
 
 /// A line for each gateway's reach and key, and for each agent's model on one
 ///
-/// A shipped agent as kelpie ships it is in use only where a project `listed` it, so an
-/// unlisted one gets no line, whatever its gateway serves or lacks.
+/// A shipped agent as kelpie ships it, or once shipped it, is in use only where a project
+/// `listed` it, so an unlisted one gets no line, whatever its gateway serves or lacks.
 pub(super) fn checks(
     gateways: &Gateways,
     agents: &Agents,
@@ -24,7 +24,8 @@ pub(super) fn checks(
 ) -> Vec<Line> {
     let shipped = Agents::embedded();
     let idle = |name: &AgentName, agent: &Agent| {
-        !listed.contains(name) && shipped.get(name) == Some(agent)
+        let as_shipped = shipped.get(name) == Some(agent) || legacy::is_once_shipped(name, agent);
+        !listed.contains(name) && as_shipped
     };
     let mut lines = Vec::new();
     for (name, gateway) in gateways.iter() {
@@ -180,6 +181,10 @@ mod tests {
     const REVIEWS_ON_PADDOCK: &str = "---\nrole: reviewer\nharness: endpoint\n\
                                       gateway: paddock\nmodel: coder\ncontext: 32768\n---\n";
 
+    // A reviewer on the model `iq3_xxs`, the one the lineup these tests were built on put on paddock
+    const PADDOCK_REVIEWER: &str = "---\nrole: reviewer\nharness: endpoint\n\
+                                  gateway: paddock\nmodel: iq3_xxs\ncontext: 262144\n---\n";
+
     fn named(names: &[&str]) -> BTreeSet<AgentName> {
         let name = |n: &&str| AgentName::try_from((*n).to_owned()).unwrap();
         names.iter().map(name).collect()
@@ -201,7 +206,11 @@ mod tests {
     fn a_gateway_is_reached_its_key_taken_and_each_agents_model_looked_for() {
         let server = StandInEndpoint::start([Answer::Says("unused")])
             .like_paddock("pk-right", &["qwen3.8:27b", "iq3_xxs"]);
-        let book = agents(&[("local.md", ON_PADDOCK), ("box.md", REVIEWS_ON_PADDOCK)]);
+        let book = agents(&[
+            ("local.md", ON_PADDOCK),
+            ("box.md", REVIEWS_ON_PADDOCK),
+            ("iq3-xxs-review.md", PADDOCK_REVIEWER),
+        ]);
         let lines = checks(
             &gateways(server.host(), |_| Some("pk-right".into())),
             &book,
@@ -275,60 +284,35 @@ mod tests {
     }
 
     #[test]
-    fn a_shipped_agent_as_shipped_is_not_missing_a_gateway_kelpie_has_none_of() {
-        let stub = "---\nextends: kelpie:iq3-xxs-review\n---\n";
-        let book = agents(&[("iq3-xxs-review.md", stub)]);
-        let none = Gateways::default();
-        assert!(checks(&none, &agents(&[]), &named(&[])).is_empty());
-        assert!(checks(&none, &book, &named(&[])).is_empty());
-
-        let edited = "---\nextends: kelpie:iq3-xxs-review\nmodel: other\n---\n";
-        let book = agents(&[("iq3-xxs-review.md", edited)]);
-        let lines = checks(&none, &book, &named(&[]));
-        assert_eq!(
-            verdicts(&lines),
-            [("agent iq3-xxs-review".to_owned(), "missing")]
-        );
-    }
-
-    #[test]
-    fn a_shipped_agent_no_project_lists_gets_no_line_on_a_gateway_that_serves_other_models() {
+    fn an_agent_file_no_project_lists_is_still_looked_for_on_a_gateway_that_serves_other_models() {
         let server = StandInEndpoint::start([]).like_paddock("pk-right", &["qwen3.8:27b"]);
         let gateways = gateways(server.host(), |_| Some("pk-right".into()));
-        let book = agents(&[("local.md", ON_PADDOCK)]);
+        let book = agents(&[
+            ("local.md", ON_PADDOCK),
+            ("iq3-xxs-review.md", PADDOCK_REVIEWER),
+        ]);
 
         let lines = checks(&gateways, &book, &named(&[]));
-        assert_eq!(
-            verdicts(&lines),
-            [
-                ("gateway paddock".to_owned(), "ok"),
-                ("gateway paddock: key".to_owned(), "ok"),
-                ("gateway paddock: local".to_owned(), "ok"),
-            ]
-        );
+        let missing = ("gateway paddock: iq3-xxs-review".to_owned(), "missing");
+        assert!(verdicts(&lines).contains(&missing), "{lines:?}");
         let lines = checks(&gateways, &book, &named(&["iq3-xxs-review"]));
-        let listed = ("gateway paddock: iq3-xxs-review".to_owned(), "missing");
-        assert!(verdicts(&lines).contains(&listed), "{lines:?}");
+        assert!(verdicts(&lines).contains(&missing), "{lines:?}");
     }
 
     #[test]
-    fn the_shipped_iq3_xxs_review_is_looked_for_on_paddock_in_every_book() {
+    fn kelpie_ships_no_agent_that_names_a_gateway() {
         let book = agents(&[]);
-        let on_paddock: Vec<_> = on(&book, "paddock", &|_, _| false).collect();
-        assert_eq!(on_paddock, [("iq3-xxs-review".to_owned(), "iq3_xxs")]);
-        let idle = |name: &AgentName, _: &Agent| name.as_str() == "iq3-xxs-review";
-        assert_eq!(
-            on(&book, "paddock", &idle).count(),
-            0,
-            "an idle one is left out"
-        );
+        assert_eq!(on(&book, "paddock", &|_, _| false).count(), 0);
     }
 
     #[test]
     fn doctor_takes_an_openai_gateways_key_from_its_models_route() {
         let server =
             StandInEndpoint::start([]).like_openai("sk-right", &["qwen3.8:27b", "iq3_xxs"]);
-        let book = agents(&[("local.md", ON_PADDOCK)]);
+        let book = agents(&[
+            ("local.md", ON_PADDOCK),
+            ("iq3-xxs-review.md", PADDOCK_REVIEWER),
+        ]);
         let lines = checks(
             &openai(server.host(), |_| Some("sk-right".into())),
             &book,

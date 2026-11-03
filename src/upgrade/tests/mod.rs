@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use shep_client::PROTOCOL_VERSION;
 use shep_client::shep_core::protocol::request::{Request, SelectorSpec};
 use shep_kelpie_protocol::status::Failing;
@@ -222,10 +222,20 @@ fn says(path: &Path) -> String {
     format!("{} for shep {}", build.kelpie, build.shep)
 }
 
-// Every kind named already, so a bare upgrade's settings step has nothing to write.
+// Every kind and every agent named already, so a bare upgrade's settings step has
+// nothing to write, and so never checks this table, which does not load.
 fn table() -> Map<String, Value> {
     let mut table = Map::new();
     table.insert("forge".into(), Value::String("shep-pm/koji".into()));
+    table.insert(
+        "agents".into(),
+        json!({ "representative": "representative" }),
+    );
+    table.insert("triage".into(), json!({ "agent": "triager" }));
+    table.insert(
+        "contributions".into(),
+        json!({ "security_reviewer": "security-reviewer", "reviewers": ["defect-hunter-lite"] }),
+    );
     crate::flock::set::migrate::pm_decides(&mut table);
     table
 }

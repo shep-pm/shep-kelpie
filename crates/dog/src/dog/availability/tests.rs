@@ -27,9 +27,15 @@ fn on_gateway(gateway: &str, model: &str) -> String {
     )
 }
 
-// Kelpie's own agents and `files`, which add to them.
+// Kelpie's own agents, a Claude Code implementer (kelpie ships none, and the Claude plan is
+// listed only where an agent runs on it) and `files`, which add to them.
 fn agents(files: &[(&str, String)]) -> (tempfile::TempDir, Agents) {
     let dir = tempfile::tempdir().unwrap();
+    write_in(
+        dir.path(),
+        "sonnet-high.md",
+        "---\nrole: implementer\nharness: claude-code\nmodel: claude-sonnet-5-5\neffort: high\n---\n",
+    );
     for (name, text) in files {
         write_in(dir.path(), name, text);
     }
@@ -76,7 +82,7 @@ fn each_paddock_model_and_each_metered_account_is_listed_once_and_unknown_until_
     assert_eq!(
         shown.status(),
         json!({
-            "models": [model("coder", unknown()), model("iq3_xxs", unknown())],
+            "models": [model("coder", unknown())],
             "accounts": [account("claude"), account("codex")],
         })
     );
@@ -106,17 +112,17 @@ async fn each_pass_reads_every_model_and_a_meter_at_most_every_recheck() {
     assert_eq!(
         shown.lock().unwrap().status(),
         json!({
-            "models": [model("coder", loaded(EPOCH)), model("iq3_xxs", loaded(EPOCH))],
+            "models": [model("coder", loaded(EPOCH))],
             "accounts": [idle_claude(EPOCH)],
         })
     );
-    assert_eq!((leases.count(), claude.reads()), (2, 1));
+    assert_eq!((leases.count(), claude.reads()), (1, 1));
 
     clock.advance(RECHECK_SECS - 1);
     read(&shown, &sources, &readers).await;
     assert_eq!(
         (leases.count(), claude.reads()),
-        (4, 1),
+        (2, 1),
         "the meter is fresh"
     );
     let status = shown.lock().unwrap().status();
@@ -125,7 +131,7 @@ async fn each_pass_reads_every_model_and_a_meter_at_most_every_recheck() {
     clock.advance(1);
     claude.set(utilization(40, 12));
     read(&shown, &sources, &readers).await;
-    assert_eq!((leases.count(), claude.reads()), (6, 2));
+    assert_eq!((leases.count(), claude.reads()), (3, 2));
     let status = shown.lock().unwrap().status();
     assert_eq!(status["accounts"][0]["week"]["used_pct"], 40);
     assert_eq!(status["accounts"][0]["read_at"], EPOCH + RECHECK_SECS);

@@ -8,6 +8,7 @@ const PADDOCK: &str = "[gateways.paddock]\nurl = \"http://127.0.0.1:1\"\n\
 async fn a_reviewer_on_a_gateway_kelpie_holds_is_a_candidate() {
     let scene = Scene::new().await;
     scene.shepherd.holds_section(&format!("{WEBHOOK}{PADDOCK}"));
+    lineup::write_iq3_xxs_review(&scene.kelpie_home.join("agents"));
     scene.runs("golbat", |t| {
         holds(t, &["iq3-xxs-review", "defect-hunter-lite"]);
     });
@@ -21,6 +22,7 @@ async fn a_reviewer_on_a_gateway_kelpie_holds_is_a_candidate() {
 #[tokio::test]
 async fn a_reviewer_the_project_named_on_a_gateway_kelpie_lacks_is_missing() {
     let scene = Scene::new().await;
+    lineup::write_iq3_xxs_review(&scene.kelpie_home.join("agents"));
     scene.runs("golbat", |t| {
         holds(t, &["iq3-xxs-review"]);
     });
@@ -39,6 +41,7 @@ async fn a_reviewer_on_a_gateway_kelpie_lacks_is_no_candidate_when_the_project_n
     // is held to what a round cannot work around: `iq3-xxs-review` is left out
     // rather than refused.
     let scene = Scene::new().await;
+    lineup::write_iq3_xxs_review(&scene.kelpie_home.join("agents"));
     scene.runs("golbat", |t| {
         t["agents"]["allow"] = json!([]);
     });
@@ -53,7 +56,7 @@ async fn a_reviewer_on_a_gateway_kelpie_lacks_is_no_candidate_when_the_project_n
 
 #[tokio::test]
 async fn a_candidate_the_project_named_no_that_cannot_run_is_no_line_s_to_refuse() {
-    // `qwen` is a shipped reviewer file, so it is a candidate of every project
+    // `qwen` is a reviewer file the scene writes, so it is a candidate of every project
     // that names no agent, and its round is passed over when its script is not
     // there. Only a reviewer the project named is held to what a round cannot
     // work around, as the runner holds it.
@@ -112,4 +115,28 @@ async fn an_old_reviewers_list_is_named_as_an_old_key() {
         "the old list names no reviewer"
     );
     assert!(!subjects(&report).contains(&"koji: old keys"));
+}
+
+#[tokio::test]
+async fn a_stub_of_iq3_xxs_review_written_out_by_migrate_is_no_line_where_no_project_lists_it() {
+    // The old `add` wrote the stub everywhere, and `migrate` writes it out as the whole file
+    // on `paddock`. A project that never chose it, on a kelpie with no such gateway, is
+    // told nothing of it, as it was before the file was written out.
+    let scene = Scene::new().await;
+    scene.runs("golbat", |_| {});
+    let folder = scene.kelpie_home.join("agents");
+    crate::test::write_in(
+        &folder,
+        "iq3-xxs-review.md",
+        "---\nextends: kelpie:iq3-xxs-review\n---\n",
+    );
+    crate::agents::legacy::migrate(&folder).unwrap();
+
+    let report = scene.report().await;
+
+    let lines = subjects(&report);
+    assert!(
+        lines.iter().all(|s| *s != "agent iq3-xxs-review"),
+        "{lines:?}"
+    );
 }

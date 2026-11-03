@@ -14,6 +14,7 @@ use crate::test::{
 };
 use crate::tools::Tools;
 
+mod lineup;
 mod tickets;
 
 const EXAMPLE: &str = include_str!("../../../settings.example.toml");
@@ -166,6 +167,7 @@ impl Scene {
             &scene.kelpie_home.join("agents"),
             "harness: claude-code\nmodel: claude-opus-5-5\neffort: high\n",
         );
+        lineup::write(&scene.kelpie_home.join("agents"));
         scene.runs("koji", |t| edit(&scene, t));
         scene
     }
