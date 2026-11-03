@@ -586,17 +586,18 @@ pub enum Stuck {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         rerun: bool,
     },
-    /// A check stayed queued on a head after its workflow run was rerun. A
-    /// yes reruns the run once more and goes back to waiting; a no reruns
-    /// nothing and waits.
+    /// A check stayed queued after its run was rerun, or an app's check
+    /// never finished. A yes reruns the run, if any, and waits again; a no
+    /// waits.
     CheckQueued {
         /// The head
         head: String,
         /// The checks still queued
         checks: Vec<String>,
-        /// The workflow run they belong to
-        run: u64,
-        /// The run's page on the forge
+        /// The workflow run they belong to; none for an app's check
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run: Option<u64>,
+        /// The run's page, or the pull request's checks page without a run
         url: String,
         /// The review round whose CI wait it was, when one; an answer goes
         /// back to it

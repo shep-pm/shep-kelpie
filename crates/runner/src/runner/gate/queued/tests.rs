@@ -290,3 +290,68 @@ fn a_check_of_a_rerun_run_still_going_is_ruled_on_only_past_a_jobs_timeout() {
     );
     assert_eq!(rig.forge.whole_run_reruns(), [RUN], "no second rerun");
 }
+
+const JOB_TIMEOUT: u64 = 6 * 60 * 60;
+
+fn pages_deploy() -> Queued {
+    Queued {
+        name: "Cloudflare Pages".to_owned(),
+        run: None,
+        running: true,
+    }
+}
+
+#[test]
+fn a_runless_check_within_a_jobs_timeout_stays_pending_without_a_ruling() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge
+        .set_checks(&head, Checks::Pending(vec![pages_deploy()]));
+    rig.verdict(&runner);
+
+    rig.clock.advance(JOB_TIMEOUT - CAP);
+
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(rig.forge.whole_run_reruns(), Vec::<u64>::new());
+}
+
+#[test]
+fn a_runless_check_in_progress_past_a_jobs_timeout_raises_check_queued() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge
+        .set_checks(&head, Checks::Pending(vec![pages_deploy()]));
+    rig.verdict(&runner);
+    rig.clock.advance(JOB_TIMEOUT);
+
+    let (id, question) = ruling_report(step(&runner).unwrap());
+
+    assert_eq!(id, ticket(71));
+    assert_eq!(
+        question,
+        format!(
+            "Cloudflare Pages never finished on pull request #71 at {}. It comes from an app, \
+             not a workflow, so kelpie cannot rerun it, and it can be retried where it was \
+             posted: https://github.com/shep-pm/shep/pull/71/checks. `shep kelpie rule 71 \
+             yes` or `shep kelpie rule 71 no <note>` has kelpie wait another \
+             `ci.queued_minutes`.",
+            &head[..7]
+        )
+    );
+    assert_eq!(rig.forge.whole_run_reruns(), Vec::<u64>::new());
+}
+
+#[test]
+fn a_yes_on_a_runless_check_queued_reruns_nothing_and_waits_again() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge
+        .set_checks(&head, Checks::Pending(vec![pages_deploy()]));
+    rig.verdict(&runner);
+    rig.clock.advance(JOB_TIMEOUT);
+    ruling_report(step(&runner).unwrap());
+
+    rig.ask(&runner, "rule", Some("71 yes"));
+
+    assert_eq!(rig.forge.whole_run_reruns(), Vec::<u64>::new());
+    assert_eq!(step(&runner).unwrap(), None, "it waits again");
+    rig.clock.advance(JOB_TIMEOUT - 1);
+    assert_eq!(step(&runner).unwrap(), None, "the wait starts from the yes");
+}

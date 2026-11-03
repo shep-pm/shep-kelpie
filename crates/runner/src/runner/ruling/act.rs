@@ -53,7 +53,10 @@ pub(super) fn plan(
     answer: &Answer,
     kind: &RulingKind,
 ) -> Result<Option<Act>, RuleError> {
-    if let (Answer::Yes, RulingKind::Stuck(Stuck::CheckQueued { run, .. })) = (answer, kind) {
+    // A check no workflow posted has no run to rerun, so a yes only waits.
+    if let (Answer::Yes, RulingKind::Stuck(Stuck::CheckQueued { run: Some(run), .. })) =
+        (answer, kind)
+    {
         return Ok(Some(Act::RerunAll { run: *run }));
     }
     let Answer::Do(action) = answer else {
