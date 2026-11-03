@@ -11,6 +11,7 @@ use std::fmt;
 use super::contributions;
 use super::gate::short;
 use super::report::{Begin, StepReport};
+use super::review::disputes;
 use super::review::pushed::push_prompt;
 use super::talk::with_thread_lines;
 use super::thread_replies::Settler;
@@ -447,6 +448,8 @@ impl Runner {
                 item.late_from = None;
                 if let Some(head) = merged_head {
                     item.send_unread(head);
+                    // A comment the guard refused will not be posted, and the yes read why.
+                    disputes::mark_shown(item);
                 }
                 self.late_reads.remove(&item.issue);
             }

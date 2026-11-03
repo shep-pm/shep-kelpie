@@ -12,6 +12,7 @@
 use super::Runner;
 use super::claude_files::Unchecked;
 use super::report::{Begin, StepReport};
+use super::review::disputes::Posted;
 use super::talk::At;
 use super::turn::KEEP_BODY_TRUE;
 use crate::board::{HUMAN, READY};
@@ -186,9 +187,12 @@ impl Runner {
             Ok(borrowed) => borrowed,
             Err(begin) => return Ok(*begin),
         };
-        let disputes = match self.post_disputes(number)? {
-            Ok(disputes) => disputes,
-            Err(reason) => return Ok(self.gate_failed(reason)),
+        // A comment the guard refuses would be refused every pass, so the
+        // maintainer rules on it instead of the step failing again.
+        let (disputes, refused) = match self.post_disputes(number)? {
+            Posted::Told(disputes) => (disputes, false),
+            Posted::Refused(said) => (Some(said), true),
+            Posted::Retry(reason) => return Ok(self.gate_failed(reason)),
         };
         let unreviewed = self.current().and_then(|item| item.unreviewed.clone());
         let unread_head = self.current().is_some_and(|item| !item.vouches_for(&head));
@@ -206,6 +210,7 @@ impl Runner {
         };
         let (note_fix, late_fix) = (fix_from(&item.noted_from), fix_from(&item.late_from));
         let vouched = unreviewed.is_none()
+            && !refused
             && open.holding.is_none()
             && !unread_head
             && !note_fix
