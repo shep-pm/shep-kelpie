@@ -566,6 +566,35 @@ mod tests {
             local_config(path, |key| key == "core.nothing"),
             Some(Vec::new())
         );
+
+        // Keys only global and system config hold, and a global url for a
+        // key the local config holds, are not read.
+        let global = path.join("global-config");
+        std::fs::write(
+            &global,
+            "[user]\n\tglobalonly = yes\n[remote \"origin\"]\n\turl = global\n",
+        )
+        .unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "worktree::in_process::tests::child_reads_the_config",
+                "--nocapture",
+            ])
+            .env(CHILD_REPO, path)
+            .env("GIT_CONFIG_GLOBAL", &global)
+            .env("GIT_CONFIG_SYSTEM", &global)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "{stdout}");
+        let line = stdout
+            .lines()
+            .find(|l| l.starts_with("child read "))
+            .unwrap();
+        let read: Vec<String> = ours.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        assert_eq!(line, format!("child read [{}]", read.join(",")));
+        assert!(!stdout.contains("globalonly"), "{stdout}");
     }
 
     #[test]
@@ -698,44 +727,13 @@ mod tests {
         assert!(stdout.contains(&format!("child read {head}")), "{stdout}");
     }
 
-    #[test]
-    fn global_config_is_not_read_by_the_config_read() {
-        let (dir, _) = repo();
-        git(dir.path(), &["config", "remote.origin.url", "local"]);
-        let global = dir.path().join("global-config");
-        std::fs::write(
-            &global,
-            "[remote \"origin\"]\n\turl = global\n\tpushurl = global\n",
-        )
-        .unwrap();
-
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "worktree::in_process::tests::child_reads_the_config",
-                "--nocapture",
-            ])
-            .env(CHILD_REPO, dir.path())
-            .env("GIT_CONFIG_GLOBAL", &global)
-            .env("GIT_CONFIG_SYSTEM", &global)
-            .output()
-            .unwrap();
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(output.status.success(), "{stdout}");
-        assert!(
-            stdout.contains("child read [remote.origin.url=local]"),
-            "{stdout}"
-        );
-    }
-
-    // Run by `global_config_is_not_read_by_the_config_read`, a no-op elsewhere.
+    // Run by `local_config_reads_as_git_config_local_does` in a process of its own, a no-op elsewhere.
     #[test]
     fn child_reads_the_config() {
         let Some(repo) = std::env::var_os(CHILD_REPO) else {
             return;
         };
-        let read = local_config(Path::new(&repo), |key| key.starts_with("remote."));
+        let read = local_config(Path::new(&repo), |_| true);
         let read: Vec<String> = read
             .unwrap()
             .iter()
