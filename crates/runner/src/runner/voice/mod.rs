@@ -393,7 +393,8 @@ pub(super) fn merge_notes(kind: &RulingKind) -> Vec<String> {
         ),
     ];
     let mut notes: Vec<String> = (flags.into_iter())
-        .filter_map(|(set, line)| set.then(|| line.to_owned()))
+        .filter(|(set, _)| *set)
+        .map(|(_, line)| line.to_owned())
         .collect();
     notes.extend(open_summaries(open_found));
     // Nits that are all that is open are counted; beside a thread above a

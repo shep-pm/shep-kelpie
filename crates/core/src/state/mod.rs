@@ -14,11 +14,13 @@ mod events;
 mod lease;
 mod notices;
 mod numbered;
+mod open_thread;
 mod projects;
 mod red;
 mod removed;
 mod ruling;
 mod triage;
+mod write;
 
 pub use bots::{BOT_LEFT_OUT, BotLeftOut};
 pub use bumps::{Bump, E2eResult, E2eState, Red, RedStep};
@@ -30,25 +32,33 @@ pub use contributions::{
 pub use events::{BoardEvent, EVENTS_KEPT};
 pub use lease::{LeaseHeld, Resource};
 pub use notices::{MainNotice, MergeNotice, Notice};
+pub use open_thread::OpenThread;
 pub use projects::Projects;
 pub use red::{Handled, RedWorkflow};
 pub use removed::OldWorker;
 pub use ruling::{AgentFit, AgentMeasure, PmAsked, Ruling};
+#[cfg(test)]
+use std::io::Write;
+#[cfg(test)]
+use std::path::Path;
 pub use triage::{
     TRIAGE_CALLS_KEPT, TRIAGED_KEPT, TriageAsked, TriageHeld, TriageLocal, TriageQuestions,
     TriageState, TriageStep, Triaged,
 };
+#[cfg(test)]
+use write::temporary_path;
+pub use write::write_atomically;
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::fs::{self, File};
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::io;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
 use crate::pacer::DayStart;
-use crate::ports::{Cost, Finding, SessionId, Severity, Timestamp};
+use crate::ports::{Cost, Finding, SessionId, Timestamp};
 use crate::settings::Account;
 use crate::ticket::TicketId;
 use crate::work_item::{Attached, Known, Phase, Priced, Review, Seconds, Tally, Turn, WorkItem};
@@ -458,47 +468,6 @@ pub struct LastRead {
     /// When the webhook took it
     pub time: Timestamp,
 }
-/// A review bot's open thread, as a merge ruling lists it
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct OpenThread {
-    /// The bot that left it
-    pub bot: String,
-    /// The level the bot wrote, such as `P1`, when it writes one
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub level: Option<String>,
-    /// How serious kelpie reads it
-    pub severity: Severity,
-    /// The file it is on
-    pub file: String,
-    /// The line, or 0 when the bot names none
-    pub line: u32,
-    /// What the bot said, to its first sentence
-    pub what: String,
-}
-
-impl OpenThread {
-    /// The level the bot wrote, or kelpie's reading of it in capitals
-    #[must_use]
-    pub fn label(&self) -> String {
-        self.level.clone().unwrap_or_else(|| {
-            match self.severity {
-                Severity::High => "HIGH",
-                Severity::Medium => "MEDIUM",
-                Severity::Low => "LOW",
-            }
-            .to_owned()
-        })
-    }
-
-    /// Whether it is above a nit
-    #[must_use]
-    pub fn above_a_nit(&self) -> bool {
-        self.severity > Severity::Low
-    }
-}
-
 /// What raised a ruling. A no's note, or an answer, always goes to the worker.
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1013,30 +982,6 @@ impl StateStore {
             kind: e.kind(),
         }
     }
-}
-
-pub(crate) fn temporary_path(path: &Path) -> PathBuf {
-    let mut name = path.file_name().unwrap_or_default().to_owned();
-    name.push(".tmp");
-    path.with_file_name(name)
-}
-
-/// The rename is the commit point. Syncing the file first means the name
-/// never points at unwritten bytes; syncing the folder keeps the rename. On
-/// Windows, which cannot open a folder to sync it, NTFS journals the rename.
-pub fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let temporary = temporary_path(path);
-    let mut file = File::create(&temporary)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    drop(file);
-    fs::rename(&temporary, path)?;
-    let folder = path.parent().filter(|p| !p.as_os_str().is_empty());
-    #[cfg(unix)]
-    File::open(folder.unwrap_or(Path::new(".")))?.sync_all()?;
-    #[cfg(windows)]
-    let _ = folder;
-    Ok(())
 }
 
 #[cfg(any(test, feature = "test-support"))]
