@@ -130,7 +130,14 @@ impl Runner {
             }
             Checks::Failed(checks) => Some(Err(checks)),
         };
-        self.keep_ci(review, &ci)?;
+        // Green is kept by `before_read` alone, which also tells the `ci` hooks.
+        self.keep_ci(
+            review,
+            &Awaited {
+                green: ci.green && !red_only,
+                ..ci.clone()
+            },
+        )?;
         let back = Review {
             reading: None,
             ..review.clone()
