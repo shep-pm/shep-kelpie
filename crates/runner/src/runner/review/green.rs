@@ -3,7 +3,7 @@
 use std::sync::Mutex;
 
 use crate::lease::LeaseKind;
-use crate::ports::{CLEAN, Checks, Cost, Finding, Severity, Usage};
+use crate::ports::{CLEAN, Checks, Cost, Finding, Severity, Standing, Usage};
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, ScriptedRound};
 
@@ -490,6 +490,37 @@ fn settled_with_no_checks(rig: &Rig, runner: &Mutex<Runner>) -> Option<StepRepor
     assert_eq!(step(runner).unwrap(), None, "no run is reported yet");
     rig.clock.advance(CHECKS_SETTLE);
     step(runner).unwrap()
+}
+
+// A person's comment is read at the top of the next round and sent to the
+// worker, which returns that step before the round has judged the head's run.
+#[test]
+fn a_red_run_on_a_caught_up_head_is_the_workers_fix_turn() {
+    let (rig, runner, _) = pushed();
+    rig.land_on_origin("landed.txt");
+    let Some(StepReport::Rebased { head: rebased, .. }) = settled_with_no_checks(&rig, &runner)
+    else {
+        panic!("the branch was not caught up");
+    };
+    assert_eq!(
+        step(&runner).unwrap(),
+        None,
+        "the merge's run is not reported"
+    );
+    rig.clock.advance(CHECKS_SETTLE);
+    rig.forge
+        .coderabbit
+        .person_says(71, "octo-reviewer", Standing::Writer, "Please rename it.");
+    red(&rig, &rebased);
+
+    let report = rig.verdict(&runner);
+
+    assert!(
+        matches!(report, Some(StepReport::CiFailed { head: ref h, .. }) if *h == rebased),
+        "{report:?}"
+    );
+    assert_eq!(ci_fix_turns(&runner), 1);
+    assert_eq!(reads(&rig), 0);
 }
 
 #[test]

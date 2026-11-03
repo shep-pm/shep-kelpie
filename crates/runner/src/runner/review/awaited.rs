@@ -25,6 +25,28 @@ impl Runner {
     /// `None` lets the reviewer go ahead, and keeps in `review` the run it
     /// waited on.
     pub(super) fn before_read(&mut self, review: &mut Review) -> Result<Option<Begin>, StateError> {
+        self.await_ci(review, false)
+    }
+
+    /// The CI fix turn a red run on the head `review` is reading is owed,
+    /// before the round's other steps, which may each end the step first
+    ///
+    /// `None` when the run is not red and settled, or when `reading` is not the
+    /// pushed head, which `before_round` brings up to date. Everything else
+    /// waits for [`Runner::before_read`].
+    pub(super) fn red_before_round(
+        &mut self,
+        review: &mut Review,
+    ) -> Result<Option<Begin>, StateError> {
+        self.await_ci(review, true)
+    }
+
+    // `red_only` judges a red run and lets every other outcome pass.
+    fn await_ci(
+        &mut self,
+        review: &mut Review,
+        red_only: bool,
+    ) -> Result<Option<Begin>, StateError> {
         if !self.settings.ci.block {
             return Ok(None);
         }
@@ -52,6 +74,9 @@ impl Runner {
         };
         // A pull request merged or closed by hand ends as the gate ends it,
         // and no reviewer reads it.
+        if red_only && pr.state != PullRequestState::Open {
+            return Ok(None);
+        }
         match pr.state {
             PullRequestState::Open => {}
             PullRequestState::Merged => {
@@ -63,7 +88,7 @@ impl Runner {
         }
         // The forge lags a push by a moment, and its checks are of its head.
         if pr.head != head {
-            return Ok(Some(Begin::Idle));
+            return Ok((!red_only).then_some(Begin::Idle));
         }
         let now = self.ports.clock.now();
         let since = (review.ci.as_ref())
@@ -110,6 +135,13 @@ impl Runner {
             reading: None,
             ..review.clone()
         };
+        if red_only {
+            let Some(Err(checks)) = verdict else {
+                return Ok(None);
+            };
+            self.ci_settled(issue, number, &head, conclusion, &failed);
+            return self.ci_failed(number, head, checks, Some(back)).map(Some);
+        }
         if let Some(begin) = self.check_queued(number, &head, since, &queued, Some(&back))? {
             return Ok(Some(begin));
         }
