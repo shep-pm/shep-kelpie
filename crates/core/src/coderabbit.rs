@@ -263,31 +263,29 @@ fn after<'a>(text: &'a str, marker: &str) -> Option<&'a str> {
 
 /// A thread as a finding the worker is sent, in qwen's shape
 ///
-/// The severity comes from CodeRabbit's own label: Critical and Major are
-/// high, Minor is medium, Trivial is a nit.
+/// The severity comes from CodeRabbit's own label, the first line past its
+/// HTML comments: Critical and Major are high, Minor is medium, Trivial and
+/// Nitpick are nits. The title is the bold paragraph after it.
 pub fn finding(thread: &Thread) -> Finding {
-    let label = thread.body.lines().next().unwrap_or_default();
-    let severity = if label.contains("Critical") || label.contains("Major") {
-        Severity::High
-    } else if label.contains("Trivial") || label.contains("Nitpick") {
-        Severity::Low
-    } else {
-        Severity::Medium
-    };
+    // The collapsed blocks go first, since a script shown in one may hold
+    // a stray `<!--` that would swallow the title after it.
     let prose = outside_details(&thread.body);
-    let paragraphs: Vec<&str> = prose
+    let shown = strip(&strip(&prose, "<!--", "-->"), "<picture>", "</picture>");
+    let paragraphs: Vec<&str> = shown
         .split("\n\n")
         .map(str::trim)
         .filter(|p| !p.is_empty())
         .collect();
-    // Without a bold title the worker still gets the text, past the label.
-    let (what, why) = match paragraphs.iter().position(|p| p.starts_with("**")) {
+    let (severity, is_label) = paragraphs
+        .first()
+        .map_or((Severity::Medium, false), |p| label(p));
+    // Past the label the title is the first bold paragraph. Without a bold
+    // title the worker still gets the text, past the first paragraph.
+    let body = &paragraphs[usize::from(is_label).min(paragraphs.len())..];
+    let (what, why) = match body.iter().position(|p| p.starts_with("**")) {
         Some(at) => (
-            one_line(paragraphs[at].trim_matches('*')),
-            paragraphs
-                .get(at + 1)
-                .map(|p| one_line(p))
-                .unwrap_or_default(),
+            one_line(body[at].trim_matches('*')),
+            body.get(at + 1).map(|p| one_line(p)).unwrap_or_default(),
         ),
         None => (
             one_line(&paragraphs[1.min(paragraphs.len())..].join(" ")),
@@ -301,6 +299,45 @@ pub fn finding(thread: &Thread) -> Finding {
         what,
         why,
     )
+}
+
+// The severity a paragraph's first line reads as, and whether it is a label
+// to skip. A label line is joined by `|` or `\u{b7}`, whatever word it names,
+// or is plain text naming a severity. A bold line naming a severity is a
+// title: it sets the severity and stays.
+fn label(paragraph: &str) -> (Severity, bool) {
+    let line = paragraph.lines().next().unwrap_or_default();
+    let named = NAMES.iter().find(|(name, _)| line.contains(name));
+    let severity = named.map_or(Severity::Medium, |(_, severity)| *severity);
+    let joined = line.contains(" | ") || line.contains(" \u{b7} ");
+    (
+        severity,
+        joined || (named.is_some() && !line.starts_with("**")),
+    )
+}
+
+// The words of CodeRabbit's label and the severity each is read as.
+const NAMES: [(&str, Severity); 5] = [
+    ("Critical", Severity::High),
+    ("Major", Severity::High),
+    ("Minor", Severity::Medium),
+    ("Trivial", Severity::Low),
+    ("Nitpick", Severity::Low),
+];
+
+// The text without each `open` .. `close` span. An unclosed `open` stays.
+fn strip(text: &str, open: &str, close: &str) -> String {
+    let mut kept = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(open) {
+        let Some(end) = rest[start..].find(close) else {
+            break;
+        };
+        kept.push_str(&rest[..start]);
+        rest = &rest[start + end + close.len()..];
+    }
+    kept.push_str(rest);
+    kept
 }
 
 // The finding's prose, without the collapsed sections of scripts and fixes.
