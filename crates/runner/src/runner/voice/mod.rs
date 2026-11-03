@@ -18,7 +18,7 @@ use super::gate::short;
 use super::ruling::stuck_comment;
 use crate::ports::{Finding, ForgeError, NewLabel, Severity, Voice};
 use crate::settings::ForgeSlug;
-use crate::state::{Heard, MergeNotice, ProjectState, Ruling, RulingKind};
+use crate::state::{Heard, MergeNotice, OpenThread, ProjectState, Ruling, RulingKind};
 use crate::ticket::TicketId;
 
 /// Where a ruling's posted comment is kept in the state
@@ -348,8 +348,9 @@ pub(super) fn merged_notice(notice: &MergeNotice) -> String {
 
 /// What a merge ruling warns of, in words fit for any reader of its thread
 ///
-/// Nothing for any other kind of ruling.
-pub(super) fn merge_notes(kind: &RulingKind) -> Vec<&'static str> {
+/// Nothing for any other kind of ruling. An open thread above a nit is named
+/// by its bot and level only, and a high one leads.
+pub(super) fn merge_notes(kind: &RulingKind) -> Vec<String> {
     let RulingKind::Merge {
         unreviewed,
         open_threads,
@@ -357,18 +358,24 @@ pub(super) fn merge_notes(kind: &RulingKind) -> Vec<&'static str> {
         note_fix,
         late_fix,
         nits,
+        open_found,
         ..
     } = kind
     else {
         return Vec::new();
     };
+    let listed = !open_found.is_empty();
     let flags = [
+        (
+            listed && has_high(kind),
+            "A review bot thread open on it is high severity.",
+        ),
         (
             unreviewed.is_some(),
             "No reviewer read it in its last review.",
         ),
         (
-            open_threads.is_some(),
+            open_threads.is_some() && !listed,
             "Review bot threads are still open on it.",
         ),
         (
@@ -384,13 +391,71 @@ pub(super) fn merge_notes(kind: &RulingKind) -> Vec<&'static str> {
             "This head is the worker's fix for a review bot's late review, and no \
              reviewer read it.",
         ),
-        (
-            nits.is_some(),
-            "Review bots left nits on it, which never hold a merge.",
-        ),
     ];
-    (flags.into_iter())
-        .filter_map(|(set, line)| set.then_some(line))
+    let mut notes: Vec<String> = (flags.into_iter())
+        .filter(|(set, _)| *set)
+        .map(|(_, line)| line.to_owned())
+        .collect();
+    notes.extend(open_summaries(open_found));
+    // Nits that are all that is open are counted; beside a thread above a
+    // nit they are listed with it.
+    if let (Some(nits), false) = (nits, listed) {
+        notes.push(format!(
+            "Review bots left nits on it, which never hold a merge: {nits}."
+        ));
+    }
+    notes
+}
+
+/// Whether an open review bot thread on a merge ruling's head is high
+pub(in crate::runner) fn has_high(kind: &RulingKind) -> bool {
+    matches!(kind, RulingKind::Merge { open_found, .. }
+        if open_found.iter().any(|t| t.severity == Severity::High))
+}
+
+// One sentence per bot counting its open threads by level, such as
+// `cubic left 1 P1 and 2 P2 threads open.`
+pub(in crate::runner) fn open_summaries(found: &[OpenThread]) -> Vec<String> {
+    let mut bots: Vec<&str> = Vec::new();
+    for thread in found {
+        if !bots.contains(&thread.bot.as_str()) {
+            bots.push(&thread.bot);
+        }
+    }
+    bots.into_iter()
+        .map(|bot| {
+            let mine: Vec<&OpenThread> = found.iter().filter(|t| t.bot == bot).collect();
+            let mut levels: Vec<(Severity, String, usize)> = Vec::new();
+            for thread in &mine {
+                let label = thread.label();
+                match levels.iter_mut().find(|(_, l, _)| *l == label) {
+                    Some((_, _, n)) => *n += 1,
+                    None => levels.push((thread.severity, label, 1)),
+                }
+            }
+            levels.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            let counted: Vec<String> = levels.iter().map(|(_, l, n)| format!("{n} {l}")).collect();
+            let noun = if mine.len() == 1 { "thread" } else { "threads" };
+            format!("{bot} left {} {noun} open.", counted.join(" and "))
+        })
+        .collect()
+}
+
+/// A merge ruling's open review bot threads, one line each: level,
+/// `path:line` and the first sentence
+pub(in crate::runner) fn open_lines(kind: &RulingKind) -> Vec<String> {
+    let RulingKind::Merge { open_found, .. } = kind else {
+        return Vec::new();
+    };
+    open_found
+        .iter()
+        .map(|t| {
+            let place = match t.line {
+                0 => t.file.clone(),
+                line => format!("{}:{line}", t.file),
+            };
+            format!("- {} `{place}` ({}): {}", t.label(), t.bot, inert(&t.what))
+        })
         .collect()
 }
 
@@ -405,7 +470,7 @@ pub(super) fn said(kind: &RulingKind) -> String {
             let mut said = format!("Merge this pull request at {} into main?", short(head));
             for line in merge_notes(kind) {
                 said.push(' ');
-                said.push_str(line);
+                said.push_str(&line);
             }
             said
         }

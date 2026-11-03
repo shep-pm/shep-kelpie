@@ -342,6 +342,11 @@ pub trait Profile: Send + Sync + fmt::Debug {
 
     /// A thread as a finding the worker is sent
     fn finding(&self, thread: &Thread) -> Finding;
+
+    /// The level the bot wrote on a thread, such as `P1`, when it writes one
+    fn level(&self, _thread: &Thread) -> Option<String> {
+        None
+    }
 }
 
 /// A bot's answer stamped this long before the summon is still its answer:

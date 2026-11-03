@@ -14,11 +14,13 @@ mod events;
 mod lease;
 mod notices;
 mod numbered;
+mod open_thread;
 mod projects;
 mod red;
 mod removed;
 mod ruling;
 mod triage;
+mod write;
 
 pub use bots::{BOT_LEFT_OUT, BotLeftOut};
 pub use bumps::{Bump, E2eResult, E2eState, Red, RedStep};
@@ -30,20 +32,28 @@ pub use contributions::{
 pub use events::{BoardEvent, EVENTS_KEPT};
 pub use lease::{LeaseHeld, Resource};
 pub use notices::{MainNotice, MergeNotice, Notice};
+pub use open_thread::OpenThread;
 pub use projects::Projects;
 pub use red::{Handled, RedWorkflow};
 pub use removed::OldWorker;
 pub use ruling::{AgentFit, AgentMeasure, PmAsked, Ruling};
+#[cfg(test)]
+use std::io::Write;
+#[cfg(test)]
+use std::path::Path;
 pub use triage::{
     TRIAGE_CALLS_KEPT, TRIAGED_KEPT, TriageAsked, TriageHeld, TriageLocal, TriageQuestions,
     TriageState, TriageStep, Triaged,
 };
+#[cfg(test)]
+use write::temporary_path;
+pub use write::write_atomically;
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::fs::{self, File};
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::io;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -57,7 +67,7 @@ use crate::work_item::{Attached, Known, Phase, Priced, Review, Seconds, Tally, T
 pub const STATE_FILE: &str = "state.json";
 
 /// The state file's format version, bumped when the file gains a field or value an older kelpie refuses
-pub const VERSION: u32 = 94;
+pub const VERSION: u32 = 95;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -493,6 +503,10 @@ pub enum RulingKind {
         /// when any are. They never hold a merge.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         nits: Option<String>,
+        /// Every thread the listed review bots have open on the head, nits
+        /// included, when any is above a nit
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        open_found: Vec<OpenThread>,
         /// Where the disputes no reviewer read are, when the worker made any
         #[serde(default, skip_serializing_if = "Option::is_none")]
         disputes: Option<String>,
@@ -968,30 +982,6 @@ impl StateStore {
             kind: e.kind(),
         }
     }
-}
-
-pub(crate) fn temporary_path(path: &Path) -> PathBuf {
-    let mut name = path.file_name().unwrap_or_default().to_owned();
-    name.push(".tmp");
-    path.with_file_name(name)
-}
-
-/// The rename is the commit point. Syncing the file first means the name
-/// never points at unwritten bytes; syncing the folder keeps the rename. On
-/// Windows, which cannot open a folder to sync it, NTFS journals the rename.
-pub fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let temporary = temporary_path(path);
-    let mut file = File::create(&temporary)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    drop(file);
-    fs::rename(&temporary, path)?;
-    let folder = path.parent().filter(|p| !p.as_os_str().is_empty());
-    #[cfg(unix)]
-    File::open(folder.unwrap_or(Path::new(".")))?.sync_all()?;
-    #[cfg(windows)]
-    let _ = folder;
-    Ok(())
 }
 
 #[cfg(any(test, feature = "test-support"))]

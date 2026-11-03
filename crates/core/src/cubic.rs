@@ -85,6 +85,10 @@ impl Profile for Cubic {
     fn finding(&self, thread: &Thread) -> Finding {
         finding(thread)
     }
+
+    fn level(&self, thread: &Thread) -> Option<String> {
+        level(&prose(thread)).map(str::to_owned)
+    }
 }
 
 // The commits its reviews read. A reply in a thread posts a review with no
@@ -107,13 +111,7 @@ pub fn refused(body: &str) -> bool {
 /// The severity comes from cubic's level: P0 and P1 are high, P2 is
 /// medium, P3 is a nit. The level and confidence go to the worker as the why.
 fn finding(thread: &Thread) -> Finding {
-    let prose: Vec<&str> = thread
-        .body
-        .lines()
-        .take_while(|line| !line.starts_with("<details"))
-        .filter(|line| !line.trim_start().starts_with("<!--"))
-        .collect();
-    let prose = prose.join("\n");
+    let prose = prose(thread);
     let prose = prose.trim();
     let (level, text) = match prose.split_once(": ") {
         Some((level @ ("P0" | "P1" | "P2" | "P3"), text)) => (Some(level), text),
@@ -143,4 +141,23 @@ fn finding(thread: &Thread) -> Finding {
         one_line(text),
         why,
     )
+}
+
+// The thread's text above its collapsed details and markers
+fn prose(thread: &Thread) -> String {
+    let prose: Vec<&str> = thread
+        .body
+        .lines()
+        .take_while(|line| !line.starts_with("<details"))
+        .filter(|line| !line.trim_start().starts_with("<!--"))
+        .collect();
+    prose.join("\n")
+}
+
+// The level its text opens with, `P0` to `P3`
+fn level(prose: &str) -> Option<&str> {
+    match prose.trim().split_once(": ") {
+        Some((level @ ("P0" | "P1" | "P2" | "P3"), _)) => Some(level),
+        _ => None,
+    }
 }

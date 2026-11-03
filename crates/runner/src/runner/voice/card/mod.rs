@@ -14,7 +14,7 @@ use super::super::gate::short;
 use super::super::ruling::{needs_pass, stuck_comment};
 use super::super::words::{NO_NOTE, Wants};
 use super::super::{Action, Answer};
-use super::merge_notes;
+use super::{has_high, merge_notes, open_lines};
 use crate::state::{Held, Ruling, RulingKind, Stuck};
 use crate::ticket::TicketId;
 use crate::work_item::Phase;
@@ -238,7 +238,15 @@ impl Card {
     fn of(kind: &RulingKind) -> Self {
         match kind {
             RulingKind::Merge { head, .. } => {
-                let facts = merge_notes(kind).join(" ");
+                let mut facts = merge_notes(kind).join(" ");
+                let listed = open_lines(kind);
+                if !listed.is_empty() {
+                    facts.push_str("\n\n");
+                    facts.push_str(&listed.join("\n"));
+                }
+                if has_high(kind) {
+                    facts.push_str("\n\nKelpie recommends B: send it back.");
+                }
                 let mut choices = vec![
                     choice("Merge", "Merges it into main", Answer::Yes),
                     choice(

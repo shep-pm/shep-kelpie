@@ -166,6 +166,9 @@ impl Runner {
         if let Some(begin) = self.late_review()? {
             return Ok(begin);
         }
+        if let Some(begin) = self.unsent_review()? {
+            return Ok(begin);
+        }
         if let Some(begin) = self.talk_turn(&At::Ci(head.clone()))? {
             return Ok(begin);
         }
@@ -243,6 +246,7 @@ impl Runner {
             note_fix,
             late_fix,
             nits: open.nits,
+            open_found: open.found,
             disputes,
             rivals,
         };

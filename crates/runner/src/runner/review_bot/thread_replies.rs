@@ -119,7 +119,7 @@ fn a_thread_the_workers_reply_leaves_out_is_replied_to_as_not_addressed_and_stay
         panic!("no merge ruling");
     };
     assert!(
-        question.contains("Review bot threads are still open on it: 1 from cubic."),
+        question.contains("cubic left 1 P2 thread open."),
         "{question}"
     );
 }
@@ -151,7 +151,10 @@ fn yes_after_main_moves(without_ids: bool) {
     let Some(StepReport::Ruling { id, question, .. }) = rig.verdict(&runner) else {
         panic!("no merge ruling");
     };
-    assert!(question.contains("1 from cubic"), "{question}");
+    assert!(
+        question.contains("cubic left 1 P2 thread open"),
+        "{question}"
+    );
     if without_ids {
         let mut runner = runner.lock().unwrap();
         for ruling in &mut runner.state.rulings {

@@ -85,6 +85,7 @@ fn a_ruling_on_the_pull_request_names_no_command_and_a_merge_says_nothing() {
         note_fix: false,
         late_fix: false,
         nits: None,
+        open_found: Vec::new(),
         disputes: None,
         rivals: Vec::new(),
     };
@@ -746,4 +747,49 @@ fn the_public_line_names_no_test_output() {
     assert!(asked.contains(FLAG_TEST), "{asked}");
     assert!(asked.contains("abcdef1"), "{asked}");
     assert!(asked.contains("`shep kelpie rule 71 yes`"), "{asked}");
+}
+
+#[test]
+fn a_merge_question_lists_the_open_threads_and_recommends_a_no_for_a_high_one() {
+    let thread = |level: &str, severity, line| crate::state::OpenThread {
+        bot: "cubic".into(),
+        level: Some(level.into()),
+        severity,
+        file: "src/a.rs".into(),
+        line,
+        what: "A token is shared.".into(),
+    };
+    let kind = RulingKind::Merge {
+        head: "abcdef0123".into(),
+        unreviewed: None,
+        open_threads: Some("1 from cubic".into()),
+        held_by: Vec::new(),
+        unread_head: false,
+        note_fix: false,
+        late_fix: false,
+        nits: Some("1 nit left open (cubic)".into()),
+        open_found: vec![
+            thread("P1", crate::ports::Severity::High, 4),
+            thread("P3", crate::ports::Severity::Low, 9),
+        ],
+        disputes: None,
+        rivals: Vec::new(),
+    };
+
+    let asked = question::question(ticket(7), Some(71), &kind);
+
+    assert!(
+        asked.contains("cubic left 1 P1 and 1 P3 threads open."),
+        "{asked}"
+    );
+    assert!(
+        asked.contains("- P1 `src/a.rs:4` (cubic): A token is shared."),
+        "{asked}"
+    );
+    assert!(asked.contains("- P3 `src/a.rs:9` (cubic)"), "{asked}");
+    assert!(
+        asked.contains("kelpie recommends `shep kelpie rule 71 no <note>`"),
+        "{asked}"
+    );
+    assert!(!asked.contains("nit left open"), "{asked}");
 }

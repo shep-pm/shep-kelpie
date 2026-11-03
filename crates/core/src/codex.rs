@@ -118,6 +118,11 @@ impl Profile for Codex {
     fn finding(&self, thread: &Thread) -> Finding {
         finding(thread)
     }
+
+    fn level(&self, thread: &Thread) -> Option<String> {
+        let head = thread.body.lines().next().unwrap_or_default();
+        badge(head).map(str::to_owned)
+    }
 }
 
 // The commits it read: a review's, or a comment's that says so. A reply in a
