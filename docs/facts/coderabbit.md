@@ -12,6 +12,10 @@ Read 2026-09-27 from CodeRabbit's 504 comments on shep since 2026-08-01, and its
 - Footers read "up to 1 included review per hour" 40 times and "up to 10 included reviews per hour" 91 times, each with "N remain(s) after this review".
 - Waits are quoted in minutes ("in 49 minutes", "in 1 minute") or seconds ("in 59 seconds"), in the walkthrough as "Next included review available in" and in a reply to a comment summon as "next included review will be available in". No wait of an hour or more was seen.
 - Inline findings open with a label: Minor 523 times, Major 185 and Trivial 65. Kelpie reads Critical and Major as high, Minor as medium and Trivial as low, and the worker is sent that severity.
+- The inline comment's shape changed twice. Read 2026-11-02 from CodeRabbit's comments on #1602:
+  - On 2026-10-15 the first line was a label, `**🎯 Functional Correctness** | **🟡 Minor** | **⚡ Quick win**`, with no HTML comment above it.
+  - Since 2026-10-30 the first line is `<!-- coderabbit-ai-generated:v1 -->`, and the label line under it is `**<picture><img src="…/major-16.svg" …></picture> Major** · **Stability & Availability** · **Heavy lift**`, the severity word beside an icon. The bold title and the reasoning paragraph follow, then `<!-- ai-agent-prompt:start -->` and a `<details>` block.
+  - Kelpie reads the label as the first line past the HTML comments, takes the severity from the word it names, and takes the title and reasoning from the paragraphs after it. `fixtures/coderabbit-inline-major.md` and `fixtures/coderabbit-inline-minor.md` hold the shape; their reasoning paragraphs are rewritten, not recorded.
 - A review in progress was never recorded, since CodeRabbit edits it over. Kelpie reads the shape the maintainer's review driver documents.
 
 Live run on #12's build, 2026-09-28, a throwaway project on the public scratch repo shep-pm/kelpie-scratch under its own shepherd with this build's dog:

@@ -33,6 +33,23 @@ const STATUSES_DISABLED: &str =
     include_str!("../../../../../fixtures/coderabbit-statuses-399.jsonl");
 const HEAD_DISABLED: &str = "5e1c0de5a7b3c9d2f4a6b8c0d2e4f6a8b0c2d4e6";
 
+// Rebuilt from the shape of CodeRabbit's inline comments on #1602 (the Major
+// and the Minor on `stray.rs`), read 2026-11-02. The label line, title and
+// details block are as it posts them; the reasoning paragraph is rewritten.
+const INLINE_MAJOR: &str = include_str!("../../../../../fixtures/coderabbit-inline-major.md");
+const INLINE_MINOR: &str = include_str!("../../../../../fixtures/coderabbit-inline-minor.md");
+
+fn thread_of(body: &str) -> Thread {
+    Thread {
+        id: "t".into(),
+        resolved: false,
+        outdated: false,
+        path: "crates/process/src/worktree/stray.rs".into(),
+        line: Some(102),
+        body: body.into(),
+    }
+}
+
 fn activity(comments: &str, reviews: &str, threads: &str) -> Activity {
     Activity {
         comments: parse_comments(comments.as_bytes()).unwrap(),
@@ -399,6 +416,75 @@ fn severity_follows_coderabbits_label() {
     let odd = finding(&thread("_❓ Unheard of_"));
     assert_eq!((odd.severity, odd.line), (Severity::Medium, 0));
     assert_eq!((odd.what.as_str(), odd.why.as_str()), ("Title.", "Why."));
+}
+
+#[test]
+fn a_current_major_comment_reads_as_a_high_finding_with_its_title_and_reasoning() {
+    let found = finding(&thread_of(INLINE_MAJOR));
+    assert_eq!(found.severity, Severity::High);
+    assert_eq!(
+        found.what,
+        "Use the OS-resolved executable identity for containment."
+    );
+    assert!(
+        found
+            .why
+            .starts_with("The `inside` check compares the raw `args`")
+            && found.why.ends_with("resolved path instead."),
+        "{}",
+        found.why
+    );
+    for text in [&found.what, &found.why] {
+        assert!(!text.contains('<') && !text.contains("**") && !text.contains('\n'));
+    }
+}
+
+#[test]
+fn a_current_minor_comment_reads_as_medium() {
+    let found = finding(&thread_of(INLINE_MINOR));
+    assert_eq!(found.severity, Severity::Medium);
+    assert_eq!(
+        found.what,
+        "Log why the process listing failed before skipping the kill."
+    );
+    assert!(
+        found.why.starts_with("When `running_from` fails"),
+        "{}",
+        found.why
+    );
+    assert!(!found.why.contains('<'));
+}
+
+#[test]
+fn a_trivial_or_nitpick_label_is_a_nit_in_the_current_shape() {
+    let comment = |label: &str| {
+        let body = format!(
+            "<!-- coderabbit-ai-generated:v1 -->\n\n**<picture><img src=\"x/{0}-16.svg\" \
+             alt=\"\"></picture> {0}** · **Style** · **Quick win**\n\n**Rename it.**\n\nIt reads badly.",
+            label
+        );
+        finding(&thread_of(&body))
+    };
+    for label in ["Trivial", "Nitpick"] {
+        let found = comment(label);
+        assert_eq!(found.severity, Severity::Low, "{label}");
+        assert_eq!(
+            (found.what.as_str(), found.why.as_str()),
+            ("Rename it.", "It reads badly.")
+        );
+    }
+}
+
+#[test]
+fn the_october_label_line_still_reads() {
+    let body = "**🎯 Functional Correctness** | **🟡 Minor** | **⚡ Quick win**\n\n\
+                **Keep the last line.**\n\nIt is dropped today.";
+    let found = finding(&thread_of(body));
+    assert_eq!(found.severity, Severity::Medium);
+    assert_eq!(
+        (found.what.as_str(), found.why.as_str()),
+        ("Keep the last line.", "It is dropped today.")
+    );
 }
 
 #[test]
