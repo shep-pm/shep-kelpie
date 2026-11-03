@@ -205,9 +205,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
- "js-sys",
  "num-traits",
- "wasm-bindgen",
  "windows-link",
 ]
 
@@ -383,9 +381,9 @@ dependencies = [
 
 [[package]]
 name = "croner"
-version = "3.0.1"
+version = "4.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4aa42bcd3d846ebf66e15bd528d1087f75d1c6c1c66ebff626178a106353c576"
+checksum = "26d09284075f5c87675790d1ad74212a7863eb8bdf228cdbd364f08a152fc62d"
 dependencies = [
  "chrono",
  "derive_builder",
@@ -2170,9 +2168,9 @@ checksum = "c5b0ebf6537e3e8db8bb7d21ecb6d7399738c953c757945c6b95e46c4e95df7b"
 
 [[package]]
 name = "shep-channel"
-version = "0.19.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fac42fbf5f80233141c9a10b85663b6b1139ef86d0f41ef050791f1b23693abd"
+checksum = "14c0e5cd7965b65fb34130614e7bb876d7a37e1f002f24559e6c33c9df1aa0c3"
 dependencies = [
  "serde",
  "serde_json",
@@ -2181,9 +2179,9 @@ dependencies = [
 
 [[package]]
 name = "shep-client"
-version = "0.19.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3a7b4d1c299a587650e060255f87898cd523dc73256fd461d51da9ec331ed9a"
+checksum = "5cebab1d485167f415de2ad8c7e889b459d2d23fc31d69ea24641aa5c1aeb82e"
 dependencies = [
  "futures-util",
  "schemars",
@@ -2200,9 +2198,9 @@ dependencies = [
 
 [[package]]
 name = "shep-core"
-version = "0.19.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84291b3488c4ed611827c97951afefec462cd422bbe03bec40e638e8a76d299a"
+checksum = "4171984d343685bcbdbeb9678bbe2efe13f7c3f05f83dcdb8accdec735c6166d"
 dependencies = [
  "annotate-snippets",
  "anstyle",
@@ -2456,9 +2454,9 @@ dependencies = [
 
 [[package]]
 name = "shep-macros"
-version = "0.19.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b601977d71f4cdbbcd51a3a1fc8cc2ef30341d4a8f357ddd67b393ff828492b"
+checksum = "ea4c097b08df65b5639430b173f90b8a9de6d03018137a0cfcb946b1275e586a"
 dependencies = [
  "proc-macro2",
  "quote 1.0.47",
