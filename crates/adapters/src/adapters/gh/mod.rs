@@ -327,7 +327,9 @@ impl Forge for Gh {
 
 // A merge commit, and only of the head the ruling was about. No
 // `--delete-branch`: gh would also switch branches in its working folder.
-fn merge_args<'a>(repo: &'a ForgeSlug, number: &'a str, head: &'a str) -> [&'a str; 8] {
+// An empty `--body`: GitHub's default is the PR title, which release-please
+// reads as one more conventional commit and lists twice.
+fn merge_args<'a>(repo: &'a ForgeSlug, number: &'a str, head: &'a str) -> [&'a str; 10] {
     [
         "pr",
         "merge",
@@ -337,6 +339,8 @@ fn merge_args<'a>(repo: &'a ForgeSlug, number: &'a str, head: &'a str) -> [&'a s
         "--merge",
         "--match-head-commit",
         head,
+        "--body",
+        "",
     ]
 }
 
