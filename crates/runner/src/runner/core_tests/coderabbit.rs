@@ -504,14 +504,12 @@ fn a_current_label_naming_no_known_severity_is_skipped_and_read_as_medium() {
 }
 
 #[test]
-fn a_bold_title_naming_a_severity_is_a_title_not_a_label() {
-    let found = finding(&thread_of(
-        "**Minor typo in the error text.**\n\nIt says \"fial\".",
-    ));
-    assert_eq!(found.severity, Severity::Medium);
+fn a_bold_title_naming_a_severity_keeps_that_severity_and_stays_the_title() {
+    let found = finding(&thread_of("**Major rework needed.**\n\nIt says \"fial\"."));
+    assert_eq!(found.severity, Severity::High);
     assert_eq!(
         (found.what.as_str(), found.why.as_str()),
-        ("Minor typo in the error text.", "It says \"fial\".")
+        ("Major rework needed.", "It says \"fial\".")
     );
 }
 

@@ -276,11 +276,12 @@ pub fn finding(thread: &Thread) -> Finding {
         .map(str::trim)
         .filter(|p| !p.is_empty())
         .collect();
-    let label = paragraphs.first().and_then(|p| label(p));
-    let severity = label.unwrap_or(Severity::Medium);
+    let (severity, is_label) = paragraphs
+        .first()
+        .map_or((Severity::Medium, false), |p| label(p));
     // Past the label the title is the first bold paragraph. Without a bold
     // title the worker still gets the text, past the first paragraph.
-    let body = &paragraphs[usize::from(label.is_some()).min(paragraphs.len())..];
+    let body = &paragraphs[usize::from(is_label).min(paragraphs.len())..];
     let (what, why) = match body.iter().position(|p| p.starts_with("**")) {
         Some(at) => (
             one_line(body[at].trim_matches('*')),
@@ -300,20 +301,19 @@ pub fn finding(thread: &Thread) -> Finding {
     )
 }
 
-// The severity a paragraph's first line reads as when that line is a label.
-// A label line is joined by `|` or `·`, whatever word it names, or is plain
-// text naming a severity. A bold line is a title, even one naming a severity.
-fn label(paragraph: &str) -> Option<Severity> {
-    let line = paragraph.lines().next()?;
+// The severity a paragraph's first line reads as, and whether it is a label
+// to skip. A label line is joined by `|` or `\u{b7}`, whatever word it names,
+// or is plain text naming a severity. A bold line naming a severity is a
+// title: it sets the severity and stays.
+fn label(paragraph: &str) -> (Severity, bool) {
+    let line = paragraph.lines().next().unwrap_or_default();
     let named = NAMES.iter().find(|(name, _)| line.contains(name));
-    let severity = named.map(|(_, severity)| *severity);
-    if line.contains(" | ") || line.contains(" \u{b7} ") {
-        Some(severity.unwrap_or(Severity::Medium))
-    } else if line.starts_with("**") {
-        None
-    } else {
-        severity
-    }
+    let severity = named.map_or(Severity::Medium, |(_, severity)| *severity);
+    let joined = line.contains(" | ") || line.contains(" \u{b7} ");
+    (
+        severity,
+        joined || (named.is_some() && !line.starts_with("**")),
+    )
 }
 
 // The words of CodeRabbit's label and the severity each is read as.
