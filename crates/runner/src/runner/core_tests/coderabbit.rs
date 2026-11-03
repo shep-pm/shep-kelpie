@@ -33,9 +33,8 @@ const STATUSES_DISABLED: &str =
     include_str!("../../../../../fixtures/coderabbit-statuses-399.jsonl");
 const HEAD_DISABLED: &str = "5e1c0de5a7b3c9d2f4a6b8c0d2e4f6a8b0c2d4e6";
 
-// Rebuilt from the shape of CodeRabbit's inline comments on #1602 (the Major
-// and the Minor on `stray.rs`), read 2026-11-02. The label line, title and
-// details block are as it posts them; the reasoning paragraph is rewritten.
+// Two inline comments CodeRabbit left on #1602, on `stray.rs`, as recorded:
+// the Major, with a collapsed analysis above its title, and the Minor.
 const INLINE_MAJOR: &str = include_str!("../../../../../fixtures/coderabbit-inline-major.md");
 const INLINE_MINOR: &str = include_str!("../../../../../fixtures/coderabbit-inline-minor.md");
 
@@ -429,13 +428,17 @@ fn a_current_major_comment_reads_as_a_high_finding_with_its_title_and_reasoning(
     assert!(
         found
             .why
-            .starts_with("The `inside` check compares the raw `args`")
-            && found.why.ends_with("resolved path instead."),
+            .starts_with("`inside` matches the raw `args` text from `ps`.")
+            && found
+                .why
+                .ends_with("can be set independently of the executable."),
         "{}",
         found.why
     );
-    for text in [&found.what, &found.why] {
-        assert!(!text.contains('<') && !text.contains("**") && !text.contains('\n'));
+    assert!(!found.what.contains('<') && !found.what.contains("**"));
+    // The reasoning names `/proc/<pid>/exe`, so only markup is ruled out.
+    for markup in ["<!--", "<picture", "<img", "<details", "**", "\n"] {
+        assert!(!found.why.contains(markup), "{markup}: {}", found.why);
     }
 }
 
@@ -445,10 +448,10 @@ fn a_current_minor_comment_reads_as_medium() {
     assert_eq!(found.severity, Severity::Medium);
     assert_eq!(
         found.what,
-        "Log why the process listing failed before skipping the kill."
+        "Log a process-listing failure during the grace period."
     );
     assert!(
-        found.why.starts_with("When `running_from` fails"),
+        found.why.starts_with("If a later `ps` call fails"),
         "{}",
         found.why
     );
