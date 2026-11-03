@@ -346,7 +346,9 @@ fn a_merge_is_a_merge_commit_of_the_ruled_head_only() {
             "shep-pm/shep",
             "--merge",
             "--match-head-commit",
-            "1a2b"
+            "1a2b",
+            "--body",
+            ""
         ]
     );
     for never in ["--squash", "-s", "--rebase", "-r", "--auto", "--admin"] {
