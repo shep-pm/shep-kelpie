@@ -26,7 +26,7 @@ async fn an_upgrade_waits_out_a_merge_in_flight_before_any_restart() {
     let rig = Rig::new().await;
     // Two looks at a merge under way, then it is over.
     rig.shepherd.says("koji", &[MERGING, MERGING, IDLE]);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
 
@@ -59,7 +59,7 @@ async fn the_wait_names_why_a_merged_item_has_not_cleaned_up() {
         "failing":{"failures":8,"since":1790000000,
                    "reason":"cannot delete branch kelpie/7: checked out in another worktree"}}]}"#;
     rig.shepherd.says("koji", &[failing]);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     let patience = Patience {
         merge: Duration::from_millis(100),
         ..FAST
@@ -93,7 +93,7 @@ async fn the_wait_names_a_merge_failure_as_a_step_failure() {
         "failing":{"failures":8,"since":1790000000,
                    "reason":"merge refused: pull request is not ready"}}]}"#;
     rig.shepherd.says("koji", &[failing]);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     let patience = Patience {
         merge: Duration::from_millis(100),
         ..FAST
@@ -125,7 +125,7 @@ async fn the_dog_goes_down_only_when_no_runner_is_merging() {
     rig.runs("aria", &rig.installed.clone(), true);
     // `koji` is free and `aria` merging for a while.
     rig.shepherd.says("aria", &[MERGING, MERGING, IDLE]);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     rig.install(&new).await.0.unwrap();
 
     let writes = rig.shepherd.writes();
@@ -141,7 +141,7 @@ async fn the_dog_goes_down_only_when_no_runner_is_merging() {
 async fn an_upgrade_gives_up_on_a_merge_that_does_not_end_and_restarts_nothing() {
     let mut rig = Rig::new().await;
     rig.shepherd.says("koji", &[MERGING]);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     let patience = Patience {
         merge: Duration::from_millis(100),
         ..FAST
@@ -159,7 +159,7 @@ async fn a_runner_whose_status_times_out_is_waited_on_not_taken_for_idle() {
     // Three triggers delivered and unanswered, then an idle runner.
     rig.shepherd
         .replies("koji", &[None, None, None, Some(IDLE)]);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
 
@@ -184,7 +184,7 @@ async fn a_runner_whose_status_times_out_is_waited_on_not_taken_for_idle() {
 async fn a_runner_that_never_answers_status_is_named_and_nothing_restarts() {
     let mut rig = Rig::new().await;
     rig.shepherd.replies("koji", &[None]);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     let patience = Patience {
         merge: Duration::from_millis(100),
         ..FAST
@@ -215,7 +215,7 @@ const TWO_LOOKS: Patience = Patience {
 async fn a_runner_slow_to_answer_after_its_restart_does_not_hold_back_the_runners_after_it() {
     let mut rig = Rig::new().await;
     slow_aria(&rig, &[None, Some(IDLE)]);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     let action = Action::Install(Source::Binary(new));
     let (ran, said) = rig.upgrade_within(action, TWO_LOOKS).await;
     ran.unwrap();
@@ -233,7 +233,7 @@ async fn a_runner_slow_to_answer_after_its_restart_does_not_hold_back_the_runner
 async fn a_runner_that_never_answers_after_its_restart_is_named_once_the_others_are_restarted() {
     let mut rig = Rig::new().await;
     slow_aria(&rig, &[None]);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     let action = Action::Install(Source::Binary(new));
     let err = rig.upgrade_within(action, TWO_LOOKS).await.0.unwrap_err();
 
@@ -252,7 +252,7 @@ async fn a_failure_after_a_slow_runner_still_names_the_slow_runner() {
     slow_aria(&rig, &[None]);
     // `koji` is idle at the dog's look and its drain, then merges for good.
     rig.shepherd.says("koji", &[IDLE, IDLE, MERGING]);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     let patience = Patience {
         merge: Duration::from_millis(100),
         ..TWO_LOOKS
@@ -273,7 +273,7 @@ async fn a_failure_after_a_slow_runner_still_names_the_slow_runner() {
 async fn a_slow_runner_that_stopped_before_it_was_asked_again_is_named() {
     let mut rig = Rig::new().await;
     slow_aria(&rig, &[None, Some(IDLE)]);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     let scene = rig.scene(TWO_LOOKS);
     let action = Action::Install(Source::Binary(new));
     let mut said = Vec::new();
@@ -299,7 +299,7 @@ async fn a_slow_runner_that_stopped_before_it_was_asked_again_is_named() {
 async fn a_sheep_that_is_stopped_stays_stopped() {
     let mut rig = Rig::new().await;
     rig.runs("paused", &rig.installed.clone(), false);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
     assert_eq!(rig.restarts(), ["kelpie", "koji"]);
@@ -314,7 +314,7 @@ async fn a_sheep_that_is_stopped_stays_stopped() {
 async fn a_stopped_sheep_on_another_program_is_said_to_stay_behind() {
     let rig = Rig::new().await;
     rig.runs("old", Path::new("/opt/kelpie/bin/kelpie"), false);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
     assert!(
@@ -331,7 +331,7 @@ async fn a_runner_stopped_while_the_upgrade_waits_stays_stopped() {
     let mut looks = vec![MERGING; 30];
     looks.push(IDLE);
     rig.shepherd.says("koji", &looks);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     // Stopped once it has been looked at a few times, not after a delay: the upgrade
     // checks the new build first, and how long that takes depends on the machine.
     let stopping = async {
@@ -357,7 +357,7 @@ async fn a_runner_still_opening_its_channel_is_waited_on() {
     // Plain text is what a runner answers before it takes its actions.
     rig.shepherd
         .replies("koji", &[Some("unknown action: status"), Some(IDLE)]);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
     assert!(
@@ -370,7 +370,7 @@ async fn a_runner_still_opening_its_channel_is_waited_on() {
 async fn a_failure_after_the_swap_names_what_is_installed_and_the_command_that_finishes() {
     let mut rig = Rig::new().await;
     rig.shepherd.says("koji", &[MERGING]);
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     let patience = Patience {
         merge: Duration::from_millis(100),
         ..FAST
@@ -383,7 +383,7 @@ async fn a_failure_after_the_swap_names_what_is_installed_and_the_command_that_f
         err.contains(&format!("`shep kelpie upgrade --binary {installed}`")),
         "{err}"
     );
-    assert_eq!(rig.installed_says(), "0.3.0 for shep 0.19.0");
+    assert_eq!(rig.installed_says(), "0.3.0 for shep 0.23.0");
     assert_eq!(rig.restarts(), Vec::<String>::new());
 
     // That command restarts without touching a file: the build is the one installed.
@@ -393,13 +393,13 @@ async fn a_failure_after_the_swap_names_what_is_installed_and_the_command_that_f
     ran.unwrap();
     assert!(said[0].contains("installed already"), "{said:?}");
     assert_eq!(rig.restarts(), ["kelpie", "koji"]);
-    assert_eq!(says(&rig.previous()), "0.1.0 for shep 0.19.0");
+    assert_eq!(says(&rig.previous()), "0.1.0 for shep 0.23.0");
 }
 
 #[tokio::test]
 async fn a_failed_rollback_names_the_rolled_back_build_as_installed() {
     let mut rig = Rig::new().await;
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     rig.install(&new).await.0.unwrap();
     rig.restarts();
 
@@ -414,7 +414,7 @@ async fn a_failed_rollback_names_the_rolled_back_build_as_installed() {
         .0
         .unwrap_err();
     let installed = rig.installed.display();
-    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.19.0");
+    assert_eq!(rig.installed_says(), "0.1.0 for shep 0.23.0");
     assert!(
         err.contains(&format!(
             "The rolled back build is installed at {installed}"
@@ -436,12 +436,12 @@ async fn a_failed_rollback_names_the_rolled_back_build_as_installed() {
 async fn a_bare_upgrade_restarts_onto_the_installed_build() {
     let mut rig = Rig::new().await;
     // What `cargo install` leaves: the new build already at the installed path.
-    rig.cargo_installs("0.3.0", "0.19.0");
+    rig.cargo_installs("0.3.0", "0.23.0");
 
     let (ran, said) = rig.upgrade(Action::Installed).await;
     ran.unwrap();
     assert_eq!(rig.restarts(), ["kelpie", "koji"]);
-    assert_eq!(rig.installed_says(), "0.3.0 for shep 0.19.0");
+    assert_eq!(rig.installed_says(), "0.3.0 for shep 0.23.0");
     assert!(
         said.iter().any(|l| l.contains("restarting onto it")),
         "{said:?}"
@@ -460,7 +460,7 @@ async fn a_bare_upgrade_restarts_onto_the_installed_build() {
 async fn a_bare_upgrade_with_nothing_changed_restarts_nothing_and_says_so() {
     let mut rig = Rig::new().await;
     // An upgrade leaves the installed file as the one restarted onto.
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     rig.install(&new).await.0.unwrap();
     rig.restarts();
 
@@ -474,7 +474,7 @@ async fn a_bare_upgrade_with_nothing_changed_restarts_nothing_and_says_so() {
     );
 
     // A bare run records too: the next one finds the file it restarted onto.
-    rig.cargo_installs("0.10.0", "0.19.0");
+    rig.cargo_installs("0.10.0", "0.23.0");
     rig.upgrade(Action::Installed).await.0.unwrap();
     rig.restarts();
     let (ran, said) = rig.upgrade(Action::Installed).await;
@@ -490,16 +490,16 @@ async fn a_bare_upgrade_with_nothing_changed_restarts_nothing_and_says_so() {
 #[tokio::test]
 async fn a_bare_upgrade_after_the_file_changed_says_rollback_has_no_copy() {
     let mut rig = Rig::new().await;
-    let new = rig.build("new", "0.3.0", "0.19.0");
+    let new = rig.build("new", "0.3.0", "0.23.0");
     rig.install(&new).await.0.unwrap();
     rig.restarts();
 
     // `cargo install` replaces the file the upgrade left, with no copy kept.
-    rig.cargo_installs("0.10.0", "0.19.0");
+    rig.cargo_installs("0.10.0", "0.23.0");
     let (ran, said) = rig.upgrade(Action::Installed).await;
     ran.unwrap();
     assert_eq!(rig.restarts(), ["kelpie", "koji"]);
-    assert_eq!(rig.installed_says(), "0.10.0 for shep 0.19.0");
+    assert_eq!(rig.installed_says(), "0.10.0 for shep 0.23.0");
     assert!(
         said.iter().any(|l| l.contains("`--rollback` has no copy")
             && l.contains("the previous build kept, kelpie 0.1.0, is the one before it")
@@ -508,7 +508,7 @@ async fn a_bare_upgrade_after_the_file_changed_says_rollback_has_no_copy() {
     );
     assert_eq!(
         says(&rig.previous()),
-        "0.1.0 for shep 0.19.0",
+        "0.1.0 for shep 0.23.0",
         "the kept previous build is the one before cargo's"
     );
 }
@@ -533,7 +533,7 @@ async fn a_bare_upgrade_with_no_record_counts_as_changed() {
 async fn a_bare_upgrade_that_stops_in_its_restarts_does_not_offer_rollback_as_an_undo() {
     let mut rig = Rig::new().await;
     rig.shepherd.says("koji", &[MERGING]);
-    rig.cargo_installs("0.3.0", "0.19.0");
+    rig.cargo_installs("0.3.0", "0.23.0");
     let patience = Patience {
         merge: Duration::from_millis(100),
         ..FAST
@@ -557,7 +557,7 @@ async fn a_file_replaced_while_a_bare_upgrade_waits_is_not_recorded_as_restarted
     rig.shepherd.says("koji", &looks);
     let installing = async {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        rig.cargo_installs("0.10.0", "0.19.0");
+        rig.cargo_installs("0.10.0", "0.23.0");
     };
     let ((ran, _), ()) = tokio::join!(rig.upgrade(Action::Installed), installing);
     ran.unwrap();
@@ -572,11 +572,11 @@ async fn a_file_replaced_while_a_bare_upgrade_waits_is_not_recorded_as_restarted
 #[tokio::test]
 async fn a_build_that_does_not_fit_the_shepherd_stops_a_bare_upgrade_before_any_restart() {
     let mut rig = Rig::new().await;
-    rig.cargo_installs("0.4.0", "0.20.0");
+    rig.cargo_installs("0.4.0", "0.24.0");
 
     let (ran, said) = rig.upgrade(Action::Installed).await;
     let err = ran.unwrap_err();
-    assert!(err.contains("shep 0.20.0"), "{err}");
+    assert!(err.contains("shep 0.24.0"), "{err}");
     assert!(err.contains("Nothing was installed or restarted"), "{err}");
     assert_eq!(said, Vec::<String>::new());
     assert_eq!(rig.restarts(), Vec::<String>::new());
