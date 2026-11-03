@@ -2,7 +2,7 @@
 
 use super::{folder, name};
 use crate::agents::legacy::{self, Report};
-use crate::agents::{Agents, baseline};
+use crate::agents::{Agents, Role, Runs, baseline};
 
 // Each baseline's binding as `git show a22137eb:agents/<name>.md` has it, before the
 // baselines dropped their models: (name, harness, model, effort, second_look).
@@ -257,7 +257,7 @@ fn a_file_extending_a_stub_loads_bound() {
 #[test]
 fn a_file_with_no_legacy_parent_is_left_alone() {
     let own = "---\nrole: implementer\nharness: claude-code\nmodel: m\neffort: low\n---\n";
-    let whole = "---\nextends: kelpie:opus-high\n---\n";
+    let whole = "---\nextends: kelpie:codex\n---\n";
     let bare = "---\nextends: pm\n---\n";
     let dir = folder(&[
         ("own.md", own),
@@ -270,6 +270,111 @@ fn a_file_with_no_legacy_parent_is_left_alone() {
 
     assert_eq!(report, Report::default());
     assert_eq!(read(&dir, "whole.md"), whole);
+}
+
+// `opus-high` as kelpie shipped it, which a bare stub of it is written out as.
+const FORMER_OPUS_HIGH: &str = r#"---
+# Opus 5.5 at high effort, for work that is hard to undo. The agent board
+# picks it for heavy work, and an `agent:opus-high!` label on an issue pins
+# it there. Anything below the closing line is added to kelpie's own
+# instructions for this agent; it adds nothing here.
+role: implementer
+harness: claude-code
+model: claude-opus-5-5
+effort: high
+description: Builds work that is hard to undo, such as a data migration, a release step or a change to a public interface.
+tier: heavy
+---
+"#;
+
+#[test]
+fn a_bare_stub_of_an_agent_kelpie_no_longer_ships_is_written_out_once() {
+    let dir = folder(&[("opus-high.md", &stub("opus-high"))]);
+
+    let report = legacy::migrate(dir.path()).unwrap();
+
+    assert_eq!(wrote(&report), ["opus-high.md"]);
+    assert_eq!(read(&dir, "opus-high.md"), FORMER_OPUS_HIGH);
+    let agents = Agents::load(dir.path()).unwrap();
+    let agent = agents.get(&name("opus-high")).unwrap();
+    assert_eq!(
+        super::pair(agent),
+        ("claude-opus-5-5", crate::settings::Effort::High)
+    );
+    assert_eq!(legacy::migrate(dir.path()).unwrap(), Report::default());
+}
+
+#[test]
+fn a_bare_stub_of_each_of_the_five_removed_agents_is_written_out_whole_once_and_loads() {
+    let removed = [
+        "sonnet-high",
+        "opus-high",
+        "defect-hunter-lite",
+        "iq3-xxs-review",
+        "qwen",
+    ];
+    let stubs: Vec<(String, String)> = (removed.iter())
+        .map(|n| (format!("{n}.md"), stub(n)))
+        .collect();
+    let files: Vec<(&str, &str)> = (stubs.iter())
+        .map(|(file, text)| (file.as_str(), text.as_str()))
+        .collect();
+    let dir = folder(&files);
+
+    let report = legacy::migrate(dir.path()).unwrap();
+
+    assert_eq!(wrote(&report).len(), 5, "{report:?}");
+    assert_eq!(legacy::migrate(dir.path()).unwrap(), Report::default());
+    let agents = Agents::load(dir.path()).unwrap();
+    assert!(agents.broken(&name("qwen")).is_none());
+    let get = |n: &str| {
+        agents
+            .get(&name(n))
+            .unwrap_or_else(|| panic!("{n} does not load"))
+    };
+
+    let sonnet = get("sonnet-high");
+    assert_eq!(sonnet.role, Role::Implementer);
+    assert_eq!(
+        super::pair(sonnet),
+        ("claude-sonnet-5-5", crate::settings::Effort::High)
+    );
+    let opus = get("opus-high");
+    assert_eq!(opus.role, Role::Implementer);
+    assert_eq!(
+        super::pair(opus),
+        ("claude-opus-5-5", crate::settings::Effort::High)
+    );
+    let lite = get("defect-hunter-lite");
+    assert_eq!(lite.role, Role::Reviewer);
+    assert!(!lite.second_look);
+    assert_eq!(
+        super::pair(lite),
+        ("claude-opus-5-5", crate::settings::Effort::Medium)
+    );
+    assert!(lite.prompt.as_deref().unwrap().contains("{{DIFF}}"));
+    let iq3 = get("iq3-xxs-review");
+    assert_eq!(iq3.role, Role::Reviewer);
+    let (gateway, model) = iq3.runs.gateway().unwrap();
+    assert_eq!((gateway.as_str(), model), ("paddock", "iq3_xxs"));
+    let qwen = get("qwen");
+    assert_eq!(qwen.role, Role::Reviewer);
+    assert!(matches!(qwen.runs, Runs::Command(_)));
+}
+
+#[test]
+fn a_stub_of_a_removed_agent_with_keys_of_its_own_keeps_them() {
+    let mine = "---\nextends: kelpie:sonnet-high\neffort: low\n---\n";
+    let dir = folder(&[("mine.md", mine)]);
+
+    legacy::migrate(dir.path()).unwrap();
+
+    let agents = Agents::load(dir.path()).unwrap();
+    let agent = agents.get(&name("mine")).unwrap();
+    assert_eq!(
+        super::pair(agent),
+        ("claude-sonnet-5-5", crate::settings::Effort::Low)
+    );
 }
 
 #[test]
@@ -388,4 +493,29 @@ fn a_bare_stub_of_the_issue_writer_is_deleted_and_any_other_file_of_it_left_and_
     assert!(!dir.path().join("issue-writer.md").exists());
     assert_eq!(read(&dir, "mine.md"), more);
     assert_eq!(read(&dir, "scribe.md"), own);
+}
+
+#[test]
+fn a_file_written_out_from_a_bare_stub_is_the_agent_kelpie_once_shipped_and_an_edit_is_not() {
+    let dir = folder(&[
+        ("iq3-xxs-review.md", &stub("iq3-xxs-review")),
+        ("opus-high.md", &stub("opus-high")),
+    ]);
+    legacy::migrate(dir.path()).unwrap();
+    let agents = Agents::load(dir.path()).unwrap();
+    let once = |n: &str| legacy::is_once_shipped(&name(n), agents.get(&name(n)).unwrap());
+    assert!(once("iq3-xxs-review") && once("opus-high"));
+
+    // A file of the same name that says more, or one kelpie never shipped under that name, is not.
+    let edited = FORMER_OPUS_HIGH.replace("effort: high", "effort: low");
+    let agents = agents.with("opus-high", &edited);
+    assert!(!legacy::is_once_shipped(
+        &name("opus-high"),
+        agents.get(&name("opus-high")).unwrap()
+    ));
+    let mine = agents.with("mine", &edited);
+    assert!(!legacy::is_once_shipped(
+        &name("mine"),
+        mine.get(&name("mine")).unwrap()
+    ));
 }

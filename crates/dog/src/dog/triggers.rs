@@ -148,7 +148,7 @@ mod tests {
     #[test]
     fn status_shows_each_account_and_model_the_dog_reads() {
         let mut w = world();
-        let agents = crate::agents::Agents::embedded();
+        let (_dir, agents) = crate::test::claude_implementers();
         let sources = Sources::of(&agents, &crate::settings::Gateways::default());
         let shown = Availability::new(&sources);
         let (body, _) = w
@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn status_shows_each_implementer_s_typical_item_and_its_wait() {
         let mut w = world();
-        let agents = crate::agents::Agents::embedded();
+        let (_dir, agents) = crate::test::claude_implementers();
         let sources = Sources::of(&agents, &crate::settings::Gateways::default());
         let shown = Availability::new(&sources);
         let board = Board::new(&agents).view().status(&shown, Timestamp(EPOCH));

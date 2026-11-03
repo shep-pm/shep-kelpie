@@ -80,18 +80,10 @@ fn the_claude_code_rows_equal_the_legacy_table() {
         "the eight baselines and the implementer, and nothing else"
     );
 
-    let shipped = Agents::embedded();
-    let sonnet = shipped.get(&name("sonnet-high")).unwrap();
-    let (model, _) = sonnet.runs.session().unwrap();
     let implementer = file
         .row(Harness::ClaudeCode, Role::Implementer, None)
         .expect("the file binds the implementer");
     assert_eq!(implementer.file(), "implementer");
-    assert_eq!(
-        (implementer.model.as_str(), implementer.effort),
-        (model.model.as_str(), model.effort),
-        "the implementer row is the one kelpie ships as the default"
-    );
 }
 
 #[test]

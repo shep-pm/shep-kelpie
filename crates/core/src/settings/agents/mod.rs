@@ -347,10 +347,9 @@ pub struct RoleAgentNames {
     pub pm: Option<AgentName>,
     /// The representative, from kelpie's agent files: the one voice that
     /// words every post to a contributor. A project that picks contributions
-    /// needs it, so unlike the project manager it has a default. `representative`
-    /// when absent.
-    #[serde(default = "default_representative")]
-    pub representative: AgentName,
+    /// or triages issues needs it, and is refused while it is absent.
+    #[serde(default)]
+    pub representative: Option<AgentName>,
 }
 
 impl Default for RoleAgentNames {
@@ -363,7 +362,7 @@ impl Default for RoleAgentNames {
             slack: DEFAULT_SLACK_MINUTES,
             reviewers: None,
             pm: None,
-            representative: default_representative(),
+            representative: None,
         }
     }
 }
@@ -385,10 +384,6 @@ impl RoleAgentNames {
 
 fn default_slack() -> u32 {
     DEFAULT_SLACK_MINUTES
-}
-
-fn default_representative() -> AgentName {
-    AgentName::kelpies(crate::agents::REPRESENTATIVE)
 }
 
 /// An implementer the agent board may pick for a project
@@ -530,16 +525,43 @@ impl Settings {
         Ok(RoleAgents { pm })
     }
 
+    /// Refuses a project that has no implementer to pick, since no work item could open
+    ///
+    /// Kelpie ships no implementer, so a new install holds none until a lineup is written.
+    ///
+    /// # Errors
+    ///
+    /// [`SettingsError::Invalid`] naming `agents.allow` when no agent file whose role is
+    /// `implementer` is there for it to hold, with the commands that write one.
+    pub fn require_implementer(&self, agents: &Agents) -> Result<(), SettingsError> {
+        if !self.allowed_implementers(agents).is_empty() {
+            return Ok(());
+        }
+        Err(SettingsError::Invalid {
+            setting: "agents.allow",
+            reason: format!(
+                "this project has no implementer: no agent file in `{FOLDER}` whose role is \
+                 `implementer` is there, or `agents.allow` leaves each one out. Write a lineup \
+                 with `shep kelpie agents init <harness>`, or one agent with \
+                 `shep kelpie agents new implementer`, or add an implementer to `agents.allow`"
+            ),
+        })
+    }
+
     /// The representative the project names in `agents.representative`
     ///
     /// # Errors
     ///
-    /// [`SettingsError::Invalid`] naming `agents.representative` when it has
-    /// no agent file, its file's role is not `representative`, or
+    /// [`SettingsError::Invalid`] naming `agents.representative` when it is
+    /// absent, has no agent file, its file's role is not `representative`, or
     /// `agents.allow` leaves it out.
     pub fn representative(&self, agents: &Agents) -> Result<ExpertAgent, SettingsError> {
         let at = "agents.representative";
-        let name = &self.agents.representative;
+        let name = self
+            .agents
+            .representative
+            .as_ref()
+            .ok_or_else(|| unset(at, Role::Representative))?;
         let agent = find(
             agents,
             name,
@@ -664,6 +686,20 @@ pub(super) fn find<'a>(
         )));
     }
     Ok(agent)
+}
+
+/// The refusal of a setting that names the agent of `role`, while the project needs
+/// it and has not set it
+pub(super) fn unset(setting: &'static str, role: Role) -> SettingsError {
+    SettingsError::Invalid {
+        setting,
+        reason: format!(
+            "`{setting}` is not set, and this project needs an agent whose role is `{}`: set \
+             `{setting}` to one, after `shep kelpie agents init <harness>` writes bound \
+             agent files if you have none",
+            role.as_str()
+        ),
+    }
 }
 
 /// The refusal of `name` when `allow` leaves it out, with `instead` as the

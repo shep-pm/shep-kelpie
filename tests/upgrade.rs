@@ -448,13 +448,33 @@ async fn upgrade_without_a_form_prints_usage_and_exits_2() {
     }
 }
 
-// Every kind the project manager may decide, named at its default.
+// Every kind the project manager may decide, named at its default, and the four
+// agents kelpie once named for a project, so the settings step has nothing to write.
 fn named_kinds() -> Map<String, Value> {
     let decides: Map<String, Value> = (RulingName::ALL.into_iter())
         .filter_map(|kind| Some((kind.as_str().to_owned(), Value::Bool(kind.pm_default()?))))
         .collect();
     let rulings = Map::from_iter([("pm_decides".to_owned(), Value::Object(decides))]);
-    Map::from_iter([("rulings".to_owned(), Value::Object(rulings))])
+    let agents = |key: &str, value: Value| Map::from_iter([(key.to_owned(), value)]);
+    let contributions = Map::from_iter([
+        ("security_reviewer".to_owned(), "security-reviewer".into()),
+        (
+            "reviewers".to_owned(),
+            serde_json::json!(["defect-hunter-lite"]),
+        ),
+    ]);
+    Map::from_iter([
+        ("rulings".to_owned(), Value::Object(rulings)),
+        (
+            "agents".to_owned(),
+            Value::Object(agents("representative", "representative".into())),
+        ),
+        (
+            "triage".to_owned(),
+            Value::Object(agents("agent", "triager".into())),
+        ),
+        ("contributions".to_owned(), Value::Object(contributions)),
+    ])
 }
 
 #[tokio::test]

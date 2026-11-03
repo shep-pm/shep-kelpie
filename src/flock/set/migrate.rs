@@ -1,13 +1,12 @@
 //! `shep kelpie settings migrate`: writes the keys each project's table is missing
 //!
-//! A project's old `rulings.pm_alone` list becomes `rulings.pm_decides`, and
-//! each kind the map lacks is written at its default; a key there is never
-//! changed. The panel's keys, the issue writer's and the implementer list the
-//! agent board replaced ([`GONE_KEYS`]) are deleted and named with the value
-//! each held, with the gone roles in `repo_setup.roles` ([`GONE_ROLES`]) and
-//! the `unlabelled` kind. `agents.reviewers` goes too: its names join an
-//! `agents.allow` that is already a list, and `contributions.reviewers` where
-//! the project names none. Each table is checked as `set` checks it.
+//! `rulings.pm_alone` becomes `rulings.pm_decides`, each kind the map lacks written
+//! at its default. The keys the agent board replaced ([`GONE_KEYS`]), the gone roles
+//! ([`GONE_ROLES`]) and the `unlabelled` kind are deleted, each named with its value.
+//! `agents.reviewers` goes too: its names join a listed `agents.allow`, and
+//! `contributions.reviewers` where the project names none. An agent kelpie once
+//! named for a project that left it unset gets that name ([`DEFAULTS`]). Each table
+//! is checked as `set` checks it.
 
 use std::process::ExitCode;
 
@@ -17,6 +16,7 @@ use super::{Homes, Place, checked, lookup, write};
 use crate::home::{ProjectName, ProjectPaths};
 use crate::settings::{PM_ALONE, PM_DECIDES, RulingName};
 use crate::shepherd::{self, Connection, Socket};
+use crate::webhook::KelpieSettings;
 
 /// The keys migrate deletes: the loader refuses the first six by name and
 /// ignores the rest, which doctor names
@@ -49,6 +49,22 @@ const GONE_ROLES: [&str; 3] = ["advisor", "researcher", "issue-writer"];
 
 /// The kind of ruling migrate deletes from `rulings.pm_decides` and the old list
 const WRITER_KIND: &str = "unlabelled";
+
+/// The agents kelpie named when a project left the setting unset, which no code
+/// names now: migrate writes each into a table that lacks it, so the project keeps
+/// running on the agent it ran on
+const DEFAULTS: [(&str, &str); 3] = [
+    ("agents.representative", "representative"),
+    ("triage.agent", "triager"),
+    ("contributions.security_reviewer", "security-reviewer"),
+];
+
+/// What a contribution's pass ran when `contributions.reviewers` was unset: the
+/// first where kelpie's settings held a gateway named [`PADDOCK`], then the second
+const DEFAULT_REVIEWERS: [&str; 2] = ["iq3-xxs-review", "defect-hunter-lite"];
+
+/// The gateway the first of [`DEFAULT_REVIEWERS`] ran on
+const PADDOCK: &str = "paddock";
 
 /// Runs `shep kelpie settings migrate`, printing a line for each project it changed
 pub fn main() -> ExitCode {
@@ -135,6 +151,7 @@ async fn project(
     let mut wrote = pm_decides(&mut table);
     let (joined, gone_reviewers) = reviewers(&mut table);
     wrote.extend(joined);
+    wrote.extend(defaults(&mut table, &read.kelpie));
     let mut removed: Vec<String> = (listed && lookup(&table, PM_ALONE).is_none())
         .then(|| PM_ALONE.to_owned())
         .into_iter()
@@ -210,6 +227,48 @@ fn reviewers(table: &mut Map<String, Value>) -> (Vec<String>, Option<String>) {
         .map(|value| format!("{REVIEWERS} = {}", inline(&value)));
     let carried = carried(table, &named);
     (joined.into_iter().chain(carried).collect(), removed)
+}
+
+// Writes the agents kelpie named for a project that left them unset, each where
+// it is absent, and says what it wrote. A value already there is kept, and so
+// is a section that is no table at all: the check refuses that one. The
+// reviewers come after `reviewers`, which has carried the project's own.
+fn defaults(table: &mut Map<String, Value>, kelpie: &str) -> Vec<String> {
+    let paddock = holds_paddock(kelpie);
+    let reviewers = DEFAULT_REVIEWERS
+        .iter()
+        .skip(usize::from(!paddock))
+        .map(|name| Value::String((*name).to_owned()))
+        .collect();
+    let writes = DEFAULTS
+        .iter()
+        .map(|(setting, name)| (*setting, Value::String((*name).to_owned())))
+        .chain([(CONTRIBUTION_REVIEWERS, Value::Array(reviewers))]);
+    let mut wrote = Vec::new();
+    for (setting, value) in writes {
+        let (outer, key) = leaves(setting);
+        let section = table
+            .entry(outer)
+            .or_insert_with(|| Value::Object(Map::new()));
+        let Some(section) = section.as_object_mut() else {
+            continue;
+        };
+        if !section.contains_key(key) {
+            wrote.push(format!("{setting} = {}", inline(&value)));
+            section.insert(key.to_owned(), value);
+        }
+    }
+    wrote
+}
+
+// Whether kelpie's `[kelpie]` section holds a gateway named `paddock`. A section
+// that does not read holds none: the settings check says why it does not.
+fn holds_paddock(kelpie: &str) -> bool {
+    if kelpie.trim().is_empty() {
+        return false;
+    }
+    KelpieSettings::from_section(kelpie)
+        .is_ok_and(|kelpie| kelpie.gateways().iter().any(|(n, _)| n.as_str() == PADDOCK))
 }
 
 // `names` with each name once, in the order the list held them
