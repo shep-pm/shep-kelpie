@@ -137,12 +137,22 @@ fn sleep_as(program: &Path, relative: bool, argv0: Option<&Path>) -> std::proces
     if let Some(argv0) = argv0 {
         command.arg0(argv0);
     }
-    let child = command
+    command
         .args(["--exact", "--nocapture", SLEEPER_TEST])
         .env("SLEEPER", "1")
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
+        .stdout(std::process::Stdio::piped());
+    // On Linux another test's fork can hold the copy's write descriptor until
+    // it execs, which makes the copy busy for that moment.
+    let mut tries = 0;
+    let child = loop {
+        match command.spawn() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 100 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            spawned => break spawned.unwrap(),
+        }
+    };
     started(child)
 }
 
