@@ -10,8 +10,8 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use super::{
-    WorktreeError, canonical, common_dir, git, git_dirs, has_ref, in_repo, loose_commit,
-    loose_commit_in, output, own_git_dir, trusted,
+    WorktreeError, canonical, common_dir, git, git_dirs, has_ref, in_process, in_repo,
+    loose_commit, loose_commit_in, output, own_git_dir, trusted,
 };
 
 /// The clone's git dir for `worktree`: the sibling `<worktree>.git`
@@ -198,14 +198,7 @@ fn skeleton(repo: &Path, git_dir: &Path) -> Result<(), WorktreeError> {
     create(&git_dir.join("modules"))?;
     // One read for all three. Git names a key in lower case, and `--get`
     // answers the last of several values.
-    let set = git(
-        repo,
-        ["config", "--local", "--null", "--get-regexp", COPIED_KEYS],
-    )
-    .unwrap_or_default();
-    let entries: Vec<(&str, &str)> = (set.split('\0'))
-        .filter_map(|entry| entry.split_once('\n'))
-        .collect();
+    let entries = copied_settings(repo);
     for key in COPIED {
         let value = entries
             .iter()
@@ -218,11 +211,35 @@ fn skeleton(repo: &Path, git_dir: &Path) -> Result<(), WorktreeError> {
     Ok(())
 }
 
+// The checkout's values for [`COPIED`], in the order its config holds them,
+// read in process where gix can say and else by git.
+fn copied_settings(repo: &Path) -> Vec<(String, String)> {
+    if let Some(read) = in_process::local_config(repo, |key| COPIED_LOWER.contains(&key)) {
+        return read;
+    }
+    let set = git(
+        repo,
+        ["config", "--local", "--null", "--get-regexp", COPIED_KEYS],
+    )
+    .unwrap_or_default();
+    (set.split('\0'))
+        .filter_map(|entry| entry.split_once('\n'))
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .collect()
+}
+
 // The checkout's settings a clone keeps.
 const COPIED: [&str; 3] = [
     "remote.origin.url",
     "remote.origin.pushurl",
     "core.hooksPath",
+];
+
+// [`COPIED`] as git names the keys: the section and name in lower case.
+const COPIED_LOWER: [&str; 3] = [
+    "remote.origin.url",
+    "remote.origin.pushurl",
+    "core.hookspath",
 ];
 
 // [`COPIED`] as the pattern `--get-regexp` reads them with.

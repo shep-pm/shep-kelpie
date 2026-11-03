@@ -1,11 +1,11 @@
-//! Files on `origin`'s default branch, read with one git call to list them
-//! and one to read them however many there are
+//! Files on `origin`'s default branch, listed and read in process where gix can say,
+//! and else with one git call to list them and one to read them however many there are
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use crate::worktree::in_repo;
+use crate::worktree::{self, in_repo};
 
 /// The regular files under `folders` on `origin/<base>`, by path in the tree, with their bytes
 ///
@@ -16,6 +16,28 @@ pub(super) fn files_under(
     base: &str,
     folders: &[&Path],
 ) -> Result<Vec<(PathBuf, Vec<u8>)>, String> {
+    let regular = match worktree::tree_files(checkout, &format!("origin/{base}"), folders) {
+        Some(listed) => (listed.into_iter().filter(|file| file.regular))
+            .map(|file| (PathBuf::from(file.path), file.id))
+            .collect(),
+        None => regular_by_git(checkout, base, folders)?,
+    };
+    let ids: Vec<&str> = regular.iter().map(|(_, id)| id.as_str()).collect();
+    let blobs = read(checkout, &ids)?;
+    (regular.into_iter().zip(blobs))
+        .map(|((path, _), blob)| {
+            let blob = blob.ok_or_else(|| format!("{} is listed and missing", path.display()))?;
+            Ok((path, blob))
+        })
+        .collect()
+}
+
+// The regular files under `folders` on `origin/<base>` with their blobs' ids, from `ls-tree`.
+fn regular_by_git(
+    checkout: &Path,
+    base: &str,
+    folders: &[&Path],
+) -> Result<Vec<(PathBuf, String)>, String> {
     let output = in_repo(checkout)
         .args(["--literal-pathspecs", "ls-tree", "-r", "-z"])
         .arg(format!("origin/{base}"))
@@ -37,23 +59,20 @@ pub(super) fn files_under(
             regular.push((PathBuf::from(path), id.to_owned()));
         }
     }
-    let ids: Vec<&str> = regular.iter().map(|(_, id)| id.as_str()).collect();
-    let blobs = read(checkout, &ids)?;
-    (regular.into_iter().zip(blobs))
-        .map(|((path, _), blob)| {
-            let blob = blob.ok_or_else(|| format!("{} is listed and missing", path.display()))?;
-            Ok((path, blob))
-        })
-        .collect()
+    Ok(regular)
 }
 
-/// The bytes at each of `specs`, none where git finds nothing, from one `cat-file --batch`
+/// The bytes at each of `specs`, none where git finds nothing, read in process where gix can say
+/// and else from one `cat-file --batch`
 pub(super) fn read(checkout: &Path, specs: &[&str]) -> Result<Vec<Option<Vec<u8>>>, String> {
     if specs.is_empty() {
         return Ok(Vec::new());
     }
     if specs.iter().any(|spec| spec.contains('\n')) {
         return Err("a name with a line break cannot be read".to_owned());
+    }
+    if let Some(read) = worktree::blobs(checkout, specs) {
+        return Ok(read);
     }
     let mut child = in_repo(checkout)
         .args(["cat-file", "--batch"])

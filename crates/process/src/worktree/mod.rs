@@ -48,6 +48,7 @@ pub use contribution::{
     Change, Opaque, Touched, change as contribution_change, changed_paths,
     checkout as contribution_checkout,
 };
+pub use in_process::{TreeFile, blobs, tree_files};
 pub use loose::{commit_of, loose_commit, loose_commit_in};
 pub use push::push_commits;
 pub use remote::Remote;

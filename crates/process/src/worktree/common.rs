@@ -4,18 +4,21 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
-use super::{WorktreeError, canonical, git};
+use super::{WorktreeError, canonical, git, in_process};
 
 static KNOWN: Mutex<BTreeMap<PathBuf, PathBuf>> = Mutex::new(BTreeMap::new());
 
-/// The common git dir of `repo`, canonical, read from git the first time
-/// and kept after
+/// The common git dir of `repo`, canonical, read the first time in process
+/// or else from git, and kept after
 ///
 /// # Errors
 ///
 /// [`WorktreeError`] when git cannot name the dir. A failure is not kept.
 pub(super) fn of(repo: &Path) -> Result<PathBuf, WorktreeError> {
     kept(&KNOWN, repo, || {
+        if let Some(common) = in_process::common_dir(repo) {
+            return Ok(canonical(&common));
+        }
         let common = git(
             repo,
             ["rev-parse", "--path-format=absolute", "--git-common-dir"],
