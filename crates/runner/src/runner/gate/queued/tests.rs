@@ -332,7 +332,7 @@ fn a_runless_check_in_progress_past_a_jobs_timeout_raises_check_queued() {
              not a workflow, so kelpie cannot rerun it, and it can be retried where it was \
              posted: https://github.com/shep-pm/shep/pull/71/checks. `shep kelpie rule 71 \
              yes` or `shep kelpie rule 71 no <note>` has kelpie wait another \
-             `ci.queued_minutes`.",
+             6 hours.",
             &head[..7]
         )
     );

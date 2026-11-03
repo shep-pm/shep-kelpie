@@ -139,7 +139,7 @@ pub(in crate::runner) fn question(
                     "{} never finished on {about} at {}. It comes from an app, not a \
                      workflow, so kelpie cannot rerun it, and it can be retried where it \
                      was posted: {url}. {yes} or {no} has kelpie wait another \
-                     `ci.queued_minutes`.",
+                     6 hours.",
                     checks.join(", "),
                     short(head)
                 );
