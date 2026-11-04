@@ -661,6 +661,9 @@ fn role_model(keys: &SessionKeys<'_>) -> Result<RoleModel, String> {
             facts.name
         ));
     }
+    if keys.login == Login::Api && keys.harness == Harness::Pi {
+        return pi_on_the_api(keys);
+    }
     let server = match (facts.needs_model_server, &keys.host, keys.context) {
         (true, Some(host), Some(context)) => Some(model_server(facts.name, host, context)?),
         (true, ..) => {
@@ -687,7 +690,8 @@ fn role_model(keys: &SessionKeys<'_>) -> Result<RoleModel, String> {
                 keys.yaml,
                 "login",
                 &format!(
-                    "runs on {}, which has no API login yet: leave `login` out",
+                    "runs on {}, which has no API login: only claude-code and pi take \
+                     `login: api`, so leave `login` out",
                     facts.name
                 ),
             )
@@ -697,6 +701,35 @@ fn role_model(keys: &SessionKeys<'_>) -> Result<RoleModel, String> {
         model: keys.model.clone(),
         effort: keys.effort,
         harness,
+        tools: keys.tools.cloned(),
+    })
+}
+
+// pi on Anthropic's own API: no server to name, and the context size its compaction reads
+fn pi_on_the_api(keys: &SessionKeys<'_>) -> Result<RoleModel, String> {
+    // parity: harness.api-login
+    let named = match &keys.host {
+        Some(ModelHost::Url(_)) => Some("url"),
+        Some(ModelHost::Gateway(_)) => Some("gateway"),
+        None => None,
+    };
+    if let Some(key) = named {
+        let why = "runs on pi with `login: api`, which reaches Anthropic's API and no model \
+                   server: leave it out";
+        return Err(at_key(keys.yaml, key, why));
+    }
+    let Some(context) = keys.context else {
+        return Err(at_key(
+            keys.yaml,
+            "login",
+            "runs on pi with `login: api`, which needs the model's context size as `context`, \
+             as pi compacts by it",
+        ));
+    };
+    Ok(RoleModel {
+        model: keys.model.clone(),
+        effort: keys.effort,
+        harness: AgentHarness::PiApi(context),
         tools: keys.tools.cloned(),
     })
 }

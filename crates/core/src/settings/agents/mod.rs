@@ -117,6 +117,9 @@ pub enum AgentHarness {
     ClaudeApi,
     /// pi, on the model a server runs
     Pi(ModelServer),
+    /// pi, on Anthropic's own API with the runner's key: no model server,
+    /// and the context size pi compacts by
+    PiApi(ContextSize),
     /// Codex, on the ChatGPT account
     Codex,
     /// goose, on the model a server runs
@@ -159,20 +162,27 @@ impl AgentHarness {
         // parity: harness.api-login
         match self {
             Self::ClaudeCode => Some(Self::ClaudeApi),
+            Self::Pi(server) => Some(Self::PiApi(server.context)),
             _ => None,
         }
     }
 
     /// Whether its calls are billed to an API key
     pub fn bills_api(&self) -> bool {
-        matches!(self, Self::ClaudeApi)
+        matches!(self, Self::ClaudeApi | Self::PiApi(_))
+    }
+
+    /// Whether a call on it runs on a model server that kelpie names and
+    /// forwards to, which a call billed to the API key does not
+    pub fn needs_server(&self) -> bool {
+        matches!(self, Self::Pi(_) | Self::Goose(_))
     }
 
     /// The harness, as settings name it
     pub fn harness(&self) -> Harness {
         match self {
             Self::ClaudeCode | Self::ClaudeApi => Harness::ClaudeCode,
-            Self::Pi(_) => Harness::Pi,
+            Self::Pi(_) | Self::PiApi(_) => Harness::Pi,
             Self::Codex => Harness::Codex,
             Self::Goose(_) => Harness::Goose,
             #[cfg(any(test, feature = "test-support"))]
