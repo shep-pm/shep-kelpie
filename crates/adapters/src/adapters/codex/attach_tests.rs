@@ -74,7 +74,7 @@ fn a_codex_session_for_the_terminal_resumes_in_the_workers_sandbox() {
     assert_eq!(args[0], "resume");
     assert_eq!(args[args.len() - 2..], ["--", THREAD]);
     let pair = |a: &str, b: &str| args.windows(2).any(|w| w == [a, b]);
-    assert!(pair("--model", "gpt-6-sol"), "{args:?}");
+    assert!(pair("--model", "gpt-6.1-sol"), "{args:?}");
     assert!(pair("--sandbox", "danger-full-access"), "{args:?}");
     assert!(pair("--ask-for-approval", "on-request"), "{args:?}");
     assert!(!args.iter().any(|a| a == "untrusted"), "{args:?}");
