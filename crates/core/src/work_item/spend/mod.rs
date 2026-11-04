@@ -159,7 +159,24 @@ impl WorkItem {
         usage: Usage,
         session_cost: Option<Cost>,
     ) -> Option<Cost> {
+        self.record_metered_call(role, at, session, usage, session_cost, None)
+    }
+
+    /// Records a call like [`Self::record_call`], priced by `energy` where its
+    /// harness reports no session cost: what its gateway's lease used, at the
+    /// host's price
+    pub fn record_metered_call(
+        &mut self,
+        role: Role,
+        at: Timestamp,
+        session: SessionId,
+        usage: Usage,
+        session_cost: Option<Cost>,
+        energy: Option<Cost>,
+    ) -> Option<Cost> {
         let before = self.session_cost(&session);
+        let session_cost =
+            session_cost.or_else(|| energy.map(|e| Cost(before.0.saturating_add(e.0))));
         let unpriced = session_cost.is_none();
         let session_cost = session_cost.unwrap_or(before);
         let cost = Cost(session_cost.0.saturating_sub(before.0));

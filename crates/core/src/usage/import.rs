@@ -90,6 +90,8 @@ fn call_of(line: &str) -> Option<CallLine> {
         compactions: 0,
         units: units(usage),
         cost_usd: step.cost_usd,
+        energy_wh: None,
+        energy_source: None,
         unpriced: step.cost_usd.is_none(),
         session_cost_usd: None,
         seconds: None,

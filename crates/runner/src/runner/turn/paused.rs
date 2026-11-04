@@ -49,7 +49,14 @@ impl Runner {
         let item = self.current_in(&mut next)?;
         if let Ok(reply) = result {
             let session = item.session.clone();
-            item.record_call(Role::Worker, now, session, reply.usage, reply.session_cost);
+            item.record_metered_call(
+                Role::Worker,
+                now,
+                session,
+                reply.usage,
+                reply.session_cost,
+                reply.metered.and_then(|m| m.cost),
+            );
             item.context = reply.context;
         }
         item.turn = Turn::Next {

@@ -24,7 +24,12 @@ const TOKENS: Family = Family {
 const COST: Family = Family {
     name: "kelpie_cost_usd_total",
     kind: Counter,
-    help: "What the calls whose harness reported a cost cost, in US dollars, by agent and effort.",
+    help: "What the calls that have a cost cost, in US dollars, by agent and effort: the cost their harness reported, or the price of their lease's energy.",
+};
+const ENERGY: Family = Family {
+    name: "kelpie_energy_wh_total",
+    kind: Counter,
+    help: "Watt-hours the gateway's leases used for the calls on a model it meters, by agent, model and what measured them.",
 };
 const COMPACTIONS: Family = Family {
     name: "kelpie_compactions_total",
@@ -34,7 +39,7 @@ const COMPACTIONS: Family = Family {
 const UNPRICED: Family = Family {
     name: "kelpie_unpriced_calls_total",
     kind: Counter,
-    help: "Calls whose harness reported no cost.",
+    help: "Calls with no cost: their harness reported none and no priced lease stood in.",
 };
 const CALL_SECONDS: Family = Family {
     name: "kelpie_call_seconds_total",
@@ -246,6 +251,16 @@ impl Recorder {
                 reason = "a call's tokens stay far below 2^53"
             )]
             self.add(&TOKENS, labels, count as f64);
+        }
+        if let (Some(wh), Some(source)) = (call.energy_wh, call.energy_source) {
+            let labels = vec![
+                role.clone(),
+                agent.clone(),
+                harness.clone(),
+                model.clone(),
+                ("source", wire(&source)),
+            ];
+            self.add(&ENERGY, labels, wh);
         }
         match call.cost_usd {
             Some(usd) => {

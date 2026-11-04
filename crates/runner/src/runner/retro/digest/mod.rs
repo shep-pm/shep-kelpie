@@ -101,7 +101,13 @@ struct Spend {
     units: u64,
     cost: f64,
     priced: u32,
+    // Calls priced by their lease's energy, and what that cost
+    electric: u32,
+    electric_cost: f64,
     unpriced: u32,
+    // The unpriced calls whose energy was metered, and their watt-hours
+    metered: u32,
+    watt_hours: f64,
     timed_out: u32,
 }
 
@@ -114,10 +120,24 @@ impl Spend {
             // unknown rather than nothing
             self.timed_out += 1;
         } else if call.cost_usd.is_some() && !call.unpriced {
-            self.priced += 1;
-            self.cost += call.cost_usd.unwrap_or_default();
+            let cost = call.cost_usd.unwrap_or_default();
+            // A harness that reported a session cost priced the call itself.
+            match (call.energy_wh, call.session_cost_usd) {
+                (Some(_), None) => {
+                    self.electric += 1;
+                    self.electric_cost += cost;
+                }
+                _ => {
+                    self.priced += 1;
+                    self.cost += cost;
+                }
+            }
         } else {
             self.unpriced += 1;
+            if let Some(wh) = call.energy_wh {
+                self.metered += 1;
+                self.watt_hours += wh;
+            }
         }
     }
 
@@ -126,7 +146,11 @@ impl Spend {
         self.units += other.units;
         self.cost += other.cost;
         self.priced += other.priced;
+        self.electric += other.electric;
+        self.electric_cost += other.electric_cost;
         self.unpriced += other.unpriced;
+        self.metered += other.metered;
+        self.watt_hours += other.watt_hours;
         self.timed_out += other.timed_out;
     }
 
@@ -139,7 +163,7 @@ impl Spend {
             cost: role.cost_usd,
             priced: role.calls.saturating_sub(role.unpriced_calls),
             unpriced: role.unpriced_calls,
-            timed_out: 0,
+            ..Self::default()
         }
     }
 
@@ -149,13 +173,19 @@ impl Spend {
         if self.priced > 0 {
             parts.push(format!("${:.2}", self.cost));
         }
+        if self.electric > 0 {
+            let electricity = format!("local, ${:.2} of electricity", self.electric_cost);
+            parts.push(match self.electric == self.calls {
+                true => electricity,
+                false => format!("{} {electricity}", self.electric),
+            });
+        }
         if self.unpriced > 0 {
-            parts.push(each(
-                self.unpriced,
-                self.calls,
-                "local, unpriced",
-                "unpriced",
-            ));
+            let whole = match self.metered == self.unpriced {
+                true => format!("local, {} Wh, unpriced", watt_hours(self.watt_hours)),
+                false => "local, unpriced".to_owned(),
+            };
+            parts.push(each(self.unpriced, self.calls, &whole, "unpriced"));
         }
         if self.timed_out > 0 {
             parts.push(each(
@@ -169,6 +199,14 @@ impl Spend {
             true => "$0.00".to_owned(),
             false => parts.join("; "),
         }
+    }
+}
+
+// Watt-hours to a tenth, with no tenth when it is a whole number
+fn watt_hours(wh: f64) -> String {
+    match (wh - wh.round()).abs() < 0.05 {
+        true => format!("{wh:.0}"),
+        false => format!("{wh:.1}"),
     }
 }
 

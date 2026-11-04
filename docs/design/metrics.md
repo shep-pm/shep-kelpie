@@ -12,13 +12,13 @@ Kelpie's numbers, live, on shep's metrics endpoint. ADR 0012, #920.
 
 ## Series
 
-Calls, counted as each ledger line is appended (`Ledger::append`, `crates/core/src/usage/mod.rs`), the file written or not. Lines a stopping runner writes, imports and `shep kelpie issue`'s are not counted:
+Calls, counted as each ledger line is appended (`Ledger::append`, `crates/core/src/usage/mod.rs`), written or not. A stopping runner's lines, imports and `shep kelpie issue`'s are not counted:
 
-- `kelpie_calls_total{role,kind,agent,harness,effort,ended}`: `agent` is the settings' name for it (`codex`, `coderabbit`, `qwen`), and `agent` and `effort` read `unknown` where the line has none (imported lines, a local round's effort)
-- Forge calls (`kelpie_forge_calls_total`) and the login's rate limit gauges (`kelpie_forge_rate_used`, `kelpie_forge_rate_reset_timestamp_seconds`) are in `metrics-dog.md`; they are 18 series
+- `kelpie_calls_total{role,kind,agent,harness,effort,ended}`: `agent` is the settings' name for it; `agent` and `effort` read `unknown` where the line has none (imported lines, a local round's effort)
+- Forge calls (`kelpie_forge_calls_total`) and the login's rate limit gauges (`kelpie_forge_rate_*`) are in `metrics-dog.md`; 18 series
 - `kelpie_tokens_total{role,agent,harness,model,effort,type}`: `type` is `input`, `output`, `cache_read`, `cache_write`
-- `kelpie_cost_usd_total{role,agent,harness,model,effort}`, priced calls only; `kelpie_unpriced_calls_total{role,harness}`
-- `kelpie_compactions_total{role,harness}`: a compaction the harness did by itself partway through a call, from the ledger line's `compactions`. Claude Code: its compaction hook (`crates/adapters/src/adapters/claude/settings/mod.rs`) leaves a mark in the call's scratch folder, counted when the call ends; only a worker with a `compact_window` has the hook, and a call another image adopted counts none. pi: each `compaction_end` of a turn that made a summary. Kelpie's own `/compact` is `kind="compact"` in `kelpie_calls_total`, not here. Codex and goose: none yet
+- `kelpie_cost_usd_total{role,agent,harness,model,effort}`, priced calls only, electricity included; `kelpie_energy_wh_total{role,agent,harness,model,source}`, a metered call's watt-hours (`source`: `wall` or `parts`); `kelpie_unpriced_calls_total{role,harness}`, metered calls with no price too
+- `kelpie_compactions_total{role,harness}`: a compaction the harness did by itself partway through a call. Claude Code: its compaction hook (`crates/adapters/src/adapters/claude/settings/mod.rs`) leaves a mark in the call's scratch folder, counted when the call ends; only a worker with a `compact_window` has the hook, and a call another image adopted counts none. pi: each `compaction_end` of a turn that made a summary. Kelpie's own `/compact` is `kind="compact"` in `kelpie_calls_total`. Codex, goose: none yet
 - `kelpie_call_seconds_total{role,kind}`, beside `kelpie_calls_total` for a mean
 
 Plan limits: gauges the pacer sets whenever it reads an account's usage (`Runner::pace`, `runner/pace.rs`), not when the reading fails. `account` is `claude` or `codex` (`Account::as_str`). `crates/core/src/metrics/plan.rs`

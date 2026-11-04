@@ -781,3 +781,69 @@ fn a_turn_claude_code_compacted_counts_one_compaction() {
         "a turn that did not compact adds none"
     );
 }
+
+// A worker's turn on a local model, as its ledger line reads, with its `energy` fields
+fn local_turn(cost: Option<f64>, energy: serde_json::Value) -> Line {
+    let mut line = serde_json::json!({
+        "line": "call", "at": 1, "issue": "7", "role": "worker", "kind": "turn",
+        "agent": "local-qwen", "harness": "goose", "model": "qwen3",
+        "usage": { "input": 1, "cache_write": 0, "cache_read": 0, "output": 1 },
+        "units": 2, "seconds": 3, "ended": "answered", "unpriced": cost.is_none(),
+    });
+    line["cost_usd"] = cost.into();
+    line.as_object_mut()
+        .unwrap()
+        .extend(energy.as_object().unwrap().clone());
+    serde_json::from_value(line).unwrap()
+}
+
+#[test]
+fn energy_is_counted_by_agent_and_model() {
+    let (recorder, sink) = recorder();
+    let energy =
+        |wh: f64, source: &str| serde_json::json!({ "energy_wh": wh, "energy_source": source });
+    recorder.line(&local_turn(Some(0.04), energy(12.5, "wall")));
+    recorder.line(&local_turn(Some(0.02), energy(6.0, "wall")));
+    recorder.line(&local_turn(None, energy(3.0, "parts")));
+
+    let who = [
+        ("role", "worker"),
+        ("agent", "local-qwen"),
+        ("harness", "goose"),
+        ("model", "qwen3"),
+    ];
+    let source = |source| [&who[..], &[("source", source)]].concat();
+    assert_eq!(
+        sink.value("kelpie_energy_wh_total", &source("wall")),
+        Some(18.5)
+    );
+    assert_eq!(
+        sink.value("kelpie_energy_wh_total", &source("parts")),
+        Some(3.0)
+    );
+}
+
+#[test]
+fn an_energy_priced_call_counts_in_the_cost_total() {
+    let (recorder, sink) = recorder();
+    let energy = serde_json::json!({ "energy_wh": 12.5, "energy_source": "wall" });
+    recorder.line(&local_turn(Some(0.04), energy.clone()));
+    recorder.line(&local_turn(None, energy));
+
+    let cost = [
+        ("role", "worker"),
+        ("agent", "local-qwen"),
+        ("harness", "goose"),
+        ("model", "qwen3"),
+        ("effort", "unknown"),
+    ];
+    assert_eq!(sink.value("kelpie_cost_usd_total", &cost), Some(0.04));
+    assert_eq!(
+        sink.value(
+            "kelpie_unpriced_calls_total",
+            &[("role", "worker"), ("harness", "goose")]
+        ),
+        Some(1.0),
+        "a metered call with no price is still unpriced"
+    );
+}

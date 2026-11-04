@@ -121,10 +121,12 @@ impl Runner {
             Some(ReviewSpent::Claude {
                 usage,
                 session_cost,
+                metered,
                 ..
             }) => Some(Spent {
                 usage: *usage,
                 session_cost: *session_cost,
+                metered: *metered,
                 // A reviewer's session has no compact window, so no hook counts a compaction.
                 compactions: 0,
             }),

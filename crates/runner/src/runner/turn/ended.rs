@@ -104,8 +104,14 @@ impl Runner {
                     _ => None,
                 };
                 let session = item.session.clone();
-                let cost =
-                    item.record_call(Role::Worker, now, session, reply.usage, reply.session_cost);
+                let cost = item.record_metered_call(
+                    Role::Worker,
+                    now,
+                    session,
+                    reply.usage,
+                    reply.session_cost,
+                    reply.metered.and_then(|m| m.cost),
+                );
                 item.summary = crate::board::briefing::summary(&reply.text);
                 item.context = reply.context;
                 // A fix turn's reply says what it made of each bot thread sent.

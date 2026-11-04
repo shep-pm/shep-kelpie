@@ -11,7 +11,7 @@ use serde::Serialize;
 use crate::board::Skip;
 use crate::pacer::HoldKind;
 use crate::ports::{
-    AgentCall, Cost, Finding, Role, RoundEnd, SessionId, Timestamp, Transcript, Usage,
+    AgentCall, Cost, Finding, Metered, Role, RoundEnd, SessionId, Timestamp, Transcript, Usage,
 };
 use crate::settings::{AgentName, LocalRound};
 use crate::ticket::TicketId;
@@ -836,6 +836,7 @@ pub(super) enum Spent {
         session: SessionId,
         usage: Usage,
         session_cost: Option<Cost>,
+        metered: Option<Metered>,
     },
     /// A local round that ran, however it ended
     Local,

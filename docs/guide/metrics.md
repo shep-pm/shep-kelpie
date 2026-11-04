@@ -36,9 +36,10 @@ Every runner series carries `sheep`, the project's name, as well as `id` and `fo
 |---|---|---|
 | `kelpie_calls_total` | `role`, `kind`, `agent`, `harness`, `effort`, `ended` | Model calls that ended, and how: `answered`, `unreadable`, `failed`, `timed-out`, `stopped`, `paused` |
 | `kelpie_tokens_total` | `role`, `agent`, `harness`, `model`, `effort`, `type` | Tokens as the harness reported them: `input`, `output`, `cache_read`, `cache_write` |
-| `kelpie_cost_usd_total` | `role`, `agent`, `harness`, `model`, `effort` | US dollars, from calls whose harness reported a cost |
+| `kelpie_cost_usd_total` | `role`, `agent`, `harness`, `model`, `effort` | US dollars, from calls whose harness reported a cost, and from calls priced by their lease's energy |
+| `kelpie_energy_wh_total` | `role`, `agent`, `harness`, `model`, `source` | Watt-hours the gateway's leases used for calls on a model it meters. `source` is `wall` (a meter on the host's socket) or `parts` (the host's parts, summed). The host's whole draw, shared with the leases beside it |
 | `kelpie_compactions_total` | `role`, `harness` | Compactions the harness did by itself partway through a call. Kelpie's own `/compact` is `kind="compact"` in `kelpie_calls_total`. Claude Code workers with a compact window, and pi; a call adopted by a new runner image counts none |
-| `kelpie_unpriced_calls_total` | `role`, `harness` | Calls whose harness reported no cost |
+| `kelpie_unpriced_calls_total` | `role`, `harness` | Calls with no cost: no harness cost and no priced lease |
 | `kelpie_call_seconds_total` | `role`, `kind` | Seconds the calls ran; over `kelpie_calls_total` for a mean |
 | `kelpie_plan_used_ratio` | `account`, `window` | How much of a plan window is used, 0 to 1, as the pacer last read it. `account` is `claude` or `codex`, `window` is `session` (5 hours) or `week` |
 | `kelpie_plan_resets_at_seconds` | `account`, `window` | When that window resets, in Unix seconds |
