@@ -7,6 +7,7 @@ use super::briefing::passed_over;
 use super::pace::{Started, Walked};
 use super::pm::Picked;
 use super::trigger::issue_list;
+use crate::agent_board::within_slack;
 use crate::board::check::label_kind;
 use crate::board::{
     self, LabelError, OpenPullRequest, READY, ReadyIssue, Skip, agent_label, old_worker_label,
@@ -96,9 +97,9 @@ impl core::error::Error for Unpicked {}
 pub(super) struct Ranked {
     first: AgentName,
     rest: Vec<AgentName>,
-    // A pin, the project manager's or a pinned label's, was the only agent asked for
+    // A pinned label's agent was the only one asked for
     pinned: bool,
-    // The note for a project manager's pin that lapsed, told once the item opens
+    // The note for a project manager's pick that did not hold, told once the item opens
     note: Option<String>,
 }
 
@@ -371,8 +372,10 @@ impl Runner {
     }
 
     // The implementers the agent board ranks for a work item for `ticket`,
-    // whose issue has `labels`, on what `picked` says. A pin, the project
-    // manager's or else a pinned `agent:` label's, is the only one asked for.
+    // whose issue has `labels`, on what `picked` says. The project manager's
+    // agent is asked for alone first and takes the item, unpinned, when the
+    // board ranks it able to start within the slack. Otherwise the ask is as if
+    // none were named: a pinned `agent:` label's agent alone, else the ranking.
     pub(super) fn ranked(
         &self,
         ticket: TicketId,
@@ -380,21 +383,41 @@ impl Runner {
         picked: Option<&Picked>,
     ) -> Result<Ranked, AddError> {
         let files = self.implementer_files();
-        let (pin, note) = pin(ticket, picked, &files);
-        let pin = match pin {
-            Some(pin) => Some(pin),
-            // A label naming no implementer is refused, pinned or not.
-            None => (agent_label(labels, &files))
-                .map_err(AddError::Label)?
-                .filter(|_| pinned(labels)),
-        };
+        let (named, mut note) = first_choice(ticket, picked, &files);
+        // A label naming no implementer is refused, pinned or not.
+        let pin =
+            (agent_label(labels, &files).map_err(AddError::Label)?).filter(|_| pinned(labels));
         let ask = PickAsk {
             kind: label_kind(labels).map(str::to_owned),
             tier: picked.and_then(|p| p.tier),
-            pin: pin.clone(),
+            pin: None,
             slack: Some(self.slack(picked.and_then(|p| p.slack))),
             agents: self.board_agents_of(files),
             leave_out: Vec::new(),
+        };
+        if let Some(agent) = named {
+            let alone = PickAsk {
+                pin: Some(agent.clone()),
+                ..ask.clone()
+            };
+            let picks = self.board_picks(&alone).map_err(AddError::Unpicked)?;
+            if (picks.iter()).any(|pick| within_slack(pick.wait, 0, alone.slack)) {
+                return Ok(Ranked {
+                    first: agent,
+                    rest: Vec::new(),
+                    pinned: false,
+                    note,
+                });
+            }
+            note = Some(format!(
+                "{}: the project manager picked {agent}, which cannot start within its slack, \
+                 so the agent board picks",
+                ticket.shown()
+            ));
+        }
+        let ask = PickAsk {
+            pin: pin.clone(),
+            ..ask
         };
         let picks = self.board_picks(&ask).map_err(AddError::Unpicked)?;
         let mut agents = picks.into_iter().map(|pick| pick.agent);
@@ -522,10 +545,10 @@ impl Runner {
     }
 }
 
-// The agent `picked` pins its work item to, while it is one of `files`, the
+// The agent `picked` names to try first, while it is one of `files`, the
 // implementers `agents.allow` holds, and the note for an agent it names that
 // is no implementer now.
-fn pin(
+fn first_choice(
     ticket: TicketId,
     picked: Option<&Picked>,
     files: &[AgentName],
@@ -533,10 +556,10 @@ fn pin(
     let Some(picked) = picked else {
         return (None, None);
     };
-    let pin = (picked.agent.as_ref())
+    let named = (picked.agent.as_ref())
         .filter(|agent| files.contains(agent))
         .cloned();
-    let lapsed = picked.agent.as_ref().filter(|_| pin.is_none());
+    let lapsed = picked.agent.as_ref().filter(|_| named.is_none());
     let note = lapsed.map(|agent| {
         format!(
             "{}: the project manager picked it for {agent}, which is no longer an \
@@ -544,7 +567,7 @@ fn pin(
             ticket.shown()
         )
     });
-    (pin, note)
+    (named, note)
 }
 
 // What `ask` wanted, in words: its kind, its least tier and its pin.

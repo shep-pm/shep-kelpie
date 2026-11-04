@@ -429,8 +429,8 @@ fn the_agents_section_lists_the_implementers_then_the_reviewers_with_tier_kinds_
         section,
         "\n\
          Implementers by name, then reviewers in their order. The agent board picks a work \
-         item's implementer by its kind, tier and slack. An agent marked out starts nothing \
-         before its time. A pick's agent is tried first, not pinned, and an `agent:<name>!` \
+         item's implementer by its kind, tier and slack. An agent marked out cannot start \
+         a work item before the time shown. A pick's agent is tried first, not pinned, and an `agent:<name>!` \
          label pins.\n\
          \n\
          - opus-high (implementer): heavy tier, kinds design, migration; \

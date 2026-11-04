@@ -68,8 +68,8 @@ fn a_new_project_gets_its_board_at_start_with_nothing_on_it() {
              ## Agents\n\
              \n\
              Implementers by name, then reviewers in their order. The agent board picks a work \
-             item's implementer by its kind, tier and slack. An agent marked out starts nothing \
-             before its time. A pick's agent is tried first, not pinned, and an \
+             item's implementer by its kind, tier and slack. An agent marked out cannot start \
+             a work item before the time shown. A pick's agent is tried first, not pinned, and an \
              `agent:<name>!` label pins.\n\
              \n\
              - opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, \
@@ -136,7 +136,7 @@ const TWO_BRANCHES: &str = r#"# Board: acme, 2026-09-21 14:18 UTC
 
 ## Agents
 
-Implementers by name, then reviewers in their order. The agent board picks a work item's implementer by its kind, tier and slack. An agent marked out starts nothing before its time. A pick's agent is tried first, not pinned, and an `agent:<name>!` label pins.
+Implementers by name, then reviewers in their order. The agent board picks a work item's implementer by its kind, tier and slack. An agent marked out cannot start a work item before the time shown. A pick's agent is tried first, not pinned, and an `agent:<name>!` label pins.
 
 - opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, such as a data migration, a release step or a change to a public interface.
 - sonnet-high (implementer): standard tier, every kind; Builds everyday features and anything with state, such as a store, a queue or a migration.

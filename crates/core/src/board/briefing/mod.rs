@@ -490,8 +490,8 @@ fn agents(out: &mut String, agents: &[AgentLine]) {
     }
     out.push_str(
         "Implementers by name, then reviewers in their order. The agent board picks a work \
-         item's implementer by its kind, tier and slack. An agent marked out starts nothing \
-         before its time. A pick's agent is tried first, not pinned, and an `agent:<name>!` \
+         item's implementer by its kind, tier and slack. An agent marked out cannot start \
+         a work item before the time shown. A pick's agent is tried first, not pinned, and an `agent:<name>!` \
          label pins.\n\n",
     );
     for agent in agents {
