@@ -556,7 +556,7 @@ fn the_probe_refuses_a_target_that_reads_only_format_3_when_a_goose_turn_is_carr
         .unwrap_err();
 
     assert!(
-        matches!(refused, HandOverError::Format { format: 6, .. }),
+        matches!(refused, HandOverError::Format { format: 7, .. }),
         "{refused}"
     );
 }
