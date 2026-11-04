@@ -6,7 +6,7 @@ use shep_client::shep_core::protocol::request::ProcessInfo;
 
 use super::Line;
 use crate::adapters::host::{Host, at_least};
-use crate::adapters::{GOOSE_MINIMUM, LOGIN_FIX, LOGIN_VAR, PI_MINIMUM};
+use crate::adapters::{API_FIX, API_VAR, GOOSE_MINIMUM, LOGIN_FIX, LOGIN_VAR, PI_MINIMUM};
 use crate::ports::{Clock, Forge, ForgeError, Meter, MeterError};
 use crate::shepherd::{ConnectRefused, Connection};
 
@@ -430,6 +430,26 @@ pub(super) fn login(subject: String, env: &[String], host: &dyn Host) -> Line {
             LOGIN_FIX,
         ),
     }
+}
+
+/// The API key the calls of a project's agents with `login: api` run with
+///
+/// Only the runner uses it, so it is read from the sheep's `env`, whose
+/// secret-backed names are `env`, and not from this shell's.
+pub(super) fn api_key(subject: String, env: &[String]) -> Line {
+    if env.iter().any(|name| name == API_VAR) {
+        return Line::ok(
+            subject,
+            "claude bills the calls of agents with `login: api` to ANTHROPIC_API_KEY from the \
+             runner's `env`",
+        );
+    }
+    Line::missing(
+        subject,
+        "ANTHROPIC_API_KEY is not set in the runner's `env`, so the calls of agents with \
+         `login: api` have no key to bill",
+        API_FIX,
+    )
 }
 
 /// The shepherd, on the pinned shep line

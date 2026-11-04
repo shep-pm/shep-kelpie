@@ -358,3 +358,68 @@ async fn without_an_app_doctor_says_every_read_goes_through_the_maintainers_logi
     );
     assert!(said.contains("your own gh login"), "{said}");
 }
+
+// Writes agent files that bill the API into kelpie's agents.
+fn bills_the_api(scene: &Scene, names: &[&str]) {
+    let agents = scene.kelpie_home.join("agents");
+    for name in names {
+        let role = if name.ends_with("reviewer") {
+            "reviewer"
+        } else {
+            "implementer"
+        };
+        let text = format!(
+            "---\nrole: {role}\nharness: claude-code\nmodel: claude-sonnet-5-5\neffort: low\n\
+             login: api\n---\nLook.\n"
+        );
+        crate::test::write_in(&agents, &format!("{name}.md"), &text);
+    }
+}
+
+// Only the runner uses the key, so doctor reads it from the runner's `env` and not from the shell.
+#[tokio::test]
+async fn an_api_agent_with_no_key_in_the_runner_env_is_missing_the_key_and_names_the_fix() {
+    let scene = Scene::new().await;
+    bills_the_api(&scene, &["api-builder"]);
+    scene.runs("golbat", |t| holds(t, &["api-builder"]));
+
+    let report = scene.report().await;
+
+    let (what, fix) = missing(&report, "golbat: anthropic api key");
+    assert!(what.contains("ANTHROPIC_API_KEY"), "{what}");
+    assert!(fix.contains("`shep secret set ANTHROPIC_API_KEY`"), "{fix}");
+    assert!(fix.contains("`env`"), "{fix}");
+    assert!(!report.passed());
+    // koji allows no API agent, so it asks for no key.
+    assert!(!subjects(&report).contains(&"koji: anthropic api key"));
+
+    scene.shepherd.sets_env(
+        "golbat",
+        "ANTHROPIC_API_KEY",
+        "{{secret:ANTHROPIC_API_KEY}}",
+    );
+    let report = scene.report().await;
+    let found = ok(&report, "golbat: anthropic api key");
+    assert!(found.contains("the runner's `env`"), "{found}");
+}
+
+#[tokio::test]
+async fn a_project_whose_claude_agents_all_bill_the_api_asks_for_no_login_token() {
+    let mut scene = Scene::new().await;
+    scene.host.token = false;
+    bills_the_api(&scene, &["api-builder", "api-reviewer"]);
+    scene.runs("golbat", |t| {
+        t["agents"]["allow"] = json!(["api-builder", "api-reviewer"]);
+    });
+
+    let report = scene.report().await;
+
+    let lines = report.render();
+    assert!(
+        !subjects(&report).contains(&"golbat: claude login"),
+        "{lines:#?}"
+    );
+    assert!(subjects(&report).contains(&"golbat: anthropic api key"));
+    // A project with a plan agent still needs the login.
+    assert!(subjects(&report).contains(&"koji: claude login"));
+}

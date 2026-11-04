@@ -20,7 +20,7 @@ use std::time::Duration;
 use shep_handover::Arrival;
 
 use crate::adapters::{
-    Base, ClaudeCli, CodexCli, Curl, CurlGithub, DogE2e, DoorBoard, DoorPace, Etags,
+    ApiKey, Base, ClaudeCli, CodexCli, Curl, CurlGithub, DogE2e, DoorBoard, DoorPace, Etags,
     GatewayClassifier, Gh, GhApps, GooseCli, GpuCurl, LocalReviewer, LoginToken, McpRules, Openssl,
     PiCli, PlaywrightBridges, PlaywrightPages, SandboxRuntime, ShepLeases, ShepherdSink, StatDisk,
     SystemGit, stop_calls,
@@ -187,8 +187,10 @@ fn serve(project: &str, arrival: Option<Arrival<Carry>>) -> Result<(), Exit> {
     let shepherd = shep_channel::serve();
     let gateways = kelpie_settings.gateways();
     crate::spawn::hide(gateways.key_vars());
-    // The runner's `env` holds the token `claude` logs in with, for `claude` alone.
+    // The runner's `env` holds the token `claude` logs in with and the API key an
+    // agent with `login: api` bills, each for `claude` alone.
     let login = LoginToken::take();
+    let api_key = ApiKey::take();
     let base = Base::labelling(Arc::new(shepherd.clone()))
         .in_runtime(home.clone(), &codex_home, gateways.key_vars())
         .unfenced_unread(&home, &shep_home);
@@ -218,7 +220,7 @@ fn serve(project: &str, arrival: Option<Arrival<Carry>>) -> Result<(), Exit> {
         agents: Arc::new(Routed::new(vec![
             (
                 Harness::ClaudeCode,
-                Arc::new(ClaudeCli::on(&base).with_login(login)),
+                Arc::new(ClaudeCli::on(&base).with_login(login).with_api_key(api_key)),
             ),
             (
                 Harness::Pi,

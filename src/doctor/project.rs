@@ -17,8 +17,8 @@ use crate::ports::{Forge, NewLabel, Timestamp, Visibility};
 use crate::review_bot::{Bot, Login, Profile};
 use crate::runner::{NO_ORIGIN, check_checkout, check_instructions, source_of};
 use crate::settings::{
-    Account, AgentName, DoctorProbe, ForgeSlug, GatewayKeys, Gateways, Harness, Limit, PM_DECIDES,
-    Pick, RoleModel, Settings, SettingsError, TicketSource,
+    Account, AgentHarness, AgentName, DoctorProbe, ForgeSlug, GatewayKeys, Gateways, Harness,
+    Limit, PM_DECIDES, Pick, RoleModel, Settings, SettingsError, TicketSource,
 };
 use crate::webhook::KelpieSettings;
 
@@ -201,8 +201,15 @@ pub(super) fn checks(
             probes.forge,
         ));
     }
-    if spends_on(&settings, (&book, &gateways), here, Harness::ClaudeCode) {
+    // A call carries one credential: the login for a plan agent, the key for an API agent.
+    let plan = |model: &RoleModel| model.harness == AgentHarness::ClaudeCode;
+    if spends_on(&settings, (&book, &gateways), here, plan) {
         lines.push(super::machine::login(at("claude login"), env, probes.host));
+    }
+    if spends_on(&settings, (&book, &gateways), here, |m| {
+        m.harness.bills_api()
+    }) {
+        lines.push(super::machine::api_key(at("anthropic api key"), env));
     }
     lines.push(reviewers(
         at("reviewers"),
@@ -224,7 +231,8 @@ pub(super) fn checks(
         let Some(probe) = harness.facts().doctor_probe else {
             continue;
         };
-        if !spends_on(&settings, (&book, &gateways), here, harness) {
+        let on_it = |model: &RoleModel| model.harness.harness() == harness;
+        if !spends_on(&settings, (&book, &gateways), here, on_it) {
             continue;
         }
         match probe {
@@ -533,16 +541,15 @@ fn spends_codex(
     sessions || (settings.allowed_implementers(book).iter()).any(|i| codex(&i.limit))
 }
 
-// Whether an implementer, another role agent or a reviewer runs on `harness`: one among
-// a pass's candidates, or, when contributions are picked up, one that reads a
+// Whether an implementer, another role agent or a reviewer has a model `on_it` holds:
+// one among a pass's candidates, or, when contributions are picked up, one that reads a
 // contribution. Settings that do not resolve are another line's to report.
 fn spends_on(
     settings: &Settings,
     (book, gateways): (&Agents, &Gateways),
     here: Here<'_>,
-    harness: Harness,
+    on_it: impl Fn(&RoleModel) -> bool,
 ) -> bool {
-    let on_it = |model: &RoleModel| model.harness.harness() == harness;
     let roles = settings.role_agents(book).ok();
     let mut reviewers = settings.lineup(book, gateways, here.home);
     let mut security = None;
