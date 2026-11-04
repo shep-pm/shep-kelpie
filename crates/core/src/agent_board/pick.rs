@@ -20,6 +20,8 @@ pub struct Item<'a> {
     pub slack: Option<u32>,
     /// Agents not to pick
     pub leave_out: &'a [AgentName],
+    /// The maintainer's ranking of agents, first most wanted, empty for none
+    pub prefer: &'a [AgentName],
 }
 
 /// An agent the board may pick, with what it read of it
@@ -52,11 +54,12 @@ pub struct Choice<'a> {
 
 /// The candidates that fit `item`, in the order the board tries them
 ///
-/// Those within the slack of the soonest finish come first. An agent with a
-/// cost comes first, cheapest first, a local agent whose history names no
-/// cost counting as free. Agents with none follow, lowest tier first as a
-/// stand-in for price. Ties go soonest first, then by name. The rest follow,
-/// soonest first.
+/// Those within the slack of the soonest finish come first. A listed agent
+/// comes first, in the list's order, a name listed twice at its first place.
+/// The rest go by cost: an agent with a cost comes first, cheapest first, a
+/// local agent whose history names no cost counting as free. Agents with none
+/// follow, lowest tier first as a stand-in for price. Ties go soonest first,
+/// then by name. The agents past the slack follow, soonest first.
 pub fn pick<'a>(item: &Item<'_>, candidates: &[Candidate<'a>]) -> Vec<Choice<'a>> {
     // Each fit beside the cost and tier it is ranked on.
     let mut fits: Vec<(Choice<'a>, Option<f64>, Tier)> = candidates
@@ -85,7 +88,11 @@ pub fn pick<'a>(item: &Item<'_>, candidates: &[Candidate<'a>]) -> Vec<Choice<'a>
     fits.sort_by_key(|(c, ..)| (c.finish, c.agent));
     let (mut eligible, rest): (Vec<_>, Vec<_>) =
         (fits.into_iter()).partition(|(c, ..)| within_slack(c.finish, soonest, item.slack));
-    eligible.sort_by(|(_, a, a_tier), (_, b, b_tier)| cheaper(*a, *b, *a_tier, *b_tier));
+    let rank = |agent: &AgentName| item.prefer.iter().position(|p| p == agent);
+    eligible.sort_by(|(a, a_cost, a_tier), (b, b_cost, b_tier)| {
+        preferred(rank(a.agent), rank(b.agent))
+            .then_with(|| cheaper(*a_cost, *b_cost, *a_tier, *b_tier))
+    });
     eligible.extend(rest);
     eligible.into_iter().map(|(choice, ..)| choice).collect()
 }
@@ -103,6 +110,16 @@ pub(super) fn takes(fit: &Fit, kind: Option<&str>) -> bool {
         (None, _) => true,
         (Some(kinds), Some(kind)) => kinds.iter().any(|k| k == kind),
         (Some(_), None) => false,
+    }
+}
+
+// A listed agent beats an unlisted one, and an earlier place beats a later
+fn preferred(a: Option<usize>, b: Option<usize>) -> Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => a.cmp(&b),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
     }
 }
 
@@ -376,5 +393,115 @@ mod tests {
             order(&pick(&Item::default(), &candidates)),
             ["local", "priced", "amy", "zed"]
         );
+    }
+
+    #[test]
+    fn a_listed_agent_within_the_slack_ranks_before_a_cheaper_unlisted_one() {
+        let (listed, cheap) = (name("listed"), name("cheap"));
+        let any = Fit::default();
+        let candidates = [
+            candidate(&cheap, &any, Some(0), 600, Some(0.1)),
+            candidate(&listed, &any, Some(0), 900, Some(9.0)),
+        ];
+        let prefer = [listed.clone()];
+        let item = Item {
+            prefer: &prefer,
+            ..Item::default()
+        };
+        assert_eq!(order(&pick(&item, &candidates)), ["listed", "cheap"]);
+        assert_eq!(
+            order(&pick(&Item::default(), &candidates)),
+            ["cheap", "listed"],
+            "with no list the cheaper goes first"
+        );
+    }
+
+    #[test]
+    fn listed_agents_rank_in_the_lists_order_whatever_they_cost() {
+        let (a, b, c) = (name("a"), name("b"), name("c"));
+        let any = Fit::default();
+        let candidates = [
+            candidate(&a, &any, Some(0), 600, Some(0.1)),
+            candidate(&b, &any, Some(0), 600, Some(5.0)),
+            candidate(&c, &any, Some(0), 600, Some(1.0)),
+        ];
+        let prefer = [c.clone(), b.clone(), c.clone(), a.clone()];
+        let item = Item {
+            prefer: &prefer,
+            ..Item::default()
+        };
+        assert_eq!(
+            order(&pick(&item, &candidates)),
+            ["c", "b", "a"],
+            "a name listed twice takes its first place"
+        );
+    }
+
+    #[test]
+    fn a_listed_agent_past_the_slack_stays_behind_the_agents_within_it() {
+        let (soon, late, later) = (name("soon"), name("late"), name("later"));
+        let any = Fit::default();
+        let candidates = [
+            candidate(&later, &any, Some(0), 9000, Some(0.1)),
+            candidate(&late, &any, Some(0), 5400, Some(0.1)),
+            candidate(&soon, &any, Some(0), 600, Some(9.0)),
+        ];
+        let prefer = [later.clone(), late.clone()];
+        let item = Item {
+            prefer: &prefer,
+            slack: Some(60),
+            ..Item::default()
+        };
+        assert_eq!(
+            order(&pick(&item, &candidates)),
+            ["soon", "late", "later"],
+            "past the slack they stay soonest first, whatever the list says"
+        );
+    }
+
+    #[test]
+    fn unlisted_agents_follow_the_listed_ones_in_todays_order() {
+        let (listed, cheap, dear, unknown) =
+            (name("listed"), name("cheap"), name("dear"), name("unknown"));
+        let any = Fit::default();
+        let candidates = [
+            candidate(&unknown, &any, Some(0), 600, None),
+            candidate(&dear, &any, Some(0), 600, Some(5.0)),
+            candidate(&cheap, &any, Some(0), 600, Some(0.5)),
+            candidate(&listed, &any, Some(0), 600, Some(9.0)),
+        ];
+        let prefer = [listed.clone()];
+        let item = Item {
+            prefer: &prefer,
+            ..Item::default()
+        };
+        assert_eq!(
+            order(&pick(&item, &candidates)),
+            ["listed", "cheap", "dear", "unknown"]
+        );
+    }
+
+    #[test]
+    fn a_pin_and_a_left_out_agent_still_beat_the_list() {
+        let (first, second) = (name("first"), name("second"));
+        let any = Fit::default();
+        let candidates = [
+            candidate(&first, &any, Some(0), 600, Some(1.0)),
+            candidate(&second, &any, Some(0), 600, Some(1.0)),
+        ];
+        let prefer = [first.clone(), second.clone()];
+        let pinned = Item {
+            pin: Some(&second),
+            prefer: &prefer,
+            ..Item::default()
+        };
+        assert_eq!(order(&pick(&pinned, &candidates)), ["second"]);
+        let gone = [first.clone()];
+        let handed = Item {
+            leave_out: &gone,
+            prefer: &prefer,
+            ..Item::default()
+        };
+        assert_eq!(order(&pick(&handed, &candidates)), ["second"]);
     }
 }
