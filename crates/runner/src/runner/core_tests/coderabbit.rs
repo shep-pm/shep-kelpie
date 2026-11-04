@@ -55,6 +55,7 @@ fn activity(comments: &str, reviews: &str, threads: &str) -> Activity {
         reviews: parse_reviews(reviews.as_bytes()).unwrap(),
         threads: parse_threads(threads.as_bytes(), LOGIN.graphql).unwrap(),
         statuses: Vec::new(),
+        checks: Vec::new(),
         reactions: Vec::new(),
     }
 }

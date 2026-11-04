@@ -164,10 +164,41 @@ impl Etags {
                 return Ok(pages);
             }
         }
-        Err(ForgeError::Unreadable(format!(
-            "{path} has more than {MAX_PAGES} pages of {PER_PAGE}"
-        )))
+        Err(too_many(path))
     }
+
+    // Every page of a list GitHub answers as an object holding `field`'s array
+    pub(super) fn pages_in(
+        &self,
+        fetch: &dyn Fetch,
+        config: Option<&Path>,
+        path: &str,
+        field: &str,
+    ) -> Result<Vec<Vec<u8>>, ForgeError> {
+        let mut pages = Vec::new();
+        for page in 1..=MAX_PAGES {
+            let body = self.get(fetch, config, &format!("{path}&page={page}"))?;
+            let seen = count_in(&body, field).ok_or_else(|| unreadable(&body))?;
+            let full = seen >= PER_PAGE;
+            pages.push(body);
+            if !full {
+                return Ok(pages);
+            }
+        }
+        Err(too_many(path))
+    }
+}
+
+// How many items `field`'s array holds, and None when the body is not JSON with one
+fn count_in(body: &[u8], field: &str) -> Option<usize> {
+    let said: serde_json::Value = serde_json::from_slice(body).ok()?;
+    said.get(field)?.as_array().map(Vec::len)
+}
+
+fn too_many(path: &str) -> ForgeError {
+    ForgeError::Unreadable(format!(
+        "{path} has more than {MAX_PAGES} pages of {PER_PAGE}"
+    ))
 }
 
 /// The requests, made with `gh api`

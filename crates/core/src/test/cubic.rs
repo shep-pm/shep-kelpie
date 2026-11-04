@@ -1,10 +1,14 @@
 //! The rig's cubic, posting in the shapes it was recorded posting on
-//! shep-pm/shep#637
+//! shep-pm/shep#637 and #1544
 
 use super::coderabbit::FakeCodeRabbit;
-use crate::cubic::LOGIN;
+use crate::cubic::{LIMIT, LOGIN};
 use crate::ports::Timestamp;
-use crate::review_bot::{Comment, Review, Thread};
+use crate::review_bot::{CheckRun, Comment, Review, Thread};
+
+/// When the rig's cubic says reviews resume: 29 November 2026 at 00:00 UTC,
+/// the day shep-pm/shep#1544's check run named
+pub const CUBIC_RESUMES: Timestamp = Timestamp(1_795_910_400);
 
 impl FakeCodeRabbit {
     /// cubic says it started on pull request `number` at `at`
@@ -51,12 +55,26 @@ impl FakeCodeRabbit {
         });
     }
 
-    /// cubic refuses a summon on pull request `number` at `at`. Its real
-    /// wording was never recorded.
+    /// cubic refuses a summon on pull request `number` at `at`, posting no
+    /// comment and completing its check run on the head instead, as it did on
+    /// shep-pm/shep#1544
     pub fn cubic_refuse(&self, number: u64, at: u64) {
+        self.cubic_refuse_saying(
+            number,
+            at,
+            "You've reached your plan's monthly review limit. Reviews resume on \
+             29 November 2026 (in 25 days).",
+        );
+    }
+
+    /// cubic refuses on pull request `number` at `at` with a check run whose
+    /// summary says `said`, which is where the day it names reviews resume sits
+    pub fn cubic_refuse_saying(&self, number: u64, at: u64, said: &str) {
         self.post_as(number, LOGIN.rest, |seen| {
-            seen.comments.push(Comment {
-                body: "You have reached the monthly reviewed-line limit.".into(),
+            seen.checks.push(CheckRun {
+                title: LIMIT.into(),
+                summary: said.into(),
+                conclusion: "neutral".into(),
                 at: Timestamp(at),
             });
         });

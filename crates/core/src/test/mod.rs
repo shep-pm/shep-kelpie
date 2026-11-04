@@ -40,6 +40,7 @@ pub use alerts::FakeAlerts;
 pub use bridge::FakeBridges;
 pub use classifier::{FakeClassifier, SeenAsk};
 pub use coderabbit::FakeCodeRabbit;
+pub use cubic::CUBIC_RESUMES;
 pub use dev_server::FakeDevServers;
 pub use disk::{FakeDisk, GB};
 pub use e2e_runner::FakeE2e;

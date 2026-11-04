@@ -1,5 +1,6 @@
-//! A review bot's comments, reviews, threads and head statuses on a pull
-//! request, and the label and thread changes the project manager makes
+//! A review bot's comments, reviews, threads, head statuses and check runs
+//! on a pull request, and the label and thread changes the project manager
+//! makes
 
 use std::path::Path;
 
@@ -9,7 +10,7 @@ use super::conditional::{Etags, GhApi};
 use super::{gh, gh_as, unreadable};
 use crate::github::api::{REPLY_TO_THREAD, RESOLVE_THREAD};
 use crate::ports::{ForgeError, Timestamp};
-use crate::review_bot::{Activity, Comment, Login, Reaction, Review, Status, Thread};
+use crate::review_bot::{Activity, CheckRun, Comment, Login, Reaction, Review, Status, Thread};
 use crate::settings::ForgeSlug;
 
 // A pull request with more than 100 threads is not expected; one past it
@@ -89,13 +90,30 @@ pub(super) fn activity(
         bot,
         &["url", "description", "created_at"],
     )?;
+    let runs = match etags.pages_in(
+        &GhApi,
+        config,
+        &format!("repos/{slug}/commits/refs/pull/{number}/head/check-runs?per_page=100"),
+        "check_runs",
+    ) {
+        Err(e) if refused_or_missing(&e) => Vec::new(),
+        pages => pages?,
+    };
     Ok(Activity {
         comments: parse_comments(&comments)?,
         reviews: parse_reviews(&reviews)?,
         threads: parse_threads(&threads, login.graphql)?,
         statuses: parse_statuses(&statuses)?,
+        checks: parse_checks(&runs, login.graphql)?,
         reactions: parse_reactions(&reactions, login.rest)?,
     })
+}
+
+// An App installed before it could read Checks, and a head with no runs, are
+// GitHub's 403 and 404: there is nothing to read beside the rest.
+fn refused_or_missing(error: &ForgeError) -> bool {
+    matches!(error, ForgeError::Failed(said)
+        if said.contains("HTTP 403") || said.contains("HTTP 404"))
 }
 
 pub(super) fn label(
@@ -283,6 +301,62 @@ pub fn parse_statuses(stdout: &[u8]) -> Result<Vec<Status>, ForgeError> {
             })
         })
         .collect()
+}
+
+/// The check runs the bot's App completed on the head, newest first
+///
+/// A run another App posted is left out, as is one still running: only a
+/// finished one says what the bot has to say. A run queued or running names
+/// no App, output or time at all, so every part that a filter can drop is
+/// read as optional and dropped before any time is parsed. A page with a CI
+/// job still running on the head is a page of runs, not an unreadable one.
+///
+/// # Errors
+///
+/// When `gh` printed what is not the expected JSON.
+pub fn parse_checks(pages: &[Vec<u8>], bot: &str) -> Result<Vec<CheckRun>, ForgeError> {
+    #[derive(Deserialize)]
+    struct Page {
+        check_runs: Vec<Run>,
+    }
+    #[derive(Deserialize)]
+    struct Run {
+        app: Option<App>,
+        status: String,
+        conclusion: Option<String>,
+        completed_at: Option<String>,
+        output: Option<Output>,
+    }
+    #[derive(Deserialize)]
+    struct App {
+        slug: String,
+    }
+    #[derive(Deserialize, Default)]
+    struct Output {
+        title: Option<String>,
+        summary: Option<String>,
+    }
+    let mut runs: Vec<CheckRun> = Vec::new();
+    for body in pages {
+        let page: Page = serde_json::from_slice(body).map_err(|_| unreadable(body))?;
+        for run in page.check_runs {
+            let (Some(app), Some(at)) = (run.app, run.completed_at) else {
+                continue;
+            };
+            if app.slug != bot || run.status != "completed" {
+                continue;
+            }
+            let output = run.output.unwrap_or_default();
+            runs.push(CheckRun {
+                title: output.title.unwrap_or_default(),
+                summary: output.summary.unwrap_or_default(),
+                conclusion: run.conclusion.unwrap_or_default(),
+                at: time(&at, body)?,
+            });
+        }
+    }
+    runs.sort_by_key(|run| std::cmp::Reverse(run.at));
+    Ok(runs)
 }
 
 /// The reactions in the lines of `gh api` JSON
@@ -529,6 +603,130 @@ mod tests {
             parse_reactions(b"{}", codex),
             Err(ForgeError::Unreadable(_))
         ));
+    }
+
+    // Recorded from shep-pm/shep#1544's head, where cubic posted no comment
+    // and only this run, on 2026-11-04.
+    const CHECK_RUNS_1544: &str =
+        include_str!("../../../../../fixtures/gh-cubic-check-runs-limit.json");
+
+    #[test]
+    fn cubics_check_runs_are_read_from_the_recorded_page() {
+        let seen = parse_checks(&[CHECK_RUNS_1544.as_bytes().to_vec()], "cubic-dev-ai").unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].title, "AI review line limit reached");
+        assert_eq!(seen[0].conclusion, "neutral");
+        assert_eq!(seen[0].at, Timestamp(1_793_796_444));
+        assert!(
+            seen[0]
+                .summary
+                .contains("Reviews resume on 29 November 2026 (in 25 days)"),
+            "{}",
+            seen[0].summary
+        );
+        assert_eq!(
+            parse_checks(&[CHECK_RUNS_1544.as_bytes().to_vec()], "coderabbitai").unwrap(),
+            [],
+            "the run is cubic's App, not another bot's"
+        );
+    }
+
+    #[test]
+    fn another_apps_check_runs_are_left_out() {
+        let page = br#"{"total_count":3,"check_runs":[
+            {"app":{"slug":"github-actions"},"status":"completed","conclusion":"success",
+             "completed_at":"2026-11-04T12:00:00Z","output":{"title":"Build","summary":"ok"}},
+            {"app":{"slug":"cubic-dev-ai"},"status":"in_progress","conclusion":null,
+             "completed_at":null,"output":{"title":null,"summary":null}},
+            {"app":{"slug":"cubic-dev-ai"},"status":"completed","conclusion":"neutral",
+             "completed_at":"2026-11-04T12:47:24Z","output":{"title":"AI review line limit reached",
+             "summary":"Reviews resume on 29 November 2026."}}]}"#
+            .to_vec();
+
+        let seen = parse_checks(&[page], "cubic-dev-ai").unwrap();
+
+        let titles: Vec<&str> = seen.iter().map(|r| r.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["AI review line limit reached"],
+            "its running run is not one"
+        );
+    }
+
+    // Recorded from shep-pm/shep-kelpie's own main head on 2026-11-04 while its
+    // CI ran, trimmed to the four runs that carry the shape: GitHub answers null
+    // for `completed_at` and `conclusion`, and a null `title` and `summary` in
+    // `output`, on a run queued or still running.
+    const CHECK_RUNS_CI_HEAD: &str =
+        include_str!("../../../../../fixtures/gh-check-runs-head-with-ci.json");
+
+    #[test]
+    fn a_head_with_ci_still_running_is_read_as_its_finished_runs() {
+        let page = CHECK_RUNS_CI_HEAD.as_bytes().to_vec();
+        let seen = parse_checks(std::slice::from_ref(&page), "github-actions").unwrap();
+        let times: Vec<u64> = seen.iter().map(|r| r.at.0).collect();
+        assert_eq!(
+            times,
+            [1_793_808_992, 1_793_808_983],
+            "the queued run and the one still running are none, newest first"
+        );
+        assert!(seen.iter().all(|r| r.conclusion == "success"), "{seen:?}");
+        assert_eq!(
+            parse_checks(&[page], "cubic-dev-ai").unwrap(),
+            [],
+            "the page is still read whole for a bot that posted nothing on the head"
+        );
+    }
+
+    #[test]
+    fn cubics_finished_run_is_read_beside_its_own_still_queued() {
+        let page = br#"{"total_count":2,"check_runs":[
+            {"app":{"slug":"cubic-dev-ai"},"status":"in_progress","conclusion":null,
+             "completed_at":null,"output":{"title":null,"summary":null,"text":null,
+             "annotations_count":0,"annotations_url":"https://api.github.com/x"}},
+            {"app":{"slug":"cubic-dev-ai"},"status":"completed","conclusion":"neutral",
+             "completed_at":"2026-11-04T12:47:24Z","output":{"title":"AI review line limit reached",
+             "summary":"Reviews resume on 29 November 2026."}}]}"#
+            .to_vec();
+
+        let seen = parse_checks(&[page], "cubic-dev-ai").unwrap();
+
+        assert_eq!(seen.len(), 1, "its running run is not one");
+        assert_eq!(seen[0].title, "AI review line limit reached");
+    }
+
+    #[test]
+    fn runs_are_newest_first_across_pages() {
+        let older = br#"{"check_runs":[{"app":{"slug":"cubic-dev-ai"},"status":"completed",
+            "conclusion":"neutral","completed_at":"2026-11-04T12:00:00Z",
+            "output":{"title":"AI review completed","summary":"clean"}}]}"#
+            .to_vec();
+        let newer = br#"{"check_runs":[{"app":{"slug":"cubic-dev-ai"},"status":"completed",
+            "conclusion":"neutral","completed_at":"2026-11-04T12:47:24Z",
+            "output":{"title":"AI review line limit reached","summary":"out of lines"}}]}"#
+            .to_vec();
+
+        let seen = parse_checks(&[older, newer], "cubic-dev-ai").unwrap();
+
+        assert_eq!(seen[0].title, "AI review line limit reached");
+        assert_eq!(seen[1].title, "AI review completed");
+    }
+
+    #[test]
+    fn a_head_whose_check_runs_the_app_cannot_read_is_no_checks() {
+        let scope = "gh: Resource not accessible by integration (HTTP 403)\n";
+        assert!(refused_or_missing(&ForgeError::Failed(scope.into())));
+        let missing = "gh: Not Found (HTTP 404)\n";
+        assert!(refused_or_missing(&ForgeError::Failed(missing.into())));
+        let limited = ForgeError::Limited {
+            said: "gh: API rate limit exceeded (HTTP 403)".into(),
+            cooldown: crate::ports::Cooldown::default(),
+        };
+        assert!(
+            !refused_or_missing(&limited),
+            "a limit is asked about again"
+        );
+        assert!(!refused_or_missing(&ForgeError::Spawn("no gh".into())));
     }
 
     #[test]

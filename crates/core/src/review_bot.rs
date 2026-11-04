@@ -194,6 +194,10 @@ pub struct Activity {
     pub threads: Vec<Thread>,
     /// The commit statuses it set on the pull request's head, newest first
     pub statuses: Vec<Status>,
+    /// The check runs its App completed on the pull request's head, newest
+    /// first. One completed before a summon is still its answer, so a
+    /// profile reads them whatever their time.
+    pub checks: Vec<CheckRun>,
     /// The reactions it left on the pull request's comments, oldest first
     pub reactions: Vec<Reaction>,
 }
@@ -254,6 +258,22 @@ pub struct Status {
     /// What it says, such as "Review completed"
     pub description: String,
     /// When it was set
+    pub at: Timestamp,
+}
+
+/// A check run a bot's App completed on the pull request's head
+///
+/// A check run says what the App has to say without posting a comment, which
+/// is where cubic's refusal sits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckRun {
+    /// What its output is titled, such as "AI review line limit reached"
+    pub title: String,
+    /// The text under its title, where a refusal's opening may sit
+    pub summary: String,
+    /// How it ended, as the forge names it: `neutral`, `success`
+    pub conclusion: String,
+    /// When it completed
     pub at: Timestamp,
 }
 
@@ -354,7 +374,8 @@ pub trait Profile: Send + Sync + fmt::Debug {
 pub const CLOCK_SLACK: u64 = 60;
 
 impl Activity {
-    /// Only what the bot posted or edited from `at` on, threads aside
+    /// Only what the bot posted or edited from `at` on, threads and check
+    /// runs aside
     pub fn since(&self, at: Timestamp) -> Self {
         let from = at.0.saturating_sub(CLOCK_SLACK);
         Self {
@@ -377,6 +398,7 @@ impl Activity {
                 .filter(|s| s.at.0 >= from)
                 .cloned()
                 .collect(),
+            checks: self.checks.clone(),
             reactions: self
                 .reactions
                 .iter()

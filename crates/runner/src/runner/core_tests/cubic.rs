@@ -1,4 +1,4 @@
-use crate::adapters::gh::review_bot::{parse_comments, parse_reviews, parse_threads};
+use crate::adapters::gh::review_bot::{parse_checks, parse_comments, parse_reviews, parse_threads};
 use crate::cubic::*;
 use crate::ports::{Severity, Timestamp};
 use crate::review_bot::Comment;
@@ -17,6 +17,13 @@ const HEAD_637: &str = "d51bb92830c5c60afba8ecbf8f51940551ce2a18";
 const REVIEWS_645: &str = include_str!("../../../../../fixtures/cubic-reviews-645.jsonl");
 const HEAD_645: &str = "2eca0ecb90f7188f691b23aa959b4ca4dc0078b2";
 
+// shep-pm/shep#1544: the plan out of reviewed lines, where cubic posted no
+// comment and only this check run, completed 2026-11-04T12:47:24Z.
+const CHECK_RUNS_1544: &str =
+    include_str!("../../../../../fixtures/gh-cubic-check-runs-limit.json");
+const HEAD_1544: &str = "014889df33ac47608d2056ef3eddd317758bdeac";
+const RESUMES: &str = "2026-11-29T00:00:00Z";
+
 fn iso(text: &str) -> Timestamp {
     let at: jiff::Timestamp = text.parse().unwrap();
     Timestamp(at.as_second().try_into().unwrap())
@@ -28,8 +35,32 @@ fn activity(comments: &str, reviews: &str) -> Activity {
         reviews: parse_reviews(reviews.as_bytes()).unwrap(),
         threads: parse_threads(THREADS_637.as_bytes(), LOGIN.graphql).unwrap(),
         statuses: Vec::new(),
+        checks: Vec::new(),
         reactions: Vec::new(),
     }
+}
+
+// A head with one cubic check run and nothing else it posted
+fn checks(page: &str) -> Activity {
+    Activity {
+        checks: parse_checks(&[page.as_bytes().to_vec()], LOGIN.graphql).unwrap(),
+        ..Activity::default()
+    }
+}
+
+// A check-runs page with one cubic run titled `title` and summarised as `summary`
+fn page(title: &str, summary: &str, at: &str) -> String {
+    serde_json::json!({
+        "total_count": 1,
+        "check_runs": [{
+            "app": {"slug": "cubic-dev-ai"},
+            "status": "completed",
+            "conclusion": "neutral",
+            "completed_at": at,
+            "output": {"title": title, "summary": summary}
+        }]
+    })
+    .to_string()
 }
 
 #[test]
@@ -143,6 +174,120 @@ fn a_p1_is_high_and_a_thread_with_no_level_is_medium() {
     assert_eq!(
         (bare.what.as_str(), bare.why.as_str()),
         ("It drops the error.", "")
+    );
+}
+
+#[test]
+fn a_line_limit_check_run_is_a_refusal_that_opens_on_the_day_it_names() {
+    let seen = checks(CHECK_RUNS_1544);
+    assert_eq!(seen.checks.len(), 1);
+    assert_eq!(seen.checks[0].title, LIMIT);
+    assert_eq!(seen.checks[0].conclusion, "neutral");
+    let summoned = iso("2026-11-04T12:47:00Z");
+    assert!(
+        Cubic.heard(&seen, HEAD_1544, summoned),
+        "it posted no comment"
+    );
+    assert_eq!(
+        Cubic.read(&seen, HEAD_1544, summoned),
+        Reading::Refused {
+            opens: Some(iso(RESUMES))
+        }
+    );
+}
+
+#[test]
+fn a_line_limit_check_run_from_before_the_summon_still_refuses_it() {
+    let seen = checks(CHECK_RUNS_1544);
+    let summoned = iso("2026-11-05T09:00:00Z");
+    let owed = seen.since(summoned);
+    assert_eq!(
+        owed.checks.len(),
+        1,
+        "a check run is kept whatever its time"
+    );
+    assert_eq!(
+        Cubic.read(&owed, HEAD_1544, summoned),
+        Reading::Refused {
+            opens: Some(iso(RESUMES))
+        }
+    );
+}
+
+#[test]
+fn a_line_limit_summary_with_no_date_refuses_with_no_opening() {
+    let said = "You've reached your plan's monthly review limit.";
+    let seen = checks(&page(LIMIT, said, "2026-11-04T12:47:24Z"));
+    assert_eq!(
+        Cubic.read(&seen, HEAD_1544, Timestamp(100)),
+        Reading::Refused { opens: None }
+    );
+    assert!(Cubic.heard(&seen, HEAD_1544, Timestamp(100)));
+}
+
+#[test]
+fn a_review_skipped_or_completed_check_run_is_no_refusal() {
+    let done = checks(&page(
+        "AI review completed",
+        "**No issues found** across 8 files",
+        "2026-11-04T12:47:24Z",
+    ));
+    assert_eq!(
+        Cubic.read(&done, HEAD_1544, Timestamp(100)),
+        Reading::Silent
+    );
+    let skipped = checks(&page(
+        "AI review skipped by configuration",
+        "",
+        "2026-11-04T12:47:24Z",
+    ));
+    assert_eq!(
+        Cubic.read(&skipped, HEAD_1544, Timestamp(100)),
+        Reading::Silent
+    );
+    let rewritten = checks(&page(
+        "Automatic AI review not started after branch rewrite",
+        "",
+        "2026-11-04T12:47:24Z",
+    ));
+    assert_eq!(
+        Cubic.read(&rewritten, HEAD_1544, Timestamp(100)),
+        Reading::Silent
+    );
+    assert!(
+        !Cubic.heard(&skipped, HEAD_1544, Timestamp(100)),
+        "a run that is no refusal is no sign"
+    );
+}
+
+#[test]
+fn a_review_covering_the_head_outranks_a_limit_run_on_it() {
+    let mut seen = checks(&page(
+        LIMIT,
+        "You've reached your plan's monthly review limit. Reviews resume on 29 November 2026.",
+        "2026-11-04T12:47:24Z",
+    ));
+    seen.reviews = parse_reviews(REVIEWS_645.as_bytes()).unwrap();
+    assert!(Cubic.covers(&seen, HEAD_645));
+    assert_eq!(
+        Cubic.read(&seen, HEAD_645, iso("2026-11-04T12:00:00Z")),
+        Reading::Reviewed,
+        "cubic read the head, whatever its check run says about the plan's lines"
+    );
+}
+
+#[test]
+fn a_limit_run_whose_named_day_has_gone_is_no_refusal() {
+    let seen = checks(CHECK_RUNS_1544);
+    let after = iso("2026-11-30T09:00:00Z");
+    assert!(
+        Cubic.heard(&seen, HEAD_1544, after),
+        "cubic did answer here"
+    );
+    assert_eq!(
+        Cubic.read(&seen, HEAD_1544, after),
+        Reading::Silent,
+        "the day it named has come and gone, so the window's own definition decides"
     );
 }
 

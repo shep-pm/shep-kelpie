@@ -10,12 +10,12 @@ use crate::cubic::SUMMON;
 use crate::lease::LeaseKind;
 use crate::lease::wire::WindowFact;
 use crate::ports::{CLEAN, Leases, PullRequestState};
-use crate::review_bot::{Bot, Reviewers};
+use crate::review_bot::{Bot, REVIEW_WAIT, Reviewers};
 use crate::runner::coderabbit::tests::now;
 use crate::runner::{Runner, StepReport, step};
 use crate::settings::AgentName;
 use crate::test::ticket;
-use crate::test::{Rig, Scripted, Told};
+use crate::test::{CUBIC_RESUMES, Rig, Scripted, Told};
 
 const MONTH: u64 = 720 * 3600;
 
@@ -213,7 +213,7 @@ fn a_busy_window_holds_its_bots_round_and_the_next_bot_waits_its_turn() {
 }
 
 #[test]
-fn a_cubic_refusal_closes_its_window_for_its_span_and_the_pass_goes_on_to_coderabbit() {
+fn a_cubic_refusal_closes_its_window_until_the_day_it_names_and_the_pass_goes_on_to_coderabbit() {
     let rig = listing("shep", &["cubic", "coderabbit"]);
     let (runner, head) = reviewed(&rig);
     assert!(matches!(
@@ -237,14 +237,55 @@ fn a_cubic_refusal_closes_its_window_for_its_span_and_the_pass_goes_on_to_codera
     assert!(
         rig.leases
             .told()
-            .contains(&Told::Window(WindowFact::Opens, summon + 20 + MONTH)),
-        "its file's month, since cubic quotes no opening"
+            .contains(&Told::Window(WindowFact::Opens, CUBIC_RESUMES.0)),
+        "the day its check run named"
     );
     assert!(!rig.leases.held(&cubic()));
 
     assert_eq!(step(&runner).unwrap(), summoned(&head));
     assert_eq!(labels(&rig), [(71, LABEL.to_owned(), true)]);
     assert_eq!(summons_by_comment(&rig), 1, "no second summon of cubic");
+}
+
+// cubic's limit run naming a day that has come and gone is no refusal: the
+// round waits out cubic's review wait and passes it over for its silence,
+// rather than telling the dog a window that opens in the past and re-summoning
+// cubic every round.
+#[test]
+fn a_cubic_limit_run_whose_named_day_has_gone_is_read_as_no_answer() {
+    let rig = listing("shep", &["cubic"]);
+    let (runner, head) = reviewed(&rig);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::MarkedReady { .. })
+    ));
+    assert_eq!(step(&runner).unwrap(), summoned(&head));
+    let summon = now(&rig);
+    rig.forge.coderabbit.cubic_refuse_saying(
+        71,
+        summon + 20,
+        "You've reached your plan's monthly review limit. Reviews resume on \
+         21 September 2026.",
+    );
+    rig.clock.advance(20);
+    assert_eq!(step(&runner).unwrap(), None, "nothing refused");
+    rig.clock.advance(REVIEW_WAIT);
+    let skipped = step(&runner).unwrap();
+    assert!(
+        matches!(
+            &skipped,
+            Some(StepReport::ReviewerSkipped { reason, .. }) if reason.contains("never reviewed")
+        ),
+        "{skipped:?}"
+    );
+    assert!(
+        rig.leases
+            .told()
+            .iter()
+            .all(|t| !matches!(t, Told::Window(WindowFact::Opens, _))),
+        "no refusal, so no window opening told at all"
+    );
+    assert_eq!(summons_by_comment(&rig), 1, "cubic is summoned once");
 }
 
 // A dog whose book has no window for cubic never grants it, and the round
