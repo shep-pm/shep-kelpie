@@ -19,6 +19,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use shep_client::dogs::dog_config;
 
+use crate::agent_board::AgentBoardSettings;
 use crate::forwarder::Upstream;
 use crate::lease::counted::CARGO_TEST_CAPACITY;
 use crate::settings::{EndpointUrl, Gateway, GatewayName, Gateways, SettingsError};
@@ -48,6 +49,10 @@ pub struct KelpieSettings {
     /// them when it starts.
     #[serde(default)]
     pub gateways: BTreeMap<GatewayName, Gateway>,
+    /// How the agent board orders the agents that finish in time, shared by
+    /// every project. The dog reads it when it starts.
+    #[serde(default)]
+    pub agent_board: AgentBoardSettings,
 }
 
 /// The counted leases' capacities
@@ -271,7 +276,9 @@ const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntf
                      `ca_cert` path, an optional one-word `token` and `trusted = true` with one, \
                      a `[leases]` table with a \
                      `cargo-test` count, a `gpu_metrics_url`, a `codex_home` path, \
-                     `[gateways.<name>]` tables with `url` and `key_env`, and nothing else";
+                     `[gateways.<name>]` tables with `url` and `key_env`, \
+                     an `[agent_board]` table with a `prefer` list of agent names, \
+                     and nothing else";
 
 /// Why `trusted` is refused without a `token`
 const NEEDS_TOKEN: &str = "needs a `token`: without one anyone who learns the topic's name \
@@ -887,5 +894,29 @@ mod tests {
             err.starts_with("`gateways.paddock.url` cannot be used"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn the_agent_board_list_reads_names_in_order_and_refuses_a_bad_name_and_an_unknown_key() {
+        let read =
+            KelpieSettings::parse("[agent_board]\nprefer = [\"opus\", \"sonnet\"]\n").unwrap();
+        let names: Vec<_> = read.agent_board.prefer.iter().map(|n| n.as_str()).collect();
+        assert_eq!(names, ["opus", "sonnet"], "in the list's order");
+        assert!(
+            KelpieSettings::parse("")
+                .unwrap()
+                .agent_board
+                .prefer
+                .is_empty()
+        );
+        for bad in [
+            "[agent_board]\nprefer = [\"Opus\"]\n",
+            "[agent_board]\nprefer = [\"a b\"]\n",
+            "[agent_board]\nprefer = \"opus\"\n",
+            "[agent_board]\nrank = [\"opus\"]\n",
+        ] {
+            let err = parse_err(bad);
+            assert!(err.contains(SHAPE), "{err}");
+        }
     }
 }

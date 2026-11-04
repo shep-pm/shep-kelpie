@@ -6,6 +6,11 @@
 //! reads which agents do clearly worse at a kind than another that takes it.
 //! Every duration is in seconds but a slack, in minutes.
 
+use schemars::JsonSchema;
+use serde::Deserialize;
+
+use crate::settings::AgentName;
+
 mod fit;
 mod pick;
 mod record;
@@ -17,3 +22,13 @@ pub use pick::{Candidate, Choice, Item, pick, within_slack};
 pub use record::{HEAVY_FIX_TURNS, Record, records};
 pub use typical::{DEFAULT_SECS, History, SAMPLES, Typical};
 pub use wait::{Availability, wait};
+
+/// The maintainer's say in the board's order, in `[kelpie.agent_board]`
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentBoardSettings {
+    /// Agents in the order the board prefers them among those that finish
+    /// within the slack, first most wanted. Empty ranks none.
+    #[serde(default)]
+    pub prefer: Vec<AgentName>,
+}

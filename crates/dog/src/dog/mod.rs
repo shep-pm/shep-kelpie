@@ -360,7 +360,11 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
     let shown = availability::begin(&agents, &settings, ports);
     // Never `KELPIE_HOME`: shep starts the adopted dog without it.
     let kelpie_home = home::under(&shep_home);
-    let board = board::begin(&agents, kelpie_home.clone());
+    let board = board::begin(
+        &agents,
+        settings.agent_board.prefer.clone(),
+        kelpie_home.clone(),
+    );
     // The other leases do not need the door, so the dog runs on without it.
     // It is bound before any handler can start a process that inherits it.
     // The runner hands its workers the same door, or the default with this message.

@@ -39,6 +39,7 @@ pub struct Board {
     ranked: Arc<BTreeMap<AgentName, Agent>>,
     ledgers: BTreeMap<ProjectName, Ledger>,
     marks: Marks,
+    prefer: Arc<[AgentName]>,
 }
 
 #[derive(Debug)]
@@ -56,6 +57,7 @@ pub struct View {
     ranked: Arc<BTreeMap<AgentName, Agent>>,
     ledgers: Vec<Arc<[FinishedLine]>>,
     marks: Marks,
+    prefer: Arc<[AgentName]>,
 }
 
 impl View {
@@ -76,7 +78,15 @@ impl Board {
             ranked: Arc::new(ranked),
             ledgers: BTreeMap::new(),
             marks: Marks::new(),
+            prefer: Arc::default(),
         }
+    }
+
+    /// The board with `prefer` as the maintainer's ranking of agents, first most wanted
+    #[must_use]
+    pub(super) fn preferring(mut self, prefer: Vec<AgentName>) -> Self {
+        self.prefer = prefer.into();
+        self
     }
 
     /// What it holds now, for a pick, a `fit` ask or `status` to read without the lock
@@ -89,6 +99,7 @@ impl Board {
                 .map(|l| Arc::clone(&l.finished))
                 .collect(),
             marks: self.marks.clone(),
+            prefer: Arc::clone(&self.prefer),
         }
     }
 }
@@ -168,9 +179,13 @@ fn ledgers(kelpie_home: &Path) -> Option<BTreeMap<ProjectName, Option<(PathBuf, 
     Some(found)
 }
 
-/// The board of `agents`' implementers and reviewers, refreshed from the ledgers under `kelpie_home` from now on
-pub(super) fn begin(agents: &Agents, kelpie_home: PathBuf) -> Arc<Mutex<Board>> {
-    let mut board = Board::new(agents);
+/// The board of `agents`' implementers and reviewers, ranking `prefer` first, refreshed from the ledgers under `kelpie_home` from now on
+pub(super) fn begin(
+    agents: &Agents,
+    prefer: Vec<AgentName>,
+    kelpie_home: PathBuf,
+) -> Arc<Mutex<Board>> {
+    let mut board = Board::new(agents).preferring(prefer);
     load_marks(&mut board, &kelpie_home);
     let board = Arc::new(Mutex::new(board));
     tokio::spawn(keep(Arc::clone(&board), Arc::new(kelpie_home)));
