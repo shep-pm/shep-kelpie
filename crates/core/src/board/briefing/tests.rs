@@ -393,6 +393,7 @@ fn agent(name: &str, role: Role, fit: (Tier, Option<&[&str]>, Option<&str>)) -> 
         tier,
         kinds: kinds.map(|k| k.iter().map(|&k| k.to_owned()).collect()),
         description: description.map(str::to_owned),
+        out: None,
     }
 }
 
@@ -428,8 +429,9 @@ fn the_agents_section_lists_the_implementers_then_the_reviewers_with_tier_kinds_
         section,
         "\n\
          Implementers by name, then reviewers in their order. The agent board picks a work \
-         item's implementer by its kind, tier and slack, and a pick's agent or an \
-         `agent:<name>!` label pins it.\n\
+         item's implementer by its kind, tier and slack. An agent marked out starts nothing \
+         before its time. A pick's agent is tried first, not pinned, and an `agent:<name>!` \
+         label pins.\n\
          \n\
          - opus-high (implementer): heavy tier, kinds design, migration; \
          Work that needs the strongest agent.\n\
@@ -452,6 +454,33 @@ fn an_agent_with_no_description_reads_no_description() {
     let text = render(&board);
     assert!(
         text.contains("- qwen (reviewer): standard tier, every kind; no description\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn an_agent_that_is_out_shows_until_when_and_why() {
+    let spent = AgentLine {
+        out: Some(Out {
+            until: Timestamp(1_800_000_000),
+            why: "its week is spent".to_owned(),
+        }),
+        ..agent(
+            "codex",
+            Role::Implementer,
+            (Tier::Standard, None, Some("Codex on the plan")),
+        )
+    };
+    let board = Briefing {
+        agents: vec![spent],
+        ..briefing(Vec::new())
+    };
+    let text = render(&board);
+    assert!(
+        text.contains(
+            "- codex (implementer): standard tier, every kind; Codex on the plan; \
+             out until 2027-01-15 08:00 UTC: its week is spent\n"
+        ),
         "{text}"
     );
 }

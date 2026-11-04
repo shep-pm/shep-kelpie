@@ -16,7 +16,7 @@ use super::trigger::lock;
 use super::turn::held_up::HeldUp;
 use crate::agents::{Fit, Role, Tier};
 use crate::board::briefing::{
-    self, AgentLine, Briefing, Files, IDLE_AFTER, Item, Merge, Ready, ReadyLine, RedLine,
+    self, AgentLine, Briefing, Files, IDLE_AFTER, Item, Merge, Out, Ready, ReadyLine, RedLine,
     RulingLine, Session, age, elapsed, quiet_for,
 };
 use crate::board::{ReadyIssue, Skip, priority, rule_order};
@@ -547,8 +547,10 @@ impl Runner {
     }
 
     // The implementers the agent board may pick, by name, then the project's
-    // reviewers, each with the keys its file holds now.
+    // reviewers, each with the keys its file holds now and, while it is out,
+    // until when and why.
     fn agent_lines(&self) -> Vec<AgentLine> {
+        let now = self.ports.clock.now();
         let line = |name: &AgentName, role: Role| {
             let fit = self.book.get(name).map(|agent| &agent.fit);
             AgentLine {
@@ -561,6 +563,7 @@ impl Runner {
                 description: fit
                     .and_then(|fit| fit.description.as_ref())
                     .map(|text| self.shown(one_line(text.as_str()))),
+                out: self.agent_out(name, now),
             }
         };
         let implementers = (self.board_agents().into_iter())
@@ -568,6 +571,21 @@ impl Runner {
             .collect::<Vec<_>>();
         let reviewers = (self.lineup.iter()).map(|r| line(&r.name, Role::Reviewer));
         implementers.into_iter().chain(reviewers).collect()
+    }
+
+    // Until when `agent` starts nothing at `now`, and why: a review bot's
+    // window while it is closed, else the hold last found on its plan account.
+    fn agent_out(&self, agent: &AgentName, now: Timestamp) -> Option<Out> {
+        if let Some(until) = self.window_opens(agent, now) {
+            return Some(Out {
+                until,
+                why: "its review window is closed".to_owned(),
+            });
+        }
+        self.last_hold(agent, now).map(|hold| Out {
+            until: hold.until,
+            why: self.shown(hold.reason.clone()),
+        })
     }
 
     fn ready_lines(&self) -> Option<Ready> {

@@ -244,6 +244,17 @@ pub struct AgentLine {
     pub kinds: Option<Vec<String>>,
     /// What its file says it is for
     pub description: Option<String>,
+    /// Until when it starts nothing, and why, while it is out
+    pub out: Option<Out>,
+}
+
+/// An agent that starts nothing until a time, as the agents section shows it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Out {
+    /// When it can start again
+    pub until: Timestamp,
+    /// Why it cannot before then
+    pub why: String,
 }
 
 /// The board as `board.md` holds it
@@ -479,17 +490,21 @@ fn agents(out: &mut String, agents: &[AgentLine]) {
     }
     out.push_str(
         "Implementers by name, then reviewers in their order. The agent board picks a work \
-         item's implementer by its kind, tier and slack, and a pick's agent or an \
-         `agent:<name>!` label pins it.\n\n",
+         item's implementer by its kind, tier and slack. An agent marked out starts nothing \
+         before its time. A pick's agent is tried first, not pinned, and an `agent:<name>!` \
+         label pins.\n\n",
     );
     for agent in agents {
         let kinds = match &agent.kinds {
             Some(kinds) => format!("kinds {}", kinds.join(", ")),
             None => "every kind".to_owned(),
         };
+        let gone = agent.out.as_ref().map_or_else(String::new, |gone| {
+            format!("; out until {} UTC: {}", date_time(gone.until), gone.why)
+        });
         let _ = writeln!(
             out,
-            "- {} ({}): {} tier, {kinds}; {}",
+            "- {} ({}): {} tier, {kinds}; {}{gone}",
             agent.name,
             agent.role.as_str(),
             agent.tier.as_str(),
