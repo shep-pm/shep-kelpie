@@ -192,7 +192,10 @@ fn a_pi_file_with_login_api_reads_as_pi_on_the_api_and_needs_a_context() {
 fn a_pi_file_with_login_api_and_a_url_or_gateway_is_refused_with_its_line() {
     for (key, value) in [("url", "http://box:11434/v1"), ("gateway", "paddock")] {
         let refused = parse(&file(&format!("{PI_API}{key}: {value}\n"))).unwrap_err();
-        assert!(refused.starts_with(&format!("`{key}`: ")), "{key}: {refused}");
+        assert!(
+            refused.starts_with(&format!("`{key}`: ")),
+            "{key}: {refused}"
+        );
         assert!(refused.contains("runs on pi"), "{key}: {refused}");
         assert!(refused.contains("Anthropic"), "{key}: {refused}");
         assert!(refused.ends_with("at line 8"), "{key}: {refused}");

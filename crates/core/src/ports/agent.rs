@@ -492,6 +492,14 @@ pub struct Adopted {
     /// of its own by it and cannot tell it from the output
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<SessionId>,
+    /// Whether the call bills the API key, so it has no model server whatever
+    /// its harness, and a harness that runs on one keeps no forwarder for it
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub api: bool,
+}
+
+fn is_false(flag: &bool) -> bool {
+    !flag
 }
 
 fn claude_code() -> Harness {

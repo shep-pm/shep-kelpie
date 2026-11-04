@@ -18,12 +18,14 @@ use serde_json::json;
 
 use self::compact::Tokens;
 use self::shared::profile;
+use super::claude::sandbox::MODEL_HOST;
 use super::cli::{Cli, CliAdapter, Launch, Turn};
 use super::harness::{
     Base, assignments, bind_in_scratch, call_policy, program_folder, prompt_file, step_skill, tail,
 };
 use super::process::record::CallFiles;
 use super::unreachable::reaches_no_host;
+use super::{API_FIX, API_VAR, ApiKey};
 use crate::dep_sources::ProcessEnv;
 use crate::fence;
 use crate::forwarder::Upstream;
@@ -32,7 +34,7 @@ use crate::ports::{
     Adopted, AgentCall, AgentError, AgentReply, COMPACT, CallActivity, Fence, Policy, Session,
     SessionId, Tools, Transcript, Usage,
 };
-use crate::settings::{Harness, HookPoint, ModelServer};
+use crate::settings::{AgentHarness, ContextSize, Harness, HookPoint};
 use crate::tool_error::GUARD_MARK;
 
 // What the module's tests take from it by glob.
@@ -41,7 +43,7 @@ use {
     super::forwarder::Forwarder,
     crate::forwarder::WORKER_HOST,
     crate::ports::{Agents, Ending, Forward, Role},
-    crate::settings::{AgentHarness, Gateways, ModelHost},
+    crate::settings::{Gateways, ModelHost, ModelServer},
 };
 
 mod activity;
@@ -99,6 +101,9 @@ mod review_tests;
 mod skills_tests;
 
 #[cfg(test)]
+mod record_tests;
+
+#[cfg(test)]
 mod window_tests;
 
 /// The oldest pi kelpie is built for: built-in MCP needs 0.99 or later, and
@@ -147,6 +152,8 @@ fn mcp_config(call: &AgentCall) -> Option<serde_json::Value> {
 #[derive(Debug, Clone)]
 pub struct Pi {
     program: OsString,
+    // The API key the calls of an agent with `login: api` run with
+    api_key: Option<ApiKey>,
     // What a call with no fence may not read, besides its own folder
     unfenced_no_read: Vec<String>,
 }
@@ -161,6 +168,7 @@ impl PiCli {
     pub fn on(base: &Base) -> Self {
         let pi = Pi {
             program: "pi".into(),
+            api_key: None,
             unfenced_no_read: base.unfenced_no_read.clone(),
         };
         Self::new(pi, base)
@@ -171,6 +179,14 @@ impl PiCli {
     #[must_use]
     pub fn with_program(mut self, program: PathBuf) -> Self {
         self.cli.program = program.into();
+        self
+    }
+
+    /// Runs the calls of an agent with `login: api` with `api_key` in their
+    /// environment, where there is one
+    #[must_use]
+    pub fn with_api_key(mut self, api_key: Option<ApiKey>) -> Self {
+        self.cli.api_key = api_key;
         self
     }
 
@@ -196,23 +212,27 @@ impl Cli for Pi {
     }
 
     fn write_config(&self, call: &AgentCall, served: Option<&Upstream>) -> Result<(), AgentError> {
-        let (server, upstream) = (server(call)?, served.ok_or_else(unserved)?);
         let files = Files::of(call);
         let setup = |what: &Path, e: std::io::Error| {
             AgentError::Setup(format!("cannot write {}: {}", what.display(), e.kind()))
         };
         std::fs::create_dir_all(files.sessions()).map_err(|e| setup(&files.sessions(), e))?;
-        let models = json!({ "providers": { PROVIDER: {
-            "baseUrl": upstream.worker_url(),
-            "api": "openai-completions",
-            // pi lists no model without one. The forwarder sends a gateway's own key.
-            "apiKey": PROVIDER,
-            "models": [{
-                "id": call.model,
-                "contextWindow": server.context.get(),
-                "reasoning": true,
-            }],
-        } } });
+        let context = context(call)?;
+        // On the API pi uses its own Anthropic provider, so kelpie names none.
+        let models = match call.harness.server() {
+            Some(server) => json!({ "providers": { PROVIDER: {
+                "baseUrl": served.ok_or_else(unserved)?.worker_url(),
+                "api": "openai-completions",
+                // pi lists no model without one. The forwarder sends a gateway's own key.
+                "apiKey": PROVIDER,
+                "models": [{
+                    "id": call.model,
+                    "contextWindow": server.context.get(),
+                    "reasoning": true,
+                }],
+            } } }),
+            None => json!({ "providers": {} }),
+        };
         let text = serde_json::to_string_pretty(&models).expect("models are JSON");
         let written = [
             (files.home.join("models.json"), text.as_str()),
@@ -242,7 +262,7 @@ impl Cli for Pi {
         let path = files.settings();
         match call
             .compact_window
-            .and_then(|w| compact::settings(server.context.get(), w))
+            .and_then(|w| compact::settings(context.get(), w))
         {
             Some(settings) => {
                 let text = serde_json::to_string_pretty(&settings).expect("settings are JSON");
@@ -259,6 +279,18 @@ impl Cli for Pi {
     // A resumed session pi never wrote is a call that cannot run.
     fn begin(&self, call: &AgentCall, _: Turn) -> Result<(), AgentError> {
         refuse_missing_session(call)
+    }
+
+    // `pi` would start and fail with its own "no API key", which a ruling
+    // would carry, in place of the fix.
+    fn ready(&self, call: &AgentCall) -> Result<(), AgentError> {
+        match (call.harness.bills_api(), &self.api_key) {
+            (true, None) => Err(AgentError::Setup(format!(
+                "{API_VAR} is not set in the runner's environment, so this agent's pi \
+                 has no API key to bill: {API_FIX}"
+            ))),
+            _ => Ok(()),
+        }
     }
 
     // `pi` in the call's folder, its variables set by `env` inside the sandbox,
@@ -280,6 +312,12 @@ impl Cli for Pi {
             .arg(&self.program)
             .args(argv)
             .current_dir(&call.cwd);
+        // The key is a variable of the command and never an argument. A call on a server
+        // has it removed, so only an API call carries it.
+        match (&self.api_key, call.harness.bills_api()) {
+            (Some(key), true) => command.env(API_VAR, key.expose()),
+            _ => command.env_remove(API_VAR),
+        };
         Ok(command)
     }
 
@@ -302,9 +340,10 @@ impl Cli for Pi {
         _: (),
         output: &Output,
     ) -> Result<AgentReply, AgentError> {
-        let kept = adopted.kept.as_ref().ok_or_else(unserved)?;
+        let kept = adopted.kept.as_ref().map(|k| &k.session);
+        let session = kept.or(adopted.session.as_ref()).ok_or_else(unserved)?;
         let compacting = adopted.flying.as_ref().is_some_and(|f| f.compact);
-        read_as(compacting, output, &kept.session)
+        read_as(compacting, output, session)
     }
 
     fn transcript(&self, call: &AgentCall) -> Option<Transcript> {
@@ -333,9 +372,18 @@ fn refuse_missing_session(call: &AgentCall) -> Result<(), AgentError> {
     }
 }
 
-/// The server the call's model is on, which every pi call needs
+/// The server the call's model is on, for the tests of a call on one
+#[cfg(test)]
 fn server(call: &AgentCall) -> Result<&ModelServer, AgentError> {
     call.harness.server().ok_or_else(unserved)
+}
+
+/// The context size the call's model has, which pi's compaction reads: the server's, or the file's on the API
+fn context(call: &AgentCall) -> Result<ContextSize, AgentError> {
+    match &call.harness {
+        AgentHarness::PiApi(context) => Ok(*context),
+        other => Ok(other.server().ok_or_else(unserved)?.context),
+    }
 }
 
 // A compact call, and a call bounded by a window that hands its prompt back
@@ -529,8 +577,8 @@ fn guard_extension(fence: &Fence) -> String {
 
 /// The whole call's policy: its fence, or none, and what pi itself needs
 ///
-/// The model's host is not in it. The one host pi may dial is the forwarder's,
-/// which the adapter adds.
+/// A call on a server has no model host in it: the one host pi may dial is the
+/// forwarder's, which the adapter adds. A call on the API dials Anthropic's.
 fn fenced(call: &AgentCall, files: &Files, program: &Path, unfenced: &[String]) -> Policy {
     let mut policy = call_policy(call, unfenced);
     policy.no_keychain = call.reach.block_keychain;
@@ -566,6 +614,9 @@ fn fenced(call: &AgentCall, files: &Files, program: &Path, unfenced: &[String]) 
     bind_in_scratch(&mut policy, call, &files.scratch);
     super::mcp::fence_the_graph(&mut policy, call);
     super::mcp::fence_the_browser(&mut policy, call);
+    if call.harness.bills_api() {
+        policy.hosts.push(MODEL_HOST.to_owned());
+    }
     policy
 }
 

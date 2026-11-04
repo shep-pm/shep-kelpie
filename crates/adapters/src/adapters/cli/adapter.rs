@@ -78,7 +78,7 @@ impl<C: Cli> CliAdapter<C> {
                 facts.name
             )));
         }
-        match (facts.needs_model_server, call.harness.server()) {
+        match (call.harness.needs_server(), call.harness.server()) {
             (true, None) => Err(AgentError::Setup(format!(
                 "kelpie routed a call to {} that names no model server",
                 facts.name
@@ -281,11 +281,11 @@ impl<C: Cli> Agents for CliAdapter<C> {
     fn adoption(&self, call: &AgentCall) -> Result<Adopted, NotAdopted> {
         let facts = C::HARNESS.facts();
         let mut adopted = adoption_of(call, C::HARNESS)?;
-        if facts.needs_model_server {
+        if call.harness.needs_server() {
             let kept = self.carried.kept_by(&adopted.record);
             adopted.kept = Some(kept.ok_or("this image holds no forwarder for the call")?);
         }
-        if facts.sessions == SessionIds::Cli {
+        if facts.sessions == SessionIds::Cli || (facts.needs_model_server && adopted.api) {
             adopted.session = Some(call.session.id().clone());
         }
         Ok(adopted)

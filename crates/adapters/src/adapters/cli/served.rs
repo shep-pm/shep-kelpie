@@ -74,7 +74,8 @@ impl<C: Cli> CliAdapter<C> {
     ) -> Result<AgentReply, AgentError> {
         let harness = C::HARNESS;
         let facts = harness.facts();
-        let kept = match (facts.needs_model_server, adopted.kept.as_ref()) {
+        let on_a_server = facts.needs_model_server && !adopted.api;
+        let kept = match (on_a_server, adopted.kept.as_ref()) {
             (true, None) => {
                 let why = format!("the carried {} call names no forwarder", facts.name);
                 return Err(self.unserved(adopted, ending, why));

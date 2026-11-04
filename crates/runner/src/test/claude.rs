@@ -323,6 +323,7 @@ impl Agents for FakeClaude {
             harness: crate::settings::Harness::ClaudeCode,
             kept: None,
             session: None,
+            api: false,
         })
     }
 

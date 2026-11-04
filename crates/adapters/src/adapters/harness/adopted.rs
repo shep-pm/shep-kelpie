@@ -37,5 +37,6 @@ pub(crate) fn adoption_of(call: &AgentCall, harness: Harness) -> Result<Adopted,
         harness,
         kept: None,
         session: None,
+        api: call.harness.bills_api(),
     })
 }

@@ -579,6 +579,7 @@ fn a_carry_holding_a_goose_turn() -> Carry {
             model: Some("qwen3.8:27b".into()),
         }),
         session: Some(SessionId("goose-7".into())),
+        api: false,
     };
     let flying = Flying {
         left: 600,

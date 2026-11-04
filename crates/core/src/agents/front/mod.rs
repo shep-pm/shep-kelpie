@@ -661,6 +661,7 @@ fn role_model(keys: &SessionKeys<'_>) -> Result<RoleModel, String> {
             facts.name
         ));
     }
+    // parity: harness.api-login
     if keys.login == Login::Api && keys.harness == Harness::Pi {
         return pi_on_the_api(keys);
     }
