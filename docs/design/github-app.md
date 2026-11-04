@@ -9,6 +9,7 @@ Per-user App: tokens, posting, answering rulings on GitHub. Who answers a ruling
 - Covered worker call gets a token for one repo, `contents` (and `workflows`) only; refused if GitHub grants more (guard parsing can't be complete; credential is the boundary). #420, #462
 - Token reaches worker as a `gh` config file, not a variable (every process shows those); git credential helpers emptied. #420, #429
 - Covered worker writes `pull-request.md`; kelpie opens and edits the PR, refusing a non-conventional title. Files read/written without following links. #420, #439, #898, `crates/worker_folder/`
+- Kelpie joins a body's soft-wrapped lines before it opens or edits (GitHub breaks a body at every newline, so one wrapped at 80 columns shows as a narrow column). A line starting a list item, heading, quote, table row or thematic break, one after a blank line, and one after a heading, table row or hard break each start a line of their own; fenced and indented code is kept as written. The `wording` skill is unchanged: a rule there is no gate. `runner/paragraphs/`. #1640
 - A fork worker only commits; kelpie pushes. #633, `contribution-push.md`
 - Workers push any branch: `doctor` says protect `main`. Kelpie reads covered workers' failed CI logs (3 runs, 6000 bytes each, noise dropped, a log over that led by its failure lines and their next 15 lines) rather than widen token. #420
 - Worker token renewed every 30 min (1h life). `runner/login_refresh.rs`

@@ -204,6 +204,16 @@ impl Runner {
         self.still_held(account, Scope::Turn, now).is_some()
     }
 
+    /// The hold the pacer last found on `agent`'s account for a new work item,
+    /// whatever the age of that reading, while it lasts at `now`
+    pub(super) fn last_hold(&self, agent: &AgentName, now: Timestamp) -> Option<&Hold> {
+        let Some(Limit::Account(account)) = self.agent_limit(agent) else {
+            return None;
+        };
+        let (_, last) = self.pacing.get(&account)?;
+        last.hold(Scope::Dispatch).filter(|hold| now < hold.until)
+    }
+
     /// The meters a new work item is paced on, less those a trusted hold answers for
     pub(super) fn dispatch_meters(&self, now: Timestamp) -> Vec<(Account, Arc<dyn Meter>)> {
         (self.spent_accounts().into_iter())

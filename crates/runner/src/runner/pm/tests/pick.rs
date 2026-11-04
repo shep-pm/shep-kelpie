@@ -172,19 +172,27 @@ fn a_list_longer_than_the_free_slots_drops_the_rest() {
     assert_eq!(dropped, ["pick #15: only 3 can start from this wake"]);
 }
 
-#[test]
-fn a_picks_agent_pins_its_work_item_over_the_issues_pinned_label_and_its_tier_and_slack_are_kept() {
+const PICKS_OPUS: &str = "```json\n{\"pick\": {\"issue\": 12, \"agent\": \"opus-high\", \
+                          \"tier\": \"heavy\", \"slack\": 0}, \"why\": \"#12 is hard to undo.\"}\n```";
+
+// A project with #9 and #12 ready, #12 labelled `labels`, whose project manager has
+// picked #12 for `opus-high` and has not been stepped past it.
+fn picked_for_opus(labels: &[&str]) -> (Rig, Mutex<Runner>) {
     let (rig, runner) = with_pm("koji");
     rig.forge.list_ready(9, false);
     rig.forge.list_ready(12, false);
-    rig.forge.label(12, "agent:sonnet-high!");
-    rig.forge.label(12, "kind:docs");
-    rig.claude.script([Scripted::Say(
-        "```json\n{\"pick\": {\"issue\": 12, \"agent\": \"opus-high\", \"tier\": \"heavy\", \
-         \"slack\": 0}, \"why\": \"#12 is hard to undo.\"}\n```",
-    )]);
+    for label in labels {
+        rig.forge.label(12, label);
+    }
+    rig.claude.script([Scripted::Say(PICKS_OPUS)]);
     let (_, acted, dropped) = answered(step(&runner).unwrap());
     assert_eq!((acted, dropped), (vec!["picked #12".to_owned()], vec![]));
+    (rig, runner)
+}
+
+#[test]
+fn a_picks_agent_that_can_start_runs_the_item_unpinned_over_the_issues_label() {
+    let (rig, runner) = picked_for_opus(&["agent:sonnet-high!", "kind:docs"]);
 
     let report = step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
 
@@ -197,7 +205,7 @@ fn a_picks_agent_pins_its_work_item_over_the_issues_pinned_label_and_its_tier_an
     let item = held.state.item(ticket(12)).unwrap();
     assert_eq!(
         (item.pinned, item.tier, item.slack, item.kind.as_deref()),
-        (true, Some(Tier::Heavy), Some(0), Some("docs"))
+        (false, Some(Tier::Heavy), Some(0), Some("docs"))
     );
     assert!(
         rig.forge
@@ -205,12 +213,59 @@ fn a_picks_agent_pins_its_work_item_over_the_issues_pinned_label_and_its_tier_an
             .contains(&"agent:sonnet-high!".to_owned()),
         "the issue's label is left as it was"
     );
+    // The pick is asked for alone first, then the ranking behind it, which the
+    // label pins, for the pacer's walk to fall to.
     let asks = rig.agent_board.asks();
-    let ask = asks.last().unwrap();
-    assert_eq!(
-        (ask.pin.as_ref().map(|p| p.as_str()), ask.tier, ask.slack),
-        (Some("opus-high"), Some(Tier::Heavy), Some(0))
+    let pins: Vec<_> = (asks.iter())
+        .map(|ask| ask.pin.as_ref().map(|p| p.as_str()))
+        .collect();
+    assert_eq!(pins, [Some("opus-high"), Some("sonnet-high")]);
+    assert!(
+        asks.iter()
+            .all(|a| (a.tier, a.slack) == (Some(Tier::Heavy), Some(0)))
     );
+}
+
+const BEHIND: &str = "#12: the project manager picked opus-high, which cannot start within its \
+                      slack, so the agent board picks";
+
+#[test]
+fn a_picks_agent_that_cannot_start_within_the_slack_leaves_the_pick_to_the_board() {
+    let (rig, runner) = picked_for_opus(&[]);
+    rig.agent_board.waits("opus-high", 60);
+
+    let report = step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+
+    assert!(
+        matches!(&report, StepReport::Dispatched { issue, agent, .. }
+            if *issue == ticket(12) && agent.as_str() == "sonnet-high"),
+        "{report:?}"
+    );
+    let mut held = runner.lock().unwrap();
+    let item = held.state.item(ticket(12)).unwrap();
+    assert_eq!(
+        (item.pinned, item.tier, item.slack),
+        (false, Some(Tier::Heavy), Some(0))
+    );
+    assert!(held.take_notes().iter().any(|n| n == BEHIND));
+}
+
+#[test]
+fn a_picks_agent_that_cannot_start_falls_back_to_the_issues_pinned_label() {
+    let (rig, runner) = picked_for_opus(&["agent:sonnet-high!"]);
+    rig.agent_board.waits("opus-high", 60);
+    rig.agent_board.ranks_first(&["opus-high"]);
+
+    let report = step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+
+    assert!(
+        matches!(&report, StepReport::Dispatched { issue, agent, .. }
+            if *issue == ticket(12) && agent.as_str() == "sonnet-high"),
+        "{report:?}"
+    );
+    let mut held = runner.lock().unwrap();
+    assert!(held.state.item(ticket(12)).unwrap().pinned);
+    assert!(held.take_notes().iter().any(|n| n == BEHIND));
 }
 
 #[test]

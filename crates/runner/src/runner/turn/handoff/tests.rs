@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::ports::{AgentError, Session};
 use crate::runner::{Runner, StepReport, step};
 use crate::settings::Harness;
-use crate::test::{Rig, Scripted, ticket};
+use crate::test::{CALL_PATIENCE, Rig, Scripted, ticket};
 
 const CODER: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-coder\n\
                      effort: low\nusage: none\n---\n";
@@ -60,6 +60,19 @@ fn next_turn(rig: &Rig, runner: &Mutex<Runner>) -> (String, Session) {
     step(runner).unwrap();
     let call = rig.claude.calls().pop().expect("a worker call");
     (call.model, call.session)
+}
+
+// Steps until a step reports what `wanted` matches, as a call ending on its own
+// thread brings it
+fn until(runner: &Mutex<Runner>, wanted: impl Fn(&StepReport) -> bool) {
+    let deadline = std::time::Instant::now() + CALL_PATIENCE;
+    while std::time::Instant::now() < deadline {
+        match step(runner).unwrap() {
+            Some(report) if wanted(&report) => return,
+            _ => std::thread::yield_now(),
+        }
+    }
+    panic!("no step reported what the test waited for");
 }
 
 fn resumed(session: &Session) -> bool {
@@ -192,6 +205,35 @@ fn a_pinned_item_never_hands_off() {
     let (model, session) = next_turn(&rig, &runner);
     assert_eq!(model, "claude-sonnet-5-5");
     assert!(resumed(&session), "{session:?}");
+}
+
+#[test]
+fn an_item_the_project_manager_picked_an_agent_for_hands_off_once_that_agent_is_out() {
+    let rig = Rig::new("acme");
+    rig.pm("pm");
+    rig.write_agent("coder", CODER);
+    rig.agent_board.ranks(&["sonnet-high", "coder"]);
+    rig.forge.list_ready(7, false);
+    rig.forge.list_ready(9, false);
+    let runner = rig.open().unwrap();
+    rig.claude.script([
+        Scripted::Say(
+            "```json\n{\"pick\": {\"issue\": 7, \"agent\": \"sonnet-high\"}, \"why\": \"w\"}\n```",
+        ),
+        Scripted::Commit("work.txt", "work\n"),
+    ]);
+    until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+    until(&runner, |r| matches!(r, StepReport::Ended { .. }));
+    assert_eq!(item(&rig, &runner)["agent"], "sonnet-high");
+    assert_eq!(item(&rig, &runner)["pinned"], Value::Null, "not pinned");
+
+    // The agent has fallen behind: it is out, as a spent week leaves it.
+    let own = SOON + SLACK + 1;
+    rig.agent_board
+        .ranks_finishing(&[("coder", SOON), ("sonnet-high", own)]);
+
+    assert_eq!(step(&runner).unwrap(), Some(handed_off(own)));
+    assert_eq!(item(&rig, &runner)["agent"], "coder");
 }
 
 #[test]
