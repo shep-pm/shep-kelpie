@@ -416,7 +416,7 @@ fn a_check_run_is_created_and_completed_on_the_head() {
         )
         .unwrap();
 
-    assert_eq!(id, CheckRunId(4_399_123_455));
+    assert_eq!(id, CheckRunId(126_279_576_658));
     let json = |call: &Call| -> serde_json::Value {
         serde_json::from_str(call.body.as_deref().unwrap()).unwrap()
     };
@@ -434,7 +434,10 @@ fn a_check_run_is_created_and_completed_on_the_head() {
         })
     );
     assert_eq!(made[1].1.verb, Verb::Patch);
-    assert_eq!(made[1].1.path, "/repos/shep-pm/koji/check-runs/4399123455");
+    assert_eq!(
+        made[1].1.path,
+        "/repos/shep-pm/koji/check-runs/126279576658"
+    );
     assert_eq!(json(&made[1].1)["status"], "completed");
     assert_eq!(json(&made[1].1)["conclusion"], "success");
 }
