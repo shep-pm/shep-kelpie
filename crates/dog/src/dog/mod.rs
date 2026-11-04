@@ -47,7 +47,7 @@ use crate::skills;
 use crate::webhook::KelpieSettings;
 use bus::{Bus, Sent};
 use desk::{Delivery, Desk};
-use triggers::ACTIONS;
+use triggers::{ACTIONS, Shown};
 
 /// The dog's name, which kelpie is adopted under and `shep kelpie lease` triggers
 pub const NAME: &str = crate::shepherd::DOG;
@@ -301,19 +301,25 @@ fn read_section(text: &str) -> Result<KelpieSettings, String> {
     }))
 }
 
-// A section that does not parse whole: the `[leases]` table and the rest
-// are read apart, so a mistake in one leaves the other standing.
+// A section that does not parse whole: the `[leases]` and `[api_credit]` tables
+// and the rest are read apart, so a mistake in one leaves the others standing.
+// A bad `[api_credit]` is no cap and no preference, which spends nothing extra.
 fn salvage(text: &str) -> KelpieSettings {
     let Ok(mut table) = text.parse::<toml::Table>() else {
         println!("cargo-test is held by 3 at a time");
         return KelpieSettings::default();
     };
     let leases = table.remove("leases");
+    let credit = table.remove("api_credit");
     let rest = toml::to_string(&table).unwrap_or_default();
     let mut settings = KelpieSettings::from_section(&rest).unwrap_or_default();
     match leases.map(toml::Value::try_into).transpose() {
         Ok(leases) => settings.leases = leases.unwrap_or_default(),
         Err(e) => println!("[leases] is not right ({e}): cargo-test is held by 3 at a time"),
+    }
+    match credit.map(toml::Value::try_into).transpose() {
+        Ok(credit) => settings.api_credit = credit,
+        Err(e) => println!("[api_credit] is not right ({e}): API spend has no cap or preference"),
     }
     settings
 }
@@ -354,7 +360,7 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
     let shown = availability::begin(&agents, &settings, ports);
     // Never `KELPIE_HOME`: shep starts the adopted dog without it.
     let kelpie_home = home::under(&shep_home);
-    let board = board::begin(&agents, kelpie_home.clone());
+    let board = board::begin(&agents, kelpie_home.clone(), settings.api_credit);
     // The other leases do not need the door, so the dog runs on without it.
     // It is bound before any handler can start a process that inherits it.
     // The runner hands its workers the same door, or the default with this message.
@@ -389,18 +395,27 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
         let (shown, board) = (Arc::clone(&shown), Arc::clone(&board));
         shepherd.on_action(action, move |params, name| {
             let shown = availability::lock(&shown).clone();
-            // The board's medians and records are worked out before the desk is held for the
-            // answer, and only for `status`, the one action that shows them.
-            let (board, records) = match name {
+            // The board's medians, records and credit are worked out before the desk is held for
+            // the answer, and only for `status`, the one action that shows them.
+            let (board, records, api_credit) = match name {
                 "status" => {
                     let view = board::lock(&board).view();
                     let now = lock_desk(&desk).desk.book.now();
-                    (view.status(&shown, now), view.records())
+                    (
+                        view.status(&shown, now),
+                        view.records(),
+                        view.credit_status(now),
+                    )
                 }
-                _ => (serde_json::Value::Null, serde_json::Value::Null),
+                _ => Default::default(),
             };
-            let (body, grants) = lock_desk(&desk)
-                .change(|d| d.answer_with(name, params, &shown, (&board, &records)));
+            let shown_now = Shown {
+                board: &board,
+                records: &records,
+                api_credit: &api_credit,
+            };
+            let (body, grants) =
+                lock_desk(&desk).change(|d| d.answer_with(name, params, &shown, shown_now));
             let _ = answered.send(grants);
             body
         });
@@ -735,6 +750,21 @@ mod tests {
         let settings = salvage(text);
         assert!(settings.gpu_metrics_url.is_some());
         assert_eq!(settings.leases.cargo_test_capacity().get(), 3);
+    }
+
+    #[test]
+    fn a_bad_api_credit_leaves_the_rest_of_the_section_standing() {
+        let text = "gpu_metrics_url = \"http://gpu-box:9835/metrics\"\n\
+                    [leases]\ncargo-test = 5\n[api_credit]\nusd = 0\nday = 1\n";
+        let settings = read_section(text).unwrap();
+        assert!(settings.gpu_metrics_url.is_some());
+        assert_eq!(settings.leases.cargo_test_capacity().get(), 5);
+        assert_eq!(settings.api_credit, None, "no cap and no preference");
+
+        let both = "[leases]\ncargo-test = 0\n[api_credit]\nusd = 50\nday = 9\n";
+        let settings = read_section(both).unwrap();
+        assert_eq!(settings.leases.cargo_test_capacity().get(), 3);
+        assert_eq!(settings.api_credit.map(|c| c.day()), Some(9));
     }
 
     #[test]

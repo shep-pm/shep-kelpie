@@ -10,6 +10,7 @@ use crate::lease::door::PickAsk;
 use crate::ports::{Meter, Timestamp, Utilization};
 use crate::settings::{Account, Gateway, GatewayName, Gateways};
 use crate::test::{EPOCH, FakeClock, FakeMeter, LeaseReads, utilization, write_in};
+use crate::webhook::{ApiCredit, KelpieSettings};
 
 // Adds `n` merged items of `agent` and `kind` to `project`'s ledger under
 // `home`, each taking `wall` seconds over four worker turns and costing `cost_usd`.
@@ -403,4 +404,292 @@ fn status_shows_each_agents_records_by_kind() {
     );
     assert_eq!(records["sonnet-high"]["docs"]["items"], 1);
     assert_eq!(records["opus-high"]["fix"]["items"], 1);
+}
+
+// The window of a grant that resets on the 1st, round `EPOCH` (21 September 2026)
+pub(in crate::dog) const WINDOW: (u64, u64) = (1_788_220_800, 1_790_812_800);
+
+pub(in crate::dog) fn credit(usd: u32) -> ApiCredit {
+    let text = format!("[api_credit]\nusd = {usd}\nday = 1\n");
+    (KelpieSettings::from_section(&text).unwrap().api_credit).unwrap()
+}
+
+// Adds a call `agent` ended at `at` to `project`'s ledger under `home`, priced
+// at `cost_usd` where it has one.
+pub(in crate::dog) fn call(
+    home: &Path,
+    project: &str,
+    (agent, at): (&str, u64),
+    cost_usd: Option<f64>,
+) {
+    let mut line = json!({
+        "line": "call", "at": at, "issue": 7, "role": "worker", "kind": "turn",
+        "agent": agent, "ended": "answered", "units": 10,
+        "usage": { "input": 10, "cache_write": 0, "cache_read": 0, "output": 0 },
+    });
+    match cost_usd {
+        Some(cost) => line["cost_usd"] = json!(cost),
+        None => line["unpriced"] = json!(true),
+    }
+    let folder = home.join(project);
+    fs::create_dir_all(&folder).unwrap();
+    let mut ledger = (OpenOptions::new().create(true).append(true))
+        .open(folder.join(usage::FILE))
+        .unwrap();
+    writeln!(ledger, "{line}").unwrap();
+}
+
+// Two plan agents and an API agent, all standard-tier implementers on one model.
+fn two_plans_and_a_billed(dir: &Path) -> Agents {
+    write_in(dir, "plan-a.md", &format!("{ON_CLAUDE}---\n"));
+    write_in(dir, "plan-b.md", &format!("{ON_CLAUDE}---\n"));
+    write_in(dir, "billed.md", &format!("{ON_CLAUDE}login: api\n---\n"));
+    Agents::load(dir).unwrap()
+}
+
+fn ask_of(agents: &[&'static str]) -> PickAsk {
+    PickAsk {
+        kind: Some("fix".into()),
+        tier: None,
+        pin: None,
+        slack: Some(100_000),
+        agents: agents.iter().map(|a| AgentName::kelpies(a)).collect(),
+        leave_out: vec![],
+    }
+}
+
+fn order(picks: &[crate::lease::door::Pick]) -> Vec<&str> {
+    picks.iter().map(|p| p.agent.as_str()).collect()
+}
+
+#[test]
+fn spend_counts_only_api_agents_priced_calls_inside_the_window_across_projects() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = two_plans_and_a_billed(&dir.path().join("agents"));
+    let home = dir.path().join("kelpie");
+    let (start, end) = WINDOW;
+    call(&home, "koji", ("billed", start + 10), Some(1.25));
+    call(&home, "golbat", ("billed", end - 10), Some(2.5));
+    call(&home, "koji", ("billed", start), Some(0.25));
+    call(&home, "koji", ("billed", start - 1), Some(40.0));
+    call(&home, "koji", ("billed", end), Some(40.0));
+    call(&home, "koji", ("billed", start + 20), None);
+    call(&home, "koji", ("plan-a", start + 30), Some(40.0));
+    call(&home, "golbat", ("no-such-agent", start + 30), Some(40.0));
+    let board = Mutex::new(Board::new(&agents).credited(Some(credit(100))));
+    refresh(&board, &home);
+
+    let spent = lock(&board).view().api_spent(Timestamp(EPOCH));
+
+    assert_eq!(
+        spent, 4.0,
+        "the window's priced calls of the API agent alone"
+    );
+}
+
+#[test]
+fn the_spent_total_starts_over_when_the_window_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = two_plans_and_a_billed(&dir.path().join("agents"));
+    let home = dir.path().join("kelpie");
+    let (start, end) = WINDOW;
+    call(&home, "koji", ("billed", start + 10), Some(30.0));
+    let board = Mutex::new(Board::new(&agents).credited(Some(credit(100))));
+    refresh(&board, &home);
+    let view = lock(&board).view();
+
+    assert_eq!(view.api_spent(Timestamp(end - 1)), 30.0);
+    assert_eq!(view.api_spent(Timestamp(end)), 0.0, "the next window");
+
+    call(&home, "koji", ("billed", end + 5), Some(7.0));
+    refresh(&board, &home);
+    let view = lock(&board).view();
+    assert_eq!(view.api_spent(Timestamp(end + 6)), 7.0);
+    assert_eq!(
+        view.api_spent(Timestamp(end - 1)),
+        30.0,
+        "the old window still"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn while_credit_is_left_an_api_agent_is_picked_ahead_of_a_plan_agent_of_its_role_and_tier() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = two_plans_and_a_billed(&dir.path().join("agents"));
+    let home = dir.path().join("kelpie");
+    finished(&home, "koji", ("plan-a", "fix"), 5, (600, 1.0));
+    finished(&home, "koji", ("plan-b", "fix"), 5, (600, 2.0));
+    call(&home, "koji", ("billed", WINDOW.0 + 10), Some(99.0));
+    let shown = seen(&agents, &Gateways::default(), 10).await;
+    let ask = ask_of(&["plan-a", "plan-b", "billed"]);
+    let now = Timestamp(EPOCH);
+    let picked = |credit| {
+        let board = Mutex::new(Board::new(&agents).credited(credit));
+        refresh(&board, &home);
+        pick::answer(&lock(&board).view(), &shown, &ask, now)
+    };
+
+    assert_eq!(
+        order(&picked(None)),
+        ["plan-a", "billed", "plan-b"],
+        "by cost, the API agent's being its tier's median"
+    );
+    assert_eq!(
+        order(&picked(Some(credit(100)))),
+        ["billed", "plan-a", "plan-b"],
+        "$99 of $100 is spent, so credit is left"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_api_agent_of_a_lower_tier_or_another_role_is_not_moved_ahead_of_a_plan_agent() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("agents");
+    write_in(
+        &folder,
+        "plan.md",
+        &format!("{ON_CLAUDE}tier: heavy\n---\n"),
+    );
+    write_in(
+        &folder,
+        "billed-light.md",
+        &format!("{ON_CLAUDE}login: api\ntier: light\n---\n"),
+    );
+    let reviewer = "---\nrole: reviewer\nharness: claude-code\nmodel: claude-opus-5-5\n\
+                    effort: high\ntier: heavy\n---\nRead the diff.\n";
+    write_in(&folder, "read.md", reviewer);
+    let agents = Agents::load(&folder).unwrap();
+    let home = dir.path().join("kelpie");
+    finished(&home, "koji", ("plan", "fix"), 5, (600, 1.0));
+    let shown = seen(&agents, &Gateways::default(), 10).await;
+    let ask = ask_of(&["plan", "billed-light", "read"]);
+    let now = Timestamp(EPOCH);
+    let picked = |credit| {
+        let board = Mutex::new(Board::new(&agents).credited(credit));
+        refresh(&board, &home);
+        order(&pick::answer(&lock(&board).view(), &shown, &ask, now))
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+
+    let before = picked(None);
+    assert_eq!(before, ["plan", "billed-light", "read"]);
+    assert_eq!(
+        picked(Some(credit(100))),
+        before,
+        "the heavy plan agent keeps its place ahead of the light API agent, as does the reviewer"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_api_agent_is_not_moved_ahead_of_a_local_agent_of_its_role_and_tier() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("agents");
+    write_in(
+        &folder,
+        "billed.md",
+        &format!("{ON_CLAUDE}login: api\n---\n"),
+    );
+    write_in(
+        &folder,
+        "local.md",
+        "---\nrole: implementer\nharness: stand-in\nmodel: lite\neffort: low\nusage: none\n---\n",
+    );
+    let agents = Agents::load(&folder).unwrap();
+    let shown = seen(&agents, &Gateways::default(), 10).await;
+    let ask = ask_of(&["local", "billed"]);
+    let now = Timestamp(EPOCH);
+    let picked = |credit| {
+        let board = Board::new(&agents).credited(credit);
+        order(&pick::answer(&board.view(), &shown, &ask, now))
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(picked(None), ["local", "billed"], "the local model is free");
+    assert_eq!(picked(Some(credit(100))), ["local", "billed"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_spent_credit_leaves_every_api_agent_out_of_the_answer_a_pinned_one_included() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = two_plans_and_a_billed(&dir.path().join("agents"));
+    let home = dir.path().join("kelpie");
+    finished(&home, "koji", ("plan-a", "fix"), 5, (600, 1.0));
+    call(&home, "koji", ("billed", WINDOW.0 + 10), Some(60.0));
+    call(&home, "golbat", ("billed", WINDOW.0 + 20), Some(40.0));
+    let shown = seen(&agents, &Gateways::default(), 10).await;
+    let board = Mutex::new(Board::new(&agents).credited(Some(credit(100))));
+    refresh(&board, &home);
+    let view = lock(&board).view();
+    let now = Timestamp(EPOCH);
+
+    let all = pick::answer(&view, &shown, &ask_of(&["plan-a", "plan-b", "billed"]), now);
+    let pinned = PickAsk {
+        pin: Some(AgentName::kelpies("billed")),
+        ..ask_of(&["plan-a", "plan-b", "billed"])
+    };
+    let plan_pin = PickAsk {
+        pin: Some(AgentName::kelpies("plan-b")),
+        ..ask_of(&["plan-a", "plan-b", "billed"])
+    };
+
+    assert_eq!(order(&all), ["plan-a", "plan-b"], "spent to the cent");
+    assert_eq!(
+        order(&pick::answer(&view, &shown, &pinned, now)),
+        [] as [&str; 0]
+    );
+    assert_eq!(
+        order(&pick::answer(&view, &shown, &plan_pin, now)),
+        ["plan-b"]
+    );
+    let later = Timestamp(WINDOW.1);
+    assert_eq!(
+        order(&pick::answer(&view, &shown, &pinned, later)),
+        ["billed"],
+        "the next window has credit again"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_api_agent_the_ranking_leaves_out_is_not_added_by_the_credit() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = two_plans_and_a_billed(&dir.path().join("agents"));
+    let shown = seen(&agents, &Gateways::default(), 10).await;
+    let board = Board::new(&agents).credited(Some(credit(100)));
+    let ask = PickAsk {
+        leave_out: vec![AgentName::kelpies("billed")],
+        ..ask_of(&["plan-a", "plan-b", "billed"])
+    };
+
+    let picks = pick::answer(&board.view(), &shown, &ask, Timestamp(EPOCH));
+
+    assert_eq!(order(&picks), ["plan-a", "plan-b"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn with_no_credit_set_an_api_agent_ranks_as_any_other() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = two_plans_and_a_billed(&dir.path().join("agents"));
+    let home = dir.path().join("kelpie");
+    finished(&home, "koji", ("plan-a", "fix"), 5, (600, 1.0));
+    finished(&home, "koji", ("plan-b", "fix"), 5, (600, 2.0));
+    call(&home, "koji", ("billed", WINDOW.0 + 10), Some(1000.0));
+    let shown = seen(&agents, &Gateways::default(), 10).await;
+    let board = Mutex::new(Board::new(&agents));
+    refresh(&board, &home);
+    let view = lock(&board).view();
+    let ask = ask_of(&["plan-a", "plan-b", "billed"]);
+    let pinned = PickAsk {
+        pin: Some(AgentName::kelpies("billed")),
+        ..ask.clone()
+    };
+
+    let picks = pick::answer(&view, &shown, &ask, Timestamp(EPOCH));
+
+    assert_eq!(order(&picks), ["plan-a", "billed", "plan-b"]);
+    let one = pick::answer(&view, &shown, &pinned, Timestamp(EPOCH));
+    assert_eq!(order(&one), ["billed"], "no cap, however much was spent");
 }
