@@ -26,7 +26,6 @@ Pacing, leases, forge limits, time, usage, settings.
 - Failing step backs off 15s-10 min; rate-limit answer holds every forge call until reset (10 min for secondary limit, longer if hit again). #394
 - One forge hold and pace per login, kept by the dog (`forge` ask on `lease.sock`, `dog/forge.rs`): any runner's used-up answer holds all; a runner that cannot reach the dog uses its own (`DoorPace`, `core/lease/door_pace.rs`). Dog's copy is in memory, a restart clears it. #580
 - `pick` and `fit` asks on `lease.sock`: the agent board's ranking and its fit reading, agent-board.md and agent-board-fit.md. `dog/board/`
-- API credit (`[kelpie.api_credit]`, `usd` and `day` 1 to 31): a grant resetting 00:00 UTC on `day`, the month's last when shorter. The dog sums `login: api` agents' priced calls in the window over every ledger, picks such an agent first while the sum is under `usd` and drops it, pinned too, at or above; absent, no cap and no preference. Read at start (`shep restart kelpie`); `status.api_credit`. agent-board.md. #1659
 - Pace: 60 calls/minute and 5/second per login (`PER_MINUTE`, `AT_ONCE`, `crates/core/src/ports/pace.rs`), under GitHub's secondary limits; each project gets cap / active projects. Queued calls wait (`Clock::wait`), never fail. #580
 - Hold ends at the answer's `retry-after`, else its `x-ratelimit-reset`, else the 10-min fallback; same for `gh` and App calls (App limits are `ForgeError::Limited`; `PacedVoice` holds and paces them; worker-token mint waits the hold). #580
 - REST reads that repeat (ruling-thread comments and the comment's node id, the review bot's comments, reviews and statuses) keep each answer's `ETag` per login and path, in memory, and send it as `If-None-Match`; a 304 is the kept answer, which GitHub does not count against the limit. Lists are read a page at a time, each its own conditional read. GraphQL (board, `gh pr view`, `gh issue view`, threads) has no conditional requests. A forge-ledger line carries `not_modified` when a call had 304s; `shep kelpie usage --forge` lists them by kind. `gh api`'s 304 is unmeasured: a tagged read that fails naming a 304, when the same read untagged works, sends no tag again; a list past 50 pages of 100 is an error. #592, `crates/adapters/src/adapters/gh/conditional/mod.rs`
@@ -46,7 +45,7 @@ Pacing, leases, forge limits, time, usage, settings.
 - `worker`: `allowed_domains`, `guard_hooks`, `instructions_file`, `turn_timeout` (60), `compact_window` (200000; pi a reserve, goose a threshold: compaction.md). `runner/turn/`
 - `skills`: per-step overrides; `retro` off (the PM's batch retro when named); `triage`, `spec`, `reset` driven by no step yet. `crates/core/src/skills/mod.rs`
 - `hooks`, `e2e`. ADR 0009, `settings/hooks.rs`, `settings/e2e.rs`
-- `[kelpie]`: `webhook`, `gpu_metrics_url`, `codex_home`, `gateways`, `leases.cargo-test` (3), `api_credit` (`usd`, `day`). `crates/core/src/webhook.rs`
+- `[kelpie]`: `webhook`, `gpu_metrics_url`, `codex_home`, `gateways`, `leases.cargo-test` (3). `crates/core/src/webhook.rs`
 
 ## Not built
 

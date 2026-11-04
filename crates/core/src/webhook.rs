@@ -19,7 +19,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use shep_client::dogs::dog_config;
 
-pub use crate::api_credit::ApiCredit;
 use crate::forwarder::Upstream;
 use crate::lease::counted::CARGO_TEST_CAPACITY;
 use crate::settings::{EndpointUrl, Gateway, GatewayName, Gateways, SettingsError};
@@ -49,12 +48,6 @@ pub struct KelpieSettings {
     /// them when it starts.
     #[serde(default)]
     pub gateways: BTreeMap<GatewayName, Gateway>,
-    /// The maintainer's API credit, which comes in grants that reset on a set
-    /// day. With it the dog keeps every runner's API spend inside one grant
-    /// and picks an API agent first while credit is left. No cap and no
-    /// preference when absent. The dog reads it when it starts.
-    #[serde(default)]
-    pub api_credit: Option<ApiCredit>,
 }
 
 /// The counted leases' capacities
@@ -278,8 +271,7 @@ const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntf
                      `ca_cert` path, an optional one-word `token` and `trusted = true` with one, \
                      a `[leases]` table with a \
                      `cargo-test` count, a `gpu_metrics_url`, a `codex_home` path, \
-                     `[gateways.<name>]` tables with `url` and `key_env`, an `[api_credit]` table with \
-                     `usd` and `day`, and nothing else";
+                     `[gateways.<name>]` tables with `url` and `key_env`, and nothing else";
 
 /// Why `trusted` is refused without a `token`
 const NEEDS_TOKEN: &str = "needs a `token`: without one anyone who learns the topic's name \
@@ -437,6 +429,11 @@ impl KelpieSettings {
                       Codex's `reviews_on_ready`, into `agents/<bot>.md` in kelpie's home, \
                       which `shep kelpie add` writes out, and delete the tables",
             },
+            crate::settings::Removed {
+                key: "api_credit",
+                because: "the dog caps no API spend: an agent on `login: api` ranks as any other",
+                fix: crate::settings::DELETE,
+            },
         ];
         crate::settings::refuse_removed(text, &removed, &[])?;
         let read: Self = toml::from_str(text).map_err(|e: toml::de::Error| {
@@ -467,7 +464,6 @@ impl KelpieSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::Timestamp;
 
     // The example's section as shep hands it over: re-rooted, so `[webhook]`.
     fn example() -> String {
@@ -846,86 +842,13 @@ mod tests {
     }
 
     #[test]
-    fn an_api_credit_reads_its_amount_and_day_and_refuses_a_zero_amount_and_a_day_past_31() {
-        let absent = KelpieSettings::from_section("").unwrap();
-        assert_eq!(absent.api_credit, None, "no table, no cap");
-        let set = KelpieSettings::from_section("[api_credit]\nusd = 50.5\nday = 31\n").unwrap();
-        let credit = set.api_credit.expect("the table is read");
-        assert_eq!((credit.cap_usd(), credit.day()), (50.5, 31));
-        for bad in [
-            "usd = 0\nday = 5",
-            "usd = -3\nday = 5",
-            "usd = 10\nday = 0",
-            "usd = 10\nday = 32",
-            "usd = 10",
-            "day = 5",
-            "usd = \"10\"\nday = 5",
-        ] {
-            let text = format!("[api_credit]\n{bad}\n");
-            assert!(KelpieSettings::from_section(&text).is_err(), "{bad}");
-        }
-    }
-
-    // A moment, from its RFC 3339 text
-    fn at(text: &str) -> Timestamp {
-        Timestamp(text.parse::<jiff::Timestamp>().unwrap().as_second() as u64)
-    }
-
-    fn credit(day: u8) -> ApiCredit {
-        let text = format!("[api_credit]\nusd = 100\nday = {day}\n");
-        KelpieSettings::from_section(&text)
-            .unwrap()
-            .api_credit
-            .unwrap()
-    }
-
-    #[test]
-    fn the_credit_window_starts_on_the_grant_day_at_midnight_utc() {
-        let grant = credit(15);
-        let window = |now| grant.window(at(now));
-        assert_eq!(
-            window("2026-03-20T13:45:00Z"),
-            (at("2026-03-15T00:00:00Z"), at("2026-04-15T00:00:00Z"))
-        );
-        assert_eq!(
-            window("2026-03-15T00:00:00Z"),
-            (at("2026-03-15T00:00:00Z"), at("2026-04-15T00:00:00Z")),
-            "the grant's first second is in its window"
-        );
-        assert_eq!(
-            window("2026-03-14T23:59:59Z"),
-            (at("2026-02-15T00:00:00Z"), at("2026-03-15T00:00:00Z")),
-            "the second before it is in the last one"
-        );
-        assert_eq!(
-            window("2026-12-31T23:00:00Z"),
-            (at("2026-12-15T00:00:00Z"), at("2027-01-15T00:00:00Z")),
-            "the window crosses the year"
-        );
-    }
-
-    #[test]
-    fn a_grant_day_past_a_months_end_starts_the_window_on_its_last_day() {
-        let grant = credit(31);
-        let window = |now| grant.window(at(now));
-        assert_eq!(
-            window("2026-02-28T09:00:00Z"),
-            (at("2026-02-28T00:00:00Z"), at("2026-03-31T00:00:00Z")),
-            "February has no 31st"
-        );
-        assert_eq!(
-            window("2026-02-27T23:59:59Z"),
-            (at("2026-01-31T00:00:00Z"), at("2026-02-28T00:00:00Z"))
-        );
-        assert_eq!(
-            window("2028-02-29T00:00:00Z"),
-            (at("2028-02-29T00:00:00Z"), at("2028-03-31T00:00:00Z")),
-            "a leap year's last day is the 29th"
-        );
-        assert_eq!(
-            window("2026-05-10T00:00:00Z"),
-            (at("2026-04-30T00:00:00Z"), at("2026-05-31T00:00:00Z")),
-            "April has 30 days"
+    fn a_leftover_api_credit_table_is_refused_by_name() {
+        let err = parse_err("[api_credit]\nusd = 50\nday = 1\n");
+        assert!(err.contains("`api_credit`"), "{err}");
+        assert!(err.contains("delete it"), "{err}");
+        assert!(
+            KelpieSettings::parse("").is_ok(),
+            "a section without it reads"
         );
     }
 

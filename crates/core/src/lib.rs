@@ -8,7 +8,6 @@
 
 pub mod agent_board;
 pub mod agents;
-mod api_credit;
 pub mod board;
 pub mod bridge;
 pub mod browse;

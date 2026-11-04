@@ -9,15 +9,13 @@ use super::desk::{Delivery, Desk, deliveries};
 use crate::lease::book::Asked;
 use crate::lease::{Holder, LeaseKind};
 
-/// What `status` shows beside the leases: the agent board, the records and the API credit
+/// What `status` shows beside the leases: the agent board and the records
 #[derive(Debug, Clone, Copy)]
 pub struct Shown<'a> {
     /// Each implementer's typical item and wait
     pub board: &'a Value,
     /// Each agent's track record
     pub records: &'a Value,
-    /// The credit spent and its cap, or null with none set
-    pub api_credit: &'a Value,
 }
 
 static EMPTY: LazyLock<Value> = LazyLock::new(|| json!({}));
@@ -27,7 +25,6 @@ impl Default for Shown<'_> {
         Self {
             board: &EMPTY,
             records: &EMPTY,
-            api_credit: &Value::Null,
         }
     }
 }
@@ -44,7 +41,7 @@ impl Desk {
 
     /// Answers one of the maintainer's triggers with a JSON body
     ///
-    /// `status` lists every lease, `availability` and the `board`, `records` and `api_credit` given. `take`
+    /// `status` lists every lease, `availability` and the `board` and `records` given. `take`
     /// and `return` name a book lease and act for the maintainer. Asking
     /// with `take` again is how a waiting maintainer learns of the grant.
     pub fn answer_with(
@@ -97,16 +94,12 @@ impl Desk {
         let mut leases = vec![json!(self.tests.status())];
         leases.extend(self.e2e.values().map(|l| json!(l.status())));
         leases.extend(self.book.status().iter().map(|l| json!(l)));
-        let mut status = json!({
+        json!({
             "leases": leases,
             "availability": availability.status(),
             "board": shown.board,
             "records": shown.records,
-        });
-        if !shown.api_credit.is_null() {
-            status["api_credit"] = shown.api_credit.clone();
-        }
-        status
+        })
     }
 }
 
@@ -117,8 +110,7 @@ mod tests {
     use super::{ACTIONS, Shown};
     use crate::agent_board::DEFAULT_SECS;
     use crate::dog::availability::{Availability, Sources};
-    use crate::dog::board::tests::{WINDOW, call, credit};
-    use crate::dog::board::{Board, refresh};
+    use crate::dog::board::Board;
     use crate::dog::desk::tests::{grant, stand_in, world};
     use crate::lease::Epoch;
     use crate::lease::counted::{Taker, Ticket};
@@ -202,7 +194,6 @@ mod tests {
             Shown {
                 board: &board,
                 records: &records,
-                ..Shown::default()
             },
         );
         let body: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -215,41 +206,35 @@ mod tests {
         );
     }
 
+    // An agent on `login: api` is on the board like any other, and `status`
+    // says nothing about what its calls cost.
     #[test]
-    fn status_shows_the_credit_spent_and_its_cap_and_omits_it_when_none_is_set() {
+    fn status_shows_no_api_credit_key() {
         let mut w = world();
         let dir = tempfile::tempdir().unwrap();
         let billed = "---\nrole: implementer\nharness: claude-code\nmodel: claude-sonnet-5-5\n\
                       effort: high\nlogin: api\n---\n";
         crate::test::write_in(&dir.path().join("agents"), "billed.md", billed);
         let agents = crate::agents::Agents::load(&dir.path().join("agents")).unwrap();
-        let home = dir.path().join("kelpie");
-        let (start, end) = WINDOW;
-        call(&home, "koji", ("billed", start + 5), Some(12.5));
-        let mut asked = |credit| {
-            let board = std::sync::Mutex::new(Board::new(&agents).credited(credit));
-            refresh(&board, &home);
-            let view = crate::dog::board::lock(&board).view();
-            let credit = view.credit_status(Timestamp(EPOCH));
-            let shown = Shown {
-                api_credit: &credit,
-                ..Shown::default()
-            };
-            let (body, _) = w
-                .desk
-                .answer_with("status", None, &Availability::default(), shown);
-            serde_json::from_str::<serde_json::Value>(&body).unwrap()
-        };
+        let board = Board::new(&agents)
+            .view()
+            .status(&Availability::default(), Timestamp(EPOCH));
+        let records = json!({});
+        let (body, _) = (w.desk).answer_with(
+            "status",
+            None,
+            &Availability::default(),
+            Shown {
+                board: &board,
+                records: &records,
+            },
+        );
+        let body: serde_json::Value = serde_json::from_str(&body).unwrap();
 
-        let none = asked(None);
-        let set = asked(Some(credit(50)));
-
-        assert_eq!(none.get("api_credit"), None, "no credit, no key");
-        assert_eq!(
-            set["api_credit"],
-            json!({
-                "spent_usd": 12.5, "cap_usd": 50.0, "window_start": start, "window_end": end,
-            })
+        assert_eq!(body.get("api_credit"), None, "the cap is gone");
+        assert!(
+            body["board"].get("billed").is_some(),
+            "the API agent is ranked with the rest"
         );
     }
 
