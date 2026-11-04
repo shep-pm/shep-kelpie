@@ -369,7 +369,7 @@ impl FakeGithub {
 
     /// How many writes to check runs the App made, those GitHub refused included
     pub fn check_run_writes(&self) -> usize {
-        (self.writes().into_iter())
+        (self.every_write().into_iter())
             .filter(|(_, call)| call.path.contains("/check-runs"))
             .count()
     }
@@ -424,8 +424,15 @@ impl FakeGithub {
         self.hub.lock().unwrap().asked.clone()
     }
 
-    /// Every write made as the App, in order, with the token it was made with
+    /// Every write made as the App but to a check run (see
+    /// [`Self::check_run_writes`]), in order, with the token it was made with
     pub fn writes(&self) -> Vec<(String, Call)> {
+        (self.every_write().into_iter())
+            .filter(|(_, call)| !call.path.contains("/check-runs"))
+            .collect()
+    }
+
+    fn every_write(&self) -> Vec<(String, Call)> {
         (self.asked().into_iter())
             .filter_map(|asked| match asked {
                 Asked::Write(token, call) => Some((token, call)),
