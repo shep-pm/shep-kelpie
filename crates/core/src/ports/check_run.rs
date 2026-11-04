@@ -11,6 +11,8 @@ pub enum Conclusion {
     Success,
     /// The gate failed
     Failure,
+    /// The gate ended with no verdict: the work item left it
+    Skipped,
 }
 
 /// Where a check run stands
@@ -53,6 +55,7 @@ impl GateCheck {
         match self.state {
             CheckState::Completed(Conclusion::Success) => Some("success"),
             CheckState::Completed(Conclusion::Failure) => Some("failure"),
+            CheckState::Completed(Conclusion::Skipped) => Some("skipped"),
             CheckState::Queued | CheckState::InProgress => None,
         }
     }

@@ -161,8 +161,12 @@ impl Runner {
             _ => Answerer::Maintainer,
         };
         let unread = matches!(by, Settler::Pm { unread: true, .. });
+        let parked = self.parked_answer(id, &answer);
         let outcome = match self.apply(id, answer, answerer, unread)? {
-            true => outcome,
+            true => {
+                self.note_answer(parked);
+                outcome
+            }
             // The answer was about a head that is gone, so none was taken. An
             // answer in the ruling's own thread leaves its comment as it is.
             false => Outcome::withdrawn(MOVED).in_thread(by == Settler::Thread),

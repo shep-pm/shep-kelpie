@@ -2,7 +2,8 @@
 
 use std::sync::Mutex;
 
-use crate::ports::CLEAN;
+use crate::ports::{CLEAN, Checks, Standing};
+use crate::runner::review_bot::LATE_READ;
 use crate::runner::{Runner, step};
 use crate::test::{Rig, Scripted, ShownCheck};
 
@@ -142,4 +143,59 @@ fn a_missing_permission_turns_check_runs_off_for_the_repo() {
         .count();
     assert_eq!(asked, 1, "the checks token is asked for once");
     assert!(!rig.github.comments().is_empty(), "comments still post");
+}
+
+// The maintainer never answered, so the head shows no failed gate.
+#[test]
+fn a_comment_that_withdraws_a_ruling_closes_its_checks_without_a_failure() {
+    let (rig, runner, head) = Rig::parked_set("shep", Rig::with_app);
+    step(&runner).unwrap();
+    rig.forge.coderabbit.person_says(
+        71,
+        "octo-reviewer",
+        Standing::Writer,
+        "Please rename the flag.",
+    );
+    rig.clock.advance(LATE_READ);
+    rig.claude.script([
+        Scripted::Push("rename.txt", "renamed\n"),
+        Scripted::Text(CLEAN),
+    ]);
+    step(&runner).unwrap(); // the comment is read
+    step(&runner).unwrap(); // the worker's turn
+
+    assert_eq!(
+        names(&on(&rig, &head)),
+        [
+            ("kelpie / review", "completed", Some("success")),
+            ("kelpie", "completed", Some("skipped")),
+            ("kelpie / ruling", "completed", Some("skipped"))
+        ]
+    );
+}
+
+// A fix pushed after CI failed moves the item to a new head, and the old
+// head's checks are not left running.
+#[test]
+fn a_head_the_worker_moves_on_from_leaves_no_check_running() {
+    let (rig, runner, head) = Rig::with_pull_request_set("shep", Rig::with_app);
+    rig.forge
+        .set_checks(&head, Checks::Failed(vec!["test".to_owned()]));
+    rig.claude
+        .script([Scripted::Push("fix.txt", "fix\n"), Scripted::Text(CLEAN)]);
+    for _ in 0..4 {
+        rig.next_look();
+        step(&runner).unwrap();
+    }
+
+    let pushed = rig.forge.head_of("kelpie/7").expect("the worker pushed");
+    assert_ne!(pushed, head);
+    let old = on(&rig, &head);
+    assert!(!old.is_empty());
+    assert!(
+        old.iter().all(|c| c.status == "completed"),
+        "{:?}",
+        names(&old)
+    );
+    assert!(on(&rig, &pushed).iter().any(|c| c.name == "kelpie"));
 }
