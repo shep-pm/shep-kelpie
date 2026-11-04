@@ -400,6 +400,7 @@ fn finish(
         session_cost: model.and_then(|m| price::price(m, &spent.since(Spent::default()))),
         context,
         compactions: 0,
+        metered: None,
     })
 }
 

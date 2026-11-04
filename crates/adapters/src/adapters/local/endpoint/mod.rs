@@ -156,7 +156,9 @@ impl LocalReviewer {
             tell: &tell,
             ending: &ending,
         };
-        port.around_leased(&upstream, &taking, chunked)
+        // What the lease used is dropped for now.
+        let (round, _) = port
+            .around_leased(&upstream, &taking, chunked)
             .map_err(|unheld| match unheld {
                 Unheld::GaveUp => ReviewerError::Stopped,
                 Unheld::Refused(why) => ReviewerError::Failed(format!(
@@ -164,7 +166,8 @@ impl LocalReviewer {
                     endpoint.model.as_str()
                 )),
                 Unheld::Lost(why) => ReviewerError::Failed(why),
-            })?
+            })?;
+        round
     }
 
     #[expect(

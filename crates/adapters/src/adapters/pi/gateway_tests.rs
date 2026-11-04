@@ -230,6 +230,7 @@ fn a_workers_chat_call_names_the_lease_its_turn_holds() {
                 pi.sandboxed_command(&call, lease)
             })
             .unwrap()
+            .0
             .unwrap();
         assert!(chat_through(&forwarder).contains("hello"), "{role:?}");
     }

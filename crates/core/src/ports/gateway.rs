@@ -9,7 +9,7 @@
 use std::fmt;
 
 use crate::forwarder::Upstream;
-use crate::ports::Ending;
+use crate::ports::{Ending, Metered};
 
 /// What a gateway answers to kelpie's key
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,28 +88,29 @@ pub trait ModelGateway: Send + Sync {
     ///
     /// `None` when this kind offers no lease, and `call` has not run. `Some`
     /// when it was asked: `Err` when the lease was not taken or was lost,
-    /// which is an error whatever `call` did, since it was asked to end.
+    /// which is an error whatever `call` did, since it was asked to end. `Ok`
+    /// holds what the release said the lease used, `None` when it said nothing.
     fn lease(
         &self,
         gateway: &Upstream,
         taking: &Taking<'_>,
         call: &mut dyn FnMut(&str),
-    ) -> Option<Result<(), Unheld>>;
+    ) -> Option<Result<Option<Metered>, Unheld>>;
 
     /// Runs `call` holding the lease `id`, which an earlier image of the
     /// runner took and left held, and releases it after
     ///
     /// The lease is renewed at once and then as it was, so it is not lost
-    /// between the images. `None` when this kind offers no lease, and `call`
-    /// has not run. `Some` when it was asked: `Err` when the lease was lost,
-    /// which is an error whatever `call` did, since it was asked to end.
+    /// between the images. As for [`ModelGateway::lease`]: `None` when this
+    /// kind offers no lease, and `call` has not run, else `Err` when the lease
+    /// was lost and `Ok` with what the release said it used.
     fn resume(
         &self,
         gateway: &Upstream,
         id: &str,
         ending: &Ending,
         call: &mut dyn FnMut(),
-    ) -> Option<Result<(), Unheld>> {
+    ) -> Option<Result<Option<Metered>, Unheld>> {
         let _ = (gateway, id, ending, call);
         None
     }
@@ -129,10 +130,12 @@ impl dyn ModelGateway + '_ {
         call: impl FnOnce() -> T,
     ) -> Result<T, Unheld> {
         self.around_leased(gateway, taking, |_| call())
+            .map(|(done, _)| done)
     }
 
     /// Runs `call` under a lease on `taking.model`, told the lease's id, or at
-    /// once with `None` when this kind offers none
+    /// once with `None` when this kind offers none, and returns its value with
+    /// what the lease used
     ///
     /// # Errors
     ///
@@ -142,20 +145,24 @@ impl dyn ModelGateway + '_ {
         gateway: &Upstream,
         taking: &Taking<'_>,
         call: impl FnOnce(Option<&str>) -> T,
-    ) -> Result<T, Unheld> {
+    ) -> Result<(T, Option<Metered>), Unheld> {
         let mut call = Some(call);
         let mut done = None;
         let mut run = |id: &str| done = call.take().map(|call| call(Some(id)));
-        if let Some(Err(unheld)) = self.lease(gateway, taking, &mut run) {
-            return Err(unheld);
-        }
+        let metered = match self.lease(gateway, taking, &mut run) {
+            Some(Err(unheld)) => return Err(unheld),
+            Some(Ok(metered)) => metered,
+            None => None,
+        };
         // A kind with no lease left the call unrun.
         done.or_else(|| call.map(|call| call(None)))
+            .map(|done| (done, metered))
             .ok_or_else(|| Unheld::Refused("the lease ran no call".into()))
     }
 
     /// Runs `call` under the lease `id` an earlier image took, or at once
-    /// when this kind offers none
+    /// when this kind offers none, and returns its value with what the lease
+    /// used
     ///
     /// # Errors
     ///
@@ -166,14 +173,17 @@ impl dyn ModelGateway + '_ {
         id: &str,
         ending: &Ending,
         call: impl FnOnce() -> T,
-    ) -> Result<T, Unheld> {
+    ) -> Result<(T, Option<Metered>), Unheld> {
         let mut call = Some(call);
         let mut done = None;
         let mut run = || done = call.take().map(|call| call());
-        if let Some(Err(unheld)) = self.resume(gateway, id, ending, &mut run) {
-            return Err(unheld);
-        }
+        let metered = match self.resume(gateway, id, ending, &mut run) {
+            Some(Err(unheld)) => return Err(unheld),
+            Some(Ok(metered)) => metered,
+            None => None,
+        };
         done.or_else(|| call.map(|call| call()))
+            .map(|done| (done, metered))
             .ok_or_else(|| Unheld::Refused("the lease ran no call".into()))
     }
 }
@@ -202,7 +212,7 @@ mod tests {
             _: &Upstream,
             _: &Taking<'_>,
             _: &mut dyn FnMut(&str),
-        ) -> Option<Result<(), Unheld>> {
+        ) -> Option<Result<Option<Metered>, Unheld>> {
             None
         }
     }
@@ -231,7 +241,8 @@ mod tests {
         let upstream = Upstream::new(&base).unwrap();
         let ending = Ending::default();
         let port: &dyn ModelGateway = &Leaseless;
-        assert_eq!(port.around_resumed(&upstream, "L1", &ending, || 7), Ok(7));
+        let resumed = port.around_resumed(&upstream, "L1", &ending, || 7);
+        assert_eq!(resumed, Ok((7, None)));
         assert!(!ending.asked());
     }
 }

@@ -20,7 +20,8 @@ use serde_json::{Value, json};
 
 use crate::forwarder::Upstream;
 use crate::ports::{
-    Ending, KeyCheck, ModelGateway, ModelLoad, PaddockHolder, Stand, Taking, Unheld,
+    Cost, Ending, KeyCheck, MeterSource, Metered, ModelGateway, ModelLoad, PaddockHolder, Stand,
+    Taking, Unheld,
 };
 use crate::settings::Timing;
 
@@ -184,7 +185,7 @@ impl ModelGateway for Paddock {
         gateway: &Upstream,
         taking: &Taking<'_>,
         call: &mut dyn FnMut(&str),
-    ) -> Option<Result<(), Unheld>> {
+    ) -> Option<Result<Option<Metered>, Unheld>> {
         (taking.tell)(Stand::Asking);
         let taken = Lease::take(
             gateway,
@@ -195,18 +196,14 @@ impl ModelGateway for Paddock {
             taking.ending,
             self.timing,
         );
-        let mut lease = match taken {
+        let lease = match taken {
             Ok(Some(lease)) => lease,
             Ok(None) => return Some(Err(Unheld::GaveUp)),
             Err(why) => return Some(Err(Unheld::Refused(why))),
         };
         (taking.tell)(Stand::Granted);
         call(lease.id());
-        // Finishing it first settles that no later renewal can end the call.
-        Some(match lease.finish() {
-            Some(why) => Err(Unheld::Lost(why)),
-            None => Ok(()),
-        })
+        Some(released(lease))
     }
 
     fn resume(
@@ -215,16 +212,22 @@ impl ModelGateway for Paddock {
         id: &str,
         ending: &Ending,
         call: &mut dyn FnMut(),
-    ) -> Option<Result<(), Unheld>> {
-        let mut lease = match Lease::resume(gateway, id, ending, self.timing) {
+    ) -> Option<Result<Option<Metered>, Unheld>> {
+        let lease = match Lease::resume(gateway, id, ending, self.timing) {
             Ok(lease) => lease,
             Err(why) => return Some(Err(Unheld::Refused(why))),
         };
         call();
-        Some(match lease.finish() {
-            Some(why) => Err(Unheld::Lost(why)),
-            None => Ok(()),
-        })
+        Some(released(lease))
+    }
+}
+
+// Finishing the lease first settles that no later renewal can end the call.
+// A lease that was lost is released all the same, but its energy is not read.
+fn released(mut lease: Lease) -> Result<Option<Metered>, Unheld> {
+    match lease.finish() {
+        Some(why) => Err(Unheld::Lost(why)),
+        None => Ok(lease.release()),
     }
 }
 
@@ -241,6 +244,7 @@ pub(crate) struct Lease {
     held: Arc<Mutex<Held>>,
     // Dropping the sender stops the renewals, which are not waited for.
     renewing: Option<mpsc::Sender<()>>,
+    released: bool,
 }
 
 // What a lease is, as its holder and the renewing thread see it under one lock.
@@ -344,6 +348,28 @@ impl Lease {
         }
     }
 
+    /// Releases the lease and says the energy paddock answers it used
+    ///
+    /// `None` when paddock answered none, or an answer that cannot be read,
+    /// or could not be asked. A lease dropped without this is released
+    /// all the same, and its energy goes unread.
+    pub(crate) fn release(mut self) -> Option<Metered> {
+        let head = self.delete()?;
+        metered_in(&head)
+    }
+
+    // Releases the lease once, and the head of paddock's answer when it was a `204`.
+    fn delete(&mut self) -> Option<String> {
+        self.finish();
+        if std::mem::replace(&mut self.released, true) {
+            return None;
+        }
+        // A release that fails still ends once the ttl runs out unrenewed.
+        let path = format!("/paddock/leases/{}", self.id);
+        let sent = send_head(&self.gateway, ("DELETE", &path), None, true, self.release);
+        sent.ok().filter(|a| a.status == 204).map(|a| a.head)
+    }
+
     // `resumed` has the first renewal made at once and not after `timing.renew`.
     fn renewed(
         gateway: &Upstream,
@@ -412,17 +438,43 @@ impl Lease {
             release: timing.release,
             held,
             renewing: Some(stop),
+            released: false,
         }
     }
 }
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        self.finish();
-        // A release that fails still ends once the ttl runs out unrenewed.
-        let path = format!("/paddock/leases/{}", self.id);
-        let _ = send(&self.gateway, ("DELETE", &path), None, true, self.release);
+        self.delete();
     }
+}
+
+// The energy a release's header lines say the lease used.
+//
+// The watt-hours and the source are both needed, since watt-hours alone do not
+// say what measured them. A price that is missing or unreadable is no cost.
+fn metered_in(head: &str) -> Option<Metered> {
+    let header = |wanted: &str| {
+        head.lines().find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.trim()
+                .eq_ignore_ascii_case(wanted)
+                .then(|| value.trim())
+        })
+    };
+    let wh: f64 = header("Paddock-Energy-Wh")?.parse().ok()?;
+    let source = match header("Paddock-Energy-Source")? {
+        "wall" => MeterSource::Wall,
+        "parts" => MeterSource::Parts,
+        _ => return None,
+    };
+    if !wh.is_finite() || wh < 0.0 {
+        return None;
+    }
+    let cost = header("Paddock-Energy-Usd")
+        .and_then(|usd| usd.parse().ok())
+        .and_then(Cost::from_usd);
+    Some(Metered { wh, cost, source })
 }
 
 // The id goes in a header and a path, so it is held to what paddock writes.
@@ -454,7 +506,7 @@ fn ask_once(
     });
     loop {
         match answered.recv_timeout(POLL) {
-            Ok(answer) => return answer.map(Some),
+            Ok(answer) => return answer.map(|a| Some((a.status, a.body))),
             Err(RecvTimeoutError::Timeout) if give_up() => {
                 let _ = hang_up.shutdown(Shutdown::Both);
                 return Ok(None);
@@ -491,6 +543,13 @@ fn open(gateway: &Upstream, within: Duration) -> Result<TcpStream, String> {
     Err(cannot(last))
 }
 
+// What an HTTP answer said: its status, its header lines and its body.
+struct Answered {
+    status: u16,
+    head: String,
+    body: String,
+}
+
 // One request on a connection of its own, and its status and body, each step within `within`.
 pub(crate) fn send(
     gateway: &Upstream,
@@ -499,6 +558,18 @@ pub(crate) fn send(
     keyed: bool,
     within: Duration,
 ) -> Result<(u16, String), String> {
+    let answered = send_head(gateway, asked, body, keyed, within)?;
+    Ok((answered.status, answered.body))
+}
+
+// As `send`, with the answer's header lines too.
+fn send_head(
+    gateway: &Upstream,
+    asked: (&str, &str),
+    body: Option<&Value>,
+    keyed: bool,
+    within: Duration,
+) -> Result<Answered, String> {
     let request = request(gateway, asked, body, keyed)?;
     exchange(&open(gateway, within)?, &request, Some(within))
 }
@@ -531,7 +602,7 @@ fn exchange(
     stream: &TcpStream,
     request: &str,
     within: Option<Duration>,
-) -> Result<(u16, String), String> {
+) -> Result<Answered, String> {
     let lost = |e: std::io::Error| format!("the gateway did not answer: {}", e.kind());
     stream.set_read_timeout(within).map_err(lost)?;
     stream.set_write_timeout(within).map_err(lost)?;
@@ -546,7 +617,11 @@ fn exchange(
     let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
     let status = head.split(' ').nth(1).and_then(|s| s.parse().ok());
     let status = status.ok_or("the gateway's answer is not HTTP")?;
-    Ok((status, body.to_owned()))
+    Ok(Answered {
+        status,
+        head: head.to_owned(),
+        body: body.to_owned(),
+    })
 }
 
 #[cfg(test)]
