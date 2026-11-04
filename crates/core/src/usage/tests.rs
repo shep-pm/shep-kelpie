@@ -2,6 +2,7 @@ use crate::test::ticket;
 use serde_json::json;
 
 use super::*;
+use crate::ports::{MeterSource, Metered};
 use crate::usage::baselines::Baseline;
 use crate::work_item::{CiFailures, QwenTally};
 
@@ -474,4 +475,98 @@ fn a_report_names_an_unrecorded_work_item_by_its_ticket_id() {
         out.contains(&"  k12: 1 call, 60 units, $0.30".to_owned()),
         "{out:#?}"
     );
+}
+
+// A worker's turn on `harness`, started at 100, as the ledger's draft of it
+fn turn_draft(harness: &str) -> Draft {
+    serde_json::from_value(json!({
+        "issue": 7, "pull_request": null, "role": "worker", "kind": "turn",
+        "agent": "local-qwen", "harness": harness, "model": "qwen3", "effort": null,
+        "session": "s-1", "started": 100,
+    }))
+    .unwrap()
+}
+
+fn spent(session_cost: Option<Cost>, metered: Option<Metered>) -> Spent {
+    Spent {
+        usage: usage(10, 0, 0, 5),
+        session_cost,
+        compactions: 0,
+        metered,
+    }
+}
+
+fn metered(wh: f64, usd: Option<f64>, source: MeterSource) -> Metered {
+    Metered {
+        wh,
+        cost: usd.and_then(Cost::from_usd),
+        source,
+    }
+}
+
+fn line_of(spent: Spent) -> CallLine {
+    let (at, before) = (Timestamp(160), Cost(0));
+    let draft = turn_draft("goose");
+    draft.line(at, Ended::Answered, Some(spent), before, BTreeMap::new())
+}
+
+#[test]
+fn a_priced_lease_prices_a_call_its_harness_left_unpriced() {
+    let lease = metered(12.5, Some(0.04), MeterSource::Wall);
+
+    let line = line_of(spent(None, Some(lease)));
+
+    assert_eq!(line.cost_usd, Some(0.04));
+    assert!(!line.unpriced);
+    assert_eq!(line.energy_wh, Some(12.5));
+    assert_eq!(line.energy_source, Some(MeterSource::Wall));
+}
+
+#[test]
+fn a_harnesss_own_dollars_win_over_the_energy_price() {
+    let lease = metered(12.5, Some(0.04), MeterSource::Parts);
+
+    let line = line_of(spent(Cost::from_usd(0.5), Some(lease)));
+
+    assert_eq!(line.cost_usd, Some(0.5));
+    assert!(!line.unpriced);
+    assert_eq!(line.energy_wh, Some(12.5), "its energy is still recorded");
+}
+
+#[test]
+fn a_metered_call_with_no_price_stays_unpriced_with_its_energy() {
+    let lease = metered(12.0, None, MeterSource::Parts);
+
+    let line = line_of(spent(None, Some(lease)));
+
+    assert_eq!(line.cost_usd, None);
+    assert!(line.unpriced);
+    assert_eq!(line.energy_wh, Some(12.0));
+    assert_eq!(line.energy_source, Some(MeterSource::Parts));
+}
+
+#[test]
+fn a_line_without_energy_still_reads() {
+    // A line as a build before energy wrote it
+    let old = r#"{"line":"call","at":150,"issue":7,"role":"worker","kind":"turn",
+        "usage":{"input":1,"cache_write":0,"cache_read":0,"output":0},"units":1,
+        "unpriced":true,"ended":"answered"}"#;
+
+    let Line::Call(read) = ledger_line(old) else {
+        unreachable!()
+    };
+    assert_eq!((read.energy_wh, read.energy_source), (None, None));
+
+    let written = serde_json::to_string(&Line::Call(read)).unwrap();
+    assert!(!written.contains("energy"), "{written}");
+}
+
+#[test]
+fn an_energy_line_writes_its_source_as_wall_or_parts() {
+    let line = line_of(spent(None, Some(metered(1.0, None, MeterSource::Wall))));
+
+    let written = serde_json::to_value(Line::Call(line)).unwrap();
+
+    assert_eq!(written["energy_wh"], 1.0);
+    assert_eq!(written["energy_source"], "wall");
 }

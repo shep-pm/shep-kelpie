@@ -418,7 +418,9 @@ impl Cost {
 }
 
 /// How a gateway measured the energy a lease used
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// wire format: the name a usage ledger line writes as its `energy_source`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum MeterSource {
     /// A meter on the host's wall socket
     Wall,

@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{CallKind, CallLine, Ended, PacerLine, units};
-use crate::ports::{AgentCall, AgentError, AgentReply, Cost, Role, SessionId, Timestamp, Usage};
+use crate::ports::{
+    AgentCall, AgentError, AgentReply, Cost, Metered, Role, SessionId, Timestamp, Usage,
+};
 use crate::settings::LocalRound;
 use crate::ticket::TicketId;
 
@@ -28,7 +30,7 @@ pub struct Draft {
 }
 
 /// What a call came back with, as far as its line goes
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Spent {
     /// The tokens it used
     pub usage: Usage,
@@ -36,6 +38,8 @@ pub struct Spent {
     pub session_cost: Option<Cost>,
     /// Times the harness compacted the session by itself during the call
     pub compactions: u32,
+    /// What its gateway's lease used, where the gateway meters its leases
+    pub metered: Option<Metered>,
 }
 
 impl From<&AgentReply> for Spent {
@@ -44,6 +48,7 @@ impl From<&AgentReply> for Spent {
             usage: reply.usage,
             session_cost: reply.session_cost,
             compactions: reply.compactions,
+            metered: reply.metered,
         }
     }
 }
@@ -112,7 +117,10 @@ impl Draft {
         let usage = spent.map(|s| s.usage).unwrap_or_default();
         let session_cost = spent.and_then(|s| s.session_cost);
         let compactions = spent.map_or(0, |s| s.compactions);
-        let cost = session_cost.map(|now| Cost(now.0.saturating_sub(before.0)));
+        let metered = spent.and_then(|s| s.metered);
+        // A harness's own dollars win over what its lease's energy cost.
+        let cost = (session_cost.map(|now| Cost(now.0.saturating_sub(before.0))))
+            .or_else(|| metered.and_then(|m| m.cost));
         CallLine {
             at,
             issue: self.issue,
@@ -128,6 +136,8 @@ impl Draft {
             compactions,
             units: units(usage),
             cost_usd: cost.map(Cost::usd),
+            energy_wh: metered.map(|m| m.wh),
+            energy_source: metered.map(|m| m.source),
             unpriced: self.kind != CallKind::LocalRound && cost.is_none(),
             session_cost_usd: session_cost.map(Cost::usd),
             seconds: Some(at.0.saturating_sub(self.started.0)),

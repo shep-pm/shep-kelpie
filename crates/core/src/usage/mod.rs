@@ -18,7 +18,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::metrics::Recorder;
-use crate::ports::{Cost, Role, SessionId, Timestamp, Usage};
+use crate::ports::{Cost, MeterSource, Role, SessionId, Timestamp, Usage};
 use crate::ticket::TicketId;
 use crate::work_item::RoleTally;
 
@@ -241,10 +241,19 @@ pub struct CallLine {
     pub compactions: u32,
     /// Those tokens in the control room's units
     pub units: u64,
-    /// What it cost, in US dollars, when its harness reported a cost
+    /// What it cost, in US dollars: what its harness reported, or else what
+    /// its lease's energy cost where the host is priced
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
-    /// Whether its harness reported no cost
+    /// Watt-hours its gateway's lease used, shared with the leases beside it,
+    /// for a call on a model whose gateway meters its leases
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub energy_wh: Option<f64>,
+    /// What measured `energy_wh`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub energy_source: Option<MeterSource>,
+    /// Whether it has no cost: its harness reported none and no priced
+    /// lease stood in
     #[serde(default, skip_serializing_if = "is_false")]
     pub unpriced: bool,
     /// What its session had cost by its end, in US dollars, when reported

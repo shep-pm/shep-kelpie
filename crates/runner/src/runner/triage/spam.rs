@@ -200,6 +200,8 @@ impl Runner {
             compactions: 0,
             units: 0,
             cost_usd: None,
+            energy_wh: None,
+            energy_source: None,
             unpriced: false,
             session_cost_usd: None,
             seconds: None,

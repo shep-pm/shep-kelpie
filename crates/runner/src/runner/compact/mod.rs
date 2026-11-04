@@ -46,12 +46,13 @@ impl Runner {
         let report = match result {
             Ok(reply) => {
                 let session = item.session.clone();
-                item.record_call(
+                item.record_metered_call(
                     Role::Worker,
                     now,
                     session.clone(),
                     reply.usage,
                     reply.session_cost,
+                    reply.metered.and_then(|m| m.cost),
                 );
                 let reminder = reminder(item, ticket);
                 // A skill's command only runs from the very start of a prompt.

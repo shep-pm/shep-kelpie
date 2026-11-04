@@ -261,6 +261,7 @@ fn a_session_that_ends_after_the_review_moved_on_still_keeps_its_cost_and_its_en
             session: SessionId("late".into()),
             usage: Usage::default(),
             session_cost: Some(Cost(7)),
+            metered: None,
         };
         let reviewed = crate::runner::report::Reviewed {
             result: ReviewResult::Findings(Ok(Vec::new())),

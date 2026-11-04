@@ -80,8 +80,10 @@ pub(in crate::runner) fn record_spent(item: &mut WorkItem, spent: Option<Spent>,
             session,
             usage,
             session_cost,
+            metered,
         }) => {
-            item.record_call(role, now, session, usage, session_cost);
+            let energy = metered.and_then(|m| m.cost);
+            item.record_metered_call(role, now, session, usage, session_cost, energy);
         }
         Some(Spent::Local) => {
             item.qwen.rounds += 1;
@@ -115,6 +117,7 @@ fn run_claude(
             session: call.session.id().clone(),
             usage: reply.usage,
             session_cost: reply.session_cost,
+            metered: reply.metered,
         }),
         // Its settings, harness or session never got as far as a model.
         Err(_) => crate::usage::ended(&reply).map(Spent::Unanswered),
