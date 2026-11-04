@@ -306,7 +306,10 @@ pub fn parse_statuses(stdout: &[u8]) -> Result<Vec<Status>, ForgeError> {
 /// The check runs the bot's App completed on the head, newest first
 ///
 /// A run another App posted is left out, as is one still running: only a
-/// finished one says what the bot has to say.
+/// finished one says what the bot has to say. A run queued or running names
+/// no App, output or time at all, so every part that a filter can drop is
+/// read as optional and dropped before any time is parsed. A page with a CI
+/// job still running on the head is a page of runs, not an unreadable one.
 ///
 /// # Errors
 ///
@@ -318,17 +321,17 @@ pub fn parse_checks(pages: &[Vec<u8>], bot: &str) -> Result<Vec<CheckRun>, Forge
     }
     #[derive(Deserialize)]
     struct Run {
-        app: App,
+        app: Option<App>,
         status: String,
         conclusion: Option<String>,
-        completed_at: String,
-        output: Output,
+        completed_at: Option<String>,
+        output: Option<Output>,
     }
     #[derive(Deserialize)]
     struct App {
         slug: String,
     }
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Default)]
     struct Output {
         title: Option<String>,
         summary: Option<String>,
@@ -337,14 +340,18 @@ pub fn parse_checks(pages: &[Vec<u8>], bot: &str) -> Result<Vec<CheckRun>, Forge
     for body in pages {
         let page: Page = serde_json::from_slice(body).map_err(|_| unreadable(body))?;
         for run in page.check_runs {
-            if run.app.slug != bot || run.status != "completed" {
+            let (Some(app), Some(at)) = (run.app, run.completed_at) else {
+                continue;
+            };
+            if app.slug != bot || run.status != "completed" {
                 continue;
             }
+            let output = run.output.unwrap_or_default();
             runs.push(CheckRun {
-                title: run.output.title.unwrap_or_default(),
-                summary: run.output.summary.unwrap_or_default(),
+                title: output.title.unwrap_or_default(),
+                summary: output.summary.unwrap_or_default(),
                 conclusion: run.conclusion.unwrap_or_default(),
-                at: time(&run.completed_at, body)?,
+                at: time(&at, body)?,
             });
         }
     }
@@ -630,7 +637,7 @@ mod tests {
             {"app":{"slug":"github-actions"},"status":"completed","conclusion":"success",
              "completed_at":"2026-11-04T12:00:00Z","output":{"title":"Build","summary":"ok"}},
             {"app":{"slug":"cubic-dev-ai"},"status":"in_progress","conclusion":null,
-             "completed_at":"1970-01-01T00:00:00Z","output":{"title":null,"summary":null}},
+             "completed_at":null,"output":{"title":null,"summary":null}},
             {"app":{"slug":"cubic-dev-ai"},"status":"completed","conclusion":"neutral",
              "completed_at":"2026-11-04T12:47:24Z","output":{"title":"AI review line limit reached",
              "summary":"Reviews resume on 29 November 2026."}}]}"#
@@ -644,6 +651,48 @@ mod tests {
             ["AI review line limit reached"],
             "its running run is not one"
         );
+    }
+
+    // Recorded from shep-pm/shep-kelpie's own main head on 2026-11-04 while its
+    // CI ran, trimmed to the four runs that carry the shape: GitHub answers null
+    // for `completed_at` and `conclusion`, and a null `title` and `summary` in
+    // `output`, on a run queued or still running.
+    const CHECK_RUNS_CI_HEAD: &str =
+        include_str!("../../../../../fixtures/gh-check-runs-head-with-ci.json");
+
+    #[test]
+    fn a_head_with_ci_still_running_is_read_as_its_finished_runs() {
+        let page = CHECK_RUNS_CI_HEAD.as_bytes().to_vec();
+        let seen = parse_checks(std::slice::from_ref(&page), "github-actions").unwrap();
+        let times: Vec<u64> = seen.iter().map(|r| r.at.0).collect();
+        assert_eq!(
+            times,
+            [1_793_808_992, 1_793_808_983],
+            "the queued run and the one still running are none, newest first"
+        );
+        assert!(seen.iter().all(|r| r.conclusion == "success"), "{seen:?}");
+        assert_eq!(
+            parse_checks(&[page], "cubic-dev-ai").unwrap(),
+            [],
+            "the page is still read whole for a bot that posted nothing on the head"
+        );
+    }
+
+    #[test]
+    fn cubics_finished_run_is_read_beside_its_own_still_queued() {
+        let page = br#"{"total_count":2,"check_runs":[
+            {"app":{"slug":"cubic-dev-ai"},"status":"in_progress","conclusion":null,
+             "completed_at":null,"output":{"title":null,"summary":null,"text":null,
+             "annotations_count":0,"annotations_url":"https://api.github.com/x"}},
+            {"app":{"slug":"cubic-dev-ai"},"status":"completed","conclusion":"neutral",
+             "completed_at":"2026-11-04T12:47:24Z","output":{"title":"AI review line limit reached",
+             "summary":"Reviews resume on 29 November 2026."}}]}"#
+            .to_vec();
+
+        let seen = parse_checks(&[page], "cubic-dev-ai").unwrap();
+
+        assert_eq!(seen.len(), 1, "its running run is not one");
+        assert_eq!(seen[0].title, "AI review line limit reached");
     }
 
     #[test]
