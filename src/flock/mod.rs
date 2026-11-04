@@ -22,7 +22,9 @@ mod verbs;
 mod watch;
 
 pub use set::migrate::main as settings_migrate;
-pub use verbs::{USAGE, VERBS, main, split_project, verb_first};
+pub use verbs::{
+    ABOUT_WIDTH, ELSEWHERE, Row, TABLE, USAGE, VERBS, declared, main, split_project, verb_first,
+};
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
