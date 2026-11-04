@@ -671,6 +671,9 @@ pub fn advance(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
         }
         pass => pass,
     };
+    if pass.is_ok() {
+        lock(runner).passes += 1;
+    }
     lock(runner).post();
     pass
 }

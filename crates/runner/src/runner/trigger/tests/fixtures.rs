@@ -66,6 +66,8 @@ pub(in crate::runner) fn settled(value: &mut Value, head: &str) {
         Value::Object(fields) => {
             // How long this run's passes held the lock, which no fixture can name.
             fields.remove("lock");
+            // How many passes this run made, which no fixture can name.
+            fields.remove("passes");
             for key in ["board", "folder", "worktree", "build", "commit", "session"] {
                 let marker = match key {
                     "build" => "<build>",

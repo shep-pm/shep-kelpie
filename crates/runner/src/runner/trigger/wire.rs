@@ -49,6 +49,7 @@ impl From<&Status<'_>> for wire::Status {
             forge_held_until: status.forge_held_until,
             settings_refused: status.settings_refused.map(Into::into),
             lock: status.lock.clone(),
+            passes: status.passes,
         }
     }
 }
