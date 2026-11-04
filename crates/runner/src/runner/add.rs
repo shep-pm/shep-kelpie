@@ -373,9 +373,8 @@ impl Runner {
 
     // The implementers the agent board ranks for a work item for `ticket`,
     // whose issue has `labels`, on what `picked` says. The project manager's
-    // agent is asked for alone first and takes the item, unpinned, when the
-    // board ranks it able to start within the slack. Otherwise the ask is as if
-    // none were named: a pinned `agent:` label's agent alone, else the ranking.
+    // agent is asked for alone first and takes the item, unpinned, when it
+    // can start within the slack. Else the ask is as if none were named.
     pub(super) fn ranked(
         &self,
         ticket: TicketId,
