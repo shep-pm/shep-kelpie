@@ -33,7 +33,7 @@ use crate::board::OpenPullRequest;
 use crate::ports::{
     BranchRun, Checks, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, InstallationToken,
     Issue, NewLabel, OpenPull, PullRequest, PullRequestState, QueueStanding, Queued, RateLimits,
-    Rerun, Reviewed, Talk, ThreadComment, Timestamp, Visibility, Workflow,
+    Rerun, Reviewed, Talk, ThreadComment, Timestamp, Visibility, Workflow, is_gate_check,
 };
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
@@ -623,6 +623,13 @@ impl Check {
 }
 
 impl Check {
+    // One of kelpie's own gates, which its App posts beside CI and holds open
+    // while it waits on CI. A workflow job of the same name links to its run.
+    fn gate(&self) -> bool {
+        matches!(self, Self::CheckRun { name, details_url, .. }
+            if is_gate_check(name) && details_url.as_deref().and_then(run_of).is_none())
+    }
+
     // The check run that is still queued or in progress, which the gate
     // reruns past a cap if its workflow run finished: GitHub leaves a job of
     // a finished run in either state for good, and a commit status has no run.
@@ -665,13 +672,14 @@ fn run_of(details_url: &str) -> Option<u64> {
 
 // The whole run is read before a verdict, so a red run names every failure.
 fn checks(rollup: &[Check]) -> Checks {
+    let rollup: Vec<&Check> = rollup.iter().filter(|c| !c.gate()).collect();
     if rollup.is_empty() {
         return Checks::None;
     }
     let mut failed = Vec::new();
     let mut ran = false;
     let mut pending = false;
-    for check in rollup {
+    for check in &rollup {
         match check.outcome() {
             (_, Outcome::Pending) => pending = true,
             (name, Outcome::Failed) => failed.push(name.to_owned()),
@@ -680,7 +688,7 @@ fn checks(rollup: &[Check]) -> Checks {
         }
     }
     if pending {
-        return Checks::Pending(rollup.iter().filter_map(Check::queued).collect());
+        return Checks::Pending(rollup.iter().filter_map(|c| c.queued()).collect());
     }
     if failed.is_empty() {
         if ran { Checks::Passed } else { Checks::Skipped }

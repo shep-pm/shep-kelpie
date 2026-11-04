@@ -10,17 +10,16 @@ use std::sync::Arc;
 
 use super::Runner;
 use super::ruling::Answer;
-use crate::ports::{CheckRunId, CheckState, Conclusion, ForgeError, GateCheck};
+use crate::ports::{
+    CheckRunId, CheckState, Conclusion, ForgeError, GateCheck, REVIEW_CHECK as REVIEW,
+    RULING_CHECK as RULING, SUMMARY_CHECK as SUMMARY,
+};
 use crate::state::Ruling;
 use crate::ticket::TicketId;
 use crate::work_item::{Phase, Review, WorkItem};
 
 #[cfg(test)]
 mod tests;
-
-const REVIEW: &str = "kelpie / review";
-const RULING: &str = "kelpie / ruling";
-const SUMMARY: &str = "kelpie";
 
 /// The longest title, in characters
 const TITLE: usize = 120;
