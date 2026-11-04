@@ -59,12 +59,21 @@ impl FakeCodeRabbit {
     /// comment and completing its check run on the head instead, as it did on
     /// shep-pm/shep#1544
     pub fn cubic_refuse(&self, number: u64, at: u64) {
+        self.cubic_refuse_saying(
+            number,
+            at,
+            "You've reached your plan's monthly review limit. Reviews resume on \
+             29 November 2026 (in 25 days).",
+        );
+    }
+
+    /// cubic refuses on pull request `number` at `at` with a check run whose
+    /// summary says `said`, which is where the day it names reviews resume sits
+    pub fn cubic_refuse_saying(&self, number: u64, at: u64, said: &str) {
         self.post_as(number, LOGIN.rest, |seen| {
             seen.checks.push(CheckRun {
                 title: LIMIT.into(),
-                summary: "You've reached your plan's monthly review limit. Reviews \
-                          resume on 29 November 2026 (in 25 days)."
-                    .into(),
+                summary: said.into(),
                 conclusion: "neutral".into(),
                 at: Timestamp(at),
             });

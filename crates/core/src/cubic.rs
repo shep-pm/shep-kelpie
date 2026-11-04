@@ -1,13 +1,13 @@
 //! cubic's profile as a review bot
 //!
 //! cubic has no label: a comment summons it, and a comment a few seconds on
-//! says it started. Its review posts whether or not it found anything, on
-//! the commit it read, with its summary between markers. Each finding is a
-//! thread whose text opens with its level, `P1` to `P3`, below a marker
-//! carrying its confidence out of 10. It sets no commit status and states no
-//! quota. Its refusal is a check run on the head titled [`LIMIT`], which
-//! names the day reviews resume; a comment saying a limit was reached is
-//! read as one too, though none has been seen.
+//! says it started. Its review posts whether or not it found anything, on the
+//! commit it read, with its summary between markers. Each finding is a thread
+//! whose text opens with its level, `P1` to `P3`, below a marker carrying its
+//! confidence out of 10. It sets no commit status and states no quota. Its
+//! refusal is a check run on the head titled [`LIMIT`], naming the day reviews
+//! resume, read after any review covering the head and only while that day has
+//! yet to come. A comment naming a limit is a refusal too.
 
 use crate::ports::{Finding, Severity, Timestamp};
 use crate::review_bot::{
@@ -70,15 +70,17 @@ impl Profile for Cubic {
     }
 
     fn read(&self, activity: &Activity, head: &str, since: Timestamp) -> Reading {
-        // A head cubic ran out of reviewed lines on is refused whatever else
-        // it posted there.
-        if let Some(run) = limited(activity) {
+        // A head a cubic review covers is answered, whatever its check runs
+        // say about the plan's lines.
+        if self.covers(activity, head) {
+            return Reading::Reviewed;
+        }
+        // Its refusal is a check run on the head saying it is out of reviewed
+        // lines, read only while the day it names has yet to come.
+        if let Some(run) = limited(activity, since) {
             return Reading::Refused {
                 opens: resumes(&run.summary),
             };
-        }
-        if self.covers(activity, head) {
-            return Reading::Reviewed;
         }
         // A refusal among its comments since the summon stands, whatever it
         // posted after.
@@ -95,7 +97,7 @@ impl Profile for Cubic {
         let from = since.0.saturating_sub(CLOCK_SLACK);
         activity.comments.iter().any(|c| c.at.0 >= from)
             || activity.reviews.iter().any(|r| r.at.0 >= from)
-            || limited(activity).is_some()
+            || a_limit_run(activity)
     }
 
     fn covers(&self, activity: &Activity, head: &str) -> bool {
@@ -122,9 +124,20 @@ impl Profile for Cubic {
     }
 }
 
-// The check run on the head saying cubic's plan is out of reviewed lines
-fn limited(activity: &Activity) -> Option<&CheckRun> {
-    activity.checks.iter().find(|run| run.title == LIMIT)
+// The newest check run on the head saying cubic's plan is out of reviewed
+// lines, while the day it names has yet to come: `checks` is newest first, so
+// this is the last cubic said of the kind. A run whose day has gone says
+// nothing about now, and the window's own definition decides then.
+fn limited(activity: &Activity, since: Timestamp) -> Option<&CheckRun> {
+    activity.checks.iter().find(|run| {
+        run.title == LIMIT && !resumes(&run.summary).is_some_and(|day| day.0 <= since.0)
+    })
+}
+
+// Any check run of the kind, whatever its day says: cubic did answer, which is
+// what a summon is heard by.
+fn a_limit_run(activity: &Activity) -> bool {
+    activity.checks.iter().any(|run| run.title == LIMIT)
 }
 
 // The day its summary names for reviews resuming, as 00:00 UTC that day.

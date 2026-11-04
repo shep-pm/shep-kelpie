@@ -261,6 +261,37 @@ fn a_review_skipped_or_completed_check_run_is_no_refusal() {
 }
 
 #[test]
+fn a_review_covering_the_head_outranks_a_limit_run_on_it() {
+    let mut seen = checks(&page(
+        LIMIT,
+        "You've reached your plan's monthly review limit. Reviews resume on 29 November 2026.",
+        "2026-11-04T12:47:24Z",
+    ));
+    seen.reviews = parse_reviews(REVIEWS_645.as_bytes()).unwrap();
+    assert!(Cubic.covers(&seen, HEAD_645));
+    assert_eq!(
+        Cubic.read(&seen, HEAD_645, iso("2026-11-04T12:00:00Z")),
+        Reading::Reviewed,
+        "cubic read the head, whatever its check run says about the plan's lines"
+    );
+}
+
+#[test]
+fn a_limit_run_whose_named_day_has_gone_is_no_refusal() {
+    let seen = checks(CHECK_RUNS_1544);
+    let after = iso("2026-11-30T09:00:00Z");
+    assert!(
+        Cubic.heard(&seen, HEAD_1544, after),
+        "cubic did answer here"
+    );
+    assert_eq!(
+        Cubic.read(&seen, HEAD_1544, after),
+        Reading::Silent,
+        "the day it named has come and gone, so the window's own definition decides"
+    );
+}
+
+#[test]
 fn a_comment_saying_a_limit_was_reached_is_a_refusal_with_no_opening() {
     let refusal = Activity {
         comments: vec![Comment {
