@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use super::*;
 use crate::github::Verb;
-use crate::ports::{Cooldown, LineComment, PostedComment, Timestamp};
+use crate::ports::{
+    CheckRunId, CheckState, Conclusion, Cooldown, GateCheck, LineComment, PostedComment, Timestamp,
+};
 use crate::test::{Asked, FakeClock, FakeGithub};
 
 fn slug(s: &str) -> ForgeSlug {
@@ -386,6 +388,103 @@ fn a_thread_is_resolved_with_a_token_that_holds_contents_and_posts_use_one_that_
     let made = writes(&github);
     assert_eq!(made[0].0, "ghs_test1", "the reply uses kelpie's token");
     assert_eq!(made[1].0, "ghs_test2", "the resolve uses its own");
+}
+
+fn check(state: CheckState) -> GateCheck {
+    GateCheck {
+        name: "kelpie".to_owned(),
+        state,
+        title: "Waiting on review".to_owned(),
+        summary: "Round 1 is with qwen.".to_owned(),
+    }
+}
+
+#[test]
+fn a_check_run_is_created_and_completed_on_the_head() {
+    let (voice, github, _home) = voiced();
+    github.answer_check_runs_with(include_str!("../../../../../fixtures/gh-check-run.json"));
+    let repo = slug("shep-pm/koji");
+
+    let id = voice
+        .check_run(&repo, "9fceb02", &check(CheckState::InProgress))
+        .unwrap();
+    voice
+        .update_check_run(
+            &repo,
+            id,
+            &check(CheckState::Completed(Conclusion::Success)),
+        )
+        .unwrap();
+
+    assert_eq!(id, CheckRunId(4_399_123_455));
+    let json = |call: &Call| -> serde_json::Value {
+        serde_json::from_str(call.body.as_deref().unwrap()).unwrap()
+    };
+    let made = writes(&github);
+    assert_eq!(made.len(), 2);
+    assert_eq!(made[0].1.verb, Verb::Post);
+    assert_eq!(made[0].1.path, "/repos/shep-pm/koji/check-runs");
+    assert_eq!(
+        json(&made[0].1),
+        serde_json::json!({
+            "name": "kelpie",
+            "head_sha": "9fceb02",
+            "status": "in_progress",
+            "output": {"title": "Waiting on review", "summary": "Round 1 is with qwen."},
+        })
+    );
+    assert_eq!(made[1].1.verb, Verb::Patch);
+    assert_eq!(made[1].1.path, "/repos/shep-pm/koji/check-runs/4399123455");
+    assert_eq!(json(&made[1].1)["status"], "completed");
+    assert_eq!(json(&made[1].1)["conclusion"], "success");
+}
+
+// Posting comments must work on an installation that never accepted Checks,
+// so the permission is asked for by the check run's token alone.
+#[test]
+fn a_check_run_asks_for_a_checks_only_token() {
+    let (voice, github, _home) = voiced();
+    let repo = slug("shep-pm/koji");
+
+    voice.comment(&repo, 12, "hello").unwrap();
+    voice
+        .check_run(&repo, "9fceb02", &check(CheckState::InProgress))
+        .unwrap();
+
+    let requests: Vec<String> = (github.asked().into_iter())
+        .filter_map(|asked| match asked {
+            Asked::AccessToken(_, body) => Some(body),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        requests,
+        [
+            r#"{"permissions":{"issues":"write","pull_requests":"write"},"repositories":["koji"]}"#,
+            r#"{"permissions":{"checks":"write"},"repositories":["koji"]}"#,
+        ]
+    );
+    let made = writes(&github);
+    assert_eq!(made[0].0, "ghs_test1", "the comment uses kelpie's token");
+    assert_eq!(made[1].0, "ghs_test2", "the check run uses its own");
+}
+
+// A permission the installation has not accepted is told apart from GitHub
+// being busy: asking again changes nothing.
+#[test]
+fn a_check_run_without_the_checks_permission_says_so() {
+    let (voice, github, _home) = voiced();
+    github.never_given(&["checks"]);
+
+    let err = voice
+        .check_run(
+            &slug("shep-pm/koji"),
+            "9fceb02",
+            &check(CheckState::InProgress),
+        )
+        .unwrap_err();
+
+    assert!(matches!(err, ForgeError::NoPermission(_)), "{err:?}");
 }
 
 fn line(path: &str, line: u32, body: &str) -> LineComment {

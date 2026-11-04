@@ -136,6 +136,10 @@ pub enum Kind {
     AppCreateLabel,
     /// A label put on an issue or taken off by the App
     AppSetIssueLabel,
+    /// A check run the App made on a pull request's head
+    AppCheckRun,
+    /// A check run of the App's rewritten
+    AppUpdateCheckRun,
 }
 
 impl Kind {
@@ -263,7 +267,9 @@ impl Kind {
             | Self::AppCreateIssue
             | Self::AppEditIssue
             | Self::AppCreateLabel
-            | Self::AppSetIssueLabel => Api::Rest,
+            | Self::AppSetIssueLabel
+            | Self::AppCheckRun
+            | Self::AppUpdateCheckRun => Api::Rest,
         }
     }
 }

@@ -4,7 +4,10 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
 
-use super::{Clock, ForgeError, InstallationToken, LineComment, NewLabel, PostedComment, Voice};
+use super::{
+    CheckRunId, Clock, ForgeError, GateCheck, InstallationToken, LineComment, NewLabel,
+    PostedComment, Voice,
+};
 use crate::forge_ledger::{Ended, Identity, Kind, Ledger};
 use crate::settings::ForgeSlug;
 
@@ -146,6 +149,26 @@ impl Voice for RecordedVoice {
     ) -> Result<(), ForgeError> {
         self.call(Kind::AppSetIssueLabel, |v| {
             v.set_issue_label(repo, number, label, on)
+        })
+    }
+
+    fn check_run(
+        &self,
+        repo: &ForgeSlug,
+        head: &str,
+        check: &GateCheck,
+    ) -> Result<CheckRunId, ForgeError> {
+        self.call(Kind::AppCheckRun, |v| v.check_run(repo, head, check))
+    }
+
+    fn update_check_run(
+        &self,
+        repo: &ForgeSlug,
+        id: CheckRunId,
+        check: &GateCheck,
+    ) -> Result<(), ForgeError> {
+        self.call(Kind::AppUpdateCheckRun, |v| {
+            v.update_check_run(repo, id, check)
         })
     }
 }

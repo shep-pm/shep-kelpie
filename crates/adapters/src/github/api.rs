@@ -11,7 +11,9 @@ use std::path::Path;
 use serde_json::Value;
 
 use super::tokens::Jwt;
-use crate::ports::{Cooldown, InstallationToken, LineComment, NewLabel, Timestamp};
+use crate::ports::{
+    CheckRunId, Cooldown, GateCheck, InstallationToken, LineComment, NewLabel, Timestamp,
+};
 use crate::settings::ForgeSlug;
 
 /// An App's private key in PEM, as the conversion hands it back
@@ -310,6 +312,24 @@ impl Call {
         }
     }
 
+    /// A check run on commit `head`, `POST /repos/{owner}/{repo}/check-runs`
+    pub fn check_run(repo: &ForgeSlug, head: &str, check: &GateCheck) -> Self {
+        let mut body = check_body(check);
+        body["name"] = Value::from(check.name.as_str());
+        body["head_sha"] = Value::from(head);
+        Self::post(format!("/repos/{}/check-runs", repo.as_str()), body)
+    }
+
+    /// Check run `id` rewritten to show `check`,
+    /// `PATCH /repos/{owner}/{repo}/check-runs/{id}`
+    pub fn update_check_run(repo: &ForgeSlug, id: CheckRunId, check: &GateCheck) -> Self {
+        Self {
+            verb: Verb::Patch,
+            path: format!("/repos/{}/check-runs/{}", repo.as_str(), id.0),
+            body: Some(check_body(check).to_string()),
+        }
+    }
+
     /// Review thread `thread` resolved, `POST /graphql` with
     /// [`RESOLVE_THREAD`]
     pub fn resolve_thread(thread: &str) -> Self {
@@ -339,6 +359,19 @@ impl Call {
             body: Some(body.to_string()),
         }
     }
+}
+
+// What a check run's create and update share: its status, how it ended and
+// the title and summary it shows.
+fn check_body(check: &GateCheck) -> Value {
+    let mut body = serde_json::json!({
+        "status": check.status(),
+        "output": { "title": check.title, "summary": check.summary },
+    });
+    if let Some(conclusion) = check.conclusion() {
+        body["conclusion"] = Value::from(conclusion);
+    }
+    body
 }
 
 // `text` as one path segment: all but letters, digits and `-_.~` is
@@ -377,6 +410,19 @@ pub fn parse_number(body: &str) -> Result<u64, ApiError> {
 pub fn parse_review(body: &str) -> Result<u64, ApiError> {
     let v: Value = serde_json::from_str(body).map_err(|_| ApiError::Unreadable("id"))?;
     v["id"].as_u64().ok_or(ApiError::Unreadable("id"))
+}
+
+/// The id of the check run a create's answer describes
+///
+/// # Errors
+///
+/// [`ApiError::Unreadable`] when the answer has no id.
+pub fn parse_check_run(body: &str) -> Result<CheckRunId, ApiError> {
+    let v: Value = serde_json::from_str(body).map_err(|_| ApiError::Unreadable("id"))?;
+    v["id"]
+        .as_u64()
+        .map(CheckRunId)
+        .ok_or(ApiError::Unreadable("id"))
 }
 
 /// The id and creation time of the comment a post's answer describes
@@ -481,6 +527,9 @@ pub enum Grant {
     /// written, though its documentation does not say so. It is minted for
     /// that call alone, because it can push, which kelpie's posts cannot.
     Threads,
+    /// Kelpie's check runs: checks, written. Kept apart from the posting token
+    /// so an installation that has not accepted Checks still posts comments.
+    Checks,
     /// Kelpie's reads of the board, pull requests, reviews and checks: issues,
     /// pull requests, checks and commit statuses, read. Nothing is written.
     Reader,
@@ -498,6 +547,7 @@ impl Grant {
         match self {
             Self::Kelpie => Some(Purpose::Posts),
             Self::Reader | Self::ReaderCore => Some(Purpose::Reads),
+            Self::Checks => Some(Purpose::Checks),
             Self::Worker { .. } | Self::Threads => None,
         }
     }
@@ -510,6 +560,8 @@ pub(crate) enum Purpose {
     Posts,
     /// Kelpie's reads
     Reads,
+    /// Kelpie's check runs
+    Checks,
 }
 
 /// The body of an access token's request, which limits the token to `repo`
@@ -522,6 +574,7 @@ pub fn token_request(repo: &ForgeSlug, grant: Grant) -> String {
             serde_json::json!({ "contents": "write", "workflows": "write" })
         }
         Grant::Threads => serde_json::json!({ "contents": "write", "pull_requests": "write" }),
+        Grant::Checks => serde_json::json!({ "checks": "write" }),
         Grant::Reader => serde_json::json!({
             "issues": "read",
             "pull_requests": "read",

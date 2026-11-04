@@ -7,7 +7,9 @@ mod github;
 mod leases;
 mod reviewer;
 
-pub use github::{Asked, FakeGithub, FakeSigner, HeldToken, PEM, REVIEW_ID, SentReview};
+pub use github::{
+    Asked, FakeGithub, FakeSigner, HeldToken, PEM, REVIEW_ID, SentReview, ShownCheck,
+};
 pub use leases::{DogStandIn, FakeLeases, Told};
 pub use reviewer::{FakeReviewer, ScriptedRound, SeenRound};
 
