@@ -142,9 +142,13 @@ fn spend_credit(view: &View, mut picks: Vec<Pick>, now: Timestamp) -> Vec<Pick> 
         picks.retain(|pick| !billed(pick));
         return picks;
     }
-    // The places each role and tier holds are refilled API agents first, each side in its order.
-    let group =
-        |pick: &Pick| (view.ranked.get(&pick.agent)).map(|agent| (agent.role, agent.fit.tier()));
+    // The places each role and tier holds for API and plan agents are refilled API agents
+    // first, each side in its order. A local or gateway agent spends neither, and keeps its place.
+    let group = |pick: &Pick| {
+        let agent = view.ranked.get(&pick.agent)?;
+        let plan = matches!(agent.runs.session(), Some((_, Limit::Account(_))));
+        (billed(pick) || plan).then(|| (agent.role, agent.fit.tier()))
+    };
     let mut groups: Vec<(_, Vec<usize>)> = Vec::new();
     for (place, pick) in picks.iter().enumerate() {
         let Some(key) = group(pick) else { continue };

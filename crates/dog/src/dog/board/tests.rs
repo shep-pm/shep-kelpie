@@ -583,6 +583,36 @@ async fn an_api_agent_of_a_lower_tier_or_another_role_is_not_moved_ahead_of_a_pl
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_api_agent_is_not_moved_ahead_of_a_local_agent_of_its_role_and_tier() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("agents");
+    write_in(
+        &folder,
+        "billed.md",
+        &format!("{ON_CLAUDE}login: api\n---\n"),
+    );
+    write_in(
+        &folder,
+        "local.md",
+        "---\nrole: implementer\nharness: stand-in\nmodel: lite\neffort: low\nusage: none\n---\n",
+    );
+    let agents = Agents::load(&folder).unwrap();
+    let shown = seen(&agents, &Gateways::default(), 10).await;
+    let ask = ask_of(&["local", "billed"]);
+    let now = Timestamp(EPOCH);
+    let picked = |credit| {
+        let board = Board::new(&agents).credited(credit);
+        order(&pick::answer(&board.view(), &shown, &ask, now))
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(picked(None), ["local", "billed"], "the local model is free");
+    assert_eq!(picked(Some(credit(100))), ["local", "billed"]);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_spent_credit_leaves_every_api_agent_out_of_the_answer_a_pinned_one_included() {
     let dir = tempfile::tempdir().unwrap();
     let agents = two_plans_and_a_billed(&dir.path().join("agents"));
