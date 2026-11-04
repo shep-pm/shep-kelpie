@@ -574,7 +574,7 @@ impl Runner {
     }
 
     // Until when `agent` starts nothing at `now`, and why: a review bot's
-    // window while it is closed, else the hold last found on its plan account.
+    // window while it is closed, else the new-item hold last found on its plan account.
     fn agent_out(&self, agent: &AgentName, now: Timestamp) -> Option<Out> {
         if let Some(until) = self.window_opens(agent, now) {
             return Some(Out {

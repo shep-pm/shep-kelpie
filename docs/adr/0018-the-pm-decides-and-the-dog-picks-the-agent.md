@@ -58,7 +58,7 @@ So the roles that decide are cut to one, the project manager, and choosing an ag
 ### Amendment, 2026-11-04: the project manager's agent is tried first, not pinned
 
 - A pick that named an agent pinned the item to it, and a pinned item is the only one tried and never hands off, so a pick could strand an item on an agent that had run out (a Codex week at 100%, a review bot's closed window) until it reset.
-- The project manager's named agent is now the first choice. The runner asks the board for it alone and opens the item on it, unpinned, when the board ranks it with a wait within the item's slack. Otherwise the agent board picks as if none were named. A later handoff moves an unpinned item once its agent falls behind the slack.
+- The project manager's named agent is now the first choice. The runner asks the board for it alone and opens the item on it, unpinned, when the board ranks it with a wait within the item's slack. Otherwise the agent board picks as if none were named. The ranking follows the pick for the pacer's walk, since the dog reads no day allowance, so an agent the pacer holds never strands the item. A later handoff moves an unpinned item once its agent falls behind the slack.
 - Only the maintainer's `agent:<name>!` label pins. `board.md`'s Agents section marks each agent that is out with the time it returns and why, so the project manager names one that can start.
 
 ## Considered options

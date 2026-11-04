@@ -564,3 +564,36 @@ fn a_hold_whose_time_has_passed_marks_no_agent_out() {
         "{bullets:#?}"
     );
 }
+
+#[test]
+fn an_agent_whose_days_allowance_is_spent_is_marked_out_until_the_day_resets() {
+    let rig = Rig::new("koji");
+    rig.write_codex_implementer();
+    rig.allow(&["sonnet-high", "codex"]);
+    rig.codex_day_began(0);
+    let runner = rig.open().unwrap();
+    rig.codex_meter.set(Rig::utilization(15, 0));
+    rig.forge.list_ready(7, false);
+    rig.forge.label(7, "agent:codex!");
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Held { .. })
+    ));
+    rig.clock.advance(60);
+    super::brief(&runner);
+
+    let bullets = agent_bullets(&rig);
+    let line = |name: &str| bullets.iter().find(|b| b.contains(name)).unwrap();
+    assert!(
+        line("- codex ").contains("; out until 2026-"),
+        "{bullets:#?}"
+    );
+    assert!(
+        line("- codex ").contains("today's Codex allowance of 14.3% of the week is spent"),
+        "{bullets:#?}"
+    );
+    assert!(
+        !line("- sonnet-high ").contains("out until"),
+        "{bullets:#?}"
+    );
+}

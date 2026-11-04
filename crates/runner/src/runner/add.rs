@@ -99,6 +99,10 @@ pub(super) struct Ranked {
     rest: Vec<AgentName>,
     // A pinned label's agent was the only one asked for
     pinned: bool,
+    // For which ticket, and whether `first` is the project manager's pick,
+    // which never pins
+    ticket: TicketId,
+    picked: bool,
     // The note for a project manager's pick that did not hold, told once the item opens
     note: Option<String>,
 }
@@ -124,10 +128,21 @@ impl Ranked {
 
     /// The item opens on `agent`, one of those ranked
     pub(super) fn opening(self, agent: AgentName) -> Opening {
+        let behind = self.picked && agent != self.first;
+        let note = self.note.or_else(|| {
+            behind.then(|| {
+                format!(
+                    "{}: the project manager picked {}, which the pacer holds, so {agent} takes it",
+                    self.ticket.shown(),
+                    self.first
+                )
+            })
+        });
+        let pinned = self.pinned && !(self.picked && agent == self.first);
         Opening {
             agent,
-            pinned: self.pinned,
-            note: self.note,
+            pinned,
+            note,
         }
     }
 }
@@ -394,6 +409,7 @@ impl Runner {
             agents: self.board_agents_of(files),
             leave_out: Vec::new(),
         };
+        let mut picked = None;
         if let Some(agent) = named {
             let alone = PickAsk {
                 pin: Some(agent.clone()),
@@ -401,25 +417,40 @@ impl Runner {
             };
             let picks = self.board_picks(&alone).map_err(AddError::Unpicked)?;
             if (picks.iter()).any(|pick| within_slack(pick.wait, 0, alone.slack)) {
-                return Ok(Ranked {
-                    first: agent,
-                    rest: Vec::new(),
-                    pinned: false,
-                    note,
-                });
+                picked = Some(agent);
+            } else {
+                note = Some(format!(
+                    "{}: the project manager picked {agent}, which cannot start within its \
+                     slack, so the agent board picks",
+                    ticket.shown()
+                ));
             }
-            note = Some(format!(
-                "{}: the project manager picked {agent}, which cannot start within its slack, \
-                 so the agent board picks",
-                ticket.shown()
-            ));
         }
         let ask = PickAsk {
             pin: pin.clone(),
             ..ask
         };
-        let picks = self.board_picks(&ask).map_err(AddError::Unpicked)?;
-        let mut agents = picks.into_iter().map(|pick| pick.agent);
+        let picks = self.board_picks(&ask);
+        // The dog reads no day allowance, so the pick may be one the pacer
+        // holds. The ranking is walked behind it, and takes the item then.
+        if let Some(first) = picked {
+            let behind = (picks.unwrap_or_default().into_iter())
+                .map(|pick| pick.agent)
+                .filter(|agent| *agent != first)
+                .collect();
+            return Ok(Ranked {
+                first,
+                rest: behind,
+                pinned: pin.is_some(),
+                ticket,
+                picked: true,
+                note,
+            });
+        }
+        let mut agents = picks
+            .map_err(AddError::Unpicked)?
+            .into_iter()
+            .map(|p| p.agent);
         let Some(first) = agents.next() else {
             return Err(AddError::Unpicked(Unpicked::Nobody(wanted(&ask))));
         };
@@ -427,6 +458,8 @@ impl Runner {
             first,
             rest: agents.collect(),
             pinned: pin.is_some(),
+            ticket,
+            picked: false,
             note,
         })
     }

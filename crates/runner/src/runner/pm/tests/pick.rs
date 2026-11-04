@@ -213,11 +213,16 @@ fn a_picks_agent_that_can_start_runs_the_item_unpinned_over_the_issues_label() {
             .contains(&"agent:sonnet-high!".to_owned()),
         "the issue's label is left as it was"
     );
+    // The pick is asked for alone first, then the ranking behind it, which the
+    // label pins, for the pacer's walk to fall to.
     let asks = rig.agent_board.asks();
-    let ask = asks.last().unwrap();
-    assert_eq!(
-        (ask.pin.as_ref().map(|p| p.as_str()), ask.tier, ask.slack),
-        (Some("opus-high"), Some(Tier::Heavy), Some(0))
+    let pins: Vec<_> = (asks.iter())
+        .map(|ask| ask.pin.as_ref().map(|p| p.as_str()))
+        .collect();
+    assert_eq!(pins, [Some("opus-high"), Some("sonnet-high")]);
+    assert!(
+        asks.iter()
+            .all(|a| (a.tier, a.slack) == (Some(Tier::Heavy), Some(0)))
     );
 }
 
