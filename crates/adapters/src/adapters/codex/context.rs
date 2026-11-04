@@ -13,7 +13,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use super::{AgentCall, AgentError, AgentReply, CODEX, Files, Spent, Thread};
+use super::{AgentCall, AgentError, AgentReply, CODEX, Files, Spent, Thread, price};
 use crate::ports::Usage;
 use crate::transcripts;
 
@@ -193,6 +193,7 @@ pub(super) fn compact(call: &AgentCall) -> Result<AgentReply, AgentError> {
     let Some(known) = super::thread(&files, id)? else {
         return Err(AgentError::NoSession(CODEX, id.clone()));
     };
+    let session_cost = price::price(&call.model, &known.spent.since(Spent::default()));
     super::save_thread(
         &files,
         id,
@@ -205,7 +206,7 @@ pub(super) fn compact(call: &AgentCall) -> Result<AgentReply, AgentError> {
         session_id: id.clone(),
         text: String::new(),
         usage: Usage::default(),
-        session_cost: None,
+        session_cost,
         context: None,
         compactions: 0,
     })
