@@ -25,26 +25,12 @@ Pacing, leases, forge limits, time, usage, settings.
 - Triggers that only ask (`status`, `timings`, `drain`) never wake loop; board poll starts at `BOARD_POLL` (60s), doubles to `IDLE_POLL_MAX` (5 min) while no item is open and the board repeats; a moved board, an item opening or ending, `add`/`tell`/`rule`/`start` and a write of kelpie's own reset it; rate-limit read stays at 60s; `status.board_poll_secs`. #394, #1329
 - Failing step backs off 15s-10 min; rate-limit answer holds every forge call until reset (10 min for secondary limit, longer if hit again). #394
 - One forge hold and pace per login, kept by the dog (`forge` ask on `lease.sock`, `dog/forge.rs`): any runner's used-up answer holds all; a runner that cannot reach the dog uses its own (`DoorPace`, `core/lease/door_pace.rs`). Dog's copy is in memory, a restart clears it. #580
-- `pick` and `fit` asks on `lease.sock`: the agent board's ranking and its fit reading, agent-board.md. `dog/board/`
+- `pick` and `fit` asks on `lease.sock`: the agent board's ranking and its fit reading, agent-board.md and agent-board-fit.md. `dog/board/`
 - Pace: 60 calls/minute and 5/second per login (`PER_MINUTE`, `AT_ONCE`, `crates/core/src/ports/pace.rs`), under GitHub's secondary limits; each project gets cap / active projects. Queued calls wait (`Clock::wait`), never fail. #580
 - Hold ends at the answer's `retry-after`, else its `x-ratelimit-reset`, else the 10-min fallback; same for `gh` and App calls (App limits are `ForgeError::Limited`; `PacedVoice` holds and paces them; worker-token mint waits the hold). #580
 - REST reads that repeat (ruling-thread comments and the comment's node id, the review bot's comments, reviews and statuses) keep each answer's `ETag` per login and path, in memory, and send it as `If-None-Match`; a 304 is the kept answer, which GitHub does not count against the limit. Lists are read a page at a time, each its own conditional read. GraphQL (board, `gh pr view`, `gh issue view`, threads) has no conditional requests. A forge-ledger line carries `not_modified` when a call had 304s; `shep kelpie usage --forge` lists them by kind. `gh api`'s 304 is unmeasured: a tagged read that fails naming a 304, when the same read untagged works, sends no tag again; a list past 50 pages of 100 is an error. #592, `crates/adapters/src/adapters/gh/conditional/mod.rs`
 - A write of kelpie's own (forge ledger counts the ones that went through) makes the next look due in `DUE_FLOOR`, not at the next poll; a push is not counted. #592, `runner/looks/`
 - A step that retries gets one attempt per step (close of merged issue; ruling-comment edit backs off like a failing step). #580
-
-## Where the time goes
-
-- Every second of an item lands in one of six phases (`worker`, `review`, `ci`, `ruling`, `merge`, `other`), totals add up. #141, #331
-- Charged at each save to the prior phase; stopped time = `other` (decided 2026-10-01); saves about every 30s. GPU wait is `review`. #141, `crates/runner/src/runner/mod.rs`
-- `history` keeps last 100 finished items for `timings [n]`. #141
-
-## Where the usage goes
-
-- Every model call is a line in `<kelpie home>/<project>/usage.jsonl`, append-only. `crates/core/src/usage/mod.rs`, #347
-- Each step is a JSON object in `<kelpie home>/<project>/steps.jsonl` (`at` first), append-only, which `watch` and `usage --import` read; the out log gets one plain line per event, never JSON. `runner/step_log.rs`, #491
-- Units = `input + 2 x hour cache writes + 1.25 x five-minute writes + 0.1 x cache reads + 5 x output` (control room weights). #347
-- Call never reaching a model gets no line; call cut by stop written from launch draft; finished item adds `finished` line. #347
-- Unwritable ledger fails no call or step. `shep kelpie usage` compares units per merged PR against the maintainer's baselines. #347
 
 ## Settings
 
