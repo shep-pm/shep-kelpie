@@ -187,6 +187,13 @@ pub(super) fn checks(
             probes.host,
         ));
         lines.push(super::github::reads(at("reads"), repo, probes.github));
+        if covered {
+            lines.push(super::github::check_runs(
+                at("check runs"),
+                repo,
+                probes.github,
+            ));
+        }
         lines.extend(super::github::maintainer(
             at("maintainer"),
             covered,

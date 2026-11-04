@@ -1,6 +1,8 @@
 //! Kelpie's own voice on the forge, made as its GitHub App
 
-use super::{ForgeError, InstallationToken, LineComment, NewLabel, PostedComment};
+use super::{
+    CheckRunId, ForgeError, GateCheck, InstallationToken, LineComment, NewLabel, PostedComment,
+};
 use crate::settings::ForgeSlug;
 
 /// The id [`Voice::review`] gives a review the forge took whose answer named none
@@ -137,5 +139,31 @@ pub trait Voice: Send + Sync {
         number: u64,
         label: &str,
         on: bool,
+    ) -> Result<(), ForgeError>;
+
+    /// Shows `check` as a new check run on commit `head`, and returns its id
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError::NoPermission`] when the App's installation does not hold
+    /// the Checks permission. Another [`ForgeError`] when the App cannot post
+    /// it or its answer names no id.
+    fn check_run(
+        &self,
+        repo: &ForgeSlug,
+        head: &str,
+        check: &GateCheck,
+    ) -> Result<CheckRunId, ForgeError>;
+
+    /// Rewrites check run `id`, one the App made, to show `check`
+    ///
+    /// # Errors
+    ///
+    /// As [`Voice::check_run`], less the id.
+    fn update_check_run(
+        &self,
+        repo: &ForgeSlug,
+        id: CheckRunId,
+        check: &GateCheck,
     ) -> Result<(), ForgeError>;
 }

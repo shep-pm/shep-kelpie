@@ -9,8 +9,8 @@ use std::sync::Arc;
 use super::api::{self, ApiError, Call, GithubApi, ThreadWrite};
 use super::tokens::{GithubApp, TokenError};
 use crate::ports::{
-    ForgeError, InstallationToken, LineComment, NewLabel, PostedComment, UNREAD_ID, Voice,
-    with_comments_in_body,
+    CheckRunId, ForgeError, GateCheck, InstallationToken, LineComment, NewLabel, PostedComment,
+    UNREAD_ID, Voice, with_comments_in_body,
 };
 use crate::settings::ForgeSlug;
 
@@ -39,6 +39,18 @@ impl AppVoice {
         self.api.write(token, call).map_err(api_error)
     }
 
+    fn check_write(&self, repo: &ForgeSlug, call: &Call) -> Result<String, ForgeError> {
+        let token = (self.tokens.checks_token(repo))
+            .map(|issued| issued.token)
+            .map_err(checks_error)?;
+        match self.api.write(&token, call) {
+            Err(ApiError::Refused(403)) => Err(ForgeError::NoPermission(
+                "GitHub answered HTTP 403 to the check run".to_owned(),
+            )),
+            other => other.map_err(api_error),
+        }
+    }
+
     // GraphQL answers a refusal with HTTP 200, so the body says how it went.
     fn thread_write(
         &self,
@@ -54,6 +66,18 @@ impl AppVoice {
             ))),
             Err(e) => Err(ForgeError::App(e.to_string())),
         }
+    }
+}
+
+// A check run is written with its own token, which asks for the Checks
+// permission an installation may not have accepted: GitHub then answers
+// 422 to the mint, or 403 to the write.
+fn checks_error(e: TokenError) -> ForgeError {
+    match e {
+        TokenError::Api(ApiError::Refused(422)) => ForgeError::NoPermission(
+            "the installation has not accepted Checks (read and write)".to_owned(),
+        ),
+        e => token_error(e),
     }
 }
 
@@ -183,6 +207,26 @@ impl Voice for AppVoice {
         let call = Call::reply_to_thread(thread, body);
         let token = self.token(repo)?;
         self.thread_write(&token, &call, "addPullRequestReviewThreadReply")
+    }
+
+    fn check_run(
+        &self,
+        repo: &ForgeSlug,
+        head: &str,
+        check: &GateCheck,
+    ) -> Result<CheckRunId, ForgeError> {
+        let answer = self.check_write(repo, &Call::check_run(repo, head, check))?;
+        api::parse_check_run(&answer).map_err(|e| ForgeError::App(e.to_string()))
+    }
+
+    fn update_check_run(
+        &self,
+        repo: &ForgeSlug,
+        id: CheckRunId,
+        check: &GateCheck,
+    ) -> Result<(), ForgeError> {
+        self.check_write(repo, &Call::update_check_run(repo, id, check))
+            .map(drop)
     }
 
     fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError> {

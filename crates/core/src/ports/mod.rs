@@ -22,6 +22,7 @@ mod agent;
 mod agent_board;
 mod attachment;
 mod bridge;
+mod check_run;
 mod classifier;
 mod dev_server;
 mod disk;
@@ -65,6 +66,7 @@ pub use agent::{
 pub use agent_board::AgentBoard;
 pub use attachment::is_github_attachment;
 pub use bridge::{Bridges, OpenBridge, Playwright};
+pub use check_run::{CheckRunId, CheckState, Conclusion, GateCheck};
 pub use classifier::{Classifier, ClassifierError, Probability, SpamState};
 pub use dev_server::{DevPort, DevRun, DevServers, READY_WITHIN, Started};
 pub use disk::Disk;

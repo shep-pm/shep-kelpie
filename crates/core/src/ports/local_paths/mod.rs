@@ -13,9 +13,10 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::{
-    BranchRun, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, InstallationToken,
-    LineComment, NewLabel, OpenPull, PostedComment, PullRequest, QueueStanding, RateLimits, Rerun,
-    Reviewed, Talk, ThreadComment, Tickets, Timestamp, Visibility, Voice, Workflow,
+    BranchRun, CheckRunId, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, GateCheck,
+    InstallationToken, LineComment, NewLabel, OpenPull, PostedComment, PullRequest, QueueStanding,
+    RateLimits, Rerun, Reviewed, Talk, ThreadComment, Tickets, Timestamp, Visibility, Voice,
+    Workflow,
 };
 use crate::board::OpenPullRequest;
 use crate::hooks::{Hooks, Role, SharedHooks};
@@ -424,6 +425,11 @@ impl GuardedVoice {
         }
     }
 
+    fn check_text(&self, repo: &ForgeSlug, check: &GateCheck) -> Result<(), ForgeError> {
+        self.check(repo, "the check's title", &check.title)?;
+        self.check(repo, "the check's summary", &check.summary)
+    }
+
     // Everything the App writes is kelpie's own text.
     fn check(&self, repo: &ForgeSlug, what: &'static str, text: &str) -> Result<(), ForgeError> {
         let checks = (&self.local, self.flock.as_ref(), &*self.hooks.get());
@@ -530,6 +536,26 @@ impl Voice for GuardedVoice {
         on: bool,
     ) -> Result<(), ForgeError> {
         self.voice.set_issue_label(repo, number, label, on)
+    }
+
+    fn check_run(
+        &self,
+        repo: &ForgeSlug,
+        head: &str,
+        check: &GateCheck,
+    ) -> Result<CheckRunId, ForgeError> {
+        self.check_text(repo, check)?;
+        self.voice.check_run(repo, head, check)
+    }
+
+    fn update_check_run(
+        &self,
+        repo: &ForgeSlug,
+        id: CheckRunId,
+        check: &GateCheck,
+    ) -> Result<(), ForgeError> {
+        self.check_text(repo, check)?;
+        self.voice.update_check_run(repo, id, check)
     }
 }
 

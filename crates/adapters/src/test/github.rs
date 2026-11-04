@@ -47,6 +47,10 @@ struct Hub {
     minted: u32,
     issues: u64,
     comment_ids: u64,
+    // What every new check run is answered with instead of its id alone
+    check_run_answer: Option<String>,
+    // The check runs GitHub took, in the order it numbered them
+    check_runs: Vec<ShownCheck>,
     // Why every comment is refused, while it is
     comments_refused: Option<ApiError>,
     // Why every issue body edit is refused, while it is
@@ -76,6 +80,25 @@ struct Hub {
     // Each comment the App posted that GitHub took: its number, its id, what
     // it says and when, which is what the forge then lists beside anyone's
     posted: Vec<(u64, u64, String, jiff::Timestamp)>,
+}
+
+/// A check run as GitHub shows it after the App's writes
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShownCheck {
+    /// Its id, numbered from 5000
+    pub id: u64,
+    /// The commit it is on
+    pub head: String,
+    /// Its name
+    pub name: String,
+    /// `queued`, `in_progress` or `completed`
+    pub status: String,
+    /// How it ended, once it has
+    pub conclusion: Option<String>,
+    /// The title it shows
+    pub title: String,
+    /// The summary under the title
+    pub summary: String,
 }
 
 /// A pull request review the App sent
@@ -333,6 +356,59 @@ impl FakeGithub {
             .collect()
     }
 
+    /// Makes every new check run answer `text` from now on, whatever GitHub says
+    pub fn answer_check_runs_with(&self, text: &str) {
+        self.hub.lock().unwrap().check_run_answer = Some(text.to_owned());
+    }
+
+    /// The check runs GitHub took from the App, in creation order, each as
+    /// its latest write left it
+    pub fn check_runs(&self) -> Vec<ShownCheck> {
+        self.hub.lock().unwrap().check_runs.clone()
+    }
+
+    /// How many writes to check runs the App made, those GitHub refused included
+    pub fn check_run_writes(&self) -> usize {
+        (self.every_write().into_iter())
+            .filter(|(_, call)| call.path.contains("/check-runs"))
+            .count()
+    }
+
+    // A check run answers with its id, numbered from 5000, and the hub keeps
+    // what the write left it showing.
+    fn check_run_answer(hub: &mut Hub, call: &Call) -> String {
+        let sent: serde_json::Value =
+            serde_json::from_str(call.body.as_deref().unwrap_or("{}")).unwrap_or_default();
+        let text = |v: &serde_json::Value| v.as_str().unwrap_or_default().to_owned();
+        if call.verb == Verb::Post {
+            let id = 5000 + hub.check_runs.len() as u64;
+            hub.check_runs.push(ShownCheck {
+                id,
+                head: text(&sent["head_sha"]),
+                name: text(&sent["name"]),
+                status: String::new(),
+                conclusion: None,
+                title: String::new(),
+                summary: String::new(),
+            });
+            Self::show(hub, id, &sent);
+            return (hub.check_run_answer.clone()).unwrap_or_else(|| format!(r#"{{"id":{id}}}"#));
+        }
+        let id = call.path.rsplit('/').next().and_then(|n| n.parse().ok());
+        Self::show(hub, id.unwrap_or_default(), &sent);
+        "{}".to_owned()
+    }
+
+    fn show(hub: &mut Hub, id: u64, sent: &serde_json::Value) {
+        let text = |v: &serde_json::Value| v.as_str().unwrap_or_default().to_owned();
+        if let Some(run) = hub.check_runs.iter_mut().find(|run| run.id == id) {
+            run.status = text(&sent["status"]);
+            run.conclusion = sent["conclusion"].as_str().map(str::to_owned);
+            run.title = text(&sent["output"]["title"]);
+            run.summary = text(&sent["output"]["summary"]);
+        }
+    }
+
     /// Takes comments again after [`Self::refuse_comments`]
     pub fn accept_comments(&self) {
         self.hub.lock().unwrap().comments_refused = None;
@@ -348,8 +424,15 @@ impl FakeGithub {
         self.hub.lock().unwrap().asked.clone()
     }
 
-    /// Every write made as the App, in order, with the token it was made with
+    /// Every write made as the App but to a check run (see
+    /// [`Self::check_run_writes`]), in order, with the token it was made with
     pub fn writes(&self) -> Vec<(String, Call)> {
+        (self.every_write().into_iter())
+            .filter(|(_, call)| !call.path.contains("/check-runs"))
+            .collect()
+    }
+
+    fn every_write(&self) -> Vec<(String, Call)> {
         (self.asked().into_iter())
             .filter_map(|asked| match asked {
                 Asked::Write(token, call) => Some((token, call)),
@@ -575,6 +658,7 @@ impl GithubApi for FakeGithub {
                 ("metadata", "read"),
                 ("pull_requests", "write"),
             ]),
+            Grant::Checks => ask(&[("checks", "write"), ("metadata", "read")]),
             Grant::Reader => ask(&[
                 ("checks", "read"),
                 ("issues", "read"),
@@ -657,6 +741,10 @@ impl GithubApi for FakeGithub {
                 .review_answer
                 .clone()
                 .unwrap_or_else(|| REVIEW_ANSWER.to_owned()));
+        }
+        // A check run answers with its id, numbered from 5000.
+        if call.path.contains("/check-runs") {
+            return Ok(Self::check_run_answer(&mut hub, call));
         }
         // A comment answers with its id, numbered from 100 and so below any a
         // person writes on the fake forge, and the time the clock says.

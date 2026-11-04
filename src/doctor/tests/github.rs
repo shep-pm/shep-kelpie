@@ -312,6 +312,37 @@ async fn an_app_without_checks_or_statuses_reads_the_rest_and_doctor_names_the_t
 }
 
 #[tokio::test]
+async fn a_repo_with_checks_write_is_told_its_gates_show_as_check_runs() {
+    let scene = Scene::new().await;
+
+    let report = scene.report().await;
+
+    let said = ok(&report, "koji: check runs");
+    assert!(said.contains("shep-pm/koji"), "{said}");
+    assert!(said.contains("`kelpie`"), "{said}");
+}
+
+// An App registered before check runs was never given the permission.
+#[tokio::test]
+async fn a_repo_without_checks_write_is_told_where_to_accept_it() {
+    let scene = Scene::new().await;
+    scene.github.never_given(&["checks"]);
+
+    let report = scene.report().await;
+
+    let Verdict::Unsure { what, next } = verdict(&report, "koji: check runs") else {
+        panic!("{:#?}", report.render());
+    };
+    assert!(what.contains("shows no check runs"), "{what}");
+    assert!(next.contains("Checks, to Read and write"), "{next}");
+    assert!(
+        next.contains("accept the new permission on the installation"),
+        "{next}"
+    );
+    assert!(report.passed(), "an optional gain, not a failure");
+}
+
+#[tokio::test]
 async fn without_an_app_doctor_says_every_read_goes_through_the_maintainers_login() {
     let scene = Scene::new().await;
     scene.runs("golbat", |t| {

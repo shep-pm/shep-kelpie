@@ -148,6 +148,17 @@ pub trait GithubApp: Send + Sync {
     /// As [`GithubApp::token`].
     fn thread_token(&self, repo: &ForgeSlug) -> Result<InstallationToken, TokenError>;
 
+    /// A token to write check runs on `repo` with, kept like
+    /// [`GithubApp::token`] but apart from it: it holds Checks, written, and
+    /// nothing else
+    ///
+    /// # Errors
+    ///
+    /// As [`GithubApp::token`]. GitHub answers 422, as
+    /// [`TokenError::Api`]`(`[`ApiError::Refused`]`(422))`, when the
+    /// installation has not accepted the Checks permission.
+    fn checks_token(&self, repo: &ForgeSlug) -> Result<IssuedToken, TokenError>;
+
     /// A token to read `repo` with, kept until it nears its end like
     /// [`GithubApp::token`] but apart from it: it holds what the App has been
     /// given of the read permissions kelpie's reads use, and writes nothing
@@ -239,6 +250,10 @@ impl GithubApp for AppTokens {
 
     fn thread_token(&self, repo: &ForgeSlug) -> Result<InstallationToken, TokenError> {
         self.mint(repo, Grant::Threads).map(|issued| issued.token)
+    }
+
+    fn checks_token(&self, repo: &ForgeSlug) -> Result<IssuedToken, TokenError> {
+        self.mint(repo, Grant::Checks)
     }
 
     fn reader(&self, repo: &ForgeSlug) -> Result<IssuedToken, TokenError> {

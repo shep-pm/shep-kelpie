@@ -84,6 +84,10 @@ pub enum ForgeError {
     },
     /// The GitHub App's write failed, with why
     App(String),
+    /// The GitHub App's installation lacks a permission the write needs, with
+    /// what GitHub said: asking again changes nothing until the maintainer
+    /// accepts it
+    NoPermission(String),
     /// The GitHub App could not be asked just now, such as with GitHub out of
     /// reach, busy or rate limited, with why: asking again later may work
     AppBusy(String),
@@ -110,6 +114,9 @@ impl fmt::Display for ForgeError {
             ),
             Self::Limited { said, .. } => f.write_str(said),
             Self::App(why) => write!(f, "the GitHub App could not post: {why}"),
+            Self::NoPermission(why) => {
+                write!(f, "the GitHub App lacks a permission it needs: {why}")
+            }
             Self::AppBusy(why) => write!(f, "the GitHub App is not answering: {why}"),
             Self::NoIssue { ticket } => {
                 write!(f, "ticket {ticket} is not an issue on this forge")

@@ -649,6 +649,7 @@ pub fn advance(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
     }
     // After the pass, so a ruling it raised is told in the pass that raised it.
     lock(runner).tell_rulings();
+    lock(runner).tell_checks();
     brief(runner);
     // The project manager wakes only on a pass that started nothing else,
     // once the board it reads is written.
@@ -728,6 +729,7 @@ fn one_pass(runner: &Mutex<Runner>) -> Result<Pass, StateError> {
 fn hear(runner: &Mutex<Runner>, news: News) -> Result<Option<StepReport>, StateError> {
     let heard = hear_news(runner, news);
     lock(runner).tell_rulings();
+    lock(runner).tell_checks();
     // A call's end is what `drain` answers with, and the pass goes on to ask
     // the forge with the lock held.
     lock(runner).post();

@@ -104,6 +104,30 @@ pub(super) fn reads(subject: String, repo: &ForgeSlug, github: &dyn GithubApp) -
     }
 }
 
+/// The line for check runs on `repo`'s pull requests: shown by kelpie's App
+/// where its installation holds Checks (write), and none otherwise
+pub(super) fn check_runs(subject: String, repo: &ForgeSlug, github: &dyn GithubApp) -> Line {
+    let slug = repo.as_str();
+    match github.checks_token(repo) {
+        Ok(_) => Line::ok(
+            subject,
+            format!(
+                "kelpie's App shows its gates on {slug}'s pull requests as check runs; only \
+                 `kelpie` may be a required check"
+            ),
+        ),
+        Err(TokenError::Api(e)) if e.passes() => {
+            Line::unsure(subject, e.to_string(), "run doctor again")
+        }
+        Err(e) => Line::unsure(
+            subject,
+            format!("kelpie shows no check runs on {slug}'s pull requests: {e}"),
+            "in the App's settings on GitHub, set Repository permissions, Checks, to Read and \
+             write, then accept the new permission on the installation",
+        ),
+    }
+}
+
 /// The line for what a worker on `repo` holds: a token that pushes its branch
 /// where the App covers the repo, else the maintainer's own login, which a
 /// Windows worker gets as `GH_TOKEN` and any other reads from `gh`'s config

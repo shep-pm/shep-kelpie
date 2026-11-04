@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use super::rate_limit::{FALLBACK, time_of};
 use super::{
-    Clock, ForgeError, ForgeHold, InstallationToken, LineComment, NewLabel, PostedComment, Say,
-    Voice,
+    CheckRunId, Clock, ForgeError, ForgeHold, GateCheck, InstallationToken, LineComment, NewLabel,
+    PostedComment, Say, Voice,
 };
 use crate::settings::ForgeSlug;
 
@@ -155,5 +155,23 @@ impl Voice for PacedVoice {
         on: bool,
     ) -> Result<(), ForgeError> {
         self.call(|v| v.set_issue_label(repo, number, label, on))
+    }
+
+    fn check_run(
+        &self,
+        repo: &ForgeSlug,
+        head: &str,
+        check: &GateCheck,
+    ) -> Result<CheckRunId, ForgeError> {
+        self.call(|v| v.check_run(repo, head, check))
+    }
+
+    fn update_check_run(
+        &self,
+        repo: &ForgeSlug,
+        id: CheckRunId,
+        check: &GateCheck,
+    ) -> Result<(), ForgeError> {
+        self.call(|v| v.update_check_run(repo, id, check))
     }
 }

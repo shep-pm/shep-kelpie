@@ -45,7 +45,7 @@ pub use registered_app::RegisteredApp;
 pub use script_cli::ScriptCli;
 pub use shep_kelpie_adapters::test::{
     Asked, DogStandIn, FakeGithub, FakeLeases, FakeReviewer, HeldToken, REVIEW_ID, ScriptedRound,
-    SeenRound, SentReview, Told,
+    SeenRound, SentReview, ShownCheck, Told,
 };
 pub use shep_kelpie_core::test::{
     Answer, EPOCH, FakeAgentBoard, FakeAlerts, FakeBridges, FakeClassifier, FakeClock,

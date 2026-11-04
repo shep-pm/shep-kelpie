@@ -44,6 +44,7 @@ mod board_read;
 mod briefing;
 mod browser;
 mod builds;
+mod checks;
 mod ci_failure;
 mod ci_help;
 mod claim;
@@ -360,6 +361,8 @@ pub struct Runner {
     tickets_source: SharedSource,
     // What the notice points have told, in memory only
     told_points: points::Told,
+    // The check runs posted on pull requests' heads, in memory only
+    checks: checks::Book,
     // The project manager's wakes and decisions, in memory only
     pm: pm::Desk,
     // What the batch retro keeps between passes, in memory only
@@ -670,6 +673,7 @@ impl Runner {
             hooks,
             tickets_source,
             told_points: spoken,
+            checks: checks::Book::default(),
             pm: pm::Desk::default(),
             retro_book: retro::Book::default(),
             postings,
