@@ -5,7 +5,8 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | file | covers | touch (`core/`: `crates/core/src/`, `dog/`: `crates/dog/src/dog/`, `adapters/`: `crates/adapters/src/`, `runner/`: `crates/runner/src/runner/`) |
 |---|---|---|
 | agents.md | harnesses, gateways | `adapters/`, `core/settings/agents/`, `process/spawn.rs` |
-| agent-files.md | agent file, `extends`, baselines | `core/agents/`, `src/flock/add/` |
+| agent-files.md | agent file, `extends` | `core/agents/`, `src/flock/add/` |
+| agent-baselines.md | shipped agents, baselines, unbound files, `agents init` and `new` | `core/agents/`, `src/flock/add/`, `src/agent_verbs/`, `dog/mod.rs` |
 | agent-migration.md | `agents migrate` | `core/agents/legacy.rs` |
 | agent-allow.md | allow list | `core/settings/agents/`, `runner/add.rs` |
 | agent-board.md | pick and fit estimates, the dog's board, `pick` and `fit` asks | `core/agent_board/`, `dog/{board,door}/`, `core/lease/door_pick.rs` |
