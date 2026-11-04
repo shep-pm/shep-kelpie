@@ -796,17 +796,35 @@ mod tests {
         assert!(!w.path("ran").exists(), "claude ran with no key");
     }
 
-    // Cargo sets it for every test binary it runs, and nothing kelpie starts reads it.
+    // Hiding a variable lasts the life of the process and shows in the environment of every
+    // command built after, which other tests count. So the test runs itself again as a child
+    // process that holds the key, and the child takes it.
     #[test]
     fn the_api_key_taken_from_the_environment_is_hidden_from_every_other_process() {
-        const SET: &str = "CARGO_PKG_DESCRIPTION";
-        let value = std::env::var(SET).unwrap();
-        let key = ApiKey::take_from(SET).expect("the variable holds text");
-        assert_eq!(key.expose(), value.trim());
-        let seen = crate::spawn::command("env").output().unwrap();
-        let seen = String::from_utf8_lossy(&seen.stdout).into_owned();
-        assert!(seen.contains("PATH="), "{seen}");
-        assert!(!seen.contains(SET), "a process saw the variable");
+        const CHILD: &str = "KELPIE_TEST_TAKES_THE_API_KEY";
+        if std::env::var_os(CHILD).is_some() {
+            let key = ApiKey::take().expect("the parent set the key");
+            assert_eq!(key.expose(), KEY);
+            let seen = crate::spawn::command("env").output().unwrap();
+            let seen = String::from_utf8_lossy(&seen.stdout).into_owned();
+            assert!(seen.contains("PATH="), "{seen}");
+            assert!(!seen.contains(API_VAR), "a process saw the variable");
+            return;
+        }
+        let name = module_path!().split_once("::").unwrap().1;
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "--nocapture"])
+            .arg(format!(
+                "{name}::the_api_key_taken_from_the_environment_is_hidden_from_every_other_process"
+            ))
+            .env(CHILD, "1")
+            .env(API_VAR, KEY)
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&child.stdout).into_owned()
+            + &String::from_utf8_lossy(&child.stderr);
+        assert!(child.status.success(), "{said}");
+        assert!(said.contains("1 passed"), "the child ran no test: {said}");
     }
 
     #[cfg(unix)]

@@ -98,12 +98,8 @@ impl ApiKey {
     /// Takes the key from this process's environment, and keeps the variable
     /// out of every process started from now on, `claude`'s apart
     pub fn take() -> Option<Self> {
-        Self::take_from(API_VAR)
-    }
-
-    fn take_from(var: &str) -> Option<Self> {
-        let key = std::env::var(var).ok().and_then(Self::new);
-        crate::spawn::hide([var.to_owned()]);
+        let key = std::env::var(API_VAR).ok().and_then(Self::new);
+        crate::spawn::hide([API_VAR.to_owned()]);
         key
     }
 
