@@ -343,3 +343,33 @@ fn a_call_the_item_does_not_count_moves_its_sessions_cost_without_adding_to_its_
     );
     assert_eq!(next, Some(Cost(5)));
 }
+
+#[test]
+fn a_call_priced_by_its_energy_counts_toward_the_items_cost_and_is_not_unpriced() {
+    let mut item = a_work_item();
+    let session = SessionId("local".into());
+    let (calls, cost, unpriced) = (item.spend().worker.calls, item.cost(), item.spend().worker);
+    let call = |item: &mut WorkItem, session_cost, energy| {
+        let session = session.clone();
+        item.record_metered_call(
+            Role::Worker,
+            Timestamp(9),
+            session,
+            Usage::default(),
+            session_cost,
+            energy,
+        )
+    };
+
+    let by_energy = call(&mut item, None, Some(Cost(4)));
+    let by_harness = call(&mut item, Some(Cost(10)), Some(Cost(4)));
+    let neither = call(&mut item, None, None);
+
+    assert_eq!(by_energy, Some(Cost(4)));
+    assert_eq!(by_harness, Some(Cost(6)), "the harness's own dollars win");
+    assert_eq!(neither, None);
+    assert_eq!(item.cost(), Cost(cost.0 + 10));
+    let worker = item.spend().worker;
+    assert_eq!(worker.calls, calls + 3);
+    assert_eq!(worker.unpriced_calls, unpriced.unpriced_calls + 1);
+}
