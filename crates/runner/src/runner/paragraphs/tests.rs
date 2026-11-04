@@ -58,6 +58,28 @@ fn headings_tables_quotes_and_hard_breaks_are_not_joined() {
 }
 
 #[test]
+fn a_table_without_leading_pipes_stays_a_table() {
+    let body = "Text before the table\nColumn | What\n--- | ---\na | b\n\nText after the table.";
+
+    assert_eq!(join(body), body);
+}
+
+#[test]
+fn a_setext_underline_is_not_joined_to_its_title() {
+    let body = "Summary\n=======\nText after it\n\nAnother\n-----\nAnd more";
+
+    assert_eq!(join(body), body);
+}
+
+#[test]
+fn a_paragraph_after_an_html_line_starts_a_line_of_its_own() {
+    let body =
+        "<!-- note -->\nThe **change** here\n\n<details>\n<summary>More</summary>\n</details>";
+
+    assert_eq!(join(body), body);
+}
+
+#[test]
 fn a_continuation_that_starts_like_a_flag_or_issue_is_still_joined() {
     let body = "The verb takes the flag\n--no-deps\nand nothing else.\n\nIt follows\n#1498\n\
                 and closes it.\n\nThe change costs\n+478\nlines.";
