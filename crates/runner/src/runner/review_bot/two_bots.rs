@@ -15,7 +15,7 @@ use crate::runner::coderabbit::tests::now;
 use crate::runner::{Runner, StepReport, step};
 use crate::settings::AgentName;
 use crate::test::ticket;
-use crate::test::{Rig, Scripted, Told};
+use crate::test::{CUBIC_RESUMES, Rig, Scripted, Told};
 
 const MONTH: u64 = 720 * 3600;
 
@@ -213,7 +213,7 @@ fn a_busy_window_holds_its_bots_round_and_the_next_bot_waits_its_turn() {
 }
 
 #[test]
-fn a_cubic_refusal_closes_its_window_for_its_span_and_the_pass_goes_on_to_coderabbit() {
+fn a_cubic_refusal_closes_its_window_until_the_day_it_names_and_the_pass_goes_on_to_coderabbit() {
     let rig = listing("shep", &["cubic", "coderabbit"]);
     let (runner, head) = reviewed(&rig);
     assert!(matches!(
@@ -237,8 +237,8 @@ fn a_cubic_refusal_closes_its_window_for_its_span_and_the_pass_goes_on_to_codera
     assert!(
         rig.leases
             .told()
-            .contains(&Told::Window(WindowFact::Opens, summon + 20 + MONTH)),
-        "its file's month, since cubic quotes no opening"
+            .contains(&Told::Window(WindowFact::Opens, CUBIC_RESUMES.0)),
+        "the day its check run named"
     );
     assert!(!rig.leases.held(&cubic()));
 

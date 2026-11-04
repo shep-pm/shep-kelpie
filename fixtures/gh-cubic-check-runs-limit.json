@@ -1,0 +1,91 @@
+{
+  "total_count": 1,
+  "check_runs": [
+    {
+      "app": {
+        "client_id": "Iv23li1trmdoQNRSsTw8",
+        "created_at": "2024-12-09T11:43:48Z",
+        "description": "cubic helps teams like cal.com and n8n catch bugs before they go live, and merge PRs 28% faster.\r\n\r\n- **Automated code reviews**: cubic's AI reviews your code on every PR. Catch bugs that human reviewers miss, in minutes.\r\n\r\n- **Memory**: Tag @cubic-dev-ai with feedback to teach it about your codebase\r\n\r\n- **Pull Request Description**: The pull request diff is clearly summarised, so you can quickly see the intent of the changes.\r\n",
+        "events": [
+          "check_suite",
+          "commit_comment",
+          "issue_comment",
+          "member",
+          "membership",
+          "organization",
+          "pull_request",
+          "pull_request_review",
+          "pull_request_review_comment",
+          "pull_request_review_thread",
+          "repository"
+        ],
+        "external_url": "https://cubic.dev",
+        "html_url": "https://github.com/apps/cubic-dev-ai",
+        "id": 1082092,
+        "name": "cubic-dev-ai",
+        "node_id": "A_kwHOC0qjcc4AEILs",
+        "owner": {
+          "avatar_url": "https://avatars.githubusercontent.com/u/189440881?v=4",
+          "events_url": "https://api.github.com/users/mrge-io/events{/privacy}",
+          "followers_url": "https://api.github.com/users/mrge-io/followers",
+          "following_url": "https://api.github.com/users/mrge-io/following{/other_user}",
+          "gists_url": "https://api.github.com/users/mrge-io/gists{/gist_id}",
+          "gravatar_id": "",
+          "html_url": "https://github.com/mrge-io",
+          "id": 189440881,
+          "login": "mrge-io",
+          "node_id": "O_kgDOC0qjcQ",
+          "organizations_url": "https://api.github.com/users/mrge-io/orgs",
+          "received_events_url": "https://api.github.com/users/mrge-io/received_events",
+          "repos_url": "https://api.github.com/users/mrge-io/repos",
+          "starred_url": "https://api.github.com/users/mrge-io/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/mrge-io/subscriptions",
+          "type": "Organization",
+          "url": "https://api.github.com/users/mrge-io",
+          "user_view_type": "public"
+        },
+        "permissions": {
+          "actions": "write",
+          "administration": "read",
+          "checks": "write",
+          "contents": "write",
+          "deployments": "read",
+          "emails": "read",
+          "issues": "write",
+          "members": "read",
+          "metadata": "read",
+          "organization_custom_properties": "read",
+          "organization_custom_roles": "read",
+          "pull_requests": "write",
+          "statuses": "read",
+          "workflows": "write"
+        },
+        "slug": "cubic-dev-ai",
+        "updated_at": "2026-10-12T16:02:01Z"
+      },
+      "check_suite": {
+        "id": 113343183680
+      },
+      "completed_at": "2026-11-04T12:47:24Z",
+      "conclusion": "neutral",
+      "details_url": "https://www.cubic.dev/pr/shep-pm/shep/pull/1544",
+      "external_id": "ai_pr_review_github_delivery_bcdafe2d506efade2ad242e16205925e12c4e16f001d39218db76843fd293464",
+      "head_sha": "014889df33ac47608d2056ef3eddd317758bdeac",
+      "html_url": "https://github.com/shep-pm/shep/runs/126582250921",
+      "id": 126582250921,
+      "name": "cubic · AI code reviewer",
+      "node_id": "CR_kwDOTytUD88AAAAdeOPdqQ",
+      "output": {
+        "annotations_count": 0,
+        "annotations_url": "https://api.github.com/repos/shep-pm/shep/check-runs/126582250921/annotations",
+        "summary": "You've reached your plan's monthly review limit. cubic has reviewed 80,828 of the 80,000 allowed lines of code this month. Reviews resume on 29 November 2026 (in 25 days). Your team has fixed 431 issues after cubic flagged them so far. [Upgrade to Pro](https://www.cubic.dev/settings?tab=billing) to increase your limit and resume reviews now.\n\nTo help optimise your usage, you can tune cubic to get the most out of your usage limits:\n\n- Stop reviewing [test files](https://www.cubic.dev/ai-review?tab=setup&card=ai-review-card-ignore-patterns)\n- Turn off [incremental reviews](https://www.cubic.dev/ai-review?tab=setup&card=ai-review-card-incremental-reviews)\n- Use the [cubic CLI](https://docs.cubic.dev/ide/cli-review) locally\n- Upgrade to a [pro plan](https://www.cubic.dev/settings?tab=billing)\n\n[Learn more →](https://docs.cubic.dev/account/ai-review-usage#tips-to-reduce-usage)",
+        "text": null,
+        "title": "AI review line limit reached"
+      },
+      "pull_requests": [],
+      "started_at": "2026-11-04T12:47:22Z",
+      "status": "completed",
+      "url": "https://api.github.com/repos/shep-pm/shep/check-runs/126582250921"
+    }
+  ]
+}

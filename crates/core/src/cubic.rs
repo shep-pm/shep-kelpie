@@ -4,12 +4,15 @@
 //! says it started. Its review posts whether or not it found anything, on
 //! the commit it read, with its summary between markers. Each finding is a
 //! thread whose text opens with its level, `P1` to `P3`, below a marker
-//! carrying its confidence out of 10. It sets no commit status and states
-//! no quota, and its refusal was never seen, so one reads as any comment
-//! of its since the summon that says a limit was reached.
+//! carrying its confidence out of 10. It sets no commit status and states no
+//! quota. Its refusal is a check run on the head titled [`LIMIT`], which
+//! names the day reviews resume; a comment saying a limit was reached is
+//! read as one too, though none has been seen.
 
 use crate::ports::{Finding, Severity, Timestamp};
-use crate::review_bot::{Activity, Bot, CLOCK_SLACK, Login, Profile, Reading, Thread, one_line};
+use crate::review_bot::{
+    Activity, Bot, CLOCK_SLACK, CheckRun, Login, Profile, Reading, Thread, one_line,
+};
 
 /// The comment that summons cubic
 pub const SUMMON: &str = "@cubic-dev-ai review";
@@ -22,8 +25,28 @@ pub const LOGIN: Login<'static> = Login {
 
 /// What cubic says when it starts a review
 pub const STARTED: &str = "I have started the AI code review";
+
+/// What cubic's check run on the head is titled when its plan is out of
+/// reviewed lines, which is the refusal seen
+pub const LIMIT: &str = "AI review line limit reached";
+
 const SUMMARY: &str = "<!-- cubic:review-summary:start -->";
 const CONFIDENCE: &str = "<!-- metadata:{\"confidence\":";
+const RESUME: &str = "Reviews resume on";
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
 
 /// cubic, the second review bot
 #[derive(Debug, Clone, Copy, Default)]
@@ -47,6 +70,13 @@ impl Profile for Cubic {
     }
 
     fn read(&self, activity: &Activity, head: &str, since: Timestamp) -> Reading {
+        // A head cubic ran out of reviewed lines on is refused whatever else
+        // it posted there.
+        if let Some(run) = limited(activity) {
+            return Reading::Refused {
+                opens: resumes(&run.summary),
+            };
+        }
         if self.covers(activity, head) {
             return Reading::Reviewed;
         }
@@ -65,6 +95,7 @@ impl Profile for Cubic {
         let from = since.0.saturating_sub(CLOCK_SLACK);
         activity.comments.iter().any(|c| c.at.0 >= from)
             || activity.reviews.iter().any(|r| r.at.0 >= from)
+            || limited(activity).is_some()
     }
 
     fn covers(&self, activity: &Activity, head: &str) -> bool {
@@ -89,6 +120,35 @@ impl Profile for Cubic {
     fn level(&self, thread: &Thread) -> Option<String> {
         level(&prose(thread)).map(str::to_owned)
     }
+}
+
+// The check run on the head saying cubic's plan is out of reviewed lines
+fn limited(activity: &Activity) -> Option<&CheckRun> {
+    activity.checks.iter().find(|run| run.title == LIMIT)
+}
+
+// The day its summary names for reviews resuming, as 00:00 UTC that day.
+// None when it names none kelpie can read, which leaves the window's own
+// definition to decide.
+fn resumes(summary: &str) -> Option<Timestamp> {
+    let said: String = summary
+        .split(RESUME)
+        .nth(1)?
+        .trim_start()
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == ' ')
+        .collect();
+    let mut words = said.split_whitespace();
+    let day: u32 = words.next()?.parse().ok()?;
+    let month_name = words.next()?;
+    let month = MONTHS
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(month_name))?;
+    let year: i32 = words.next()?.parse().ok()?;
+    let at: jiff::Timestamp = format!("{year:04}-{:02}-{day:02}T00:00:00Z", month + 1)
+        .parse()
+        .ok()?;
+    Some(Timestamp(u64::try_from(at.as_second()).ok()?))
 }
 
 // The commits its reviews read. A reply in a thread posts a review with no

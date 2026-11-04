@@ -48,11 +48,11 @@ pub use shep_kelpie_adapters::test::{
     SeenRound, SentReview, ShownCheck, Told,
 };
 pub use shep_kelpie_core::test::{
-    Answer, EPOCH, FakeAgentBoard, FakeAlerts, FakeBridges, FakeClassifier, FakeClock,
-    FakeDevServers, FakeDisk, FakeE2e, FakeForge, FakeGit, FakeMeter, FakePages, FakeShepherd,
-    FakeTests, GB, HeldCall, Hold, Home, LOGIN_TOKEN, LeaseReads, Memory, OpenSandbox,
-    RecordedSink, SeenAsk, StandInEndpoint, Synced, Take, VIEWER, a_work_item, clean_visit,
-    project_table, ticket, toml_path, unreachable_url,
+    Answer, CUBIC_RESUMES, EPOCH, FakeAgentBoard, FakeAlerts, FakeBridges, FakeClassifier,
+    FakeClock, FakeDevServers, FakeDisk, FakeE2e, FakeForge, FakeGit, FakeMeter, FakePages,
+    FakeShepherd, FakeTests, GB, HeldCall, Hold, Home, LOGIN_TOKEN, LeaseReads, Memory,
+    OpenSandbox, RecordedSink, SeenAsk, StandInEndpoint, Synced, Take, VIEWER, a_work_item,
+    clean_visit, project_table, ticket, toml_path, unreachable_url,
 };
 pub use shep_kelpie_test_support::{
     CALL_PATIENCE, Elsewhere, Fake, copy_dir, cut_from_main, git, linked_worktree, main_commits,

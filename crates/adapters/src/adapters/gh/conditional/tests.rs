@@ -147,6 +147,40 @@ fn a_list_is_read_a_page_at_a_time_and_each_page_is_its_own_conditional_read() {
 }
 
 #[test]
+fn a_list_inside_an_object_is_read_a_page_at_a_time() {
+    let (etags, revalidated) = etags();
+    let github = FakeGithub::default();
+    let full = format!(r#"{{"check_runs":[{}]}}"#, vec!["{}"; PER_PAGE].join(","));
+    github.answers("runs?per_page=100&page=1", &full);
+    github.answers("runs?per_page=100&page=2", r#"{"check_runs":[{}]}"#);
+
+    let first = etags
+        .pages_in(&github, None, "runs?per_page=100", "check_runs")
+        .unwrap();
+    let again = etags
+        .pages_in(&github, None, "runs?per_page=100", "check_runs")
+        .unwrap();
+
+    assert_eq!(first.len(), 2);
+    assert_eq!(first, again);
+    assert_eq!(github.asked().len(), 4);
+    assert_eq!(revalidated.take(), 2);
+}
+
+#[test]
+fn an_answer_with_no_such_array_is_unreadable() {
+    let (etags, _) = etags();
+    let github = FakeGithub::default();
+    github.answers("runs?per_page=100&page=1", r#"{"other":[]}"#);
+
+    let error = etags
+        .pages_in(&github, None, "runs?per_page=100", "check_runs")
+        .unwrap_err();
+
+    assert!(matches!(error, ForgeError::Unreadable(_)), "{error:?}");
+}
+
+#[test]
 fn an_answer_that_is_not_a_list_is_unreadable() {
     let (etags, _) = etags();
     let github = FakeGithub::default();
