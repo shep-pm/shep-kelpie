@@ -75,12 +75,53 @@ impl fmt::Debug for LoginToken {
     }
 }
 
+/// How to give `claude` the API key an agent with `login: api` bills, as doctor and a refused call say it
+pub const API_FIX: &str = "run `shep secret set ANTHROPIC_API_KEY` and set \
+     `ANTHROPIC_API_KEY = \"{{secret:ANTHROPIC_API_KEY}}\"` in the runner's `env`";
+
+/// The variable Claude Code reads an API key from
+pub const API_VAR: &str = "ANTHROPIC_API_KEY";
+
+/// The API key an agent with `login: api` bills its calls to
+///
+/// The maintainer keeps it with `shep secret`, and a runner hands it to the
+/// calls of those agents alone, as a variable of `claude` and never an argument.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ApiKey(String);
+
+impl ApiKey {
+    /// The key `value` is, or `None` when it is empty
+    pub fn new(value: String) -> Option<Self> {
+        (!value.trim().is_empty()).then(|| Self(value.trim().to_owned()))
+    }
+
+    /// Takes the key from this process's environment, and keeps the variable
+    /// out of every process started from now on, `claude`'s apart
+    pub fn take() -> Option<Self> {
+        let key = std::env::var(API_VAR).ok().and_then(Self::new);
+        crate::spawn::hide([API_VAR.to_owned()]);
+        key
+    }
+
+    pub(crate) fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for ApiKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ApiKey(..)")
+    }
+}
+
 /// What is true of Claude Code: the part of a headless `claude -p` call that no other CLI shares
 #[derive(Debug, Clone)]
 pub struct Claude {
     program: OsString,
     // The login `claude` runs with, in place of the maintainer's in the keychain
     login: Option<LoginToken>,
+    // The API key the calls of an agent with `login: api` run with, in place of the login
+    api_key: Option<ApiKey>,
     // Where Claude Code keeps its folders
     home: std::path::PathBuf,
     // What a call with no fence may not read, besides its own folder
@@ -104,6 +145,7 @@ impl ClaudeCli {
         let claude = Claude {
             program: "claude".into(),
             login: None,
+            api_key: None,
             home: base.home.clone(),
             unfenced_no_read: base.unfenced_no_read.clone(),
         };
@@ -123,6 +165,14 @@ impl ClaudeCli {
     #[must_use]
     pub fn with_login(mut self, login: Option<LoginToken>) -> Self {
         self.cli.login = login;
+        self
+    }
+
+    /// Runs the calls of an agent with `login: api` with `api_key` in their
+    /// environment, where there is one
+    #[must_use]
+    pub fn with_api_key(mut self, api_key: Option<ApiKey>) -> Self {
+        self.cli.api_key = api_key;
         self
     }
 
@@ -183,7 +233,16 @@ impl Cli for Claude {
     // `claude` keeps its login per config folder, so none a call could use is there
     // and it would start and fail with its own "not logged in", which a ruling
     // would carry, in place of the fix.
-    fn ready(&self, _: &AgentCall) -> Result<(), AgentError> {
+    fn ready(&self, call: &AgentCall) -> Result<(), AgentError> {
+        if call.harness.bills_api() {
+            return match self.api_key {
+                Some(_) => Ok(()),
+                None => Err(AgentError::Setup(format!(
+                    "{API_VAR} is not set in the runner's environment, so this agent's claude \
+                     has no API key to bill: {API_FIX}"
+                ))),
+            };
+        }
         if self.login.is_none() {
             return Err(AgentError::Setup(format!(
                 "{LOGIN_VAR} is not set in the runner's environment, so claude has no login: \

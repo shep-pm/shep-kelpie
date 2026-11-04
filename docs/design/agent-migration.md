@@ -1,6 +1,6 @@
 # Agent file migration
 
-How a file that predates the binding keys gets them. The agent file and its baselines are in agent-files.md.
+How a file that predates the binding keys gets them. The agent file is in agent-files.md and its baselines in agent-baselines.md.
 
 - A stub of a file kelpie stopped shipping (#1287: `sonnet-high` `opus-high` `defect-hunter-lite` `iq3-xxs-review` `qwen`, their text kept in `REMOVED` in `legacy.rs`) is rewritten by `migrate` into the whole file, once: a bare `extends` stub becomes the shipped text, and a stub with keys of its own becomes the merge of its keys over that text, so the agent still loads and the project keeps running. `pending` lists it, and the line reads `wrote the whole of kelpie:<name>`.
 - Settings (#1287): `settings migrate` (`src/flock/set/migrate.rs`, `DEFAULTS` and `DEFAULT_REVIEWERS`) writes the four names the code no longer defaults, `agents.representative` `triage.agent` `contributions.security_reviewer` and `contributions.reviewers` (`iq3-xxs-review` first where kelpie's section holds a `paddock` gateway, then `defect-hunter-lite`), into each project's table that leaves one unset, so a project that relied on them runs as before. The reviewers come after the step that carries a project's old reviewer list, a key already set is kept, and a project still unset after it is refused where the agent is needed. Run by `upgrade` with the other settings steps.

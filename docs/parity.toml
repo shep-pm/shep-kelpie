@@ -229,6 +229,13 @@ pi = "yes"
 codex = { cannot = "Codex runs on the ChatGPT account it is logged in to", doc = "docs/design/agents.md", says = "ChatGPT plan windows beside Claude's" }
 goose = "yes"
 
+[harness.api-login]
+what = "An agent file's `login: api` bills its calls to the API key in place of the plan"
+claude-code = "yes"
+pi = { gap = 1660 }
+codex = { cannot = "Codex runs on the ChatGPT account it is logged in to", doc = "docs/design/agents.md", says = "ChatGPT plan windows beside Claude's" }
+goose = { cannot = "goose runs on a model an OpenAI-compatible server serves, with no Anthropic key", doc = "docs/design/agents.md", says = "a model on an OpenAI-compatible server" }
+
 [harness.doctor]
 what = "`shep kelpie doctor` checks the harness is installed and logged in"
 claude-code = "yes"

@@ -58,6 +58,15 @@ const GONE: [(&str, &str); 3] = [
     ),
 ];
 
+// Which credential a Claude Code call carries: the plan's login or the API key
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Login {
+    #[default]
+    Plan,
+    Api,
+}
+
 // An implementer's keys: a session on a harness
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -71,6 +80,8 @@ struct Implementer {
     effort: Effort,
     #[serde(default)]
     usage: Option<UsageReader>,
+    #[serde(default)]
+    login: Option<Login>,
     #[serde(default)]
     lease: Option<IgnoredAny>,
     #[serde(default)]
@@ -160,6 +171,8 @@ struct Reviewer {
     #[serde(default)]
     usage: Option<UsageReader>,
     #[serde(default)]
+    login: Option<Login>,
+    #[serde(default)]
     lease: Option<IgnoredAny>,
     #[serde(default)]
     url: Option<EndpointUrl>,
@@ -198,6 +211,9 @@ struct Reviewer {
 // A session's keys, whichever role runs it
 struct SessionKeys<'a> {
     harness: Harness,
+    // The credential its calls carry, and the frontmatter that names a refusal's line
+    login: Login,
+    yaml: &'a str,
     model: &'a NonBlank,
     effort: Effort,
     usage: Option<UsageReader>,
@@ -274,6 +290,8 @@ pub(super) fn parse(text: &str) -> Result<Agent, String> {
                 role: Role::Implementer,
                 runs: session(&SessionKeys {
                     harness: keys.harness,
+                    login: keys.login.unwrap_or_default(),
+                    yaml: &yaml,
                     model: &keys.model,
                     effort: keys.effort,
                     usage: keys.usage,
@@ -359,6 +377,8 @@ impl Expert {
             role,
             runs: session(&SessionKeys {
                 harness: self.harness,
+                login: Login::Plan,
+                yaml,
                 model: &self.model,
                 effort: self.effort,
                 usage: self.usage,
@@ -430,6 +450,8 @@ impl OnClaude {
             role,
             runs: session(&SessionKeys {
                 harness: self.harness,
+                login: Login::Plan,
+                yaml,
                 model: &self.model,
                 effort: self.effort,
                 usage: None,
@@ -457,14 +479,17 @@ impl Reviewer {
             #[cfg(any(test, feature = "test-support"))]
             ReviewerHarness::StandIn => Harness::StandIn,
             ReviewerHarness::Command => {
+                self.no_login("command", yaml)?;
                 self.no_bot_keys("command", yaml)?;
                 return self.command(prompt.is_some()).map(Runs::Command);
             }
             ReviewerHarness::Endpoint => {
+                self.no_login("endpoint", yaml)?;
                 self.no_bot_keys("endpoint", yaml)?;
                 return self.endpoint(prompt).map(Runs::Endpoint);
             }
             ReviewerHarness::Bot => {
+                self.no_login("bot", yaml)?;
                 let key = if self.bot.is_some() { "bot" } else { "harness" };
                 return self
                     .bot(prompt.is_some())
@@ -493,6 +518,8 @@ impl Reviewer {
         }
         session(&SessionKeys {
             harness,
+            login: self.login.unwrap_or_default(),
+            yaml,
             model,
             effort,
             usage: self.usage,
@@ -500,6 +527,18 @@ impl Reviewer {
             context: self.context,
             tools: self.tools.as_ref(),
         })
+    }
+
+    // A reviewer that runs on its own spends no login of Claude Code's.
+    fn no_login(&self, harness: &str, yaml: &str) -> Result<(), String> {
+        match self.login {
+            Some(_) => Err(at_key(
+                yaml,
+                "login",
+                &format!("runs on {harness}, which carries no login, so it takes no `login`"),
+            )),
+            None => Ok(()),
+        }
     }
 
     // A command keeps the README's contract, which gives it no model, prompt
@@ -639,8 +678,21 @@ fn role_model(keys: &SessionKeys<'_>) -> Result<RoleModel, String> {
             ));
         }
     };
-    let harness = AgentHarness::on(keys.harness, server)
+    let mut harness = AgentHarness::on(keys.harness, server)
         .ok_or_else(|| format!("runs on {}, which cannot take that server", facts.name))?;
+    if keys.login == Login::Api {
+        // parity: harness.api-login
+        harness = harness.billed_to_api().ok_or_else(|| {
+            at_key(
+                keys.yaml,
+                "login",
+                &format!(
+                    "runs on {}, which has no API login yet: leave `login` out",
+                    facts.name
+                ),
+            )
+        })?;
+    }
     Ok(RoleModel {
         model: keys.model.clone(),
         effort: keys.effort,

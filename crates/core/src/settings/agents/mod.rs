@@ -110,9 +110,11 @@ impl Harness {
 /// The harness a call runs on, with the server its model is on where it needs one
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum AgentHarness {
-    /// Claude Code, on Anthropic's API
+    /// Claude Code, on the Claude plan it is logged in to
     #[default]
     ClaudeCode,
+    /// Claude Code, on the API key: the prepaid credits, not the plan
+    ClaudeApi,
     /// pi, on the model a server runs
     Pi(ModelServer),
     /// Codex, on the ChatGPT account
@@ -151,10 +153,25 @@ impl AgentHarness {
         self.harness().facts().keeps_its_servers
     }
 
+    /// The same harness with its calls billed to the API key, or `None` when
+    /// it has no API login
+    pub fn billed_to_api(self) -> Option<Self> {
+        // parity: harness.api-login
+        match self {
+            Self::ClaudeCode => Some(Self::ClaudeApi),
+            _ => None,
+        }
+    }
+
+    /// Whether its calls are billed to an API key
+    pub fn bills_api(&self) -> bool {
+        matches!(self, Self::ClaudeApi)
+    }
+
     /// The harness, as settings name it
     pub fn harness(&self) -> Harness {
         match self {
-            Self::ClaudeCode => Harness::ClaudeCode,
+            Self::ClaudeCode | Self::ClaudeApi => Harness::ClaudeCode,
             Self::Pi(_) => Harness::Pi,
             Self::Codex => Harness::Codex,
             Self::Goose(_) => Harness::Goose,

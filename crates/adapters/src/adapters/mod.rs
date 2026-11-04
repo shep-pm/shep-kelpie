@@ -49,7 +49,7 @@ pub use classifier::GatewayClassifier;
 pub use claude::settings::settings as claude_settings;
 #[cfg(any(test, feature = "test-support"))]
 pub use claude::write_settings as write_claude_settings;
-pub use claude::{ClaudeCli, LOGIN_FIX, LOGIN_VAR, LoginToken};
+pub use claude::{API_FIX, API_VAR, ApiKey, ClaudeCli, LOGIN_FIX, LOGIN_VAR, LoginToken};
 pub use cli::{Cli, CliAdapter, FollowUp, Launch, Served, Turn};
 pub use codex::CodexCli;
 pub use codex_usage::CodexMeter;
