@@ -2,7 +2,9 @@
 //!
 //! `/usage` is a local command: no model turn and no tokens. It prints each
 //! window as `Current session: 2% used · resets Sep 27 at 3:40am (America/New_York)`,
-//! with the zone named at the end and the year left out.
+//! with the zone named at the end and the year left out. A result with no
+//! `Current session:` line at all names no session window, read as one that
+//! has not started.
 
 use std::time::Duration;
 
@@ -87,31 +89,39 @@ pub(super) fn parse(stdout: &str, now: Timestamp) -> Result<Utilization, MeterEr
         return Err(unreadable(&message.result));
     }
     Ok(Utilization {
-        session: window(&message.result, "Current session:", SESSION_SECS, now)?,
+        session: window(&message.result, "Current session:", SESSION_SECS, now)?
+            .or_else(|| unstarted(SESSION_SECS, now))
+            .ok_or_else(|| unreadable("no `Current session:` line"))?,
         week: window(
             &message.result,
             "Current week (all models):",
             WEEK_SECS,
             now,
-        )?,
+        )?
+        .ok_or_else(|| unreadable("no `Current week (all models):` line"))?,
     })
 }
 
-// Right after a reset the line is `Current session: 0% used`, with no reset
-// time: the window has not started, so it ends a full `length` from now. The
-// next reading replaces that guess with the real time.
-fn window(text: &str, label: &str, length: u64, now: Timestamp) -> Result<Window, MeterError> {
+// A window with no line at all is `Ok(None)`, which `parse` decides what to
+// make of. Right after a reset the line is `Current session: 0% used`, with no
+// reset time: the window has not started, so it ends a full `length` from now.
+// The next reading replaces that guess with the real time.
+fn window(
+    text: &str,
+    label: &str,
+    length: u64,
+    now: Timestamp,
+) -> Result<Option<Window>, MeterError> {
     let unreadable = |what: String| MeterError::Unreadable(what);
-    let line = text
-        .lines()
-        .find_map(|line| line.strip_prefix(label))
-        .ok_or_else(|| unreadable(format!("no `{label}` line")))?;
+    let Some(line) = text.lines().find_map(|line| line.strip_prefix(label)) else {
+        return Ok(None);
+    };
     let read = || -> Option<Window> {
         let (used, resets) = line.split_once("% used")?;
         let used_pct = used.trim().parse().ok()?;
         let resets_at = match resets.split_once("resets ") {
             Some((_, when)) => reset_time(when.trim(), now)?,
-            None if resets.trim().is_empty() => Timestamp(now.0.checked_add(length)?),
+            None if resets.trim().is_empty() => unstarted(length, now)?.resets_at,
             None => return None,
         };
         Some(Window {
@@ -119,7 +129,17 @@ fn window(text: &str, label: &str, length: u64, now: Timestamp) -> Result<Window
             resets_at,
         })
     };
-    read().ok_or_else(|| unreadable(format!("cannot read `{label}{line}`")))
+    read()
+        .map(Some)
+        .ok_or_else(|| unreadable(format!("cannot read `{label}{line}`")))
+}
+
+// A window that has not started: nothing spent, a full `length` still to run
+fn unstarted(length: u64, now: Timestamp) -> Option<Window> {
+    Some(Window {
+        used_pct: 0,
+        resets_at: Timestamp(now.0.checked_add(length)?),
+    })
 }
 
 // `Sep 27 at 3:40am (America/New_York)`, or `3:40am (America/New_York)` for a
@@ -193,6 +213,7 @@ mod tests {
     use crate::ports::Clock;
 
     const RECORDED: &str = include_str!("../../../../fixtures/usage-result.json");
+    const NO_SESSION: &str = include_str!("../../../../fixtures/usage-result-no-session.json");
 
     fn ts(rfc3339: &str) -> Timestamp {
         let at: jiff::Timestamp = rfc3339.parse().unwrap();
@@ -222,6 +243,23 @@ mod tests {
         // The recorded output also has a `Current week (Fable)` line, at 8%.
         let utilization = parse(RECORDED, ts("2026-09-26T12:00:00-04:00")).unwrap();
         assert_ne!(utilization.week.used_pct, 8);
+    }
+
+    #[test]
+    fn output_without_a_session_line_reads_its_week() {
+        assert_eq!(
+            parse(NO_SESSION, ts("2026-09-26T12:00:00-04:00")),
+            Ok(Utilization {
+                session: Window {
+                    used_pct: 0,
+                    resets_at: ts("2026-09-26T17:00:00-04:00"),
+                },
+                week: Window {
+                    used_pct: 21,
+                    resets_at: ts("2026-10-02T23:00:00-04:00"),
+                },
+            })
+        );
     }
 
     #[test]
@@ -308,11 +346,13 @@ mod tests {
 
     #[test]
     fn output_without_a_window_names_the_line_it_lacks() {
-        let text = "Current week (all models): 21% used · resets Oct 2 at 11pm (America/New_York)";
+        let text = "Current session: 2% used · resets Sep 27 at 3:40am (America/New_York)";
         let json = serde_json::json!({ "is_error": false, "result": text }).to_string();
         assert_eq!(
             parse(&json, ts("2026-09-26T12:00:00-04:00")),
-            Err(MeterError::Unreadable("no `Current session:` line".into()))
+            Err(MeterError::Unreadable(
+                "no `Current week (all models):` line".into()
+            ))
         );
     }
 
