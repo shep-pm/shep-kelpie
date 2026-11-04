@@ -10,6 +10,7 @@ Pacing, leases, forge limits, time, usage, settings.
 - `pacing.enabled` (on): off lifts the allowance and 5-hour window, not a spent week; usage still read. #67
 - Unreadable usage holds (a guess would spend the account it protects). #15
 - Each account paces separately; new item paces on every account its agents spend, its own agent's included. #129, #1293
+- An API agent (`login: api`, `Limit::Api`) spends credit, not a plan window: it is never paced, no plan hold stops it, and it adds no account to dispatch pacing. #1658, `runner/pace.rs`
 - `budget.per_item_usd` ($10) parks item `over-budget` before a turn or round, never mid-call; yes doubles it. #492, `core/work_item/spend/`
 - A contribution's calls take a slot while they run, count against `budget.per_item_usd` through its `spend`, and go ahead of new issues; a yes or a no with a note to its `over-budget` ruling doubles the cap. Like the PM's and the issue-label calls, they are tied to no work item. #621, `runner/contributions/budget.rs`
 

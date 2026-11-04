@@ -95,7 +95,7 @@ pub(super) fn answer(
                 fit: &agent.fit,
                 wait: wait(agent, shown, turn, now),
                 typical,
-                local: !(agent.runs.session()).is_some_and(|(_, limit)| limit.is_account()),
+                local: !(agent.runs.session()).is_some_and(|(_, limit)| !limit.is_local()),
             }
         })
         .collect();

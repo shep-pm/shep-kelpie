@@ -30,6 +30,9 @@ pub const LOAD_TICK: Duration = Duration::from_secs(30);
 // The runner's Claude login, as the adapters' `LOGIN_VAR` names it.
 const LOGIN_VAR: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 
+// The key an API agent's calls bill, as the adapters' `API_VAR` names it.
+const API_VAR: &str = "ANTHROPIC_API_KEY";
+
 const NO_LOAD: &str = "the gateway gave no load for it";
 const READ_FAILED: &str = "the read failed";
 
@@ -195,7 +198,7 @@ impl Sources {
         let accounts = (agents.iter())
             .filter_map(|(_, agent)| match agent.runs.session()?.1 {
                 Limit::Account(account) => Some(*account),
-                Limit::Unqueued | Limit::Gateway => None,
+                Limit::Unqueued | Limit::Gateway | Limit::Api => None,
             })
             .collect();
         Self { models, accounts }
@@ -212,7 +215,7 @@ pub(super) struct Readers {
 /// Reads what `agents` name through `ports` from now on, into what this returns
 ///
 /// A Codex home `settings` cannot give leaves the Codex account unknown. No
-/// process the dog starts from then on sees a gateway key or the Claude login.
+/// process the dog starts from then on sees a gateway key, the Claude login or the API key.
 pub(super) fn begin(
     agents: &Agents,
     settings: &KelpieSettings,
@@ -220,7 +223,7 @@ pub(super) fn begin(
 ) -> Arc<Mutex<Availability>> {
     let gateways = settings.gateways();
     let mut hidden = gateways.key_vars();
-    hidden.push(LOGIN_VAR.to_owned());
+    hidden.extend([LOGIN_VAR.to_owned(), API_VAR.to_owned()]);
     crate::spawn::hide(hidden);
     let sources = Sources::of(agents, &gateways);
     let shown = Arc::new(Mutex::new(Availability::new(&sources)));

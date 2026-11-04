@@ -3,10 +3,11 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::pacer::{HoldKind, RECHECK_SECS};
+use crate::pacer::{HoldKind, RECHECK_SECS, Scope};
 use crate::ports::{CLEAN, Cost, MeterError, Role, Timestamp, Usage};
+use crate::runner::pace::Pace;
 use crate::runner::{Runner, StepReport, step};
-use crate::settings::AgentHarness;
+use crate::settings::{AgentHarness, Limit};
 use crate::test::ticket;
 use crate::test::{Hold, Rig, Scripted, StandInEndpoint};
 
@@ -22,6 +23,8 @@ const AS_IS: Agents = (&[], "");
 
 const CODEX_REVIEW: &str = "---\nrole: reviewer\nharness: stand-in\nmodel: gpt-5-codex\n\
                             effort: medium\nusage: codex\n---\nReview {{DIFF}}.\n";
+const API: &str = "---\nrole: implementer\nharness: claude-code\nmodel: claude-sonnet-5-5\n\
+                   effort: medium\nlogin: api\n---\n";
 const CODER_REVIEW: &str = "---\nrole: reviewer\nharness: stand-in\nmodel: qwen3-coder\n\
                             effort: low\nusage: none\n---\nReview {{DIFF}}.\n";
 
@@ -32,6 +35,10 @@ type Agents = (&'static [&'static str], &'static str);
 const ALL_CODEX: Agents = (
     &["codex"],
     "allow = [\"codex\", \"qwen\", \"codex-review\"]\n",
+);
+const CODEX_AND_API: Agents = (
+    &["codex", "api"],
+    "allow = [\"codex\", \"qwen\", \"codex-review\", \"api\"]\n",
 );
 const BESIDE_QWEN: Agents = (&["sonnet-high", "coder"], "");
 const ALL_QWEN: Agents = (
@@ -46,6 +53,7 @@ fn named(project: &str, (ranked, names): Agents) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
     rig.write_agent("codex", CODEX);
     rig.write_agent("coder", QWEN);
+    rig.write_agent("api", API);
     rig.write_agent("codex-review", CODEX_REVIEW);
     rig.write_agent("coder-review", CODER_REVIEW);
     rig.edit_settings(|s| {
@@ -485,6 +493,31 @@ fn a_review_round_waits_on_its_reviewers_account_while_the_worker_works_on() {
     }
     let roles: Vec<Role> = rig.claude.all_calls().iter().map(|c| c.role).collect();
     assert_eq!(roles, [Role::Worker, Role::Reviewer]);
+}
+
+#[test]
+fn an_api_agent_is_never_held_by_the_plan_windows() {
+    let (rig, runner) = named("shep", AS_IS);
+    // The Claude week is spent and its 5-hour window is full.
+    rig.meter.set(Rig::utilization(100, 100));
+    for scope in [Scope::Dispatch, Scope::Turn] {
+        let pace = runner.lock().unwrap().pace(scope, &Limit::Api).unwrap();
+        assert!(matches!(pace, Pace::Clear), "{scope:?} was held");
+    }
+    assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (0, 0));
+}
+
+#[test]
+fn an_item_on_an_api_agent_adds_no_account_to_dispatch_pacing() {
+    let (rig, runner) = named("koji", CODEX_AND_API);
+    rig.forge.list_ready(7, false);
+    rig.forge.label(7, "agent:api!");
+    rig.meter.set(Rig::utilization(100, 100));
+
+    assert!(dispatched(&step(&runner).unwrap()));
+    assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (0, 1));
+    let pacer = &rig.ask(&runner, "status", None)["pacer"];
+    assert_eq!(pacer.get("claude"), None, "no Claude reading: {pacer}");
 }
 
 #[test]

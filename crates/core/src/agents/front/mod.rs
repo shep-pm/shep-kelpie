@@ -725,6 +725,16 @@ fn model_server(
 /// The reader must be the harness's own: an agent on Claude Code spends
 /// the Claude account whatever its `usage` says.
 fn limit(keys: &SessionKeys<'_>) -> Result<Limit, String> {
+    if keys.login == Login::Api {
+        return match keys.usage {
+            None => Ok(Limit::Api),
+            Some(_) => Err(at_key(
+                keys.yaml,
+                "usage",
+                "runs on an API login, which reads no account: leave `usage` out",
+            )),
+        };
+    }
     let own = (keys.harness.facts().usage)
         .or(keys.usage)
         .unwrap_or(UsageReader::Claude);
