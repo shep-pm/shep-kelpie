@@ -142,13 +142,14 @@ impl Carry {
 }
 
 impl State for Carry {
-    const FORMAT: u32 = 6;
+    const FORMAT: u32 = 7;
 
     // Format 4 is the same turns without the totals. Format 5 carries each
     // turn's issue number where this build carries a ticket id, which the
-    // alias on `CarriedTurn::ticket` reads.
+    // alias on `CarriedTurn::ticket` reads. Format 7 adds `Adopted.api`, which
+    // a build that reads 6 would drop and finish a pi turn as one on a server.
     fn reads(format: u32) -> bool {
-        matches!(format, 4..=6)
+        matches!(format, 4..=7)
     }
 }
 

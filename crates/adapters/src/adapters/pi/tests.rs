@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::*;
-use crate::adapters::SandboxRuntime;
 use crate::adapters::harness::ERROR_TAIL;
-use crate::adapters::skills;
 use crate::ports::{Browser, CodeGraph, Role};
 use crate::profile::WorkerProfile;
 use crate::settings::{ContextSize, Effort, EndpointUrl, ModelHost};
@@ -310,163 +309,10 @@ fn the_sandbox_connects_only_to_the_browsers_socket_when_the_call_has_one() {
     );
 }
 
-#[test]
-fn a_steps_skill_runs_as_pis_own_slash_command() {
-    let w = World::new();
-    let plugin = w.path("skills/mattpocock");
-    std::fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
-    std::fs::create_dir_all(plugin.join("skills/implement")).unwrap();
-    std::fs::write(
-        plugin.join(".claude-plugin/plugin.json"),
-        r#"{"name":"mattpocock"}"#,
-    )
-    .unwrap();
-    std::fs::write(plugin.join("skills/implement/SKILL.md"), "---\n").unwrap();
-    let mut call = w.call(URL, Role::Worker, Session::New(id(FRESH_ID)));
-    call.plugin_dirs = vec![plugin.clone()];
-    call.prompt = "/mattpocock:implement Implement issue #7".into();
-    let argv = strings(&call);
-    assert_eq!(argv.last().unwrap(), "/skill:implement Implement issue #7");
-    let at = argv.iter().position(|a| a == "--skill").unwrap();
-    assert_eq!(
-        argv[at + 1],
-        plugin.join("skills/implement").to_str().unwrap()
-    );
-
-    call.prompt = "/mattpocock:tdd Implement issue #7".into();
-    let argv = strings(&call);
-    assert_eq!(argv.last().unwrap(), "/mattpocock:tdd Implement issue #7");
-    assert!(!argv.iter().any(|a| a == "--skill"));
-}
-
-// A plugin `name` holding a skill folder for each of `skills`
-fn plugin(w: &World, name: &str, skills: &[&str]) -> PathBuf {
-    let dir = w.path(&format!("plugins/{name}"));
-    std::fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
-    std::fs::write(
-        dir.join(".claude-plugin/plugin.json"),
-        format!(r#"{{"name":"{name}"}}"#),
-    )
-    .unwrap();
-    for skill in skills {
-        std::fs::create_dir_all(dir.join("skills").join(skill)).unwrap();
-        std::fs::write(dir.join("skills").join(skill).join("SKILL.md"), "---\n").unwrap();
-    }
-    dir
-}
-
 // Every value that follows `flag`, in order
 pub(super) fn values<'a>(argv: &'a [String], flag: &str) -> Vec<&'a str> {
     let at = |(i, a): (usize, &String)| (a == flag).then(|| argv[i + 1].as_str());
     argv.iter().enumerate().filter_map(at).collect()
-}
-
-#[test]
-fn every_plugins_skills_load_after_the_steps_own_skill_folder() {
-    let w = World::new();
-    let steps = plugin(&w, "mattpocock", &["implement", "tdd"]);
-    let style = plugin(&w, "style", &["house"]);
-    let mut call = w.fenced(URL, Path::new("/k/kelpie"), Session::New(id(WORKER_ID)));
-    call.plugin_dirs = vec![steps.clone(), style.clone()];
-    call.prompt = "/mattpocock:implement Implement issue #7".into();
-    let argv = strings(&call);
-    assert_eq!(
-        values(&argv, "--skill"),
-        [
-            steps.join("skills/implement").to_str().unwrap(),
-            steps.join("skills").to_str().unwrap(),
-            style.join("skills").to_str().unwrap(),
-        ]
-    );
-    let no_skills = argv.iter().position(|a| a == "--no-skills").unwrap();
-    let first = argv.iter().position(|a| a == "--skill").unwrap();
-    assert!(no_skills < first, "{argv:?}");
-}
-
-#[test]
-fn the_wording_skill_loads_with_the_steps_skills_on_a_worker_call() {
-    let w = World::new();
-    let skills =
-        crate::skills::Skills::load(&crate::settings::StepSkills::default(), &w.path("skills"));
-    let mut call = w.fenced(URL, Path::new("/k/kelpie"), Session::New(id(WORKER_ID)));
-    call.plugin_dirs = skills.plugin_dirs().to_vec();
-    call.prompt = "/mattpocock:implement Implement issue #7".into();
-    let wording = w.path("skills/kelpie-wording/skills");
-    assert!(wording.join("wording/SKILL.md").is_file());
-    assert!(
-        values(&strings(&call), "--skill").contains(&wording.to_str().unwrap()),
-        "{:?}",
-        strings(&call)
-    );
-}
-
-#[test]
-fn a_call_with_no_tools_loads_its_steps_skill_and_no_other() {
-    let w = World::new();
-    let steps = plugin(&w, "mattpocock", &["implement"]);
-    let style = plugin(&w, "style", &["house"]);
-    let mut call = w.call(URL, Role::Reviewer, Session::New(id(FRESH_ID)));
-    call.plugin_dirs = vec![steps.clone(), style];
-    call.prompt = "/mattpocock:implement Implement issue #7".into();
-    let argv = strings(&call);
-    assert!(argv.iter().any(|a| a == "--no-tools"), "{argv:?}");
-    assert_eq!(
-        values(&argv, "--skill"),
-        [steps.join("skills/implement").to_str().unwrap()]
-    );
-}
-
-#[test]
-fn every_kind_of_call_that_loads_a_plugins_skills_keeps_read_and_trusts_no_project() {
-    let w = World::new();
-    let steps = plugin(&w, "mattpocock", &["implement"]);
-    let style = plugin(&w, "style", &["house"]);
-    let kinds = [
-        Tools::Work,
-        Tools::Review,
-        Tools::Answer,
-        Tools::Pm,
-        Tools::Retro,
-    ];
-    for tools in kinds {
-        for reads in [false, true] {
-            let mut call = w.call(URL, Role::Reviewer, Session::New(id(FRESH_ID)));
-            call.tools = tools;
-            call.plugin_dirs = vec![steps.clone(), style.clone()];
-            call.prompt = "/mattpocock:implement Implement issue #7".into();
-            if reads {
-                call.reach.read = vec![w.path("extra")];
-            }
-            let argv = strings(&call);
-            let which = format!("{tools:?}, reading {reads}: {argv:?}");
-            assert!(!argv.iter().any(|a| a == "--approve"), "{which}");
-            assert!(argv.iter().any(|a| a == "--no-approve"), "{which}");
-            if values(&argv, "--skill").len() > 1 {
-                let [names] = values(&argv, "--tools").try_into().expect(&which);
-                assert!(names.split(',').any(|t| t == "read"), "{which}");
-            }
-        }
-    }
-}
-
-#[test]
-fn the_sandbox_reads_every_plugin_folder_a_call_loads_skills_from() {
-    let w = World::new();
-    let steps = plugin(&w, "mattpocock", &["implement"]);
-    let style = plugin(&w, "style", &["house"]);
-    let mut call = w.fenced(URL, Path::new("/k/kelpie"), Session::New(id(WORKER_ID)));
-    call.plugin_dirs = vec![steps.clone(), style.clone()];
-    let upstream = PiCli::on(&Base::default())
-        .upstream(server(&call).unwrap())
-        .unwrap();
-    let files = Files::of(&call);
-    let socket = w.path("forwarder.sock");
-    let policy = policy(&call, &files, &upstream, &socket, &NO_PROGRAM, &[]);
-    for dir in skills::skill_dirs(&call) {
-        let covered = policy.read.iter().any(|read| dir.starts_with(read));
-        assert!(covered, "{}", dir.display());
-    }
-    assert!(policy.read.contains(&steps) && policy.read.contains(&style));
 }
 
 #[test]
@@ -842,7 +688,7 @@ fn a_call_on_no_model_server_is_refused() {
 
 pub(super) struct World {
     _dir: tempfile::TempDir,
-    root: PathBuf,
+    pub(super) root: PathBuf,
 }
 
 impl World {
@@ -918,67 +764,172 @@ impl World {
     }
 }
 
-const NEEDS: &str = "needs KELPIE_PI_URL=<server>/v1 running qwen3.8:27b, KELPIE_BIN=<kelpie>, \
-                     and KELPIE_PI_RECORD=<dir> for what it prints. Run it under \
-                     `kelpie lease run gpu --model <model>`";
+const API_KEY: &str = "sk-ant-api03-for-the-test";
 
-fn env(name: &str) -> String {
-    std::env::var(name).expect(NEEDS)
+// `call` as an agent file with `login: api` makes it: pi on Anthropic's own model
+fn on_the_api(call: AgentCall) -> AgentCall {
+    AgentCall {
+        harness: AgentHarness::PiApi(ContextSize::try_from(200_000).unwrap()),
+        model: "claude-sonnet-4-5".into(),
+        ..call
+    }
 }
 
-// The real pi on the real model under the real sandbox: a turn, the session
-// resumed, and a worker refused by `kelpie confine`, the sandbox and `kelpie
-// guard`. The fixtures are these recordings with the temporary folder renamed.
+// What a command sets `var` to, or none when it unsets it or leaves it alone.
+fn credential(command: &Command, var: &str) -> Option<String> {
+    let set = command.get_envs().find(|(n, _)| *n == var);
+    set.and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+}
+
 #[test]
-#[ignore = "runs pi on a local model"]
-fn record_a_turn_a_resumed_turn_and_two_refusals() {
-    let (url, kelpie) = (env("KELPIE_PI_URL"), PathBuf::from(env("KELPIE_BIN")));
-    let record = PathBuf::from(env("KELPIE_PI_RECORD"));
-    let pi = PiCli::on(&Base::default().sandboxed(
-        Arc::new(SandboxRuntime::under_test()),
-        std::env::var_os("HOME").unwrap().into(),
-    ));
-    let world = World::new();
-    let fresh_id = id(FRESH_ID);
-    let save = |name: &str, out: &Output| {
-        let text = String::from_utf8_lossy(&out.stdout)
-            .replace(world.root.to_str().unwrap(), "/tmp/kelpie-pi");
-        std::fs::write(record.join(name), text).unwrap();
-    };
-
-    let mut fresh = world.call(&url, Role::Reviewer, Session::New(fresh_id.clone()));
-    fresh.prompt = "Reply with the single word ok.".into();
-    pi.prepare(&fresh).unwrap();
-    let out = run_raw(&pi, &fresh);
-    save("pi-p-fresh.jsonl", &out);
-    let first = parse_result(&out, &fresh_id).unwrap();
-
-    let mut again = world.call(&url, Role::Reviewer, Session::Resume(fresh_id.clone()));
-    again.prompt = "Which word did you reply with? Answer in one word.".into();
-    let out = run_raw(&pi, &again);
-    save("pi-p-resumed.jsonl", &out);
-    let second = parse_result(&out, &fresh_id).unwrap();
-    assert!(second.text.to_lowercase().contains("ok"), "{second:?}");
-    assert!(second.usage.input + second.usage.cache_read > first.usage.input);
-
-    let worker_id = id(WORKER_ID);
-    let mut worker = world.fenced(&url, &kelpie, Session::New(worker_id.clone()));
-    worker.prompt = format!(
-        "Do these three steps, then stop. First, use the write tool to create \
-         .claude/settings.json holding {{}}. Second, use the bash tool to run \
-         `echo hi > {}/x`. Third, use the bash tool to run `gh pr merge 1`. \
-         Then say in one line per step what happened.",
-        world.path("outside").display()
-    );
-    pi.prepare(&worker).unwrap();
-    let out = run_raw(&pi, &worker);
-    save("pi-p-refused.jsonl", &out);
-    parse_result(&out, &worker_id).unwrap();
-    assert!(!world.path("wt/.claude/settings.json").exists());
-    assert!(!world.path("outside/x").exists());
+fn a_pi_api_call_gets_the_api_key_in_its_environment_and_in_no_argument() {
+    let w = World::new();
+    let pi = stand_in(&w, FRESH).with_api_key(ApiKey::new(API_KEY.to_owned()));
+    for role in [Role::Worker, Role::Reviewer] {
+        let call = on_the_api(w.call(URL, role, Session::New(id(WORKER_ID))));
+        for turn in [Turn::Headless, Turn::Terminal] {
+            let launched = pi.launch(&call, &(), turn, None).unwrap();
+            let command = launched.command;
+            assert_eq!(credential(&command, API_VAR).as_deref(), Some(API_KEY));
+            let args = command.get_args().map(|a| a.to_string_lossy().into_owned());
+            assert!(!args.collect::<String>().contains(API_KEY), "{role:?}");
+        }
+    }
+    assert!(!format!("{pi:?}").contains(API_KEY), "Debug shows the key");
 }
 
-fn run_raw(pi: &PiCli, call: &AgentCall) -> Output {
-    let (mut command, _forwarder) = pi.sandboxed_command(call, None).unwrap();
-    command.stdin(std::process::Stdio::null()).output().unwrap()
+#[test]
+fn a_pi_call_on_a_server_never_sees_the_api_key_even_when_the_runner_holds_it() {
+    let w = World::new();
+    let pi = stand_in(&w, FRESH).with_api_key(ApiKey::new(API_KEY.to_owned()));
+    for role in [Role::Worker, Role::Reviewer] {
+        let call = w.call(URL, role, Session::New(id(WORKER_ID)));
+        for turn in [Turn::Headless, Turn::Terminal] {
+            let launched = pi.launch(&call, &(), turn, None).unwrap();
+            assert!(
+                launched.forwarder.is_some(),
+                "{role:?}: a server call has one"
+            );
+            assert_eq!(credential(&launched.command, API_VAR), None, "{role:?}");
+        }
+    }
+}
+
+#[test]
+fn a_pi_api_call_opens_no_forwarder_writes_no_kelpie_provider_and_dials_only_the_anthropic_host() {
+    let w = World::new();
+    let pi = stand_in(&w, FRESH).with_api_key(ApiKey::new(API_KEY.to_owned()));
+    let call = on_the_api(w.call(URL, Role::Reviewer, Session::New(id(FRESH_ID))));
+    pi.prepare(&call).unwrap();
+    let home = w.path("settings.pi");
+    let models: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(home.join("models.json")).unwrap()).unwrap();
+    assert_eq!(models.pointer("/providers/kelpie"), None, "{models}");
+    assert_eq!(
+        std::fs::read_to_string(home.join("auth.json")).unwrap(),
+        "{}"
+    );
+    assert!(home.join("sessions").is_dir());
+
+    let launched = pi.launch(&call, &(), Turn::Headless, None).unwrap();
+    assert!(launched.forwarder.is_none());
+    let sockets = std::fs::read_dir(w.path(".")).unwrap();
+    let sockets = sockets.filter_map(Result::ok).map(|e| e.path());
+    let sockets: Vec<_> = sockets
+        .filter(|p| p.extension().is_some_and(|e| e == "sock"))
+        .collect();
+    assert!(sockets.is_empty(), "{sockets:?}");
+
+    let files = Files::of(&call);
+    let open = fenced(&call, &files, &NO_PROGRAM, &[]);
+    assert_eq!(open.hosts, ["api.anthropic.com"]);
+    assert_eq!(open.forward, None);
+    assert!(open.denied_hosts.is_empty(), "{:?}", open.denied_hosts);
+    let worker = on_the_api(w.fenced(URL, Path::new("/k/kelpie"), Session::New(id(WORKER_ID))));
+    let fenced = fenced(&worker, &Files::of(&worker), &NO_PROGRAM, &[]);
+    assert!(
+        fenced.hosts.contains(&"api.anthropic.com".to_owned()),
+        "{:?}",
+        fenced.hosts
+    );
+    assert_eq!(fenced.forward, None);
+}
+
+#[test]
+fn a_pi_api_call_runs_the_anthropic_model_and_reads_its_compaction_context_from_the_file() {
+    let w = World::new();
+    let pi = stand_in(&w, FRESH).with_api_key(ApiKey::new(API_KEY.to_owned()));
+    let call = on_the_api(w.call(URL, Role::Worker, Session::New(id(WORKER_ID))));
+    assert_eq!(
+        values(&strings(&call), "--model"),
+        ["anthropic/claude-sonnet-4-5"]
+    );
+    let served = w.call(URL, Role::Worker, Session::New(id(WORKER_ID)));
+    assert_eq!(values(&strings(&served), "--model"), ["kelpie/qwen3.8:27b"]);
+
+    // The file says 200000 tokens, so a window of 150000 leaves a reserve of 50000.
+    let mut call = call;
+    call.compact_window = NonZeroU32::new(150_000);
+    pi.prepare(&call).unwrap();
+    let text = std::fs::read_to_string(w.path("settings.pi/settings.json")).unwrap();
+    let settings: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        settings,
+        json!({ "compaction": { "reserveTokens": 50_000 } })
+    );
+}
+
+#[test]
+fn a_pi_api_call_with_no_key_refuses_with_the_fix_and_runs_nothing() {
+    let w = World::new();
+    let pi = stand_in(&w, FRESH);
+    for role in [Role::Worker, Role::Reviewer] {
+        let call = on_the_api(w.call(URL, role, Session::New(id(WORKER_ID))));
+        for turn in [Turn::Headless, Turn::Terminal] {
+            let err = pi.launch(&call, &(), turn, None).unwrap_err();
+            let AgentError::Setup(why) = &err else {
+                panic!("{err:?}")
+            };
+            assert!(why.contains("`shep secret set ANTHROPIC_API_KEY`"), "{why}");
+        }
+        let err = pi.run(&call, &Ending::default()).unwrap_err();
+        assert!(matches!(err, AgentError::Setup(_)), "{err:?}");
+    }
+    assert!(!w.path("argv").exists(), "pi ran with no key");
+}
+
+// The call as the old image left it: pi running as a child, its output in the call's files.
+#[cfg(unix)]
+#[test]
+fn a_pi_api_call_carried_across_a_handover_is_finished_with_no_forwarder() {
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+
+    let w = World::new();
+    let pi = stand_in(&w, FRESH);
+    let call = on_the_api(w.call(URL, Role::Worker, Session::New(id(FRESH_ID))));
+    let files = CallFiles::of(&call);
+    std::fs::write(&files.stdout, FRESH).unwrap();
+    std::fs::write(&files.stderr, "").unwrap();
+    // The adopting side reaps it, as the new image reaps a child it never started.
+    #[expect(clippy::zombie_processes, reason = "`adopt` waits for the pid")]
+    let child = Command::new(crate::spawn::sh())
+        .args(["-c", "sleep 0.3"])
+        .process_group(0)
+        .stdin(Stdio::null())
+        .spawn()
+        .unwrap();
+    let record = serde_json::json!({
+        "pid": child.id(), "pgid": child.id(), "role": "worker", "issue": 7,
+        "stdout": files.stdout, "stderr": files.stderr, "ending": false, "flying": null,
+    });
+    std::fs::write(&files.record, record.to_string()).unwrap();
+
+    let adopted = pi.adoption(&call).unwrap();
+    assert_eq!(adopted.kept, None, "an API call keeps no forwarder");
+    assert_eq!(adopted.harness, Harness::Pi);
+    let reply = pi.adopt(&adopted, &Ending::default()).unwrap();
+
+    assert_eq!(reply.session_id.0, FRESH_ID);
+    assert_eq!(reply.text.trim(), "ok");
 }

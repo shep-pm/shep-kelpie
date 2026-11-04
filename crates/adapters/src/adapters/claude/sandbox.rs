@@ -65,7 +65,7 @@ impl Claude {
 /// `kelpie guard` refuses an agent started from them. Not
 /// `platform.claude.com`, where a login is refreshed: the sandbox cannot
 /// write the keychain, so a refresh there would be lost.
-const MODEL_HOST: &str = "api.anthropic.com";
+pub(crate) const MODEL_HOST: &str = "api.anthropic.com";
 
 // Claude Code names a working folder's transcript folder this way, and
 // hashes past this length. Kelpie refuses a folder it cannot name.

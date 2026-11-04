@@ -220,11 +220,19 @@ fn serve(project: &str, arrival: Option<Arrival<Carry>>) -> Result<(), Exit> {
         agents: Arc::new(Routed::new(vec![
             (
                 Harness::ClaudeCode,
-                Arc::new(ClaudeCli::on(&base).with_login(login).with_api_key(api_key)),
+                Arc::new(
+                    ClaudeCli::on(&base)
+                        .with_login(login)
+                        .with_api_key(api_key.clone()),
+                ),
             ),
             (
                 Harness::Pi,
-                Arc::new(PiCli::on(&base).with_gateways(gateways.clone())),
+                Arc::new(
+                    PiCli::on(&base)
+                        .with_gateways(gateways.clone())
+                        .with_api_key(api_key),
+                ),
             ),
             (
                 Harness::Codex,

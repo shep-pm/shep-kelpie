@@ -126,14 +126,15 @@ fn login_is_refused_with_its_line_on_a_pm_a_command_reviewer_and_a_harness_with_
             );
         }
     }
-    // A harness with no API login yet names itself.
-    for (name, keys, line) in [("pi", PI, 8), ("codex", CODEX, 6), ("goose", GOOSE, 8)] {
+    // A harness with no API login names itself, and the two that take one.
+    for (name, keys, line) in [("codex", CODEX, 6), ("goose", GOOSE, 8)] {
         let refused = parse(&file(&format!("{keys}login: api\n"))).unwrap_err();
         assert!(refused.contains("`login`"), "{name}: {refused}");
         assert!(
             refused.contains(&format!("runs on {name}")),
             "{name}: {refused}"
         );
+        assert!(refused.contains("claude-code and pi"), "{name}: {refused}");
         assert!(
             refused.ends_with(&format!("at line {line}")),
             "{name}: {refused}"
@@ -150,4 +151,53 @@ fn a_login_other_than_plan_or_api_is_refused_with_its_line() {
     assert!(refused.contains("`key`"), "{refused}");
     assert!(refused.contains("plan, api"), "{refused}");
     assert!(refused.contains("at line 6"), "{refused}");
+}
+
+const PI_API: &str = "role: implementer\nharness: pi\nmodel: claude-sonnet-4-5\neffort: low\n\
+                      login: api\ncontext: 200000\n";
+
+#[test]
+fn a_pi_file_with_login_api_reads_as_pi_on_the_api_and_needs_a_context() {
+    let reviewer = PI_API.replace("implementer", "reviewer");
+    for (what, keys) in [
+        ("an implementer", PI_API),
+        ("a reviewer", reviewer.as_str()),
+    ] {
+        let agent = parse(&format!("---\n{keys}---\nLook.\n")).unwrap();
+        let (model, limit) = agent.runs.session().unwrap();
+        let AgentHarness::PiApi(context) = &model.harness else {
+            panic!("{what}: {:?}", model.harness)
+        };
+        assert_eq!(context.get(), 200_000, "{what}");
+        assert_eq!(model.harness.harness(), Harness::Pi, "{what}");
+        assert_eq!(model.harness.server(), None, "{what}");
+        assert!(!model.harness.needs_server(), "{what}");
+        assert!(model.harness.bills_api(), "{what}");
+        assert_eq!(model.model.as_str(), "claude-sonnet-4-5", "{what}");
+        assert_eq!(limit, &Limit::Api, "{what}");
+    }
+    // A pi file on a server is as it was.
+    let agent = parse(&file(PI)).unwrap();
+    let (model, _) = agent.runs.session().unwrap();
+    assert!(model.harness.needs_server());
+    assert!(!model.harness.bills_api());
+
+    let keys = PI_API.replace("context: 200000\n", "");
+    let refused = parse(&file(&keys)).unwrap_err();
+    assert!(refused.contains("`context`"), "{refused}");
+    assert!(refused.contains("pi"), "{refused}");
+}
+
+#[test]
+fn a_pi_file_with_login_api_and_a_url_or_gateway_is_refused_with_its_line() {
+    for (key, value) in [("url", "http://box:11434/v1"), ("gateway", "paddock")] {
+        let refused = parse(&file(&format!("{PI_API}{key}: {value}\n"))).unwrap_err();
+        assert!(
+            refused.starts_with(&format!("`{key}`: ")),
+            "{key}: {refused}"
+        );
+        assert!(refused.contains("runs on pi"), "{key}: {refused}");
+        assert!(refused.contains("Anthropic"), "{key}: {refused}");
+        assert!(refused.ends_with("at line 8"), "{key}: {refused}");
+    }
 }
