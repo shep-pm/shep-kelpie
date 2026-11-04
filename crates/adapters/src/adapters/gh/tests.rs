@@ -155,6 +155,45 @@ fn skipped_runs_and_a_green_commit_status_pass() {
     assert_eq!(pr.checks, Checks::Passed);
 }
 
+// Recorded the same way from #1653: CI green, and kelpie's own `kelpie` and
+// `kelpie / review` check runs still in progress on the head.
+const PR_GATES: &str = include_str!("../../../../../fixtures/gh-pr-view-kelpie-gates.json");
+
+#[test]
+fn kelpies_own_check_runs_are_not_ci() {
+    let pr = parse_pull_request(PR_GATES.as_bytes()).unwrap();
+    assert_eq!(pr.checks, Checks::Passed);
+}
+
+#[test]
+fn a_finished_kelpie_check_run_is_not_ci_either() {
+    let failed = r#"[{"__typename":"CheckRun","name":"kelpie / ruling","status":"COMPLETED",
+        "conclusion":"FAILURE","detailsUrl":"https://github.com/shep-pm/shep-kelpie"},
+        {"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"SUCCESS"}]"#;
+    assert_eq!(rollup(failed), Checks::Passed);
+}
+
+#[test]
+fn a_head_with_only_kelpies_check_runs_has_no_ci() {
+    let only = r#"[{"__typename":"CheckRun","name":"kelpie","status":"IN_PROGRESS",
+        "conclusion":"","detailsUrl":"https://github.com/shep-pm/shep-kelpie"}]"#;
+    assert_eq!(rollup(only), Checks::None);
+}
+
+#[test]
+fn a_workflow_job_named_like_a_kelpie_check_is_ci() {
+    let job = r#"[{"__typename":"CheckRun","name":"kelpie","status":"IN_PROGRESS",
+        "conclusion":"","detailsUrl":"https://github.com/o/r/actions/runs/7/job/8"}]"#;
+    assert_eq!(
+        rollup(job),
+        Checks::Pending(vec![Queued {
+            name: "kelpie".into(),
+            run: Some(7),
+            running: true,
+        }])
+    );
+}
+
 // The shape `gh pr view --json state,isDraft,headRefOid,statusCheckRollup,labels`
 // gives shep-pm/shep#982, where the `windows-gnu` job of a finished run
 // stayed queued.

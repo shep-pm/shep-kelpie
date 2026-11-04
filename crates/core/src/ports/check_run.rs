@@ -1,5 +1,18 @@
 //! The check runs kelpie's App shows beside CI on a pull request's head
 
+/// The check run on a work item's review
+pub const REVIEW_CHECK: &str = "kelpie / review";
+/// The check run on a ruling a work item waits on
+pub const RULING_CHECK: &str = "kelpie / ruling";
+/// The check run summing up where a work item stands
+pub const SUMMARY_CHECK: &str = "kelpie";
+
+/// Whether `name` is one of the check runs kelpie posts, which are its own
+/// gates and never CI
+pub fn is_gate_check(name: &str) -> bool {
+    [REVIEW_CHECK, RULING_CHECK, SUMMARY_CHECK].contains(&name)
+}
+
 /// The forge's number for a check run, which an update names it by
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CheckRunId(pub u64);

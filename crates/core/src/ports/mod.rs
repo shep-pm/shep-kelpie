@@ -66,7 +66,10 @@ pub use agent::{
 pub use agent_board::AgentBoard;
 pub use attachment::is_github_attachment;
 pub use bridge::{Bridges, OpenBridge, Playwright};
-pub use check_run::{CheckRunId, CheckState, Conclusion, GateCheck};
+pub use check_run::{
+    CheckRunId, CheckState, Conclusion, GateCheck, REVIEW_CHECK, RULING_CHECK, SUMMARY_CHECK,
+    is_gate_check,
+};
 pub use classifier::{Classifier, ClassifierError, Probability, SpamState};
 pub use dev_server::{DevPort, DevRun, DevServers, READY_WITHIN, Started};
 pub use disk::Disk;
