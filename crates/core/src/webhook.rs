@@ -21,6 +21,7 @@ use shep_client::dogs::dog_config;
 
 use crate::forwarder::Upstream;
 use crate::lease::counted::CARGO_TEST_CAPACITY;
+use crate::ports::Timestamp;
 use crate::settings::{EndpointUrl, Gateway, GatewayName, Gateways, SettingsError};
 
 /// What every project shares
@@ -48,6 +49,106 @@ pub struct KelpieSettings {
     /// them when it starts.
     #[serde(default)]
     pub gateways: BTreeMap<GatewayName, Gateway>,
+    /// The maintainer's API credit, which comes in grants that reset on a set
+    /// day. With it the dog keeps every runner's API spend inside one grant
+    /// and picks an API agent first while credit is left. No cap and no
+    /// preference when absent. The dog reads it when it starts.
+    #[serde(default)]
+    pub api_credit: Option<ApiCredit>,
+}
+
+/// One grant of API credit and the day of the month it resets on
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ApiCredit {
+    /// What the grant is worth in US dollars, rounded to a cent. More than 0.
+    usd: GrantUsd,
+    /// The day of the month, in UTC, the grant resets on: 1 to 31. A month
+    /// with fewer days resets on its last.
+    day: GrantDay,
+}
+
+/// A grant's worth in whole cents
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(try_from = "f64")]
+// schemars describes a `try_from` type by its source, so the bounds go here.
+#[schemars(extend("exclusiveMinimum" = 0))]
+struct GrantUsd(u64);
+
+impl TryFrom<f64> for GrantUsd {
+    type Error = &'static str;
+
+    fn try_from(usd: f64) -> Result<Self, Self::Error> {
+        // Refused before rounding, which would lift 0.005 to a cent. The cast
+        // saturates, so an absurd figure cannot wrap.
+        match usd.is_finite() && usd >= 0.01 {
+            true => Ok(Self((usd * 100.0).round() as u64)),
+            false => Err("must be a number of dollars above 0, such as 50 or 12.5"),
+        }
+    }
+}
+
+/// A day of the month, 1 to 31
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(try_from = "u8")]
+#[schemars(extend("minimum" = 1, "maximum" = 31))]
+struct GrantDay(u8);
+
+impl TryFrom<u8> for GrantDay {
+    type Error = &'static str;
+
+    fn try_from(day: u8) -> Result<Self, Self::Error> {
+        match (1..=31).contains(&day) {
+            true => Ok(Self(day)),
+            false => Err("must be a day of the month, 1 to 31"),
+        }
+    }
+}
+
+impl ApiCredit {
+    /// What the grant is worth, in US dollars
+    pub fn cap_usd(&self) -> f64 {
+        self.usd.0 as f64 / 100.0
+    }
+
+    /// The day of the month, in UTC, it resets on
+    pub fn day(&self) -> u8 {
+        self.day.0
+    }
+
+    /// The grant `now` falls in: from 00:00 UTC on the latest reset day at or
+    /// before `now`, to the next one
+    pub fn window(&self, now: Timestamp) -> (Timestamp, Timestamp) {
+        self.try_window(now).unwrap_or((now, now))
+    }
+
+    // None only for a time past the years jiff can name.
+    fn try_window(&self, now: Timestamp) -> Option<(Timestamp, Timestamp)> {
+        let today = jiff::Timestamp::from_second(i64::try_from(now.0).ok()?)
+            .ok()?
+            .to_zoned(jiff::tz::TimeZone::UTC)
+            .date();
+        let this = self.reset_in(today)?;
+        let month = jiff::Span::new().months(1);
+        let (start, end) = if today >= this {
+            (this, self.reset_in(today.checked_add(month).ok()?)?)
+        } else {
+            (self.reset_in(today.checked_sub(month).ok()?)?, this)
+        };
+        Some((midnight(start)?, midnight(end)?))
+    }
+
+    // The reset day of the month `date` is in, the month's last when it is shorter.
+    fn reset_in(&self, date: jiff::civil::Date) -> Option<jiff::civil::Date> {
+        let day = i8::try_from(self.day.0).ok()?.min(date.days_in_month());
+        jiff::civil::Date::new(date.year(), date.month(), day).ok()
+    }
+}
+
+// 00:00 UTC on `date`
+fn midnight(date: jiff::civil::Date) -> Option<Timestamp> {
+    let zoned = date.at(0, 0, 0, 0).to_zoned(jiff::tz::TimeZone::UTC).ok()?;
+    Some(Timestamp(u64::try_from(zoned.timestamp().as_second()).ok()?))
 }
 
 /// The counted leases' capacities
@@ -271,7 +372,8 @@ const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntf
                      `ca_cert` path, an optional one-word `token` and `trusted = true` with one, \
                      a `[leases]` table with a \
                      `cargo-test` count, a `gpu_metrics_url`, a `codex_home` path, \
-                     `[gateways.<name>]` tables with `url` and `key_env`, and nothing else";
+                     `[gateways.<name>]` tables with `url` and `key_env`, an `[api_credit]` table with \
+                     `usd` and `day`, and nothing else";
 
 /// Why `trusted` is refused without a `token`
 const NEEDS_TOKEN: &str = "needs a `token`: without one anyone who learns the topic's name \
@@ -834,6 +936,90 @@ mod tests {
             let text = format!("[leases]\ncargo-test = {bad}\n");
             assert!(KelpieSettings::from_section(&text).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn an_api_credit_reads_its_amount_and_day_and_refuses_a_zero_amount_and_a_day_past_31() {
+        let absent = KelpieSettings::from_section("").unwrap();
+        assert_eq!(absent.api_credit, None, "no table, no cap");
+        let set = KelpieSettings::from_section("[api_credit]\nusd = 50.5\nday = 31\n").unwrap();
+        let credit = set.api_credit.expect("the table is read");
+        assert_eq!((credit.cap_usd(), credit.day()), (50.5, 31));
+        for bad in [
+            "usd = 0\nday = 5",
+            "usd = -3\nday = 5",
+            "usd = 10\nday = 0",
+            "usd = 10\nday = 32",
+            "usd = 10",
+            "day = 5",
+            "usd = \"10\"\nday = 5",
+        ] {
+            let text = format!("[api_credit]\n{bad}\n");
+            assert!(KelpieSettings::from_section(&text).is_err(), "{bad}");
+        }
+    }
+
+    // A moment, from its RFC 3339 text
+    fn at(text: &str) -> Timestamp {
+        Timestamp(text.parse::<jiff::Timestamp>().unwrap().as_second() as u64)
+    }
+
+    fn credit(day: u8) -> ApiCredit {
+        let text = format!("[api_credit]\nusd = 100\nday = {day}\n");
+        KelpieSettings::from_section(&text)
+            .unwrap()
+            .api_credit
+            .unwrap()
+    }
+
+    #[test]
+    fn the_credit_window_starts_on_the_grant_day_at_midnight_utc() {
+        let grant = credit(15);
+        let window = |now| grant.window(at(now));
+        assert_eq!(
+            window("2026-03-20T13:45:00Z"),
+            (at("2026-03-15T00:00:00Z"), at("2026-04-15T00:00:00Z"))
+        );
+        assert_eq!(
+            window("2026-03-15T00:00:00Z"),
+            (at("2026-03-15T00:00:00Z"), at("2026-04-15T00:00:00Z")),
+            "the grant's first second is in its window"
+        );
+        assert_eq!(
+            window("2026-03-14T23:59:59Z"),
+            (at("2026-02-15T00:00:00Z"), at("2026-03-15T00:00:00Z")),
+            "the second before it is in the last one"
+        );
+        assert_eq!(
+            window("2026-12-31T23:00:00Z"),
+            (at("2026-12-15T00:00:00Z"), at("2027-01-15T00:00:00Z")),
+            "the window crosses the year"
+        );
+    }
+
+    #[test]
+    fn a_grant_day_past_a_months_end_starts_the_window_on_its_last_day() {
+        let grant = credit(31);
+        let window = |now| grant.window(at(now));
+        assert_eq!(
+            window("2026-02-28T09:00:00Z"),
+            (at("2026-02-28T00:00:00Z"), at("2026-03-31T00:00:00Z")),
+            "February has no 31st"
+        );
+        assert_eq!(
+            window("2026-02-27T23:59:59Z"),
+            (at("2026-01-31T00:00:00Z"), at("2026-02-28T00:00:00Z"))
+        );
+        assert_eq!(
+            window("2028-02-29T00:00:00Z"),
+            (at("2028-02-29T00:00:00Z"), at("2028-03-31T00:00:00Z")),
+            "a leap year's last day is the 29th"
+        );
+        assert_eq!(
+            window("2026-05-10T00:00:00Z"),
+            (at("2026-04-30T00:00:00Z"), at("2026-05-31T00:00:00Z")),
+            "April has 30 days"
+        );
     }
 
     #[test]
