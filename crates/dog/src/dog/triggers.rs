@@ -1,11 +1,36 @@
 //! The maintainer's triggers on the dog: `status`, `take` and `return`
 
+use std::sync::LazyLock;
+
 use serde_json::{Value, json};
 
 use super::availability::Availability;
 use super::desk::{Delivery, Desk, deliveries};
 use crate::lease::book::Asked;
 use crate::lease::{Holder, LeaseKind};
+
+/// What `status` shows beside the leases: the agent board, the records and the API credit
+#[derive(Debug, Clone, Copy)]
+pub struct Shown<'a> {
+    /// Each implementer's typical item and wait
+    pub board: &'a Value,
+    /// Each agent's track record
+    pub records: &'a Value,
+    /// The credit spent and its cap, or null with none set
+    pub api_credit: &'a Value,
+}
+
+static EMPTY: LazyLock<Value> = LazyLock::new(|| json!({}));
+
+impl Default for Shown<'_> {
+    fn default() -> Self {
+        Self {
+            board: &EMPTY,
+            records: &EMPTY,
+            api_credit: &Value::Null,
+        }
+    }
+}
 
 /// The triggers the dog answers for the maintainer
 pub const ACTIONS: [&str; 3] = ["status", "take", "return"];
@@ -14,17 +39,12 @@ impl Desk {
     /// Shorthand for <code>[Desk::answer_with]</code> with nothing read of availability or the board
     #[cfg(test)]
     pub fn answer(&mut self, action: &str, params: Option<&str>) -> (String, Vec<Delivery>) {
-        self.answer_with(
-            action,
-            params,
-            &Availability::default(),
-            (&json!({}), &json!({})),
-        )
+        self.answer_with(action, params, &Availability::default(), Shown::default())
     }
 
     /// Answers one of the maintainer's triggers with a JSON body
     ///
-    /// `status` lists every lease, `availability` and the `board` and `records` given. `take`
+    /// `status` lists every lease, `availability` and the `board`, `records` and `api_credit` given. `take`
     /// and `return` name a book lease and act for the maintainer. Asking
     /// with `take` again is how a waiting maintainer learns of the grant.
     pub fn answer_with(
@@ -32,9 +52,9 @@ impl Desk {
         action: &str,
         params: Option<&str>,
         availability: &Availability,
-        (board, records): (&Value, &Value),
+        shown: Shown<'_>,
     ) -> (String, Vec<Delivery>) {
-        let answered = self.respond(action, params, availability, (board, records));
+        let answered = self.respond(action, params, availability, shown);
         self.look(true);
         answered
     }
@@ -44,7 +64,7 @@ impl Desk {
         action: &str,
         params: Option<&str>,
         availability: &Availability,
-        shown: (&Value, &Value),
+        shown: Shown<'_>,
     ) -> (String, Vec<Delivery>) {
         let error = |message: String| (json!({ "error": message }).to_string(), Vec::new());
         let params = params.map(str::trim).filter(|p| !p.is_empty());
@@ -73,16 +93,20 @@ impl Desk {
         (body.to_string(), Vec::new())
     }
 
-    fn status(&self, availability: &Availability, (board, records): (&Value, &Value)) -> Value {
+    fn status(&self, availability: &Availability, shown: Shown<'_>) -> Value {
         let mut leases = vec![json!(self.tests.status())];
         leases.extend(self.e2e.values().map(|l| json!(l.status())));
         leases.extend(self.book.status().iter().map(|l| json!(l)));
-        json!({
+        let mut status = json!({
             "leases": leases,
             "availability": availability.status(),
-            "board": board,
-            "records": records,
-        })
+            "board": shown.board,
+            "records": shown.records,
+        });
+        if !shown.api_credit.is_null() {
+            status["api_credit"] = shown.api_credit.clone();
+        }
+        status
     }
 }
 
@@ -90,10 +114,11 @@ impl Desk {
 mod tests {
     use serde_json::json;
 
-    use super::ACTIONS;
+    use super::{ACTIONS, Shown};
     use crate::agent_board::DEFAULT_SECS;
     use crate::dog::availability::{Availability, Sources};
-    use crate::dog::board::Board;
+    use crate::dog::board::tests::{WINDOW, call, credit};
+    use crate::dog::board::{Board, refresh};
     use crate::dog::desk::tests::{grant, stand_in, world};
     use crate::lease::Epoch;
     use crate::lease::counted::{Taker, Ticket};
@@ -151,9 +176,7 @@ mod tests {
         let (_dir, agents) = crate::test::claude_implementers();
         let sources = Sources::of(&agents, &crate::settings::Gateways::default());
         let shown = Availability::new(&sources);
-        let (body, _) = w
-            .desk
-            .answer_with("status", None, &shown, (&json!({}), &json!({})));
+        let (body, _) = w.desk.answer_with("status", None, &shown, Shown::default());
         let body: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(
             body["availability"],
@@ -172,7 +195,16 @@ mod tests {
         let shown = Availability::new(&sources);
         let board = Board::new(&agents).view().status(&shown, Timestamp(EPOCH));
         let records = json!({ "opus-high": { "fix": { "items": 1 } } });
-        let (body, _) = (w.desk).answer_with("status", None, &shown, (&board, &records));
+        let (body, _) = (w.desk).answer_with(
+            "status",
+            None,
+            &shown,
+            Shown {
+                board: &board,
+                records: &records,
+                ..Shown::default()
+            },
+        );
         let body: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(body["records"], records, "beside the board");
         // No ledger yet, and the Claude plan is unread, so it waits a recheck.
@@ -180,6 +212,44 @@ mod tests {
         assert_eq!(
             body["board"],
             json!({ "opus-high": unread, "sonnet-high": unread })
+        );
+    }
+
+    #[test]
+    fn status_shows_the_credit_spent_and_its_cap_and_omits_it_when_none_is_set() {
+        let mut w = world();
+        let dir = tempfile::tempdir().unwrap();
+        let billed = "---\nrole: implementer\nharness: claude-code\nmodel: claude-sonnet-5-5\n\
+                      effort: high\nlogin: api\n---\n";
+        crate::test::write_in(&dir.path().join("agents"), "billed.md", billed);
+        let agents = crate::agents::Agents::load(&dir.path().join("agents")).unwrap();
+        let home = dir.path().join("kelpie");
+        let (start, end) = WINDOW;
+        call(&home, "koji", ("billed", start + 5), Some(12.5));
+        let mut asked = |credit| {
+            let board = std::sync::Mutex::new(Board::new(&agents).credited(credit));
+            refresh(&board, &home);
+            let view = crate::dog::board::lock(&board).view();
+            let credit = view.credit_status(Timestamp(EPOCH));
+            let shown = Shown {
+                api_credit: &credit,
+                ..Shown::default()
+            };
+            let (body, _) = w
+                .desk
+                .answer_with("status", None, &Availability::default(), shown);
+            serde_json::from_str::<serde_json::Value>(&body).unwrap()
+        };
+
+        let none = asked(None);
+        let set = asked(Some(credit(50)));
+
+        assert_eq!(none.get("api_credit"), None, "no credit, no key");
+        assert_eq!(
+            set["api_credit"],
+            json!({
+                "spent_usd": 12.5, "cap_usd": 50.0, "window_start": start, "window_end": end,
+            })
         );
     }
 

@@ -87,6 +87,19 @@ url = "https://ntfy.sh/your-private-topic"
 # [kelpie.leases]
 # cargo-test = 3
 
+# The grant of API credit you spend on agents that run with `login: api`. The
+# amount is the grant's, in US dollars, and it resets on `day` of the month
+# (1 to 31, in UTC; a shorter month resets on its last day). While the window's
+# spend across every project is under it, the board picks such an agent ahead
+# of the plan agents of its role and tier; once the spend reaches it, no
+# runner is given one, a pinned one included, until the window resets. A work
+# item already on one is not stopped, and a call in flight may end past the
+# amount. Absent, there is no cap and no preference. The dog reads this when
+# it starts, so after a change run `shep restart kelpie`.
+# [kelpie.api_credit]
+# usd = 50
+# day = 1
+
 # Agents are not settings: each is a file of its own, `agents/<name>.md` in
 # kelpie's home (`$SHEP_HOME/kelpie/agents/`), YAML frontmatter then a
 # Markdown body. Kelpie ships `sonnet-high` and `opus-high`, which build,

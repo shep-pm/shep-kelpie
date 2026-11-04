@@ -36,6 +36,20 @@ impl View {
         Value::Object(agents.collect())
     }
 
+    /// The credit's cap, the spend in its window at `now` and the window, or null with no credit set
+    pub fn credit_status(&self, now: Timestamp) -> Value {
+        let Some(credit) = self.credit() else {
+            return Value::Null;
+        };
+        let (start, end) = credit.window(now);
+        json!({
+            "spent_usd": self.api_spent(now),
+            "cap_usd": credit.cap_usd(),
+            "window_start": start,
+            "window_end": end,
+        })
+    }
+
     /// Each agent and kind the ledgers give a record to
     pub(super) fn tallies(&self) -> BTreeMap<(String, Option<String>), Record> {
         agent_board::records(self.ledgers.iter().flat_map(|l| l.iter()))
@@ -106,14 +120,52 @@ pub(super) fn answer(
         slack: ask.slack,
         leave_out: &ask.leave_out,
     };
-    (agent_board::pick(&item, &candidates).into_iter())
+    let picks = (agent_board::pick(&item, &candidates).into_iter())
         .map(|choice| Pick {
             agent: choice.agent.clone(),
             finish: choice.finish,
             wait: choice.wait,
             cost_usd: choice.cost_usd,
         })
-        .collect()
+        .collect();
+    spend_credit(view, picks, now)
+}
+
+// With a credit set, an API agent goes ahead of the plan agents of its role and
+// tier while the window's spend is under it, and out of the answer once it is not.
+fn spend_credit(view: &View, mut picks: Vec<Pick>, now: Timestamp) -> Vec<Pick> {
+    let Some(credit) = view.credit() else {
+        return picks;
+    };
+    let billed = |pick: &Pick| view.bills_api(pick.agent.as_str());
+    if view.api_spent(now) >= credit.cap_usd() {
+        picks.retain(|pick| !billed(pick));
+        return picks;
+    }
+    // The places each role and tier holds for API and plan agents are refilled API agents
+    // first, each side in its order. A local or gateway agent spends neither, and keeps its place.
+    let group = |pick: &Pick| {
+        let agent = view.ranked.get(&pick.agent)?;
+        let plan = matches!(agent.runs.session(), Some((_, Limit::Account(_))));
+        (billed(pick) || plan).then(|| (agent.role, agent.fit.tier()))
+    };
+    let mut groups: Vec<(_, Vec<usize>)> = Vec::new();
+    for (place, pick) in picks.iter().enumerate() {
+        let Some(key) = group(pick) else { continue };
+        match groups.iter_mut().find(|(seen, _)| *seen == key) {
+            Some((_, places)) => places.push(place),
+            None => groups.push((key, vec![place])),
+        }
+    }
+    for (_, places) in &groups {
+        let (api, plan): (Vec<_>, Vec<_>) = (places.iter())
+            .map(|&place| picks[place].clone())
+            .partition(billed);
+        for (&place, pick) in places.iter().zip(api.into_iter().chain(plan)) {
+            picks[place] = pick;
+        }
+    }
+    picks
 }
 
 // What `agent` typically takes for an item of `kind`, and one of its turns:
