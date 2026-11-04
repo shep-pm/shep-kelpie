@@ -40,7 +40,7 @@ So the roles that decide are cut to one, the project manager, and choosing an ag
 ### The agent board
 
 - The dog keeps one board for every runner, since agents are shared across projects. For each agent it holds the availability above and a typical time per kind of work: the median from the ledger once the agent has 5 finished items of that kind, the median of its tier until then.
-- The project manager tags each work item with a kind and a minimum tier, and may name an agent outright. A pinned agent is the only one tried.
+- The project manager tags each work item with a kind and a minimum tier, and may name an agent outright, which is tried first (see the amendment below). A pinned agent, the maintainer's `agent:<name>!` label, is the only one tried.
 - At dispatch, the runner asks the board. Of the agents that are allowed, take the item's kind and meet its tier, with a window left, the board estimates when each would finish (queue wait plus typical time). It picks the cheapest whose finish is within `agents.slack` (default 1 hour) of the soonest. The project manager may tighten `slack` for one item, to 0 for a hotfix.
 - A started item keeps its implementer. When its next turn would queue, the same estimate runs again, and a wait past the slack hands the item to the board's next pick with a handoff. `agents.implementers`, `implementer_choice` and `fallback_after` go.
 - The board fills every free slot it has a capable agent for. The project manager says what an item needs, never how many items run or whether an agent sits idle.
@@ -54,6 +54,12 @@ So the roles that decide are cut to one, the project manager, and choosing an ag
 ### Reviews
 
 - `reviews.need` (default 2) reviewers read each item, still once each and in series, so each later one sees the earlier one's fix. Each reviewer is the board's pick at that moment, from reviewers that are allowed and fit the item's tier. One with a spent window is skipped, not waited on. A late bot review is still read (ADR 0007). `agents.reviewers` goes.
+
+### Amendment, 2026-11-04: the project manager's agent is tried first, not pinned
+
+- A pick that named an agent pinned the item to it, and a pinned item is the only one tried and never hands off, so a pick could strand an item on an agent that had run out (a Codex week at 100%, a review bot's closed window) until it reset.
+- The project manager's named agent is now the first choice. The runner asks the board for it alone and opens the item on it, unpinned, when the board ranks it with a wait within the item's slack. Otherwise the agent board picks as if none were named. The ranking follows the pick for the pacer's walk, since the dog reads no day allowance, so an agent the pacer holds never strands the item. A later handoff moves an unpinned item once its agent falls behind the slack.
+- Only the maintainer's `agent:<name>!` label pins. `board.md`'s Agents section marks each agent that is out with the time it returns and why, so the project manager names one that can start.
 
 ## Considered options
 

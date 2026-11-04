@@ -212,8 +212,12 @@ impl Runner {
         Some(Some(format!("{reads} of {need} reviewers read it: {why}")))
     }
 
-    // When the window of `reviewer`, if a review bot, opens, while it is closed at `now`.
-    fn window_opens(&self, reviewer: &AgentName, now: Timestamp) -> Option<Timestamp> {
+    /// When the window of `reviewer`, if a review bot, opens, while it is closed at `now`
+    pub(in crate::runner) fn window_opens(
+        &self,
+        reviewer: &AgentName,
+        now: Timestamp,
+    ) -> Option<Timestamp> {
         let bot = self.listed(reviewer).and_then(|r| r.bot())?;
         self.ports.leases.opens(&bot.bot.lease(), bot.window, now)
     }

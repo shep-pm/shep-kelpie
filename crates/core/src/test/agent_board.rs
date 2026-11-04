@@ -3,8 +3,8 @@
 //! It answers in memory, so a test of dispatch never reaches the dog. It
 //! starts by ranking every agent an ask allows in the order the ask lists
 //! them, with no wait, and by saying every agent fits every kind. A test puts
-//! some of them first, ranks its own order, with its own finishes, ranks
-//! nobody, says one agent does not fit a kind, or makes the board unreachable.
+//! some of them first, ranks its own order, with its own finishes, makes one wait,
+//! ranks nobody, says one agent does not fit a kind, or makes the board unreachable.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -39,6 +39,8 @@ struct Book {
     // Each agent and kind a test has set an answer for
     fits: BTreeMap<(AgentName, String), Fits>,
     fit_asks: Vec<FitAsk>,
+    // The seconds each agent a test has set one for waits before it can start
+    waits: BTreeMap<AgentName, u64>,
 }
 
 /// A board that ranks what a test sets
@@ -74,6 +76,12 @@ impl FakeAgentBoard {
         let name = |a: &&str| AgentName::try_from((*a).to_owned()).unwrap();
         let first = first.iter().map(name).collect();
         self.book.lock().unwrap().answers = Answers::Listed(first);
+    }
+
+    /// Each pick ranks `agent` as waiting `secs` before it can start
+    pub fn waits(&self, agent: &str, secs: u64) {
+        let name = AgentName::try_from(agent.to_owned()).unwrap();
+        self.book.lock().unwrap().waits.insert(name, secs);
     }
 
     /// Each fit ask about `agent` and `kind` answers that it fits
@@ -128,9 +136,9 @@ impl AgentBoard for FakeAgentBoard {
                 && item.pin.as_ref().is_none_or(|pin| pin == agent)
         };
         let picks = order.into_iter().filter(fits).map(|(agent, finish)| Pick {
+            wait: book.waits.get(&agent).copied().unwrap_or(0),
             agent,
             finish,
-            wait: 0,
             cost_usd: None,
         });
         Some(picks.collect())

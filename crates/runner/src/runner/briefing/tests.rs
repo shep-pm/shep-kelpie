@@ -3,9 +3,10 @@
 use std::sync::Mutex;
 
 use crate::ports::{AgentError, CallActivity, Cost, Timestamp, Usage};
+use crate::review_bot::Bot;
 use crate::runner::flight::advance;
 use crate::runner::flight::tests::Driven;
-use crate::runner::{Pass, Runner, step};
+use crate::runner::{Pass, Runner, StepReport, step};
 use crate::settings::Harness;
 use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, git};
 
@@ -67,8 +68,9 @@ fn a_new_project_gets_its_board_at_start_with_nothing_on_it() {
              ## Agents\n\
              \n\
              Implementers by name, then reviewers in their order. The agent board picks a work \
-             item's implementer by its kind, tier and slack, and a pick's agent or an \
-             `agent:<name>!` label pins it.\n\
+             item's implementer by its kind, tier and slack. An agent marked out cannot start \
+             a work item before the time shown. A pick's agent is tried first, not pinned, and an \
+             `agent:<name>!` label pins.\n\
              \n\
              - opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, \
              such as a data migration, a release step or a change to a public interface.\n\
@@ -134,7 +136,7 @@ const TWO_BRANCHES: &str = r#"# Board: acme, 2026-09-21 14:18 UTC
 
 ## Agents
 
-Implementers by name, then reviewers in their order. The agent board picks a work item's implementer by its kind, tier and slack, and a pick's agent or an `agent:<name>!` label pins it.
+Implementers by name, then reviewers in their order. The agent board picks a work item's implementer by its kind, tier and slack. An agent marked out cannot start a work item before the time shown. A pick's agent is tried first, not pinned, and an `agent:<name>!` label pins.
 
 - opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, such as a data migration, a release step or a change to a public interface.
 - sonnet-high (implementer): standard tier, every kind; Builds everyday features and anything with state, such as a store, a queue or a migration.
@@ -478,4 +480,120 @@ fn the_board_lists_the_projects_agents_from_their_files() {
         "no model reaches the board"
     );
     drop(runner);
+}
+
+// The `## Agents` section's bullets
+fn agent_bullets(rig: &Rig) -> Vec<String> {
+    let text = board(rig);
+    let section = text.split("## Agents\n").nth(1).unwrap();
+    let section = section.split("\n## ").next().unwrap();
+    section
+        .lines()
+        .filter(|l| l.starts_with("- "))
+        .map(str::to_owned)
+        .collect()
+}
+
+// A project listing `codex` and cubic whose #7, pinned to `codex`, the
+// pacer has held on `week` percent of Codex's week, with its board written
+// again after.
+fn codex_held_and_cubic_listed(week: u32) -> (Rig, Mutex<Runner>) {
+    let rig = Rig::new("koji");
+    rig.write_codex_implementer();
+    rig.reviewers(&["cubic"]);
+    rig.allow(&["sonnet-high", "codex", "cubic"]);
+    rig.codex_meter.set(Rig::utilization(week, 0));
+    rig.forge.list_ready(7, false);
+    rig.forge.label(7, "agent:codex!");
+    let runner = rig.open().unwrap();
+    step(&runner).unwrap();
+    rig.clock.advance(60);
+    super::brief(&runner);
+    (rig, runner)
+}
+
+#[test]
+fn the_agents_section_marks_a_spent_codex_week_and_a_closed_bot_window() {
+    let rig = Rig::new("koji");
+    rig.write_codex_implementer();
+    rig.reviewers(&["cubic"]);
+    rig.allow(&["sonnet-high", "codex", "cubic"]);
+    rig.codex_meter.set(Rig::utilization(100, 0));
+    rig.leases
+        .opens_at(&Bot::Cubic.lease(), Timestamp(Rig::EPOCH + 25 * Rig::DAY));
+    rig.forge.list_ready(7, false);
+    rig.forge.label(7, "agent:codex!");
+    let runner = rig.open().unwrap();
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Held { .. })
+    ));
+    rig.clock.advance(60);
+    super::brief(&runner);
+
+    let bullets = agent_bullets(&rig);
+    let line = |name: &str| bullets.iter().find(|b| b.contains(name)).unwrap();
+    assert!(
+        line("- codex ").ends_with(
+            "; out until 2026-09-28 14:13 UTC: Codex's week is at 100%, so no turn starts until it resets"
+        ),
+        "{bullets:#?}"
+    );
+    assert!(
+        line("- cubic ").ends_with("; out until 2026-10-16 14:13 UTC: its review window is closed"),
+        "{bullets:#?}"
+    );
+    assert!(
+        !line("- sonnet-high ").contains("out until"),
+        "{bullets:#?}"
+    );
+}
+
+#[test]
+fn a_hold_whose_time_has_passed_marks_no_agent_out() {
+    let (rig, runner) = codex_held_and_cubic_listed(100);
+    assert!(agent_bullets(&rig)[0].contains("out until"), "held first");
+
+    rig.codex_meter.set(Rig::utilization(0, 0));
+    rig.clock.advance(7 * Rig::DAY);
+    super::brief(&runner);
+
+    let bullets = agent_bullets(&rig);
+    assert!(
+        bullets.iter().all(|b| !b.contains("out until")),
+        "{bullets:#?}"
+    );
+}
+
+#[test]
+fn an_agent_whose_days_allowance_is_spent_is_marked_out_until_the_day_resets() {
+    let rig = Rig::new("koji");
+    rig.write_codex_implementer();
+    rig.allow(&["sonnet-high", "codex"]);
+    rig.codex_day_began(0);
+    let runner = rig.open().unwrap();
+    rig.codex_meter.set(Rig::utilization(15, 0));
+    rig.forge.list_ready(7, false);
+    rig.forge.label(7, "agent:codex!");
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Held { .. })
+    ));
+    rig.clock.advance(60);
+    super::brief(&runner);
+
+    let bullets = agent_bullets(&rig);
+    let line = |name: &str| bullets.iter().find(|b| b.contains(name)).unwrap();
+    assert!(
+        line("- codex ").contains("; out until 2026-"),
+        "{bullets:#?}"
+    );
+    assert!(
+        line("- codex ").contains("today's Codex allowance of 14.3% of the week is spent"),
+        "{bullets:#?}"
+    );
+    assert!(
+        !line("- sonnet-high ").contains("out until"),
+        "{bullets:#?}"
+    );
 }
