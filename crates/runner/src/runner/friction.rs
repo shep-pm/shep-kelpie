@@ -16,11 +16,13 @@ const LONGEST: usize = 600;
 /// What a section cut short ends with
 const CUT: &str = " (cut)";
 
-/// The line a harness puts at the end of a body, which is no friction
-fn trailer(line: &str) -> bool {
-    let line = line.trim_start();
-    line.starts_with("\u{1f916} Generated with") || line.starts_with("Generated with")
-}
+/// What ends a body: a closing line or the harness's own trailer, lowercased
+const ENDS: [&str; 4] = [
+    "resolves #",
+    "closes #",
+    "generated with",
+    "\u{1f916} generated with",
+];
 
 /// The text under the `Friction` heading of `body`, to the next heading or
 /// the harness's own trailer
@@ -36,18 +38,39 @@ pub(super) fn section(body: &str) -> Option<String> {
                 .trim()
                 .eq_ignore_ascii_case("friction")
     };
-    let mut lines = body.lines().skip_while(|line| !named(line)).skip(1);
-    let closes = |line: &&str| {
-        let line = line.trim_start().to_ascii_lowercase();
-        line.starts_with("resolves #") || line.starts_with("closes #")
-    };
-    let text: Vec<&str> = (lines.by_ref())
-        .take_while(|line| !heading(line) && !trailer(line))
-        .filter(|line| !closes(line))
+    let lines: Vec<&str> = (body.lines())
+        .skip_while(|line| !named(line))
+        .skip(1)
+        .take_while(|line| !heading(line))
         .collect();
-    let text = text.join("\n");
-    let text = text.trim();
+    let text = lines.join("\n");
+    let text = text[..ends_at(&text)].trim();
     (!text.is_empty()).then(|| kept(text))
+}
+
+/// Where `text` ends at a closing line or the harness's trailer
+///
+/// A body kelpie joined puts each on the line before, so a line start is not
+/// enough to find one. `text.len()` when neither is there.
+fn ends_at(text: &str) -> usize {
+    let lower = text.to_ascii_lowercase();
+    (ENDS.iter())
+        .filter_map(|marker| {
+            (lower.match_indices(marker))
+                .map(|(at, _)| at)
+                .find(|at| after_space(&lower, *at))
+        })
+        .min()
+        .unwrap_or(text.len())
+}
+
+/// Whether `at` starts a line, or a joined line's continuation
+fn after_space(lower: &str, at: usize) -> bool {
+    at == 0
+        || (lower[..at])
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_whitespace())
 }
 
 // `text` kept to [`LONGEST`], ending at a sentence where the window holds
@@ -90,6 +113,7 @@ impl Runner {
 #[cfg(test)]
 mod tests {
     use super::section;
+    use crate::runner::pull_request_file::parse;
 
     #[test]
     fn the_section_runs_to_the_next_heading() {
@@ -105,6 +129,22 @@ mod tests {
     fn the_closing_line_is_not_friction() {
         let body = "## Friction\n\nSlow build.\n\nResolves #7\n";
         assert_eq!(section(body).as_deref(), Some("Slow build."));
+    }
+
+    // `friction_of` reads the section from the body `parse` joined, where the
+    // closing line or the trailer sits on the section's last line.
+    #[test]
+    fn a_closing_line_or_trailer_joined_onto_the_section_is_cut() {
+        let closed = parse("feat: x\n\n## Friction\n\nSlow build.\nResolves #7\n")
+            .unwrap()
+            .body;
+        assert_eq!(closed, "## Friction\n\nSlow build. Resolves #7");
+        assert_eq!(section(&closed).as_deref(), Some("Slow build."));
+
+        let trailed = parse("feat: x\n\n## Friction\n\nSlow build.\n\u{1f916} Generated with [Claude Code](https://claude.com/claude-code)\n")
+            .unwrap()
+            .body;
+        assert_eq!(section(&trailed).as_deref(), Some("Slow build."));
     }
 
     #[test]

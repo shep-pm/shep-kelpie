@@ -12,7 +12,7 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | merge.md | CI, catch-up, merge | `runner/{gate,merge}/`, `runner/close_merged.rs` |
 | main-ci.md | red on `main` | `runner/main_ci/` |
 | stuck-checks.md | stuck checks | `runner/gate/queued/` |
-| github-app.md | App tokens, posting, answers | `runner/voice/`, `core/guard/gh.rs`, `worker_folder/` |
+| github-app.md | App tokens, posting, answers | `runner/{voice,paragraphs}/`, `core/guard/gh.rs`, `worker_folder/` |
 | who-answers.md | who answers | `runner/pm/rulings.rs`, `runner/agent_fit.rs` |
 | contributions.md | others' pull requests | `core/{settings/{contributions.rs,reviewers/},state/contributions.rs}`, `runner/contributions/` |
 | contribution-security.md | its security review | `runner/{contributions/,flight/security.rs}`, `process/worktree/` |
