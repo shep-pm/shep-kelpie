@@ -9,7 +9,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{Claude, LOGIN_VAR};
+use super::{API_VAR, Claude, LOGIN_VAR};
 use crate::adapters::harness::{bind_in_scratch, call_policy, program_folder, prompt_file};
 use crate::dep_sources::ProcessEnv;
 use crate::fence;
@@ -38,8 +38,17 @@ impl Claude {
             .env("CLAUDE_CODE_TMPDIR", &scratch)
             .env("CLAUDE_CONFIG_DIR", config_folder(call))
             .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
-        if let Some(login) = &self.login {
-            command.env(LOGIN_VAR, login.expose());
+        // One credential per call: the other is removed, so a plan call never sees the key.
+        if call.harness.bills_api() {
+            command.env_remove(LOGIN_VAR);
+            if let Some(key) = &self.api_key {
+                command.env(API_VAR, key.expose());
+            }
+        } else {
+            command.env_remove(API_VAR);
+            if let Some(login) = &self.login {
+                command.env(LOGIN_VAR, login.expose());
+            }
         }
         // The maintainer's gh login, for a worker with no App token on Windows.
         let fence = call.reach.fence.as_deref();
@@ -174,7 +183,7 @@ mod tests {
 
     use super::*;
     use crate::adapters::claude::write_settings;
-    use crate::adapters::{Base, ClaudeCli, LoginToken, SandboxRuntime};
+    use crate::adapters::{ApiKey, Base, ClaudeCli, LoginToken, SandboxRuntime};
     use crate::ports::Ending;
     use crate::ports::{Agents, Role, Session, SessionId, Tools};
     use crate::profile::WorkerProfile;
@@ -696,6 +705,108 @@ mod tests {
             assert!(matches!(err, AgentError::Setup(_)), "{err:?}");
         }
         assert!(!w.path("ran").exists(), "claude ran with no login");
+    }
+
+    const KEY: &str = "sk-ant-api03-for-the-test";
+
+    // The credential a command carries under `var`, if it sets one.
+    fn credential(command: &Command, var: &str) -> Option<String> {
+        let set = command.get_envs().find(|(n, _)| *n == var);
+        set.and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+    }
+
+    fn billed_to_the_api(call: AgentCall) -> AgentCall {
+        AgentCall {
+            harness: crate::settings::AgentHarness::ClaudeApi,
+            ..call
+        }
+    }
+
+    // One credential per call: the key alone for an API agent, the login alone for a plan agent.
+    #[test]
+    fn an_api_agents_call_gets_the_api_key_and_never_the_login_token() {
+        let w = World::new();
+        let cli = w
+            .cli(Arc::new(OpenSandbox::default()))
+            .with_api_key(ApiKey::new(KEY.to_owned()));
+        for call in [w.worker(), w.call(Role::Reviewer)] {
+            let call = billed_to_the_api(call);
+            for run in [ClaudeCli::sandboxed_command, ClaudeCli::terminal_command] {
+                let command = run(&cli, &call).unwrap();
+                assert_eq!(credential(&command, API_VAR).as_deref(), Some(KEY));
+                assert_eq!(credential(&command, LOGIN_VAR), None);
+            }
+        }
+    }
+
+    #[test]
+    fn a_plan_agents_call_never_sees_the_api_key_even_when_the_runner_holds_it() {
+        let w = World::new();
+        let cli = w
+            .cli(Arc::new(OpenSandbox::default()))
+            .with_api_key(ApiKey::new(KEY.to_owned()));
+        for call in [w.worker(), w.call(Role::Reviewer)] {
+            for run in [ClaudeCli::sandboxed_command, ClaudeCli::terminal_command] {
+                let command = run(&cli, &call).unwrap();
+                assert_eq!(credential(&command, API_VAR), None);
+                assert!(credential(&command, LOGIN_VAR).is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn the_api_key_is_a_variable_of_the_command_and_its_debug_text_holds_none_of_it() {
+        let w = World::new();
+        let key = ApiKey::new(KEY.to_owned());
+        assert_eq!(format!("{key:?}"), "Some(ApiKey(..))");
+        let cli = w.cli(Arc::new(OpenSandbox::default())).with_api_key(key);
+        assert!(!format!("{cli:?}").contains(KEY), "Debug shows the key");
+        let call = billed_to_the_api(w.worker());
+        write_settings(&call, &[]).unwrap();
+        let written = std::fs::read_to_string(&call.settings).unwrap();
+        assert!(!written.contains(KEY), "{written}");
+        for run in [ClaudeCli::sandboxed_command, ClaudeCli::terminal_command] {
+            let command = run(&cli, &call).unwrap();
+            assert_eq!(credential(&command, API_VAR).as_deref(), Some(KEY));
+            assert!(
+                !(command.get_args()).any(|a| a.to_string_lossy().contains(KEY)),
+                "an argument shows the key"
+            );
+        }
+    }
+
+    #[test]
+    fn an_api_call_with_no_key_refuses_with_the_fix_and_runs_nothing() {
+        let w = World::new();
+        // The login is held, so only the key is missing.
+        let cli = w.cli(Arc::new(OpenSandbox::default()));
+        for call in [w.worker(), w.call(Role::Reviewer)] {
+            let call = billed_to_the_api(call);
+            for run in [ClaudeCli::sandboxed_command, ClaudeCli::terminal_command] {
+                let err = run(&cli, &call).unwrap_err();
+                let AgentError::Setup(why) = &err else {
+                    panic!("{err:?}")
+                };
+                assert!(why.contains("`shep secret set ANTHROPIC_API_KEY`"), "{why}");
+                assert!(!why.contains("claude setup-token"), "{why}");
+            }
+            let err = cli.run(&call, &Ending::default()).unwrap_err();
+            assert!(matches!(err, AgentError::Setup(_)), "{err:?}");
+        }
+        assert!(!w.path("ran").exists(), "claude ran with no key");
+    }
+
+    // Cargo sets it for every test binary it runs, and nothing kelpie starts reads it.
+    #[test]
+    fn the_api_key_taken_from_the_environment_is_hidden_from_every_other_process() {
+        const SET: &str = "CARGO_PKG_DESCRIPTION";
+        let value = std::env::var(SET).unwrap();
+        let key = ApiKey::take_from(SET).expect("the variable holds text");
+        assert_eq!(key.expose(), value.trim());
+        let seen = crate::spawn::command("env").output().unwrap();
+        let seen = String::from_utf8_lossy(&seen.stdout).into_owned();
+        assert!(seen.contains("PATH="), "{seen}");
+        assert!(!seen.contains(SET), "a process saw the variable");
     }
 
     #[cfg(unix)]
