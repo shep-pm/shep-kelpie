@@ -110,6 +110,7 @@ mod owner_template;
 #[cfg(test)]
 mod owner_template_tests;
 mod pace;
+mod paragraphs;
 mod parent;
 mod pm;
 mod points;

@@ -6,11 +6,14 @@
 //! folder, and kelpie opens the draft when a turn ends with the branch
 //! pushed and no pull request, and sets the title and body again when a
 //! later turn changed the file.
+//!
+//! The body goes through [`paragraphs::join`] before it is sent.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::Runner;
+use super::paragraphs;
 use crate::local_paths::Leak;
 use crate::ports::ForgeError;
 use crate::work_kind::work_kind;
@@ -47,7 +50,8 @@ pub(super) enum Untitled {
 }
 
 /// The title and body in `file`: its first line is the title, its
-/// leading `#`s left off, and the rest is the body
+/// leading `#`s left off, and the rest is the body, its soft-wrapped lines
+/// joined by [`paragraphs::join`]
 ///
 /// [`Untitled`] when the first line is blank or not a conventional commit
 /// subject. Any lowercase word is a type, as [`work_kind`] reads one, since
@@ -67,7 +71,7 @@ pub(super) fn parse(file: &str) -> Result<Text, Untitled> {
     }
     Ok(Text {
         title: title.to_owned(),
-        body: rest.trim().to_owned(),
+        body: paragraphs::join(rest.trim()),
     })
 }
 
@@ -385,6 +389,35 @@ Resolves #7"
             "kelpie marks it ready when its gates pass"
         );
     }
+
+    // A worker that wrapped its body at 80 columns would have it shown as a
+    // narrow ragged column, since GitHub breaks a body at every newline.
+    #[test]
+    fn a_hard_wrapped_body_opens_the_pull_request_with_its_paragraphs_joined() {
+        let (rig, runner) = with_issue_7(true);
+        std::fs::write(path(&rig.build_7()), WRAPPED_FILE).unwrap();
+        rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+
+        step(&runner).unwrap();
+
+        assert_eq!(
+            rig.forge.text_of(500),
+            Some((WRAPPED_TITLE.to_owned(), WRAPPED_BODY.to_owned()))
+        );
+    }
+
+    // The file a worker leaves when it wrapped its body at eighty columns
+    const WRAPPED_FILE: &str = "fix(runner): join a body's lines\n\nGitHub shows every \
+        newline in a body as a line break, so a body wrapped at eighty columns reads as a \
+        narrow ragged column.\n\n- Kelpie joins each soft-wrapped line\n  onto the one before \
+        it\n\nResolves #7\n";
+
+    const WRAPPED_TITLE: &str = "fix(runner): join a body's lines";
+
+    // The same body with each paragraph and each list item on one line
+    const WRAPPED_BODY: &str = "GitHub shows every newline in a body as a line break, so a \
+        body wrapped at eighty columns reads as a narrow ragged column.\n\n- Kelpie joins each \
+        soft-wrapped line onto the one before it\n\nResolves #7";
 
     const HOME_PATH_REFUSED: &str =
         "not posted: the pull request's body names a path on this machine, which names its user";
