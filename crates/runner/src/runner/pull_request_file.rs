@@ -398,6 +398,12 @@ Resolves #7"
         std::fs::write(path(&rig.build_7()), WRAPPED_FILE).unwrap();
         rig.claude.script([Scripted::Push("work.txt", "work\n")]);
 
+        // A fixture whose paragraph was already one line would test nothing
+        assert!(
+            WRAPPED_FILE.contains("wrapped at\neighty columns"),
+            "the fixture's paragraph must span lines for kelpie to join one"
+        );
+
         step(&runner).unwrap();
 
         assert_eq!(
@@ -406,18 +412,31 @@ Resolves #7"
         );
     }
 
-    // The file a worker leaves when it wrapped its body at eighty columns
-    const WRAPPED_FILE: &str = "fix(runner): join a body's lines\n\nGitHub shows every \
-        newline in a body as a line break, so a body wrapped at eighty columns reads as a \
-        narrow ragged column.\n\n- Kelpie joins each soft-wrapped line\n  onto the one before \
-        it\n\nResolves #7\n";
+    // The file a worker leaves when it wrapped its body at eighty columns. Each
+    // piece here is one line of the file, so its paragraph really is soft-wrapped
+    const WRAPPED_FILE: &str = concat!(
+        "fix(runner): join a body's lines\n",
+        "\n",
+        "GitHub shows every newline in a body as a line break, so a body wrapped at\n",
+        "eighty columns reads as a narrow ragged column.\n",
+        "\n",
+        "- Kelpie joins each soft-wrapped line\n",
+        "  onto the one before it\n",
+        "\n",
+        "Resolves #7\n",
+    );
 
     const WRAPPED_TITLE: &str = "fix(runner): join a body's lines";
 
     // The same body with each paragraph and each list item on one line
-    const WRAPPED_BODY: &str = "GitHub shows every newline in a body as a line break, so a \
-        body wrapped at eighty columns reads as a narrow ragged column.\n\n- Kelpie joins each \
-        soft-wrapped line onto the one before it\n\nResolves #7";
+    const WRAPPED_BODY: &str = concat!(
+        "GitHub shows every newline in a body as a line break, so a body ",
+        "wrapped at eighty columns reads as a narrow ragged column.\n",
+        "\n",
+        "- Kelpie joins each soft-wrapped line onto the one before it\n",
+        "\n",
+        "Resolves #7",
+    );
 
     const HOME_PATH_REFUSED: &str =
         "not posted: the pull request's body names a path on this machine, which names its user";
