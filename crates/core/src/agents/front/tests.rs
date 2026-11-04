@@ -63,11 +63,38 @@ fn login_api_on_a_claude_code_implementer_or_reviewer_reads_as_billed_to_the_api
         };
         let (harness, limit) = read("login: api\n");
         assert_eq!(harness, AgentHarness::ClaudeApi, "{what}");
-        assert_eq!(limit, Limit::Account(Account::Claude), "{what}");
+        assert_eq!(limit, Limit::Api, "{what}");
         for plan in ["", "login: plan\n"] {
             let (harness, limit) = read(plan);
             assert_eq!(harness, AgentHarness::ClaudeCode, "{what}: {plan:?}");
             assert_eq!(limit, Limit::Account(Account::Claude), "{what}: {plan:?}");
+        }
+    }
+}
+
+#[test]
+fn an_api_agents_limit_is_api_and_a_usage_key_beside_it_is_refused_with_its_line() {
+    let reviewer = CLAUDE.replace("implementer", "reviewer");
+    for (what, keys) in [
+        ("an implementer", CLAUDE),
+        ("a reviewer", reviewer.as_str()),
+    ] {
+        let agent = parse(&format!("---\n{keys}login: api\n---\nLook.\n")).unwrap();
+        assert_eq!(agent.runs.session().unwrap().1, &Limit::Api, "{what}");
+        for usage in ["claude", "codex", "none"] {
+            let refused = parse(&format!(
+                "---\n{keys}login: api\nusage: {usage}\n---\nLook.\n"
+            ))
+            .unwrap_err();
+            assert!(
+                refused.starts_with("`usage`: "),
+                "{what} {usage}: {refused}"
+            );
+            assert!(
+                refused.contains("reads no account"),
+                "{what} {usage}: {refused}"
+            );
+            assert!(refused.ends_with("at line 7"), "{what} {usage}: {refused}");
         }
     }
 }

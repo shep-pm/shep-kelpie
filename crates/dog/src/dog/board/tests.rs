@@ -226,6 +226,80 @@ async fn a_model_behind_a_gateway_with_no_load_to_read_waits_nothing() {
     );
 }
 
+const ON_CLAUDE: &str = "---\nrole: implementer\nharness: claude-code\n\
+                         model: claude-sonnet-5-5\neffort: high\n";
+
+// A heavy plan agent, a light API agent on the same model and a light local one. Only the
+// plan agent has a history to price.
+fn plan_api_and_local(dir: &Path) -> Agents {
+    write_in(dir, "plan.md", &format!("{ON_CLAUDE}tier: heavy\n---\n"));
+    write_in(
+        dir,
+        "billed.md",
+        &format!("{ON_CLAUDE}login: api\ntier: light\n---\n"),
+    );
+    write_in(
+        dir,
+        "local.md",
+        "---\nrole: implementer\nharness: stand-in\nmodel: lite\neffort: low\nusage: none\ntier: light\n---\n",
+    );
+    Agents::load(dir).unwrap()
+}
+
+// Every candidate is within the slack, so cost alone orders them.
+fn ask_all() -> PickAsk {
+    PickAsk {
+        kind: None,
+        tier: None,
+        pin: None,
+        slack: Some(100_000),
+        agents: ["plan", "billed", "local"].map(AgentName::kelpies).to_vec(),
+        leave_out: vec![],
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_api_agent_is_not_ranked_as_a_local_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = plan_api_and_local(&dir.path().join("agents"));
+    let home = dir.path().join("kelpie");
+    let board = Mutex::new(Board::new(&agents));
+    finished(&home, "koji", ("plan", "fix"), 5, (600, 3.0));
+    refresh(&board, &home);
+    let shown = seen(&agents, &Gateways::default(), 10).await;
+
+    let picks = pick::answer(&lock(&board).view(), &shown, &ask_all(), Timestamp(EPOCH));
+
+    let order: Vec<_> = picks.iter().map(|p| p.agent.as_str()).collect();
+    assert_eq!(
+        order,
+        ["local", "plan", "billed"],
+        "with no history the API agent is not free, as the local model is"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_api_agent_waits_nothing_while_the_plan_is_spent() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = plan_api_and_local(dir.path());
+    let shown = seen_plans(
+        &agents,
+        &Gateways::default(),
+        utilization(100, 100),
+        utilization(0, 0),
+    )
+    .await;
+    let now = Timestamp(EPOCH);
+
+    let status = Board::new(&agents).view().status(&shown, now);
+    let picks = pick::answer(&Board::new(&agents).view(), &shown, &ask_all(), now);
+
+    assert_eq!(status["plan"]["wait"], 7 * 86_400, "the plan's week resets");
+    assert_eq!(status["billed"]["wait"], 0);
+    let billed = picks.iter().find(|p| p.agent.as_str() == "billed").unwrap();
+    assert_eq!(billed.wait, 0);
+}
+
 #[test]
 fn an_agent_file_named_with_an_underscore_is_no_implementer_the_board_ranks() {
     let dir = tempfile::tempdir().unwrap();

@@ -245,6 +245,8 @@ pub enum Limit {
     /// A gateway, which queues its calls: each holds a lease the gateway
     /// grants, and none is paced
     Gateway,
+    /// A session whose calls bill an API key, held back by nothing of kelpie's
+    Api,
 }
 
 /// Whether this process holds the gateways' keys, for [`Settings::refused_implementers`]
@@ -257,10 +259,14 @@ pub enum GatewayKeys {
 }
 
 impl Limit {
-    /// Whether it is an account's windows, which the pacer reads: an agent on
-    /// any other runs on a local model
+    /// Whether it is an account's windows, which the pacer reads
     pub fn is_account(&self) -> bool {
         matches!(self, Self::Account(_))
+    }
+
+    /// Whether it is a local model, behind a gateway or not
+    pub fn is_local(&self) -> bool {
+        matches!(self, Self::Unqueued | Self::Gateway)
     }
 }
 
@@ -419,7 +425,7 @@ pub struct Implementer {
 impl Implementer {
     /// Whether it runs on a local model, behind a gateway or not, and never paced
     pub fn is_local(&self) -> bool {
-        !self.limit.is_account()
+        self.limit.is_local()
     }
 }
 

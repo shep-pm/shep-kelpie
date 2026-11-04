@@ -197,6 +197,44 @@ async fn a_meter_read_never_sees_a_gateway_key() {
     assert!(!shown.contains(SET), "a meter's command saw it");
 }
 
+#[tokio::test(start_paused = true)]
+async fn the_dog_reads_no_account_for_an_api_agent_and_hides_the_api_key_from_its_processes() {
+    let dir = tempfile::tempdir().unwrap();
+    write_in(
+        dir.path(),
+        "billed.md",
+        "---\nrole: implementer\nharness: claude-code\nmodel: claude-sonnet-5-5\n\
+         effort: high\nlogin: api\n---\n",
+    );
+    let agents = Agents::load(dir.path()).unwrap();
+    let sources = Sources::of(&agents, &gateways());
+    let status = Availability::new(&sources).status();
+    assert_eq!(
+        status["accounts"],
+        json!([]),
+        "an API agent names no account"
+    );
+
+    let settings = crate::webhook::KelpieSettings::from_section("").unwrap();
+    let ports = super::Ports {
+        local_leases: Arc::new(LeaseReads::default()),
+        meter: Arc::new(FakeMeter::idle()),
+        codex_meter: |_| Arc::new(FakeMeter::idle()),
+    };
+    super::begin(&agents, &settings, ports);
+    // A removed variable shows in the built command as set to nothing.
+    let command = crate::spawn::command("env");
+    let removed = |var: &str| command.get_envs().any(|(k, v)| k == var && v.is_none());
+    assert!(
+        removed("ANTHROPIC_API_KEY"),
+        "the API key reaches a process"
+    );
+    assert!(
+        removed("CLAUDE_CODE_OAUTH_TOKEN"),
+        "the login reaches a process"
+    );
+}
+
 // A lease reader whose load read panics, as a bug in a parse would.
 struct Panics;
 

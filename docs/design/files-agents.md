@@ -9,7 +9,8 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | agent-baselines.md | shipped agents, baselines, unbound files, `agents init` and `new` | `core/agents/`, `src/flock/add/`, `src/agent_verbs/`, `dog/mod.rs` |
 | agent-migration.md | `agents migrate` | `core/agents/legacy.rs` |
 | agent-allow.md | allow list | `core/settings/agents/`, `runner/add.rs` |
-| agent-board.md | pick and fit estimates, the dog's board, `pick` and `fit` asks | `core/agent_board/`, `dog/{board,door}/`, `core/lease/door_pick.rs` |
+| agent-board.md | pick estimate, the dog's board, the `pick` ask | `core/agent_board/`, `dog/{board,door}/`, `core/lease/door_pick.rs` |
+| agent-board-fit.md | track records, fit, the `fit` ask | `core/agent_board/{record,fit}.rs`, `dog/board/fit.rs`, `core/lease/door_pick.rs` |
 | agent-board-runner.md | dispatch's ask, rework, handoff, the `fit` ask | `runner/add.rs`, `runner/dispatch/`, `runner/turn/handoff/`, `runner/agent_fit.rs` |
 | cli-adapter.md | a new CLI | `adapters/cli/` |
 | skills.md | step skills, copies, wording skill | `core/skills/*.rs` |
