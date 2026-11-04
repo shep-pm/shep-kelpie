@@ -202,6 +202,7 @@ pub(super) fn checks(
         ));
     }
     // A call carries one credential: the login for a plan agent, the key for an API agent.
+    // parity: harness.api-login
     let plan = |model: &RoleModel| model.harness == AgentHarness::ClaudeCode;
     if spends_on(&settings, (&book, &gateways), here, plan) {
         lines.push(super::machine::login(at("claude login"), env, probes.host));
