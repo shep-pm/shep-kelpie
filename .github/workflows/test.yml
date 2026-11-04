@@ -127,9 +127,11 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: scripts/test-part.sh ${{ matrix.part }}
 
+  # macOS and Windows run on main, not on a pull request: their 15 to 20
+  # minutes held every pull request's merge, and a break shows as red on main.
   test-macos:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.changes.outputs.rust != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 40
     steps:
@@ -305,9 +307,9 @@ jobs:
   # `--keep-going` reports every crate that fails to compile.
   windows:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.changes.outputs.rust != 'false' }}
     runs-on: windows-11-arm
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 60 || 200 }}
+    timeout-minutes: 200
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install rustup if the image lacks it
@@ -378,14 +380,12 @@ jobs:
         run: 'cargo test --locked -p shep-kelpie-core --lib -- lease::saved:: state::tests::release:: state::tests::a_second_atomic_write_over_a_file_replaces_it'
       # Measure every crate's lib tests before fixing each Windows failure group.
       # Skip the tests that hung in runs 40990662373 and 41020519313. The
-      # runner's 3035 tests take about two hours here (#1578), so only main
-      # runs them.
+      # runner's 3035 tests take about two hours here (#1578).
       - id: lib
         continue-on-error: true
-        timeout-minutes: ${{ github.event_name == 'pull_request' && 40 || 180 }}
+        timeout-minutes: 180
         run: >-
           cargo test --workspace --lib --locked --no-fail-fast
-          ${{ github.event_name == 'pull_request' && '--exclude shep-kelpie-runner' || '' }}
           --
           --skip upgrade::tests::handover::a_runner_stopped_while_it_hands_over_stays_stopped
           --skip upgrade::tests::sheep::a_runner_stopped_while_the_upgrade_waits_stays_stopped
