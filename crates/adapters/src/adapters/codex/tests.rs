@@ -89,7 +89,7 @@ fn a_new_worker_session_loads_nothing_of_the_maintainers_and_runs_kelpies_checks
     ] {
         assert!(argv.iter().any(|a| a == flag), "{flag}");
     }
-    assert_eq!(argv[at("--model") + 1], "gpt-6-sol");
+    assert_eq!(argv[at("--model") + 1], "gpt-6.1-sol");
     for config in [
         "model_reasoning_effort=\"medium\"",
         "web_search=\"disabled\"",
@@ -495,7 +495,8 @@ fn a_turn_answers_with_its_last_message_and_its_tokens() {
     let reply = cli.run(&call, &Ending::default()).unwrap();
     assert_eq!(reply.text, "done");
     assert_eq!(reply.session_id, id(WORKER_ID));
-    assert_eq!(reply.session_cost, None);
+    // 6959 input at $2.00, 10752 cached at $0.10 and 44 output at $10.00 per 1M.
+    assert_eq!(reply.session_cost, Some(Cost(15_433_200)));
     assert_eq!(
         reply.usage,
         Usage {
@@ -563,6 +564,34 @@ fn a_resumed_turn_counts_only_its_own_tokens_and_reads_past_refusals() {
         assert!(reply.text.contains(refused), "{refused}: {}", reply.text);
     }
     assert!(reply.text.contains("hello.txt"), "{}", reply.text);
+}
+
+#[test]
+fn a_resumed_sessions_cost_counts_its_earlier_turns() {
+    let w = World::new();
+    let cli = stand_in(&w, FRESH);
+    let call = w.call(Role::Worker, Session::New(id(WORKER_ID)));
+    cli.prepare(&call).unwrap();
+    cli.run(&call, &Ending::default()).unwrap();
+
+    let cli = stand_in(&w, RESUMED);
+    let again = w.call(Role::Worker, Session::Resume(id(WORKER_ID)));
+    let reply = cli.run(&again, &Ending::default()).unwrap();
+
+    // Both turns' tokens: 10645 input, 53504 cached and 471 output.
+    assert_eq!(reply.session_cost, Some(Cost(31_350_400)));
+}
+
+#[test]
+fn a_model_the_table_does_not_name_is_unpriced_and_still_answers() {
+    let w = World::new();
+    let cli = stand_in(&w, FRESH);
+    let mut call = w.call(Role::Worker, Session::New(id(WORKER_ID)));
+    call.model = "gpt-6-luna".into();
+    cli.prepare(&call).unwrap();
+    let reply = cli.run(&call, &Ending::default()).unwrap();
+    assert_eq!(reply.session_cost, None);
+    assert_eq!(reply.text, "done");
 }
 
 #[test]
@@ -674,7 +703,7 @@ impl World {
                 role,
                 Tools::Answer,
                 AgentHarness::Codex,
-                "gpt-6-sol",
+                "gpt-6.1-sol",
                 Effort::Medium,
                 session,
                 self.path("wt"),

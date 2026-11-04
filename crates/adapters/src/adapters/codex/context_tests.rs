@@ -120,6 +120,23 @@ fn a_compact_call_runs_no_codex_and_records_the_context_it_read() {
 }
 
 #[test]
+fn a_compaction_reports_the_sessions_cost_so_far() {
+    let w = World::new();
+    let cli = stand_in(&w, FRESH);
+    let first = w.call(Role::Worker, Session::New(id(WORKER_ID)));
+    cli.prepare(&first).unwrap();
+    let turn = cli.run(&first, &Ending::default()).unwrap();
+    let mut call = w.call(Role::Worker, Session::Resume(id(WORKER_ID)));
+    call.prompt = COMPACT.into();
+
+    let reply = cli.run(&call, &Ending::default()).unwrap();
+
+    // A priced call that adds nothing: the session's cost stands where the turn left it.
+    assert_eq!(reply.session_cost, Some(Cost(15_433_200)));
+    assert_eq!(reply.session_cost, turn.session_cost);
+}
+
+#[test]
 fn the_turn_after_a_compact_call_passes_the_lower_of_the_window_and_the_recorded_context_less_one()
 {
     let w = World::new();

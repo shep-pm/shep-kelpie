@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::Arc;
 
-use super::gateway_tests::{KEY, gateways, goose_on, on_gateway};
+use super::gateway_tests::{KEY, gateways, goose_of_kind, goose_on, on_gateway};
 use super::*;
 use crate::adapters::SandboxRuntime;
-use crate::ports::{SessionId, Usage};
+use crate::ports::{Cost, MeterSource, Metered, SessionId, Usage};
 use crate::profile::WorkerProfile;
 use crate::settings::{ContextSize, Effort, EndpointUrl, GatewayKind, GuardHook, HookEvent};
 use crate::test::{OpenSandbox, StandInEndpoint};
@@ -411,6 +411,37 @@ fn a_call_in_a_folder_with_project_plugins_or_goose_settings_is_refused_naming_i
 }
 
 #[test]
+fn a_call_on_a_paddock_model_carries_its_leases_energy() {
+    let w = World::new();
+    let call = on_gateway(&w, Role::Reviewer);
+    let metered = StandInEndpoint::start([])
+        .like_paddock(KEY, &[])
+        .releasing_with(&[
+            ("Paddock-Energy-Wh", "12.345"),
+            ("Paddock-Energy-Usd", "0.0042"),
+            ("Paddock-Energy-Source", "wall"),
+        ]);
+    let goose = goose_on(&w, &metered, FRESH, 0);
+    goose.prepare(&call).unwrap();
+    let reply = goose.run(&call, &Ending::default()).unwrap();
+    let wanted = Metered {
+        wh: 12.345,
+        cost: Some(Cost(4_200_000)),
+        source: MeterSource::Wall,
+    };
+    assert_eq!(reply.metered, Some(wanted));
+
+    // A gateway that meters nothing leaves the call unmetered, as a bare one does.
+    let silent = StandInEndpoint::start([]).like_paddock(KEY, &[]);
+    let goose = goose_on(&w, &silent, FRESH, 0);
+    let reply = goose.run(&call, &Ending::default()).unwrap();
+    assert_eq!(reply.metered, None);
+    let bare = StandInEndpoint::start([]).like_openai(KEY, &[]);
+    let goose = goose_of_kind(&w, &bare, GatewayKind::Openai, FRESH, 0);
+    assert_eq!(goose.run(&call, &Ending::default()).unwrap().metered, None);
+}
+
+#[test]
 fn a_resume_with_no_session_is_no_session_and_takes_no_lease() {
     let server = StandInEndpoint::start([]).like_paddock(KEY, &[]);
     let w = World::new();
@@ -486,6 +517,7 @@ fn a_turn_answers_with_its_last_message_and_the_tokens_its_session_spent_in_it()
             session_cost: None,
             context: None,
             compactions: 0,
+            metered: None,
         })
     );
 }

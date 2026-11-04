@@ -262,7 +262,7 @@ impl<C: Cli> Agents for CliAdapter<C> {
                 lambs.label(pid, &label);
             }
         };
-        let output = self.leased(call, ending, |lease| {
+        let (output, metered) = self.leased(call, ending, |lease| {
             // The forwarder stays until the call has ended.
             let mut launched = self.launch(call, &begun, Turn::Headless, lease)?;
             let _noted = self.noted(call, &launched, lease)?;
@@ -273,9 +273,9 @@ impl<C: Cli> Agents for CliAdapter<C> {
                     RunError::Stopped => AgentError::Stopped,
                     RunError::TimedOut => AgentError::TimedOut(C::HARNESS),
                 })
-        })??;
-        let reply = self.cli.parse(call, begun, &output)?;
-        Ok(self.completed(call, reply))
+        })?;
+        let reply = self.cli.parse(call, begun, &output?)?;
+        Ok(self.completed(call, AgentReply { metered, ..reply }))
     }
 
     fn adoption(&self, call: &AgentCall) -> Result<Adopted, NotAdopted> {

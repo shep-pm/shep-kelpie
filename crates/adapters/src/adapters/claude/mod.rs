@@ -474,6 +474,7 @@ fn parse_result(output: &Output, session: &Session) -> Result<AgentReply, AgentE
         session_cost: Some(cost),
         context,
         compactions: 0,
+        metered: None,
     })
 }
 

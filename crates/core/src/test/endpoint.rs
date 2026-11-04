@@ -76,6 +76,7 @@ struct Shared {
     models_status: Option<u16>,
     distinct_leases: bool,
     granted: u32,
+    released_with: String,
 }
 
 /// A server on a free local port, until the test ends
@@ -127,6 +128,14 @@ impl StandInEndpoint {
     /// Grants `L1`, `L2` and so on to each lease's take, not `L1` to every one
     pub fn granting_distinct_leases(self) -> Self {
         self.shared.lock().unwrap().distinct_leases = true;
+        self
+    }
+
+    /// Has each lease's release answer with these headers, as paddock does
+    /// with its energy
+    pub fn releasing_with(self, headers: &[(&str, &str)]) -> Self {
+        let lines = headers.iter().map(|(n, v)| format!("{n}: {v}\r\n"));
+        self.shared.lock().unwrap().released_with = lines.collect();
         self
     }
 
@@ -257,6 +266,7 @@ fn serve(stream: TcpStream, shared: &Mutex<Shared>) {
     if reader.read_exact(&mut body).is_err() {
         return;
     }
+    let mut extra = String::new();
     let (status, reply) = if request_line.contains("/metrics ") {
         match &shared.lock().unwrap().metrics {
             Some(page) => (200, page.clone()),
@@ -281,6 +291,7 @@ fn serve(stream: TcpStream, shared: &Mutex<Shared>) {
         let keyed = held.key.is_some() && held.key == auth;
         let take = request_line.starts_with("POST ");
         let renewals = held.renewals;
+        let released_with = held.released_with.clone();
         let listing = held
             .paddock_status
             .clone()
@@ -314,7 +325,10 @@ fn serve(stream: TcpStream, shared: &Mutex<Shared>) {
                     return;
                 }
             },
-            (true, false, _) => (204, String::new()),
+            (true, false, _) => {
+                extra = released_with;
+                (204, String::new())
+            }
         }
     } else {
         let mut shared = shared.lock().unwrap();
@@ -381,7 +395,7 @@ fn serve(stream: TcpStream, shared: &Mutex<Shared>) {
     let mut stream = reader.into_inner();
     let _ = write!(
         stream,
-        "HTTP/1.1 {status} Stand-in\r\nContent-Type: {kind}\r\n\
+        "HTTP/1.1 {status} Stand-in\r\nContent-Type: {kind}\r\n{extra}\
          Content-Length: {}\r\nConnection: close\r\n\r\n{reply}",
         reply.len()
     );

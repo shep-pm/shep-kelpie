@@ -106,3 +106,16 @@ One run each of the playground's issue 34 (the `RuleList` component), on the com
 - Both changed the same five files: a `RuleList` component and its test, and the Bottle Caps rules, test and page. Claude Code put the component in `src/components/guides`, Codex in `src/components/arcade`. Neither touched anything outside its folder.
 - Both had biome's write to `.vscode/settings.json` refused. Codex also had an `npm install` into `/tmp` refused, for Playwright to look at the page, and its dev server's `listen` (EPERM, no preview), then said visual checking was blocked. It searched the folder beside its own, `/tmp/kelpie-measure-233/claude`, since reads are open outside the credential paths, as they are for Claude Code.
 - Codex wrote every file through `apply_patch`, so `kelpie confine` saw every write, which #130's run on qwen could not give it.
+- OpenAI's API list prices for `gpt-6.1-sol`, per 1M tokens, read 2026-11-04 from https://developers.openai.com/api/docs/pricing (#1648). A ChatGPT plan charges no price per call, so kelpie prices a call at these (`crates/adapters/src/adapters/codex/price.rs`).
+
+  | | up to 272K input tokens in a request | over 272K |
+  |---|---|---|
+  | input | $2.00 | $4.00 |
+  | cached input | $0.10 | $0.20 |
+  | cache write | $2.50 | $5.00 |
+  | output | $10.00 | $15.00 |
+
+  - The table holds the short-context rates only. A turn's summed tokens cannot tell which of its requests passed 272K, and none of kelpie's Codex rollouts had a request that large.
+  - Those rollouts also showed no cache-write tokens, and nearly all input read from the cache.
+  - `Usage::input` is uncached input only, so each of input, cache read, cache write and output is priced once, at its own rate.
+  - A model the table does not name stays unpriced, as does a call carried across a handover, whose record does not name its model.

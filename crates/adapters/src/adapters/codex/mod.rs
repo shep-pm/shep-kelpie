@@ -35,7 +35,7 @@ use crate::spawn::shell_quote;
 // What the module's tests take from it by glob.
 #[cfg(test)]
 use {
-    crate::ports::{Agents, Ending},
+    crate::ports::{Agents, Cost, Ending},
     crate::settings::AgentHarness,
 };
 
@@ -43,6 +43,7 @@ mod adopt;
 mod attach;
 mod context;
 pub(crate) mod mcp;
+mod price;
 mod reading;
 mod skills;
 
@@ -66,6 +67,9 @@ mod tests;
 
 #[cfg(test)]
 mod ports_tests;
+
+#[cfg(test)]
+mod price_tests;
 
 #[cfg(test)]
 mod reading_tests;
@@ -304,7 +308,12 @@ impl Cli for Codex {
         _: Option<Thread>,
         output: &Output,
     ) -> Result<AgentReply, AgentError> {
-        finish(&Files::of(call), call.session.id(), output)
+        finish(
+            &Files::of(call),
+            call.session.id(),
+            Some(&call.model),
+            output,
+        )
     }
 
     fn adopted_begin(&self, adopted: &Adopted) -> Result<Option<Thread>, String> {
@@ -322,7 +331,13 @@ impl Cli for Codex {
         output: &Output,
     ) -> Result<AgentReply, AgentError> {
         let id = (adopted.session.as_ref()).ok_or_else(|| AgentError::Setup(NO_SESSION.into()))?;
-        finish(&Files::at(&adopt::settings_of(&adopted.record)), id, output)
+        // A carried call's model is not in its record, so it goes unpriced.
+        finish(
+            &Files::at(&adopt::settings_of(&adopted.record)),
+            id,
+            None,
+            output,
+        )
     }
 
     // Last, so a setup that fails leaves no trust behind for an end that is never told.
@@ -353,7 +368,12 @@ const NO_SESSION: &str = "the carried Codex call names no session";
 
 // Reads what the ended call left and writes its thread record, so its tokens
 // are counted from where the session stood before it.
-fn finish(files: &Files, id: &SessionId, output: &Output) -> Result<AgentReply, AgentError> {
+fn finish(
+    files: &Files,
+    id: &SessionId,
+    model: Option<&str>,
+    output: &Output,
+) -> Result<AgentReply, AgentError> {
     // The model has run by now, so what fails from here is the call's,
     // not its setup's.
     let ran = |e: AgentError| match e {
@@ -377,9 +397,10 @@ fn finish(files: &Files, id: &SessionId, output: &Output) -> Result<AgentReply, 
         session_id: id.clone(),
         text: turn.text,
         usage: spent.since(before),
-        session_cost: None,
+        session_cost: model.and_then(|m| price::price(m, &spent.since(Spent::default()))),
         context,
         compactions: 0,
+        metered: None,
     })
 }
 
@@ -841,7 +862,7 @@ struct ExecTurn {
 // `codex exec --json` prints one event per line. The answer is the last agent
 // message. Its tokens are the session's so far, earlier turns of a resumed
 // session included (`docs/facts/codex-as-an-agent.md`). A ChatGPT plan has no
-// price per call, so each is recorded as unpriced.
+// price per call, so each is priced at OpenAI's list price (`price`).
 fn parse_result(output: &Output, known: Option<&Thread>) -> Result<ExecTurn, AgentError> {
     #[derive(Deserialize)]
     struct Event {

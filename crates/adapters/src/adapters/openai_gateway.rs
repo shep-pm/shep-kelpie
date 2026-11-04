@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use crate::adapters::paddock;
 use crate::forwarder::Upstream;
-use crate::ports::{KeyCheck, ModelGateway, Taking, Unheld};
+use crate::ports::{KeyCheck, Metered, ModelGateway, Taking, Unheld};
 
 // How long the key check gets to connect and to answer.
 const ANSWER: Duration = Duration::from_secs(10);
@@ -41,7 +41,7 @@ impl ModelGateway for OpenAi {
         _: &Upstream,
         _: &Taking<'_>,
         _: &mut dyn FnMut(&str),
-    ) -> Option<Result<(), Unheld>> {
+    ) -> Option<Result<Option<Metered>, Unheld>> {
         None
     }
 }
