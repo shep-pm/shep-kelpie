@@ -42,7 +42,7 @@ const WRITER_GONE: &str = "`shep kelpie issue \"<request>\"` went with the issue
      the issue with kelpie's `issue` skill, which every harness has, and `shep kelpie issue \
      check <ticket>` checks it";
 
-pub use help::{ABOUT_WIDTH, Row, TABLE, USAGE, declared};
+pub use help::{ABOUT_WIDTH, ELSEWHERE, Row, TABLE, USAGE, declared};
 
 /// Runs `kelpie <command> <args>` for one of [`VERBS`]
 pub fn main(command: &str, args: &[String]) -> ExitCode {

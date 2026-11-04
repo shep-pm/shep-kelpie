@@ -167,6 +167,26 @@ pub const TABLE: &[Row] = &[
     ),
 ];
 
+/// The verbs `main` runs itself, which the manifest declares beside [`TABLE`]
+///
+/// Their usage is `main`'s own, so none is drawn into [`USAGE`]. The verbs no
+/// person types (`runner`, `guard`, `confine`, `mcp-connect`) are left out.
+pub const ELSEWHERE: &[Row] = &[
+    row("lease", "", "ask for, run under and read kelpie's leases"),
+    row("doctor", "[<project>] [--test-alert]", "check the setup"),
+    row("agents", "", "write and list the agent files"),
+    row("settings", "migrate", "migrate the settings file"),
+    row("upgrade", "", "install a new build and restart the runners"),
+    row("github", "setup", "register kelpie's GitHub App"),
+    row("version", "[--json]", "print the build's version"),
+    row(
+        "totp",
+        "[--rotate | --unlock]",
+        "set up or unlock the second factor",
+    ),
+    row("tools", "install", "install the tools workers run with"),
+];
+
 /// What follows the verbs in the help: the flags that go with any of them
 const NOTES: &str = "
 `--json` goes anywhere in the line of `add <issue>`, `finish`, `status`, `gate`,
@@ -179,10 +199,10 @@ folder, or whose GitHub repo is this clone's `origin`. Only `set` and `get` take
 glob of project names (`*`, `?`, `[...]`) in `-p`: quote it, or the shell expands
 it against files.";
 
-/// Each verb once, in the table's order, with the `about` of its first row
+/// Each verb once, [`TABLE`]'s then [`ELSEWHERE`]'s, with the `about` of its first row
 pub fn declared() -> Vec<(&'static str, &'static str)> {
     let mut verbs: Vec<(&str, &str)> = Vec::new();
-    for row in TABLE {
+    for row in TABLE.iter().chain(ELSEWHERE) {
         if !verbs.iter().any(|(name, _)| *name == row.name) {
             verbs.push((row.name, row.about));
         }
@@ -269,6 +289,7 @@ mod tests {
     fn every_about_fits_sixty_columns() {
         let long: Vec<_> = TABLE
             .iter()
+            .chain(ELSEWHERE)
             .filter(|row| row.about.chars().count() > 60)
             .map(|row| (row.name, row.about))
             .collect();
@@ -300,6 +321,25 @@ mod tests {
             .filter(|verb| !named.contains(verb))
             .collect();
         assert!(missing.is_empty(), "not in the table: {missing:?}");
+    }
+
+    // Every `command == "<verb>"` arm of `main`'s dispatch, bar the one no
+    // person types, is a verb the manifest must declare.
+    #[test]
+    fn declared_names_every_verb_main_runs() {
+        let main = include_str!("../../main.rs");
+        let declared: Vec<_> = declared().into_iter().map(|(name, _)| name).collect();
+        let mut missing = Vec::new();
+        for arm in main.split("command == \"").skip(1) {
+            let verb = arm.split('"').next().unwrap_or_default();
+            if verb != "mcp-connect" && !declared.contains(&verb) {
+                missing.push(verb);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "main runs, the manifest lacks: {missing:?}"
+        );
     }
 
     #[test]

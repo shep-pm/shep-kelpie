@@ -12,7 +12,8 @@ use crate::webhook::KelpieSettings;
 
 /// How `shep kelpie` is described in `--help` and completion
 ///
-/// One subcommand for each top-level verb of [`crate::flock::TABLE`].
+/// One subcommand for each top-level verb: [`crate::flock::TABLE`]'s and
+/// [`crate::flock::ELSEWHERE`]'s.
 fn verb() -> Verb {
     let mut verb = Verb::new("Run agents on a ticket board");
     verb.subcommands = crate::flock::declared()
@@ -48,6 +49,7 @@ mod tests {
         let declared: BTreeSet<_> = verb().subcommands.into_iter().map(|s| s.name).collect();
         let missing: Vec<_> = crate::flock::TABLE
             .iter()
+            .chain(crate::flock::ELSEWHERE)
             .map(|row| row.name)
             .filter(|name| !declared.contains(*name))
             .collect();
