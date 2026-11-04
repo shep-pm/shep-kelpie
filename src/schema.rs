@@ -5,10 +5,22 @@
 //! `[app.dogs.kelpie]` table. The webhook's URL is marked a secret, so
 //! lookout draws it `<set>`.
 
-use shep_client::dogs::Probe;
+use shep_client::dogs::{Probe, Subcommand, Verb};
 
 use crate::settings::Settings;
 use crate::webhook::KelpieSettings;
+
+/// How `shep kelpie` is described in `--help` and completion
+///
+/// One subcommand for each top-level verb of [`crate::flock::TABLE`].
+fn verb() -> Verb {
+    let mut verb = Verb::new("Run agents on a ticket board");
+    verb.subcommands = crate::flock::declared()
+        .into_iter()
+        .map(|(name, about)| Subcommand::new(name, about))
+        .collect();
+    verb
+}
 
 /// Answers `--version` or `--schema` and exits, or returns when neither was asked
 ///
@@ -18,6 +30,7 @@ pub fn probe() {
     let version = crate::home::probe_version();
     Probe::new(env!("CARGO_PKG_NAME"), &version)
         .ask_for_channel()
+        .verb(verb())
         .answer_with_sheep::<KelpieSettings, Settings>();
 }
 
@@ -29,6 +42,21 @@ mod tests {
     use shep_client::dogs::{SECRET_KEY, SHEEP_SCHEMA_KEY, config_schema_with_sheep};
 
     use super::*;
+
+    #[test]
+    fn the_manifest_declares_every_top_level_verb() {
+        let declared: BTreeSet<_> = verb().subcommands.into_iter().map(|s| s.name).collect();
+        let missing: Vec<_> = crate::flock::TABLE
+            .iter()
+            .map(|row| row.name)
+            .filter(|name| !declared.contains(*name))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "in the table, not the manifest: {missing:?}"
+        );
+        assert!(!verb().description.is_empty());
+    }
 
     fn schema() -> Value {
         config_schema_with_sheep::<KelpieSettings, Settings>().to_value()

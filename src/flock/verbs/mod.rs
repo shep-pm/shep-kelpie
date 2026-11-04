@@ -1,6 +1,7 @@
 //! `shep kelpie <verb>`: the command line, read into a trigger for a project
 
 mod check;
+mod help;
 
 use std::ffi::OsString;
 use std::io::{BufRead, IsTerminal, Write};
@@ -9,7 +10,7 @@ use std::process::ExitCode;
 
 use super::control::{Format, Reach};
 use super::glob::Named;
-use super::{Checkout, Launch, add, attach, control, help, pm, rule, set, ticket, usage, watch};
+use super::{Checkout, Launch, add, attach, control, pm, rule, set, ticket, usage, watch};
 use crate::adapters::Gh;
 use crate::home::{ProjectName, ProjectPaths};
 use crate::settings::source::{self, Loaded};
@@ -41,75 +42,7 @@ const WRITER_GONE: &str = "`shep kelpie issue \"<request>\"` went with the issue
      the issue with kelpie's `issue` skill, which every harness has, and `shep kelpie issue \
      check <ticket>` checks it";
 
-/// What the verbs take, as their help says
-pub const USAGE: &str = "\
-usage: shep kelpie add [<project>] [--base <branch>]
-                                         registers this checkout as a project, working
-                                         against <branch>, the repo's default by default
-       shep kelpie add <ticket>          puts a ticket on the project's board
-       shep kelpie start | pause         runs the project, or stops it once its calls end
-       shep kelpie finish [--all]        ends the open work items, picks nothing new, stops
-                                         (--all: of every project)
-       shep kelpie status [--json]       every project, or one with -p, as a short
-                                         block each, or the runner's JSON object
-       shep kelpie rule [<id> <answer>]
-       shep kelpie rework <pr> | adopt <pr>
-       shep kelpie gate [<ticket>] | drop [<ticket>]
-       shep kelpie triage <issue>        triages an issue next, past the pick rule
-       shep kelpie board                 the ready issues in the order the board takes them
-       shep kelpie board move <issue> <position> | board top <issue>
-                                         puts an issue at a place in that list, or first
-       shep kelpie timings [<n>]         where the last n finished items' time went
-       shep kelpie issue check <ticket>  whether an issue holds every part an
-                                         implementer builds from, each missing one named
-       shep kelpie issue check --draft <file> [--label <label>]...
-                                         the same for an issue not yet filed, its title
-                                         the file's first line, with no shepherd
-       shep kelpie attach <ticket>       steers its worker's session here
-       shep kelpie tell \"<note>\"         a note for the project manager's next wake
-       shep kelpie pm                    steers the project manager's session here
-       shep kelpie drain | undrain       holds back every new call, or lets them start
-       shep kelpie get [<key>]           the project's settings, or one by its dotted key
-       shep kelpie set <key> <value>     changes one setting, such as git.merging auto or
-                                         worker.allowed_domains '[\"crates.io\"]'
-       shep kelpie get -p '<glob>' <key> | set -p '<glob>' <key> <value>
-                                         the same across the projects whose names match,
-                                         such as -p 'shep*'; `set` writes all or none
-       shep kelpie ticket                the forms of the local tickets' verbs, below
-       shep kelpie ticket new \"<title>\" [--body <text>] [--label <label>]... [--parent <id>] [--blocked-by <id>]...
-                                         files a local ticket and prints its id
-       shep kelpie ticket list [--all] | ticket show <id> | ticket close <id> [--not-planned] [--duplicate]
-                                         reads a local ticket, or closes it
-       shep kelpie ticket edit <id> [--title <text>] [--body <text>] [--label <label>]... [--unlabel <label>]... [--parent <id>] [--no-parent] [--blocked-by <id>]... [--unblock <id>]...
-                                         changes a local ticket
-       shep kelpie watch [<issue> | pm] [--back <n>] [--full]
-                                         follows the runner's steps and the sessions'
-                                         transcripts live, from the end or n lines back
-       shep kelpie usage [<project>] [--since <date>]
-                                         units and dollars per merged pull request
-       shep kelpie usage <project> --import <steps file>
-                                         adds a runner's logged calls to its ledger
-       shep kelpie usage <project> --item <issue> [--json]
-                                         one work item's calls and their transcripts
-       shep kelpie usage <project> --context [--since <date>] [--json]
-                                         request sizes and cache shares per role
-       shep kelpie usage <project> --reads [--since <date>] [--json]
-                                         what workers read before their first edit
-       shep kelpie usage [<project>] --openmetrics
-                                         the ledger as OpenMetrics counters, for promtool
-       shep kelpie usage --forge [--since <date>]
-                                         GitHub calls per minute, the busiest minutes and
-                                         each used-up answer
-
-`--json` goes anywhere in the line of `add <issue>`, `finish`, `status`, `gate`,
-`drop`, `timings`, `tell`, `drain`, `undrain` and `board`, and prints the runner's
-JSON object in place of plain text.
-
-`-p <project>` or `--project <project>` goes anywhere in the line, before a
-ruling's answer. Without it, the project is the one whose repo holds this
-folder, or whose GitHub repo is this clone's `origin`. Only `set` and `get` take a
-glob of project names (`*`, `?`, `[...]`) in `-p`: quote it, or the shell expands
-it against files.";
+pub use help::{ABOUT_WIDTH, Row, TABLE, USAGE, declared};
 
 /// Runs `kelpie <command> <args>` for one of [`VERBS`]
 pub fn main(command: &str, args: &[String]) -> ExitCode {
@@ -153,7 +86,7 @@ async fn run(
     command: &str,
     args: &[String],
 ) -> Result<Vec<String>, String> {
-    if help::asked(command, args) {
+    if super::help::asked(command, args) {
         return Ok(USAGE.lines().map(str::to_owned).collect());
     }
     let home = crate::home::user_home().ok_or(crate::home::HOME_UNSET)?;
