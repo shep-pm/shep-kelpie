@@ -547,18 +547,28 @@ fn a_metered_call_with_no_price_stays_unpriced_with_its_energy() {
 
 #[test]
 fn a_line_without_energy_still_reads() {
-    // A line as a build before energy wrote it
-    let old = r#"{"line":"call","at":150,"issue":7,"role":"worker","kind":"turn",
-        "usage":{"input":1,"cache_write":0,"cache_read":0,"output":0},"units":1,
-        "unpriced":true,"ended":"answered"}"#;
+    // Every field a build before energy wrote for a priced worker turn, as the ledger holds it
+    let old = json!({
+        "line": "call", "at": 150, "issue": "7", "pull_request": 71,
+        "role": "worker", "kind": "turn", "agent": "sonnet-high", "harness": "claude-code",
+        "model": "sonnet", "effort": "high", "session": "5e55",
+        "usage": {"input": 10, "cache_write": 2, "cache_read": 3, "output": 5},
+        "compactions": 1, "units": 40, "cost_usd": 0.25, "session_cost_usd": 0.75,
+        "seconds": 60, "ended": "answered", "gpu_seconds": 20,
+        "pacer": {"claude": {"at": 140, "session_pct": 10, "week_pct": 20}},
+    });
 
-    let Line::Call(read) = ledger_line(old) else {
+    let Line::Call(read) = serde_json::from_value(old.clone()).unwrap() else {
         unreachable!()
     };
     assert_eq!((read.energy_wh, read.energy_source), (None, None));
+    assert_eq!(
+        (read.cost_usd, read.units, read.seconds),
+        (Some(0.25), 40, Some(60))
+    );
 
-    let written = serde_json::to_string(&Line::Call(read)).unwrap();
-    assert!(!written.contains("energy"), "{written}");
+    let written = serde_json::to_value(Line::Call(read)).unwrap();
+    assert_eq!(written, old, "it writes back as it was, with no energy");
 }
 
 #[test]
