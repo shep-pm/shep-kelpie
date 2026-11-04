@@ -61,6 +61,11 @@ So the roles that decide are cut to one, the project manager, and choosing an ag
 - The project manager's named agent is now the first choice. The runner asks the board for it alone and opens the item on it, unpinned, when the board ranks it with a wait within the item's slack. Otherwise the agent board picks as if none were named. The ranking follows the pick for the pacer's walk, since the dog reads no day allowance, so an agent the pacer holds never strands the item. A later handoff moves an unpinned item once its agent falls behind the slack.
 - Only the maintainer's `agent:<name>!` label pins. `board.md`'s Agents section marks each agent that is out with the time it returns and why, so the project manager names one that can start.
 
+### Amendment, 2026-11-04: the maintainer's list ranks the agents within slack
+
+- `[kelpie.agent_board] prefer` lists agents, first most wanted. Among the agents within the slack, a listed one ranks before an unlisted one, in list order, ahead of cost. Past the slack nothing changes.
+- "API first" is one setup and not a rule: the maintainer's list says which agent they want when several finish in time, whatever it bills.
+
 ## Considered options
 
 - **Keep the panel with fewer voters.** The project manager and the worker already agreed on 92 of 99 answers, and the maintainer's answers favoured no voter, so a smaller panel keeps a wait and a cost for the same answer.

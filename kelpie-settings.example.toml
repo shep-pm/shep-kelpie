@@ -87,6 +87,16 @@ url = "https://ntfy.sh/your-private-topic"
 # [kelpie.leases]
 # cargo-test = 3
 
+# The agents the board prefers, first most wanted, among those that would
+# finish within the slack of the soonest: a listed agent comes before an
+# unlisted one whatever it costs, and the rest go by cost as before. An agent
+# past the slack stays behind those within it. Shared by every project; a name
+# no implementer or reviewer file holds is ignored, and `doctor` says so.
+# Absent or empty, nothing is ranked. The dog reads this when it starts, so
+# after a change run `shep restart kelpie`.
+# [kelpie.agent_board]
+# prefer = ["sonnet-high", "opus-high"]
+
 # Agents are not settings: each is a file of its own, `agents/<name>.md` in
 # kelpie's home (`$SHEP_HOME/kelpie/agents/`), YAML frontmatter then a
 # Markdown body. Kelpie ships `sonnet-high` and `opus-high`, which build,
