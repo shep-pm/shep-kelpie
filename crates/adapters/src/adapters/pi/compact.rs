@@ -214,5 +214,6 @@ pub(super) fn parse(output: &Output, asked: &SessionId) -> Result<AgentReply, Ag
         session_cost: None,
         context: None,
         compactions: 0,
+        metered: None,
     })
 }

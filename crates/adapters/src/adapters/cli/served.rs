@@ -7,7 +7,7 @@ use crate::adapters::forwarder::Forwarder;
 use crate::adapters::harness::host_of;
 use crate::adapters::process::RunError;
 use crate::ports::{
-    Adopted, AgentCall, AgentError, AgentReply, Ending, Kept, Stand, Taking, Unheld, Wait,
+    Adopted, AgentCall, AgentError, AgentReply, Ending, Kept, Metered, Stand, Taking, Unheld, Wait,
 };
 use crate::settings::ModelHost;
 
@@ -22,19 +22,20 @@ pub(crate) struct Launched {
 impl<C: Cli> CliAdapter<C> {
     // A call on a gateway's model holds a lease on it. Its ceiling counts from
     // the grant, and a lease the gateway took back ended the call, whatever the
-    // run says. The run gets the lease's id, so its chat calls name their turn.
+    // run says. The run gets the lease's id, so its chat calls name their turn,
+    // and the answer says what the lease used, for a gateway that meters it.
     pub(crate) fn leased<T>(
         &self,
         call: &AgentCall,
         ending: &Ending,
         run: impl FnOnce(Option<&str>) -> T,
-    ) -> Result<T, AgentError> {
+    ) -> Result<(T, Option<Metered>), AgentError> {
         let harness = C::HARNESS;
         let Some(server) = self.routed(call)? else {
-            return Ok(run(None));
+            return Ok((run(None), None));
         };
         let ModelHost::Gateway(name) = &server.host else {
-            return Ok(run(None));
+            return Ok((run(None), None));
         };
         let upstream = self.upstream(server)?;
         let port = crate::adapters::port_named(&self.gateways, name).map_err(AgentError::Setup)?;
@@ -65,7 +66,7 @@ impl<C: Cli> CliAdapter<C> {
 
     /// Finishes `adopted` as `run` finishes a call it started: with its
     /// forwarder open again and its lease, if it held one, renewed, for a CLI
-    /// on a model server
+    /// on a model server, and with what that lease used on its reply
     pub(crate) fn adopt_call(
         &self,
         adopted: &Adopted,
@@ -86,26 +87,28 @@ impl<C: Cli> CliAdapter<C> {
             Err(why) => return Err(self.unserved(adopted, ending, why)),
         };
         let wait = || self.base.processes.output_of_adopted(adopted, ending);
-        let waited = match kept {
+        let (waited, metered) = match kept {
             Some(kept) => self.wait_served(adopted, kept, ending, wait)?,
-            None => wait(),
+            None => (wait(), None),
         };
         let output = waited.map_err(|e| match e {
             RunError::Io(e) => AgentError::Failed(harness, e.to_string()),
             RunError::Stopped => AgentError::Stopped,
             RunError::TimedOut => AgentError::TimedOut(harness),
         })?;
-        self.cli.parse_adopted(adopted, begun, &output)
+        let reply = self.cli.parse_adopted(adopted, begun, &output)?;
+        Ok(AgentReply { metered, ..reply })
     }
 
-    // Waits out the adopted call with its forwarder open and its lease renewed.
+    // Waits out the adopted call with its forwarder open and its lease renewed,
+    // and says what the lease used.
     fn wait_served(
         &self,
         adopted: &Adopted,
         kept: &Kept,
         ending: &Ending,
         wait: impl FnOnce() -> Result<Output, RunError>,
-    ) -> Result<Result<Output, RunError>, AgentError> {
+    ) -> Result<(Result<Output, RunError>, Option<Metered>), AgentError> {
         let harness = C::HARNESS;
         let served = host_of(&kept.server).and_then(|host| {
             let upstream = self.gateways.upstream(&host)?;
@@ -122,7 +125,7 @@ impl<C: Cli> CliAdapter<C> {
             Err(why) => return Err(self.unserved(adopted, ending, why)),
         };
         let (Some(id), ModelHost::Gateway(name)) = (&kept.lease, &host) else {
-            return Ok(wait());
+            return Ok((wait(), None));
         };
         let port = match crate::adapters::port_named(&self.gateways, name) {
             Ok(port) => port,

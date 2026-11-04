@@ -417,8 +417,29 @@ impl Cost {
     }
 }
 
+/// How a gateway measured the energy a lease used
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeterSource {
+    /// A meter on the host's wall socket
+    Wall,
+    /// The host's parts, summed
+    Parts,
+}
+
+/// What a gateway's lease used while a call held it
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Metered {
+    /// Watt-hours, the host's whole draw while the lease served, shared with
+    /// the leases beside it
+    pub wh: f64,
+    /// What those watt-hours cost, where the host is priced
+    pub cost: Option<Cost>,
+    /// What measured them
+    pub source: MeterSource,
+}
+
 /// What an agent call answered
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AgentReply {
     /// The session the call ran in
     pub session_id: SessionId,
@@ -435,6 +456,9 @@ pub struct AgentReply {
     /// Times the harness compacted the session by itself partway through
     /// the call, which a `COMPACT` call is not
     pub compactions: u32,
+    /// What the call's gateway lease used, for a call on a model whose gateway
+    /// meters its leases
+    pub metered: Option<Metered>,
 }
 
 /// A call a runner's earlier image started, which still runs as the process's

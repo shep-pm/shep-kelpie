@@ -33,7 +33,7 @@ pub(super) fn goose_on(
     goose_of_kind(world, server, GatewayKind::Paddock, stdout, code)
 }
 
-fn goose_of_kind(
+pub(super) fn goose_of_kind(
     world: &World,
     server: &StandInEndpoint,
     kind: GatewayKind,
@@ -200,6 +200,7 @@ fn a_workers_chat_call_names_the_lease_its_turn_holds() {
                 goose.sandboxed_command(&call, lease)
             })
             .unwrap()
+            .0
             .unwrap();
         assert!(chat_through(&forwarder, None).contains("hello"), "{role:?}");
     }

@@ -741,5 +741,6 @@ fn parse_turn(output: &Output, asked: &SessionId, paused: bool) -> Result<AgentR
         session_cost: None,
         context,
         compactions,
+        metered: None,
     })
 }

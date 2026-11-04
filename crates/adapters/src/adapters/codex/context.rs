@@ -209,5 +209,6 @@ pub(super) fn compact(call: &AgentCall) -> Result<AgentReply, AgentError> {
         session_cost,
         context: None,
         compactions: 0,
+        metered: None,
     })
 }

@@ -338,6 +338,7 @@ impl Agents for FakeClaude {
             session_cost: Some(Cost(0)),
             context: None,
             compactions: 0,
+            metered: None,
         })
     }
 
@@ -589,6 +590,7 @@ impl Agents for FakeClaude {
                 // The hook's mark is what the adapter counts the compaction by.
                 Ok(AgentReply {
                     compactions: 1,
+                    metered: None,
                     ..said(text)
                 })
             }
@@ -663,6 +665,7 @@ fn answer(call: &AgentCall, text: &str) -> AgentReply {
         session_cost: Some(Cost(0)),
         context: None,
         compactions: 0,
+        metered: None,
     }
 }
 

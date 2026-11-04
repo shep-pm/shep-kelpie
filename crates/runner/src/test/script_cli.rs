@@ -52,6 +52,7 @@ impl Cli for ScriptCli {
             session_cost: None,
             context: None,
             compactions: 0,
+            metered: None,
         })
     }
 

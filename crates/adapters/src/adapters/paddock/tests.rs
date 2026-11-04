@@ -471,3 +471,121 @@ fn a_round_that_gives_up_the_wait_never_runs_and_one_refused_names_why() {
     );
     assert_eq!(ran.load(Ordering::SeqCst), 0);
 }
+
+// What the lease `around_leased` holds says it used, on a paddock that answers its release with `headers`.
+fn metered_with(headers: &[(&str, &str)]) -> (Option<Metered>, Vec<String>) {
+    let server = StandInEndpoint::start([])
+        .like_paddock("pk", &[])
+        .releasing_with(headers);
+    let tell = |_| {};
+    let ending = Ending::default();
+    let taking = Taking {
+        model: "qwen",
+        note: "kelpie #7 worker",
+        give_up: &|| false,
+        tell: &tell,
+        ending: &ending,
+    };
+    let paddock = Paddock { timing: QUICK };
+    let port: &dyn ModelGateway = &paddock;
+    let (ran, metered) = port
+        .around_leased(&gateway(&server), &taking, |lease| lease.is_some())
+        .unwrap();
+    assert!(ran);
+    (metered, round_calls(&server))
+}
+
+#[test]
+fn a_release_reads_its_energy_headers() {
+    let (metered, calls) = metered_with(&[
+        ("Paddock-Energy-Wh", "12.345"),
+        ("Paddock-Energy-Usd", "0.0042"),
+        ("Paddock-Energy-Source", "wall"),
+    ]);
+    let wanted = Metered {
+        wh: 12.345,
+        cost: Some(Cost(4_200_000)),
+        source: MeterSource::Wall,
+    };
+    assert_eq!(metered, Some(wanted));
+    assert_eq!(
+        calls,
+        ["POST /paddock/leases", "DELETE /paddock/leases/L1"],
+        "the release read is the release, not a second one"
+    );
+}
+
+#[test]
+fn a_release_without_energy_headers_is_unmetered() {
+    assert_eq!(metered_with(&[]).0, None);
+    for unreadable in [
+        [
+            ("Paddock-Energy-Wh", "lots"),
+            ("Paddock-Energy-Source", "wall"),
+        ],
+        [
+            ("Paddock-Energy-Wh", "-1"),
+            ("Paddock-Energy-Source", "wall"),
+        ],
+        [
+            ("Paddock-Energy-Wh", "NaN"),
+            ("Paddock-Energy-Source", "wall"),
+        ],
+        [
+            ("Paddock-Energy-Wh", "3.5"),
+            ("Paddock-Energy-Source", "tea leaves"),
+        ],
+    ] {
+        assert_eq!(metered_with(&unreadable).0, None, "{unreadable:?}");
+    }
+    assert_eq!(
+        metered_with(&[("Paddock-Energy-Source", "wall")]).0,
+        None,
+        "a source with no watt-hours"
+    );
+}
+
+#[test]
+fn an_unpriced_release_has_watt_hours_and_no_cost() {
+    let headers = [
+        ("Paddock-Energy-Wh", "0.5"),
+        ("Paddock-Energy-Source", "parts"),
+    ];
+    let wanted = Metered {
+        wh: 0.5,
+        cost: None,
+        source: MeterSource::Parts,
+    };
+    assert_eq!(metered_with(&headers).0, Some(wanted));
+    // A price that cannot be read leaves the watt-hours standing.
+    let garbled = [("Paddock-Energy-Usd", "free"), headers[0], headers[1]];
+    assert_eq!(metered_with(&garbled).0, Some(wanted));
+}
+
+#[test]
+fn a_lease_dropped_mid_call_is_still_released() {
+    let server = StandInEndpoint::start([])
+        .like_paddock("pk", &[])
+        .releasing_with(&[
+            ("Paddock-Energy-Wh", "1"),
+            ("Paddock-Energy-Source", "wall"),
+        ]);
+    let ending = Ending::default();
+    let taking = Taking {
+        model: "qwen",
+        note: "kelpie #7 worker",
+        give_up: &|| false,
+        tell: &|_| {},
+        ending: &ending,
+    };
+    let paddock = Paddock { timing: QUICK };
+    let port: &dyn ModelGateway = &paddock;
+    let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = port.around_leased(&gateway(&server), &taking, |_| panic!("the call died"));
+    }));
+    assert!(ran.is_err());
+    assert_eq!(
+        round_calls(&server),
+        ["POST /paddock/leases", "DELETE /paddock/leases/L1"]
+    );
+}

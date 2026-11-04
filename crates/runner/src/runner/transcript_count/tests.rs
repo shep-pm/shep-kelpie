@@ -59,6 +59,7 @@ impl Agents for Pi {
             session_cost: None,
             context: None,
             compactions: 0,
+            metered: None,
         })
     }
 
@@ -93,6 +94,7 @@ impl Agents for Claude {
             session_cost: None,
             context: None,
             compactions: 0,
+            metered: None,
         })
     }
 
@@ -544,6 +546,7 @@ impl Agents for Codex {
             session_cost: None,
             context: None,
             compactions: 0,
+            metered: None,
         })
     }
 
