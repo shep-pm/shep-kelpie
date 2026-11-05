@@ -2,24 +2,26 @@
 //!
 //! Every [`LOAD_TICK`] the dog asks the shepherd for the section. A text that
 //! differs from the last good one is read whole, as the start reads it, with
-//! no salvage. A good read applies `leases.cargo-test` and `agent_board.prefer`.
-//! The keys the dog builds once at start wait for a restart, and `status` names
-//! them. A read that fails applies nothing, and the webhook the dog started
+//! no salvage. A good read applies `leases.cargo-test`, `agent_board.prefer`,
+//! `gateways` and `codex_home`. The webhook waits for a restart, and `status` names
+//! its keys. A read that fails applies nothing, and the webhook the dog started
 //! with is told once per reason.
 
+use std::collections::BTreeMap;
 use std::num::NonZeroU32;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::time::{Instant, MissedTickBehavior};
 
-use super::availability::LOAD_TICK;
+use super::availability::{self, LOAD_TICK, Live};
 use super::board::{self, Board};
 use super::door::{self, Waiters};
 use super::section::{self, Asked, Started};
 use super::triggers::{Refused, SettingsState};
 use super::{Kept, lock_desk};
 use crate::ports::{Alert, Alerts, Timestamp};
-use crate::settings::AgentName;
+use crate::settings::{AgentName, Gateway, GatewayName};
 use crate::shepherd::Connection;
 use crate::webhook::{KelpieSettings, Webhook};
 
@@ -33,6 +35,7 @@ pub(super) struct Handles {
     pub(super) waiters: Waiters,
     pub(super) alerts: Arc<dyn Alerts>,
     pub(super) standing: Arc<Mutex<SettingsState>>,
+    pub(super) live: Live,
 }
 
 // A refused section: why, since when, and whether the webhook was told or there is none to tell.
@@ -53,6 +56,8 @@ pub(super) struct Reread {
     text: String,
     capacity: NonZeroU32,
     prefer: Vec<AgentName>,
+    gateways: BTreeMap<GatewayName, Gateway>,
+    codex_home: Option<PathBuf>,
     waiting: Vec<&'static str>,
     refusal: Option<Refusal>,
     // Why the last ask returned no section, so it is said once.
@@ -68,6 +73,8 @@ impl Reread {
             text: started.text.clone(),
             capacity: started.settings.leases.cargo_test_capacity(),
             prefer: started.settings.agent_board.prefer.clone(),
+            gateways: started.settings.gateways.clone(),
+            codex_home: started.settings.codex_home.clone(),
             waiting: Vec::new(),
             refusal: None,
             unreadable: None,
@@ -102,7 +109,15 @@ impl Reread {
             self.refusal = None;
             return;
         }
-        match section::read_whole(text) {
+        // A runner's reread checks the Codex home as its start does. The dog's start leaves the
+        // account unknown instead, but a reread refuses so the maintainer hears of it now.
+        let read = section::read_whole(text).and_then(|settings| {
+            match availability::refused_codex_home(&settings) {
+                Some(reason) => Err(reason),
+                None => Ok(settings),
+            }
+        });
+        match read {
             Ok(settings) => {
                 self.refusal = None;
                 text.clone_into(&mut self.text);
@@ -134,10 +149,37 @@ impl Reread {
             };
             log.push(format!("applied agent_board.prefer: {names}"));
         }
+        self.apply_availability(settings, log);
         let waiting = waiting_for_restart(&self.started, settings);
         let fresh = waiting.iter().filter(|key| !self.waiting.contains(key));
         log.extend(fresh.map(|key| format!("waiting for restart: {key}")));
         self.waiting = waiting;
+    }
+
+    // The gateways and the Codex home, which the availability task takes together.
+    fn apply_availability(&mut self, settings: &KelpieSettings, log: &mut Vec<String>) {
+        let gateways = settings.gateways != self.gateways;
+        let codex_home = settings.codex_home != self.codex_home;
+        if !gateways && !codex_home {
+            return;
+        }
+        self.handles.live.apply(settings);
+        if gateways {
+            self.gateways.clone_from(&settings.gateways);
+            let names: Vec<_> = settings.gateways.keys().map(GatewayName::as_str).collect();
+            let names = if names.is_empty() {
+                "none".into()
+            } else {
+                names.join(", ")
+            };
+            log.push(format!("applied gateways: {names}"));
+        }
+        if codex_home {
+            self.codex_home.clone_from(&settings.codex_home);
+            let home = settings.codex_home.as_deref();
+            let home = home.map_or("kelpie's own".into(), |home| home.display().to_string());
+            log.push(format!("applied codex_home: {home}"));
+        }
     }
 
     // Keeps the old settings, and tells the webhook the dog started with the first time it sees `reason`.
@@ -216,28 +258,19 @@ fn waiting_for_restart(started: &KelpieSettings, now: &KelpieSettings) -> Vec<&'
         webhook: was_webhook,
         leases: _,          // applied live
         gpu_metrics_url: _, // a runner's, read at each of its wakes
-        codex_home: was_codex,
-        gateways: was_gateways,
-        agent_board: _, // applied live
+        codex_home: _,      // applied live
+        gateways: _,        // applied live
+        agent_board: _,     // applied live
     } = started;
     let KelpieSettings {
         webhook: now_webhook,
         leases: _,
         gpu_metrics_url: _,
-        codex_home: now_codex,
-        gateways: now_gateways,
+        codex_home: _,
+        gateways: _,
         agent_board: _,
     } = now;
-    let mut keys = webhook_keys(was_webhook.as_ref(), now_webhook.as_ref());
-    keys.extend(
-        [
-            ("gateways", was_gateways != now_gateways),
-            ("codex_home", was_codex != now_codex),
-        ]
-        .into_iter()
-        .filter_map(|(key, differs)| differs.then_some(key)),
-    );
-    keys
+    webhook_keys(was_webhook.as_ref(), now_webhook.as_ref())
 }
 
 // A webhook that appears or goes is `webhook`, and one that changes is each key that differs.

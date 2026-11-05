@@ -4,14 +4,17 @@ use std::time::Duration;
 
 use super::*;
 use crate::agents::Agents;
-use crate::dog::availability::LOAD_TICK;
+use crate::dog::availability::{self, Availability, LOAD_TICK, Ports};
 use crate::dog::board::Board;
 use crate::dog::{lock_desk, open};
 use crate::lease::counted::{Taker, Ticket};
 use crate::lease::saved::BookFile;
 use crate::review_bot::Reviewers;
 use crate::shepherd::Answer;
-use crate::test::{CALL_PATIENCE, EPOCH, FakeAlerts, FakeClock, FakeShepherd, RecordedSink};
+use crate::test::{
+    CALL_PATIENCE, EPOCH, FakeAlerts, FakeClock, FakeMeter, FakeShepherd, LeaseReads, RecordedSink,
+    write_in,
+};
 use shep_client::RequestError;
 use shep_client::shep_core::protocol::{HelloAck, Request, RpcError, RpcErrorCode};
 
@@ -26,6 +29,7 @@ struct Dog {
     waiters: Waiters,
     alerts: FakeAlerts,
     standing: Arc<Mutex<SettingsState>>,
+    shown: Arc<Mutex<Availability>>,
     clock: FakeClock,
     reread: Reread,
     _dir: tempfile::TempDir,
@@ -52,6 +56,20 @@ async fn started_on(section: &str) -> Dog {
     let board = Arc::new(Mutex::new(board));
     let (waiters, alerts) = (Waiters::default(), FakeAlerts::on(clock.clone()));
     let standing = Arc::default();
+    // One agent on the paddock gateway `paddock`, which the section names or not.
+    write_in(
+        dir.path(),
+        "coder.md",
+        "---\nrole: implementer\nharness: pi\nmodel: coder\neffort: low\n\
+         gateway: paddock\ncontext: 65536\n---\n",
+    );
+    let ports = Ports {
+        local_leases: Arc::new(LeaseReads::default()),
+        meter: Arc::new(FakeMeter::idle()),
+        codex_meter: |_| Arc::new(FakeMeter::idle()),
+    };
+    let agents = Agents::load(dir.path()).unwrap();
+    let (shown, live) = availability::begin(&agents, &started.settings, ports);
     let reread = Reread::new(
         &started,
         Handles {
@@ -60,6 +78,7 @@ async fn started_on(section: &str) -> Dog {
             waiters: Arc::clone(&waiters),
             alerts: Arc::new(alerts.clone()),
             standing: Arc::clone(&standing),
+            live,
         },
     );
     Dog {
@@ -70,6 +89,7 @@ async fn started_on(section: &str) -> Dog {
         waiters,
         alerts,
         standing,
+        shown,
         clock,
         reread,
         _dir: dir,
@@ -124,6 +144,14 @@ impl Dog {
     fn prefer(&self) -> Vec<String> {
         let prefer = crate::dog::board::lock(&self.board).prefer();
         prefer.iter().map(|a| a.as_str().to_owned()).collect()
+    }
+
+    // The models the dog reads a load for, as `gateway/model`.
+    fn models(&self) -> Vec<String> {
+        let status = self.shown.lock().unwrap().status();
+        let models = status["models"].as_array().unwrap().clone();
+        let name = |m: &serde_json::Value| format!("{}/{}", m["gateway"], m["model"]);
+        models.iter().map(name).collect()
     }
 
     fn state(&self) -> SettingsState {
@@ -368,15 +396,62 @@ async fn a_webhook_put_back_stops_waiting() {
     assert!(dog.state().waiting.is_empty());
 }
 
-#[tokio::test(start_paused = true)]
-async fn gateways_and_the_codex_home_wait_for_a_restart() {
-    let mut dog = started_on(BASE).await;
+// A key variable the dog's environment holds under cargo.
+const PADDOCK: &str =
+    "[gateways.paddock]\nurl = \"http://gpu:8700\"\nkey_env = \"CARGO_PKG_DESCRIPTION\"\n";
 
-    dog.edit(&format!("codex_home = \"/srv/codex\"\n{BASE}"));
+#[tokio::test(start_paused = true)]
+async fn a_changed_gateway_or_codex_home_applies_and_waits_for_nothing() {
+    let mut dog = started_on(BASE).await;
+    assert_eq!(dog.models(), Vec::<String>::new());
+
+    dog.edit(&format!("codex_home = \"/srv/codex\"\n{PADDOCK}{BASE}"));
     let lines = dog.pass().await;
 
-    assert_eq!(lines, ["waiting for restart: codex_home"]);
-    assert_eq!(dog.state().waiting, ["codex_home"]);
+    assert_eq!(
+        lines,
+        [
+            "applied gateways: paddock",
+            "applied codex_home: /srv/codex"
+        ]
+    );
+    assert_eq!(dog.state(), SettingsState::default(), "nothing waits");
+    assert_eq!(dog.models(), [r#""paddock"/"coder""#]);
+    assert_eq!(dog.pass().await, Vec::<String>::new(), "applied once");
+
+    dog.edit(BASE);
+    let lines = dog.pass().await;
+    assert_eq!(
+        lines,
+        ["applied gateways: none", "applied codex_home: kelpie's own"]
+    );
+    assert_eq!(dog.models(), Vec::<String>::new());
+    assert_eq!(dog.state(), SettingsState::default());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_codex_home_the_dog_refuses_refuses_the_whole_section() {
+    let mut dog = started_on(&format!("{NTFY}{BASE}")).await;
+
+    dog.edit(&format!(
+        "codex_home = \"logins/codex\"\n{PADDOCK}{NTFY}[leases]\ncargo-test = 9\n"
+    ));
+    let first = dog.pass().await;
+    dog.pass().await;
+
+    assert_eq!(dog.capacity(), 3, "nothing of the text applies");
+    assert_eq!(dog.models(), Vec::<String>::new());
+    assert!(first[0].contains("old settings stand"), "{first:?}");
+    let reason = dog.state().refused.unwrap().reason;
+    assert!(reason.contains("`codex_home`"), "{reason}");
+    assert_eq!(dog.alerts.posts().len(), 1, "alerted once");
+
+    dog.edit(&format!(
+        "codex_home = \"/srv/codex\"\n{NTFY}[leases]\ncargo-test = 9\n"
+    ));
+    dog.pass().await;
+    assert_eq!(dog.capacity(), 9);
+    assert_eq!(dog.state().refused, None);
 }
 
 #[tokio::test(start_paused = true)]

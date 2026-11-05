@@ -132,6 +132,30 @@ impl Availability {
         }
     }
 
+    /// Keeps the reading of each model and account `sources` still names, and lists a new one unknown
+    ///
+    /// A model or account no longer named is dropped with its logged reason, so
+    /// it is logged again if it comes back. `renewed` is asked again at the next pass.
+    pub(super) fn rename(&mut self, sources: &Sources, renewed: &[Account]) {
+        self.models
+            .retain(|key, _| sources.models.contains_key(key));
+        for key in sources.models.keys() {
+            self.models.entry(key.clone()).or_default();
+        }
+        self.unread
+            .retain(|key, _| sources.models.contains_key(key));
+        self.accounts
+            .retain(|account, _| sources.accounts.contains(account));
+        for account in &sources.accounts {
+            self.accounts.entry(*account).or_default();
+        }
+        for account in renewed {
+            if let Some(seen) = self.accounts.get_mut(account) {
+                seen.asked = None;
+            }
+        }
+    }
+
     /// Holds the API after `refusal`, seen at `now`, and says until when
     ///
     /// A hold still standing is kept when it outlasts the new one.
@@ -213,7 +237,8 @@ impl Availability {
         load: Result<ModelLoad, String>,
         now: Timestamp,
     ) -> Option<String> {
-        let seen = self.models.entry(key.clone()).or_default();
+        // A pass that began before a reread can end on a model no longer named.
+        let seen = self.models.get_mut(&key)?;
         seen.last = load.as_ref().ok().map(|load| (*load, now));
         seen.asked = Some(now);
         let Err(why) = load else {
@@ -228,7 +253,9 @@ impl Availability {
     }
 
     fn metered(&mut self, account: Account, usage: Option<Utilization>, now: Timestamp) {
-        let seen = self.accounts.entry(account).or_default();
+        let Some(seen) = self.accounts.get_mut(&account) else {
+            return;
+        };
         if let Some(usage) = usage {
             seen.last = Some((usage, now));
         }
@@ -253,6 +280,7 @@ fn merged(mut into: Value, from: Value) -> Value {
 }
 
 /// The models and accounts the agent files name, and where each model is asked
+#[derive(Clone)]
 pub(super) struct Sources {
     // The reason where the model cannot be asked, such as an unset key.
     models: BTreeMap<ModelKey, Result<Upstream, String>>,
@@ -282,6 +310,7 @@ impl Sources {
 }
 
 /// The ports a pass reads through, with each account's meter
+#[derive(Clone)]
 pub(super) struct Readers {
     pub(super) leases: Arc<dyn LocalLeases>,
     pub(super) meters: BTreeMap<Account, Arc<dyn Meter>>,
@@ -292,29 +321,83 @@ pub(super) struct Readers {
 ///
 /// A Codex home `settings` cannot give leaves the Codex account unknown. No
 /// process the dog starts from then on sees a gateway key, the Claude login or the API key.
+/// The [`Live`] it returns takes a change to the gateways and the Codex home.
 pub(super) fn begin(
     agents: &Agents,
     settings: &KelpieSettings,
     ports: Ports,
-) -> Arc<Mutex<Availability>> {
-    let gateways = settings.gateways();
-    let mut hidden = gateways.key_vars();
-    hidden.extend([LOGIN_VAR.to_owned(), API_VAR.to_owned()]);
-    crate::spawn::hide(hidden);
-    let sources = Sources::of(agents, &gateways);
+) -> (Arc<Mutex<Availability>>, Live) {
+    crate::spawn::hide([LOGIN_VAR.to_owned(), API_VAR.to_owned()]);
+    let sources = Sources::of(agents, &settings.gateways());
     let shown = Arc::new(Mutex::new(Availability::new(&sources)));
-    let mut meters = BTreeMap::from([(Account::Claude, ports.meter)]);
-    match codex_home(settings) {
-        Ok(home) => _ = meters.insert(Account::Codex, (ports.codex_meter)(home)),
-        Err(e) => println!("{e}: the Codex account's plan is not read"),
-    }
     let readers = Readers {
         leases: ports.local_leases,
-        meters,
+        meters: BTreeMap::from([(Account::Claude, ports.meter)]),
         clock: Arc::new(crate::ports::SystemClock),
     };
-    tokio::spawn(keep(Arc::clone(&shown), sources, readers));
-    shown
+    let live = Live {
+        agents: agents.clone(),
+        shown: Arc::clone(&shown),
+        reading: Arc::new(Mutex::new((sources, readers))),
+        codex_meter: ports.codex_meter,
+    };
+    live.apply(settings);
+    tokio::spawn(keep(Arc::clone(&shown), live.clone()));
+    (shown, live)
+}
+
+/// What the availability task reads, which a reread of the settings changes
+///
+/// The agents are the ones the dog started with, since agent files are read at the start.
+#[derive(Clone)]
+pub(super) struct Live {
+    agents: Agents,
+    shown: Arc<Mutex<Availability>>,
+    reading: Arc<Mutex<(Sources, Readers)>>,
+    codex_meter: fn(PathBuf) -> Arc<dyn Meter>,
+}
+
+impl Live {
+    /// Reads the gateways and the Codex home in `settings` from the next pass
+    ///
+    /// Each model and account still named keeps its reading and a new one is
+    /// unknown until read. Every gateway key variable is hidden from the
+    /// processes the dog starts from now on, and none is shown again. A gateway's
+    /// new key reaches the dog's environment only from a fresh spawn.
+    pub(super) fn apply(&self, settings: &KelpieSettings) {
+        let gateways = settings.gateways();
+        crate::spawn::hide(gateways.key_vars());
+        let sources = Sources::of(&self.agents, &gateways);
+        let mut reading = self.reading.lock().unwrap_or_else(PoisonError::into_inner);
+        lock(&self.shown).rename(&sources, &[Account::Codex]);
+        let mut meters = reading.1.meters.clone();
+        match codex_home(settings) {
+            Ok(home) => _ = meters.insert(Account::Codex, (self.codex_meter)(home)),
+            Err(e) => {
+                println!("{e}: the Codex account's plan is not read");
+                meters.remove(&Account::Codex);
+            }
+        }
+        reading.1.meters = meters;
+        reading.0 = sources;
+    }
+
+    // What the next pass reads, taken whole so a pass ends on what it began with.
+    fn now(&self) -> (Sources, Readers) {
+        self.reading
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+/// Why `settings` names a Codex home the dog refuses, or None when it is fine or the dog has no home to check it against
+pub(super) fn refused_codex_home(settings: &KelpieSettings) -> Option<String> {
+    let home = crate::home::user_home()?;
+    let kelpie_home = crate::home::kelpie_home().ok()?;
+    (settings.codex_home(&home, &kelpie_home))
+        .err()
+        .map(|e| e.to_string())
 }
 
 fn codex_home(settings: &KelpieSettings) -> Result<PathBuf, String> {
@@ -323,11 +406,12 @@ fn codex_home(settings: &KelpieSettings) -> Result<PathBuf, String> {
     (settings.codex_home(&home, &kelpie_home)).map_err(|e| e.to_string())
 }
 
-async fn keep(shown: Arc<Mutex<Availability>>, sources: Sources, readers: Readers) {
+async fn keep(shown: Arc<Mutex<Availability>>, live: Live) {
     let mut ticks = tokio::time::interval(LOAD_TICK);
     ticks.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         ticks.tick().await;
+        let (sources, readers) = live.now();
         for line in read(&shown, &sources, &readers).await {
             println!("{line}");
         }

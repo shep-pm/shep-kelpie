@@ -8,12 +8,12 @@ The dog rereads its `[kelpie]` section of `dogs.toml` and applies a change with 
 |---|---|---|
 | `leases.cargo-test` | live | `Desk::set_test_capacity`: a raise grants the waiters, a lower count keeps every holder and holds only new grants off |
 | `agent_board.prefer` | live | `Board::set_prefer`: each pick copies the list out in its `View` |
-| `gateways` | restart-only | `availability::begin` builds its `Sources` once and hides each key variable once |
-| `codex_home` | restart-only | `availability::begin` builds the Codex meter once |
+| `gateways` | live | `Live::apply`: the availability task rebuilds `Sources::of(agents, gateways)` and takes it at the start of its next pass. Each model and account still named keeps its reading, a new one is unknown, one gone is dropped with its logged reason. `crate::spawn::hide` only adds, so a gateway taken out keeps its variable hidden. A new key variable reaches the dog's environment only from a fresh spawn, so its models read as unread until `shep disable kelpie` and `shep enable kelpie`, as at start, and `doctor`'s `dog_keys` line says so. The agent files stay as the dog started with them |
+| `codex_home` | live | `Live::apply` builds the Codex meter on the new login, and the next pass reads it. A value `KelpieSettings::codex_home` refuses (a relative path, `~/.codex`) refuses the whole section, where the start leaves the Codex account unknown |
 | `webhook.kind`, `url`, `ca_cert`, `token`, `trusted` | restart-only | the start checks them as one and refuses a bad one, and the dog posts only to the webhook it started with |
 | `gpu_metrics_url` | not the dog's | only a runner reads it, at each wake |
 
-`waiting_for_restart` in `reread/mod.rs` takes both settings apart without `..`, so a new `KelpieSettings` key is a compile error until it is placed in this table.
+`waiting_for_restart` in `reread/mod.rs` takes both settings apart without `..`, so a new `KelpieSettings` key is a compile error until it is placed in this table. Only the webhook keys are restart-only.
 
 ## The pass
 
@@ -27,7 +27,7 @@ The dog rereads its `[kelpie]` section of `dogs.toml` and applies a change with 
 
 ## A reread that fails
 
-- Refused: the shepherd refuses the section (`InvalidConfig`, `Unsupported`), the text does not parse whole, or a start check fails. Nothing is applied, so the old settings stand.
+- Refused: the shepherd refuses the section (`InvalidConfig`, `Unsupported`), the text does not parse whole, a start check fails, or `codex_home` is one the dog cannot use. Nothing is applied, so the old settings stand.
 - The dog logs the reason once, so the maintainer learns now what would stop it at its next restart.
 - The refusal keeps its reason and first time (`Refusal { reason, at, told }`, copied from `runner/refused.rs`, which the dog cannot use since the runner crate sits above it). `status` shows it as `settings_refused: { reason, at }` only while it stands, and a good read clears it.
 - The webhook the dog started with gets one alert per reason, titled `kelpie: dog settings change refused`. A post that fails is tried again next pass, no webhook means nothing to post, and the post runs in `spawn_blocking`.
