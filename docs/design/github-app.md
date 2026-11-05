@@ -1,6 +1,6 @@
 # The GitHub App
 
-Per-user App: tokens, posting, answering rulings on GitHub. Who answers a ruling is in `who-answers.md`.
+Per-user App: tokens, posting, answering rulings on GitHub. Who answers a ruling is in `who-answers.md`, and the gate check runs a work item shows on its pull request are in `check-runs.md`.
 
 ## App and tokens
 
@@ -37,16 +37,6 @@ Per-user App: tokens, posting, answering rulings on GitHub. Who answers a ruling
 - Ruling settled elsewhere has its comment edited. #472
 - Worker posts no comment. Guard reads `gh` as gh does, refuses shell expansion. #418, `crates/core/src/guard/gh.rs`
 - Findings post as one comment-only review (`Voice::review`) with a comment per line, once per head; `publish` hooks see body and every comment. A bot's findings never post. #627, `contribution-pass.md`
-
-## Check runs
-
-- The App shows a work item's gates on its pull request's head as check runs (`Voice::check_run`, `update_check_run`), written with `Grant::Checks` (`checks: write` alone), so an installation without it still posts comments. `runner/checks/`. #1637
-- `kelpie / review` runs through `Phase::Review` and succeeds when the head leaves it. `kelpie / ruling` runs while a ruling waits on the head, titled with its question; it succeeds on a yes and fails on a no. A gate a head never reaches has no check.
-- A head the item leaves (sent back to the worker, superseded by a push, ended or dropped) has its running checks closed: `skipped`, except `kelpie / ruling` and `kelpie` fail only where the answer to the ruling was a no or a rework. A comment that withdraws a ruling is not a no. A restart forgets what was posted, so it closes nothing posted before it.
-- `kelpie` runs until `Phase::Merge` on the head, then succeeds, and fails where the ruling failed. Every gated head has one, so it is the only check a ruleset may require. A gate check is a view, not a gate.
-- Kelpie's own check runs are never CI: the CI read leaves out a check run with a gate's name and no workflow run (`is_gate_check`, `adapters/gh/`), so the open `kelpie` check never holds the wait for CI that keeps it open.
-- Checks are a view kelpie writes and never reads back; the state file is the record. Ids and last posted state are in memory per work item and head, so a restart posts each check once more. Re-run sends a webhook kelpie never gets, so each summary says `shep kelpie rework <pr>`.
-- A refusal for a missing permission turns check runs off for the repo until the runner restarts, logged once; any other error is tried again on the next change. `doctor` has a `check runs` line.
 
 ## Answering on GitHub
 
