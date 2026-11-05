@@ -1,15 +1,17 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
-use super::{Availability, Readers, Sources, read};
+use super::{Availability, LOAD_TICK, Ports, Readers, Sources, begin, read};
 use crate::agents::Agents;
 use crate::api_refusal::{CREDIT_RECHECK_SECS, Refusal};
 use crate::pacer::RECHECK_SECS;
 use crate::ports::{Meter, MeterError, ModelLoad, Timestamp};
 use crate::settings::{Account, Gateway, GatewayName, Gateways};
 use crate::test::{EPOCH, FakeClock, FakeMeter, LeaseReads, utilization, write_in};
+use crate::webhook::KelpieSettings;
 
 // One paddock, one OpenAI-compatible gateway, and a key for each.
 fn gateways() -> Gateways {
@@ -448,4 +450,221 @@ async fn a_pass_drops_a_hold_once_its_time_has_come() {
     clock.advance(1);
     read(&shown, &sources, &readers).await;
     assert_eq!(shown.lock().unwrap().status().get("api"), None);
+}
+
+// A gateway key the dog's environment holds under cargo, so a reread's gateway can be asked.
+const KEY: &str = "CARGO_PKG_DESCRIPTION";
+
+fn gateway_section(names: &[&str], key_env: &str) -> KelpieSettings {
+    let tables = names.iter().map(|name| {
+        format!("[gateways.{name}]\nurl = \"http://{name}:8700\"\nkey_env = \"{key_env}\"\n")
+    });
+    KelpieSettings::from_section(&tables.collect::<String>()).unwrap()
+}
+
+fn live_ports(leases: &Arc<LeaseReads>, codex_meter: fn(PathBuf) -> Arc<dyn Meter>) -> Ports {
+    Ports {
+        local_leases: leases.clone(),
+        meter: Arc::new(FakeMeter::idle()),
+        codex_meter,
+    }
+}
+
+// Yields until `seen` holds, by the wall clock: the paused clock never moves while a task yields.
+async fn until(what: &str, seen: impl Fn() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !seen() {
+        assert!(std::time::Instant::now() < deadline, "{what}");
+        tokio::task::yield_now().await;
+    }
+}
+
+fn account(shown: &Mutex<Availability>, name: &str) -> Value {
+    let status = shown.lock().unwrap().status();
+    let accounts = status["accounts"].as_array().unwrap().clone();
+    accounts
+        .into_iter()
+        .find(|a| a["account"] == name)
+        .unwrap_or(Value::Null)
+}
+
+// The first pass has read every account, so the next one is the next tick.
+async fn first_pass_done(shown: &Mutex<Availability>) {
+    until("the first pass never ended", || {
+        account(shown, "claude")["read_at"] != Value::Null
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_gateway_added_by_a_reread_is_read_from_the_next_pass() {
+    let (_dir, agents) = agents(&[("coder.md", on_gateway("paddock", "coder"))]);
+    let leases = Arc::new(LeaseReads::default());
+    leases.loaded(Some(ModelLoad {
+        slots: 2,
+        held: 1,
+        waiting: 0,
+    }));
+    let started = KelpieSettings::from_section("").unwrap();
+    let (shown, live) = begin(&agents, &started, live_ports(&leases, |_| idle_meter()));
+    first_pass_done(&shown).await;
+    assert_eq!(shown.lock().unwrap().status()["models"], json!([]));
+
+    live.apply(&gateway_section(&["paddock"], KEY));
+    assert_eq!(
+        shown.lock().unwrap().status()["models"],
+        json!([model("coder", unknown())]),
+        "unknown until read"
+    );
+    assert_eq!(leases.count(), 0);
+
+    tokio::time::advance(LOAD_TICK).await;
+    until("the next pass never read it", || leases.count() == 1).await;
+    until("the reading never showed", || {
+        shown.lock().unwrap().status()["models"][0]["slots"] == 2
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_gateway_taken_out_leaves_status_and_keeps_the_readings_of_the_rest() {
+    let (_dir, agents) = agents(&[
+        ("coder.md", on_gateway("paddock", "coder")),
+        ("spare-coder.md", on_gateway("spare", "spare-coder")),
+    ]);
+    let leases = Arc::new(LeaseReads::default());
+    leases.loaded(Some(ModelLoad {
+        slots: 2,
+        held: 1,
+        waiting: 0,
+    }));
+    let both = gateway_section(&["paddock", "spare"], KEY);
+    let (shown, live) = begin(&agents, &both, live_ports(&leases, |_| idle_meter()));
+    first_pass_done(&shown).await;
+    let before = shown.lock().unwrap().status();
+    assert_eq!(before["models"].as_array().unwrap().len(), 2, "{before}");
+    assert_eq!(before["models"][0]["slots"], 2, "{before}");
+
+    let (old_sources, old_readers) = live.now();
+    live.apply(&gateway_section(&["paddock"], KEY));
+
+    let after = shown.lock().unwrap().status();
+    assert_eq!(after["models"], json!([before["models"][0].clone()]));
+    assert_eq!(after["accounts"], before["accounts"]);
+
+    // A pass that began on the old sources cannot put the model back.
+    read(&shown, &old_sources, &old_readers).await;
+    let status = shown.lock().unwrap().status();
+    assert_eq!(status["models"].as_array().unwrap().len(), 1, "{status}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_gateway_key_variable_is_hidden_from_processes_from_then_on() {
+    const NEW: &str = "CARGO_PKG_NAME";
+    assert!(std::env::var_os(NEW).is_some(), "{NEW} is set under cargo");
+    let (_dir, agents) = agents(&[]);
+    let leases = Arc::new(LeaseReads::default());
+    let started = KelpieSettings::from_section("").unwrap();
+    let (_shown, live) = begin(&agents, &started, live_ports(&leases, |_| idle_meter()));
+    let hidden = |var: &str| {
+        let command = crate::spawn::command("env");
+        command.get_envs().any(|(k, v)| k == var && v.is_none())
+    };
+    assert!(!hidden(NEW), "hidden before a gateway names it");
+
+    live.apply(&gateway_section(&["paddock"], NEW));
+    assert!(hidden(NEW));
+
+    live.apply(&KelpieSettings::from_section("").unwrap());
+    assert!(hidden(NEW), "a gateway taken out keeps its variable hidden");
+}
+
+fn idle_meter() -> Arc<dyn Meter> {
+    Arc::new(FakeMeter::idle())
+}
+
+// The Codex meter of the login at `/srv/codex-live` reads 40% of the week, the one at
+// `/srv/codex-new` fails as a login not signed in does, and any other reads 0%.
+fn codex_meter_by_login(home: PathBuf) -> Arc<dyn Meter> {
+    let meter = FakeMeter::idle();
+    if home == std::path::Path::new("/srv/codex-live") {
+        meter.set(utilization(40, 12));
+    }
+    if home == std::path::Path::new("/srv/codex-new") {
+        meter.fail(MeterError::TimedOut);
+    }
+    Arc::new(meter)
+}
+
+fn codex_agent() -> (tempfile::TempDir, Agents) {
+    agents(&[(
+        "gpt.md",
+        "---\nrole: implementer\nharness: codex\nmodel: gpt-6-sol\neffort: medium\n---\n"
+            .to_owned(),
+    )])
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_changed_codex_home_builds_the_meter_on_the_new_login() {
+    let (_dir, agents) = agents(&[(
+        "gpt.md",
+        "---\nrole: implementer\nharness: codex\nmodel: gpt-6-sol\neffort: medium\n---\n"
+            .to_owned(),
+    )]);
+    let leases = Arc::new(LeaseReads::default());
+    let started = KelpieSettings::from_section("").unwrap();
+    let ports = live_ports(&leases, codex_meter_by_login);
+    let (shown, live) = begin(&agents, &started, ports);
+    until("the codex account never read", || {
+        account(&shown, "codex")["read_at"] != Value::Null
+    })
+    .await;
+    assert_eq!(account(&shown, "codex")["week"]["used_pct"], 0);
+
+    live.apply(&KelpieSettings::from_section("codex_home = \"/srv/codex-live\"\n").unwrap());
+    tokio::time::advance(LOAD_TICK).await;
+
+    until("the new login was never read", || {
+        account(&shown, "codex")["week"]["used_pct"] == 40
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_codex_home_with_no_reading_shows_the_account_unknown_not_the_old_logins_usage() {
+    let (_dir, agents) = codex_agent();
+    let leases = Arc::new(LeaseReads::default());
+    let on_live = KelpieSettings::from_section("codex_home = \"/srv/codex-live\"\n").unwrap();
+    let (shown, live) = begin(&agents, &on_live, live_ports(&leases, codex_meter_by_login));
+    until("the old login never read", || {
+        account(&shown, "codex")["week"]["used_pct"] == 40
+    })
+    .await;
+
+    live.apply(&KelpieSettings::from_section("codex_home = \"/srv/codex-new\"\n").unwrap());
+    assert_eq!(account(&shown, "codex")["unknown"], true);
+
+    let (sources, readers) = live.now();
+    read(&shown, &sources, &readers).await;
+    assert_eq!(
+        account(&shown, "codex")["unknown"],
+        true,
+        "a login that cannot be read is unknown, never the old one's usage"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pass_that_began_on_the_old_login_cannot_put_its_reading_back() {
+    let (_dir, agents) = codex_agent();
+    let leases = Arc::new(LeaseReads::default());
+    let on_live = KelpieSettings::from_section("codex_home = \"/srv/codex-live\"\n").unwrap();
+    let (shown, live) = begin(&agents, &on_live, live_ports(&leases, codex_meter_by_login));
+    first_pass_done(&shown).await;
+    let (old_sources, old_readers) = live.now();
+
+    live.apply(&KelpieSettings::from_section("").unwrap());
+    // A pass on the old readers ends after the reread, reading the old login.
+    read(&shown, &old_sources, &old_readers).await;
+
+    assert_eq!(account(&shown, "codex")["unknown"], true);
 }

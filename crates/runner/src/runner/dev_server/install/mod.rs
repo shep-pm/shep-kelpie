@@ -16,6 +16,7 @@ use std::time::Duration;
 use crate::fence;
 use crate::package_managers::{self, MANAGERS, PackageManager};
 use crate::ports::{DevRun, Fence, TestOutcome};
+use crate::profile;
 use crate::spawn::shell_quote;
 
 /// How long the install and the server together get to answer on the port, and the install of a
@@ -146,7 +147,7 @@ fn lockfile_folder(worktree: &Path, cwd: &Path) -> Option<(PathBuf, &'static Pac
 ///
 /// Does nothing where no lockfile is in the server's folder or above it in the checkout. The
 /// server gets the time to install only where the packages are not there yet, and a cache
-/// that `run` already names is kept.
+/// that `run` already names is kept. Each folder the env names under `build` is made first.
 pub(super) fn before(run: &mut DevRun, worktree: &Path, build: &Path) {
     let Some((folder, manager)) = lockfile_folder(worktree, &run.cwd) else {
         return;
@@ -173,6 +174,7 @@ pub(super) fn before(run: &mut DevRun, worktree: &Path, build: &Path) {
         (run.env.entry((*variable).to_owned()))
             .or_insert_with(|| build.join(folder).display().to_string());
     }
+    profile::make_build_folders(&run.env, build);
     (run.policy.hosts).extend(manager.hosts.iter().map(|&h| h.to_owned()));
     if !folder.join("node_modules").is_dir() || mark.exists() {
         run.ready_within = INSTALL_WITHIN;

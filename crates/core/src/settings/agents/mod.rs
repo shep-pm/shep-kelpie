@@ -363,7 +363,7 @@ pub struct RoleAgentNames {
     pub fallback_after: Option<Gone>,
     /// Minutes past the soonest finish the agent board lets a work item's agent
     /// take: a new item opens on the cheapest agent finishing within it, and a
-    /// later turn moves on when its own agent finishes past it. The project
+    /// later turn moves on when its own agent cannot start within it. The project
     /// manager's pick may name its own. Whole minutes, `0` allowed. 60 when absent.
     #[serde(default = "default_slack")]
     pub slack: u32,

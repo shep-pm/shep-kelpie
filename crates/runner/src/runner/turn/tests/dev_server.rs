@@ -234,6 +234,41 @@ fn a_port_that_is_taken_without_auto_port_plans_no_server_and_the_instructions_s
 }
 
 #[test]
+fn a_taken_port_is_replaced_with_no_auto_port_when_more_than_one_item_can_run() {
+    let shared = r#"{"configurations":[{"name":"web","runtimeExecutable":"npm","runtimeArgs":["run","dev","--","--port","4421"],"port":4421}]}"#;
+    let rig = project(Some(shared));
+    rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 2"));
+    rig.dev_servers.take(4421);
+    // One pick for the first turn, one for the second.
+    rig.dev_servers.pick_next(5305);
+    rig.dev_servers.pick_next(5305);
+    let (run, told) = planned(&rig, |_| {});
+
+    let run = run.expect("a plan");
+    assert_eq!(run.port, 5305);
+    assert_eq!(run.env.get("PORT").map(String::as_str), Some("5305"));
+    assert_eq!(run.args, ["run", "dev", "--", "--port", "5305"]);
+    assert!(told.contains("localhost:5305"), "{told}");
+}
+
+#[test]
+fn an_explicit_auto_port_false_keeps_a_taken_port_refused() {
+    let off = r#"{"configurations":[{"name":"web","runtimeExecutable":"npm","port":4421,"autoPort":false}]}"#;
+    let rig = project(Some(off));
+    rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 2"));
+    rig.dev_servers.take(4421);
+    let (run, told) = planned(&rig, |_| {});
+
+    assert_eq!(run, None);
+    assert!(
+        told.contains("runs no dev server for this turn: port 4421 is taken"),
+        "{told}"
+    );
+    assert!(told.contains("`autoPort` false"), "{told}");
+    assert!(!told.contains("http://localhost"), "{told}");
+}
+
+#[test]
 fn a_project_without_a_launch_file_on_main_plans_nothing() {
     let (run, told) = planned(&project(None), |_| {});
     assert_eq!(run, None);

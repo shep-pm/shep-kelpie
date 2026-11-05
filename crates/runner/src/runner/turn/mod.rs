@@ -672,7 +672,8 @@ impl Runner {
     }
 
     /// What a session working in `item`'s worktree reaches: the worker's own
-    /// fence, with its worktree and build folder made ready
+    /// fence, with its worktree, its build folder and the folders that env names
+    /// in it made ready
     ///
     /// # Errors
     ///
@@ -740,6 +741,9 @@ impl Runner {
         let mut reach = profile.reach();
         if let Some(fence) = reach.fence.as_mut() {
             fence.guard.hooks = self.hooks.get().as_ref().clone().in_folder(&item.worktree);
+            // A worker's own install runs where no install was planned: no lockfile yet, or one
+            // too far down the worktree for kelpie's plan to find.
+            profile::make_build_folders(&fence.env, &item.build);
         }
         Ok(reach)
     }

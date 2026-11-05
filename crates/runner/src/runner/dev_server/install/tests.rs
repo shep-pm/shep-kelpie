@@ -189,6 +189,34 @@ fn a_cache_the_server_already_names_is_kept() {
     assert_eq!(run.env["BUN_INSTALL_CACHE_DIR"], "/b/bun/cache");
 }
 
+#[test]
+fn the_folders_an_install_names_exist_before_it_runs() {
+    let dir = checkout(&["pnpm-lock.yaml"]);
+    let build = dir.path().join("b");
+    let outside = dir.path().join("outside");
+    let mut run = run(dir.path());
+    run.program = "true".to_owned();
+    // A project's own `build_env` folder, which the server's plan carries, and a cache the
+    // server named for a folder outside the build folder.
+    run.env.insert(
+        "XDG_RUNTIME_DIR".to_owned(),
+        build.join("runtime").display().to_string(),
+    );
+    run.env.insert(
+        "PNPM_CONFIG_STATE_DIR".to_owned(),
+        outside.display().to_string(),
+    );
+
+    before(&mut run, dir.path(), &build);
+
+    assert!(build.join("runtime").is_dir(), "the project's own folder");
+    for name in ["PNPM_CONFIG_STORE_DIR", "PNPM_CONFIG_CACHE_DIR"] {
+        let folder = Path::new(&run.env[name]).to_owned();
+        assert!(folder.is_dir(), "{name}: {}", folder.display());
+    }
+    assert!(!outside.exists(), "a folder outside the build folder");
+}
+
 // Runs a worktree plan's command with `install` standing in for each manager's install, in
 // the worktree, and says whether it succeeded.
 fn ran(plan: &Plan, dir: &Path, install: &str) -> bool {
@@ -215,6 +243,23 @@ fn a_worktree_with_a_lockfile_and_no_packages_is_planned_for_install() {
     );
     assert_eq!(plan.folders, ["."]);
     assert_eq!(plan.env["BUN_INSTALL_CACHE_DIR"], "/build/bun-cache");
+}
+
+#[test]
+fn a_pnpm_plan_names_its_store_cache_state_and_lock_folders() {
+    let dir = checkout(&["pnpm-lock.yaml"]);
+
+    let plan = worktree(dir.path(), Path::new("/build")).unwrap();
+
+    for (name, folder) in [
+        ("npm_config_store_dir", "pnpm-store"),
+        ("PNPM_CONFIG_STORE_DIR", "pnpm-store"),
+        ("PNPM_CONFIG_CACHE_DIR", "pnpm-cache"),
+        ("PNPM_CONFIG_STATE_DIR", "pnpm-state"),
+        ("XDG_RUNTIME_DIR", "pnpm-run"),
+    ] {
+        assert_eq!(plan.env[name], format!("/build/{folder}"), "{name}");
+    }
 }
 
 #[test]

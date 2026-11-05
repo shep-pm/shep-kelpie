@@ -44,7 +44,7 @@ pub enum StepReport {
         /// Older ready issues the board passed over, and why
         skipped: Vec<Skip>,
     },
-    /// A work item's own implementer would finish past its slack, so it was
+    /// A work item's own implementer could not start within its slack, so it was
     /// handed off to the agent board's next pick before its due turn
     HandedOff {
         /// The work item's ticket

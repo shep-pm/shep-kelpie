@@ -191,8 +191,9 @@ impl Runner {
         Some(DevServer::At { port, log })
     }
 
-    // The port the server answers on, and whether it was picked: the
-    // configured one when nothing holds it, else a free one under `autoPort`.
+    // The port the server answers on, and whether it was picked: the configured one
+    // when nothing holds it, else a free one where `autoPort` is on or the project has
+    // room for another work item, which shares the same configured port.
     fn port_for(&self, configuration: &launch::Configuration) -> Result<(u16, bool), String> {
         let servers = &self.ports.dev_servers;
         // Another work item's server may not have bound its port yet.
@@ -207,13 +208,19 @@ impl Runner {
             }
             Err("every port it found was planned for another work item".to_owned())
         };
-        match (configuration.port, configuration.auto_port) {
+        let slots = self.settings.concurrency.active_items.get();
+        let auto = configuration.auto_port.unwrap_or(slots > 1);
+        match (configuration.port, auto) {
             (Some(port), _) if port != 0 && free(port) => Ok((port, false)),
             (Some(0), false) => {
                 Err("the launch configuration's `port` is 0, which is no port".to_owned())
             }
             (Some(port), false) => Err(format!(
-                "port {port} is taken, and the launch configuration has no `autoPort`"
+                "port {port} is taken, and the launch configuration {}",
+                match configuration.auto_port {
+                    Some(false) => "has `autoPort` false",
+                    _ => "has no `autoPort`",
+                }
             )),
             (_, true) => pick()
                 .map(|port| (port, true))

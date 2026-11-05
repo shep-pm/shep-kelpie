@@ -41,12 +41,14 @@ pub struct KelpieSettings {
     #[serde(default)]
     pub gpu_metrics_url: Option<EndpointUrl>,
     /// The folder holding kelpie's own Codex login, `<kelpie home>/codex`
-    /// when absent. A leading `~/` is the home folder.
+    /// when absent. A leading `~/` is the home folder. A runner reads it
+    /// when it starts, and the dog reads it again every 30 seconds.
     #[serde(default)]
     pub codex_home: Option<PathBuf>,
     /// Model gateways such as paddock, by name, which an agent file
     /// names as `gateway` in place of its server's `url`. A runner reads
-    /// them when it starts.
+    /// them when it starts. The dog reads them again every 30 seconds, but
+    /// a new key variable reaches it only from a fresh spawn.
     #[serde(default)]
     pub gateways: BTreeMap<GatewayName, Gateway>,
     /// How the agent board orders the agents that finish in time, shared by

@@ -8,7 +8,7 @@
 # `CODEX_HOME=$SHEP_HOME/kelpie/codex codex login --device-auth`. Every Codex
 # call runs on a home of its own with the login linked in. Kelpie's home's
 # `codex` when absent; a leading `~/` is the home folder. A runner reads it
-# when it starts.
+# when it starts, and the dog reads it again every 30 seconds.
 # codex_home = "~/.shep/kelpie/codex"
 
 # The GPU's Prometheus metrics page, such as `nvidia_gpu_exporter`'s
@@ -77,7 +77,10 @@ url = "https://ntfy.sh/your-private-topic"
 # runner's environment holding the key the gateway gave kelpie: no agent
 # call sees that variable, and no file kelpie writes holds the key. Kelpie
 # takes no lease for a model behind a gateway, which queues its calls itself.
-# A runner reads its gateways when it starts.
+# A runner reads its gateways when it starts. The dog reads them again every
+# 30 seconds, but it sees a new `key_env` variable only after `shep disable
+# kelpie` and `shep enable kelpie`, so a model on a new gateway reads as
+# unknown until then.
 # `kind` says how kelpie talks to it beyond chat, `paddock` when absent and
 # the only kind so far.
 # [kelpie.gateways.paddock]

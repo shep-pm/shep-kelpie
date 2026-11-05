@@ -17,7 +17,7 @@ fn a_configuration_is_picked_by_name_else_the_first() {
     let web = select(&two(), Some("web"), "main").unwrap().unwrap();
     assert_eq!(web.runtime_executable, "npm");
     assert_eq!(web.port, Some(3000));
-    assert!(!web.auto_port);
+    assert_eq!(web.auto_port, None);
     let err = select(&two(), Some("worker"), "main").unwrap_err();
     assert!(err.contains("worker"), "{err}");
 }
@@ -30,7 +30,19 @@ fn shep_launch_file_reads_with_its_fields() {
     assert_eq!(shep.runtime_args, ["run", "dev", "--", "--port", "4421"]);
     assert_eq!(shep.port, Some(4421));
     assert_eq!(shep.cwd.as_deref(), Some("web"));
-    assert!(shep.auto_port);
+    assert_eq!(shep.auto_port, Some(true));
+}
+
+#[test]
+fn an_absent_auto_port_is_none_and_an_explicit_one_is_its_own() {
+    let auto_port = |tail: &str| {
+        let text =
+            format!(r#"{{"configurations":[{{"runtimeExecutable":"npm","port":3000{tail}}}]}}"#);
+        select(&text, None, "main").unwrap().unwrap().auto_port
+    };
+    assert_eq!(auto_port(""), None);
+    assert_eq!(auto_port(",\"autoPort\":false"), Some(false));
+    assert_eq!(auto_port(",\"autoPort\":true"), Some(true));
 }
 
 #[test]
@@ -55,7 +67,7 @@ fn with_cwd(cwd: Option<&str>) -> Configuration {
         runtime_args: Vec::new(),
         port: Some(3000),
         cwd: cwd.map(str::to_owned),
-        auto_port: false,
+        auto_port: None,
     }
 }
 

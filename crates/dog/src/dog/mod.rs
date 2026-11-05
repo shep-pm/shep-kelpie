@@ -293,7 +293,7 @@ async fn serve(ports: availability::Ports, alerts: Arc<dyn Alerts>) -> Result<()
     let capacity = settings.leases.cargo_test_capacity();
     kept.desk.set_test_capacity(capacity);
     let desk = Arc::new(Mutex::new(kept));
-    let shown = availability::begin(&agents, settings, ports);
+    let (shown, live) = availability::begin(&agents, settings, ports);
     // Never `KELPIE_HOME`: shep starts the adopted dog without it.
     let kelpie_home = home::under(&shep_home);
     let board = board::begin(
@@ -316,6 +316,7 @@ async fn serve(ports: availability::Ports, alerts: Arc<dyn Alerts>) -> Result<()
         waiters: Arc::clone(&waiters),
         alerts,
         standing: Arc::clone(&standing),
+        live,
     };
     reread::begin(reread::Reread::new(&started, handles), client.clone());
     let opened = door::open(&socket).map(|listener| (socket, listener));
