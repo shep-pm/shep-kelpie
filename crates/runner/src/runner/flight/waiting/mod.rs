@@ -49,7 +49,9 @@ impl Runner {
     // has shown output, or when its harness keeps no record to read.
     fn quiet_since(&self, ticket: TicketId) -> Option<Waiting> {
         let flight = self.flights.flying.get(&ticket)?;
-        flight.deadline?;
+        if !flight.turn {
+            return None;
+        }
         let call = flight.watched.call.as_ref()?;
         let started = flight.watched.started;
         match self.ports.agents.last_active(call) {

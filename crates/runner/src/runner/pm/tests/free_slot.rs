@@ -194,7 +194,7 @@ fn a_pick_wake_holds_the_board_until_its_call_ends_and_then_the_rule_picks() {
     );
 
     call.release();
-    let reason = "claude ran past its turn's ceiling".to_owned();
+    let reason = "claude ran past its ceiling".to_owned();
     let failed = step_until(&runner, |r| matches!(r, StepReport::PmFailed { .. }));
     assert_eq!(failed, StepReport::PmFailed { reason });
     rig.clock.advance(BOARD_POLL.as_secs());

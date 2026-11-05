@@ -4,7 +4,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver};
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::*;
 use crate::ports::{Cost, Session, Usage};
@@ -13,6 +13,7 @@ use crate::runner::step;
 use crate::test::ticket;
 use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
 use crate::ticket::TicketId;
+use crate::usage::{FILE, read};
 
 // One hour, the rig's `turn_timeout`
 pub(super) const CEILING: u64 = 3600;
@@ -121,6 +122,33 @@ fn seven_open(project: &str) -> (Rig, Mutex<Runner>) {
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     (rig, runner)
+}
+
+// Issue 7 with its pull request open, its worker's turn done, and its one
+// review round in flight on a reviewer's session, held until the returned
+// hold is released
+fn seven_reviewing(project: &str) -> (Rig, Mutex<Runner>, Hold) {
+    let rig = Rig::new(project);
+    rig.reviewers(&["claude"]);
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    let hold = Hold::default();
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Hold(hold.clone()),
+    ]);
+    step(&runner).unwrap(); // the worker's turn, which pushes and opens the pull request
+    (rig, runner, hold)
+}
+
+// Every line of the rig's project's usage ledger, as JSON
+fn ledger(rig: &Rig) -> Vec<Value> {
+    read(&rig.paths().folder.join(FILE))
+        .unwrap()
+        .iter()
+        .map(|line| serde_json::to_value(line).unwrap())
+        .collect()
 }
 
 fn turns(rig: &Rig, runner: &Mutex<Runner>) -> Vec<(u64, String)> {
@@ -279,6 +307,71 @@ fn a_turn_past_its_ceiling_is_ended_and_parked() {
         rig.ask(&runner, "status", None)["work_item"]["phase"],
         json!({ "state": "ruling", "id": id })
     );
+}
+
+#[test]
+fn a_review_call_past_its_ceiling_is_ended() {
+    let (rig, runner, hold) = seven_reviewing("acme");
+    let driven = Driven::new(&runner);
+    driven.started();
+    assert!(hold.entered(CALL_PATIENCE), "the review call never began");
+
+    rig.clock.advance(REVIEW_CEILING - 1);
+    assert!(matches!(driven.pass(), Pass::Idle));
+    assert!(!hold.returned(), "the review call ended before its ceiling");
+    rig.clock.advance(1);
+    assert!(matches!(driven.pass(), Pass::Idle));
+    assert!(
+        hold.answered(CALL_PATIENCE),
+        "the review call ran on past its ceiling"
+    );
+
+    let Some(StepReport::GateFailed { issue, reason }) = driven.landed() else {
+        panic!("a review call past its ceiling left no failed round");
+    };
+    assert_eq!(issue, ticket(7));
+    assert!(reason.contains("past its ceiling"), "{reason}");
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+        json!("review"),
+        "the pass went on past the round that never read"
+    );
+}
+
+#[test]
+fn a_review_call_past_its_ceiling_leaves_a_ledger_line() {
+    let (rig, runner, hold) = seven_reviewing("shep");
+    let driven = Driven::new(&runner);
+    driven.started();
+    assert!(hold.entered(CALL_PATIENCE), "the review call never began");
+
+    rig.clock.advance(REVIEW_CEILING);
+    driven.pass();
+    assert!(
+        hold.answered(CALL_PATIENCE),
+        "the review call ran on past its ceiling"
+    );
+    assert!(
+        matches!(driven.landed(), Some(StepReport::GateFailed { .. })),
+        "the ended call was recorded as something else"
+    );
+
+    let lines = ledger(&rig);
+    let [turn, review] = lines.as_slice() else {
+        panic!("the worker's turn and the review call: {lines:#?}");
+    };
+    assert_eq!(
+        (&turn["role"], &turn["kind"], &turn["ended"]),
+        (&json!("worker"), &json!("turn"), &json!("answered"))
+    );
+    assert_eq!(
+        (&review["role"], &review["kind"], &review["agent"]),
+        (&json!("reviewer"), &json!("review"), &json!("claude"))
+    );
+    assert_eq!(review["ended"], json!("timed-out"));
+    assert_eq!(review["issue"], json!("7"));
+    assert_eq!(review["pull_request"], json!(71));
+    assert_eq!(review["seconds"], REVIEW_CEILING);
 }
 
 #[test]
