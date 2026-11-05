@@ -5,8 +5,9 @@ use serde_json::{Value, json};
 
 use super::{Availability, Readers, Sources, read};
 use crate::agents::Agents;
+use crate::api_refusal::{CREDIT_RECHECK_SECS, Refusal};
 use crate::pacer::RECHECK_SECS;
-use crate::ports::{Meter, MeterError, ModelLoad};
+use crate::ports::{Meter, MeterError, ModelLoad, Timestamp};
 use crate::settings::{Account, Gateway, GatewayName, Gateways};
 use crate::test::{EPOCH, FakeClock, FakeMeter, LeaseReads, utilization, write_in};
 
@@ -352,4 +353,99 @@ async fn a_load_the_gateway_does_not_give_is_logged_again_only_after_a_good_read
     leases.loaded(None);
     let logged = read(&shown, &sources, &readers).await;
     assert_eq!(naming(&logged, "coder").len(), 1, "{logged:?}");
+}
+
+// 2026-09-01 22:00 UTC less a day: six hours on is 04:00 UTC.
+const EVENING: Timestamp = Timestamp(1_788_213_600);
+const CREDIT_BACK: u64 = EVENING.0 + CREDIT_RECHECK_SECS;
+// 2026-12-01 00:00 UTC
+const DECEMBER: Timestamp = Timestamp(1_796_083_200);
+
+fn spend_limit(resumes: Option<Timestamp>) -> Refusal {
+    Refusal::SpendLimit { resumes }
+}
+
+#[test]
+fn a_refusal_holds_the_api_until_the_later_of_two_times() {
+    let mut shown = Availability::default();
+    assert_eq!(shown.api_held(EVENING), None);
+
+    let first = shown.refused(spend_limit(Some(DECEMBER)), EVENING);
+    assert_eq!(first, DECEMBER);
+    assert_eq!(shown.api_held(EVENING), Some(DECEMBER));
+
+    let sooner = shown.refused(Refusal::NoCredit, EVENING);
+    assert_eq!(
+        sooner, DECEMBER,
+        "a refusal that ends sooner keeps the later time"
+    );
+    assert_eq!(shown.api_held(EVENING), Some(DECEMBER));
+
+    let later = Timestamp(DECEMBER.0 + 3600);
+    assert_eq!(shown.refused(spend_limit(Some(later)), EVENING), later);
+    assert_eq!(shown.api_held(EVENING), Some(later));
+
+    assert_eq!(shown.api_held(Timestamp(later.0 - 1)), Some(later));
+    assert_eq!(shown.api_held(later), None, "the hold ends at its time");
+    let again = shown.refused(Refusal::NoCredit, later);
+    assert_eq!(
+        again,
+        Timestamp(later.0 + CREDIT_RECHECK_SECS),
+        "a lapsed hold does not outlast a new one"
+    );
+}
+
+#[test]
+fn the_status_says_the_hold_in_one_line_and_leaves_it_out_before_one() {
+    let mut shown = Availability::default();
+    assert_eq!(shown.status().get("api"), None);
+
+    shown.refused(Refusal::NoCredit, EVENING);
+    assert_eq!(
+        shown.status()["api"],
+        json!({
+            "kind": "no_credit",
+            "until": CREDIT_BACK,
+            "line": "API: out of credit, checking again at 04:00 UTC",
+        })
+    );
+
+    let mut limited = Availability::default();
+    limited.refused(spend_limit(Some(DECEMBER)), EVENING);
+    assert_eq!(
+        limited.status()["api"],
+        json!({
+            "kind": "spend_limit",
+            "until": DECEMBER,
+            "line": "API: spend limit reached, back at 2026-12-01 00:00 UTC",
+        })
+    );
+
+    let mut unreadable = Availability::default();
+    unreadable.refused(spend_limit(None), EVENING);
+    assert_eq!(
+        unreadable.status()["api"]["line"],
+        "API: spend limit reached, checking again at 04:00 UTC"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pass_drops_a_hold_once_its_time_has_come() {
+    let sources = Sources::of(&agents(&[]).1, &gateways());
+    let shown = Mutex::new(Availability::new(&sources));
+    let clock = FakeClock::at(EVENING.0);
+    let readers = Readers {
+        leases: Arc::new(LeaseReads::default()),
+        meters: BTreeMap::new(),
+        clock: Arc::new(clock.clone()),
+    };
+    shown.lock().unwrap().refused(Refusal::NoCredit, EVENING);
+
+    clock.advance(CREDIT_RECHECK_SECS - 1);
+    read(&shown, &sources, &readers).await;
+    assert!(shown.lock().unwrap().status().get("api").is_some());
+
+    clock.advance(1);
+    read(&shown, &sources, &readers).await;
+    assert_eq!(shown.lock().unwrap().status().get("api"), None);
 }

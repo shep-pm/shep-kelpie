@@ -345,6 +345,7 @@ mod tests {
                 wait: Some(0),
                 typical: unpriced,
                 local: false,
+                held: false,
             },
             Candidate {
                 agent: &opus,
@@ -352,6 +353,7 @@ mod tests {
                 wait: Some(0),
                 typical: history.item("opus", Tier::Standard, Some("fix")),
                 local: false,
+                held: false,
             },
         ];
         let order: Vec<&str> = pick(&Item::default(), &candidates)

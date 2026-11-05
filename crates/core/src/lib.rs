@@ -8,6 +8,7 @@
 
 pub mod agent_board;
 pub mod agents;
+pub mod api_refusal;
 pub mod board;
 pub mod bridge;
 pub mod browse;
