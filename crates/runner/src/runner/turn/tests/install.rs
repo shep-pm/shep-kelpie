@@ -201,6 +201,47 @@ fn a_failed_install_is_a_logged_step_and_the_first_prompt_names_it() {
     );
 }
 
+// The turn's opening read answering 5xx holds the turn back rather than park it
+// (turn/tests/mod.rs). The install the pass ran before it found that is logged
+// once and never run again.
+#[test]
+fn an_install_before_a_held_turn_is_logged_once_and_not_run_again() {
+    let rig = Rig::new("shep");
+    rig.land("bun.lock", "");
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.claude.script([Scripted::Say("done")]);
+    rig.forge
+        .set_issue_read_error(7, ForgeError::Failed(DOWN.into()));
+
+    let report = step(&runner).unwrap();
+    assert!(
+        matches!(
+            &report,
+            Some(StepReport::GateFailed { issue, .. }) if *issue == ticket(7)
+        ),
+        "{report:?}"
+    );
+    assert_eq!(
+        steps(&runner),
+        vec![json!({
+            "step": "packages-installed",
+            "issue": "7",
+            "folders": ["."],
+            "failed": null,
+        })],
+        "the install ran and was never logged"
+    );
+
+    rig.forge.let_issue_read(7);
+    rig.clock.advance(15);
+    assert!(
+        matches!(step(&runner).unwrap(), Some(StepReport::Ended { .. })),
+        "the held turn never went on"
+    );
+    assert_eq!(rig.tests.ran().len(), 1, "the install ran again");
+}
+
 #[test]
 fn an_install_that_did_not_start_or_ran_too_long_fails_with_its_reason() {
     for (outcome, said) in [
