@@ -167,6 +167,13 @@ fn open(
     }
 }
 
+// The folder of the agent files in kelpie's home, None when the home cannot be worked out.
+fn agents_folder() -> Option<std::path::PathBuf> {
+    home::kelpie_home()
+        .ok()
+        .map(|home| home.join(agents::FOLDER))
+}
+
 // The agent files in kelpie's home, or kelpie's own when they cannot be read.
 fn agents() -> Agents {
     match home::kelpie_home() {
@@ -317,6 +324,8 @@ async fn serve(ports: availability::Ports, alerts: Arc<dyn Alerts>) -> Result<()
         alerts,
         standing: Arc::clone(&standing),
         live,
+        agents: agents_folder(),
+        loaded: agents.clone(),
     };
     reread::begin(reread::Reread::new(&started, handles), client.clone());
     let opened = door::open(&socket).map(|listener| (socket, listener));
