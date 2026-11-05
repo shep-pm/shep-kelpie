@@ -409,8 +409,12 @@ pub(in crate::runner) fn changed_files(
     worktree: &Path,
     base: &str,
 ) -> Result<Vec<String>, String> {
-    let names = diff_listing(repo, worktree, base, "--name-only")?;
-    Ok(names.lines().map(str::to_owned).collect())
+    let names = diff_listing(repo, worktree, base, &["--name-only", "-z"])?;
+    Ok(names
+        .split('\0')
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect())
 }
 
 /// The lines `worktree` changes from `base`, added plus deleted over every
@@ -420,7 +424,7 @@ pub(in crate::runner) fn changed_lines(
     worktree: &Path,
     base: &str,
 ) -> Result<Option<u32>, String> {
-    let counts = diff_listing(repo, worktree, base, "--numstat")?;
+    let counts = diff_listing(repo, worktree, base, &["--numstat"])?;
     let mut total = 0u32;
     for line in counts.lines() {
         let mut columns = line.split('\t');
@@ -438,10 +442,17 @@ pub(in crate::runner) fn changed_lines(
 }
 
 // What `git diff <format>` prints for `worktree` against `base`.
-fn diff_listing(repo: &Path, worktree: &Path, base: &str, format: &str) -> Result<String, String> {
+fn diff_listing(
+    repo: &Path,
+    worktree: &Path,
+    base: &str,
+    format: &[&str],
+) -> Result<String, String> {
     let output = crate::worktree::trusted_command(repo, worktree)
         .map_err(|e| e.to_string())?
-        .args(["diff", format, "--no-renames"])
+        .arg("diff")
+        .args(format)
+        .arg("--no-renames")
         .arg(crate::worktree::change_since(base))
         .stdin(Stdio::null())
         .output()

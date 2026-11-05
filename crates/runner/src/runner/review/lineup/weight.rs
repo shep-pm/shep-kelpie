@@ -264,6 +264,16 @@ mod tests {
     }
 
     #[test]
+    fn a_forced_full_file_with_a_non_ascii_name_beats_the_project_managers_tag() {
+        let (_rig, runner) = pm_project("pm_lightens = true\nfull_paths = [\"legal/**\"]\n");
+
+        let weight = weighed_writing(&runner, true, &[("legal/café.md", &lines(1))]).unwrap();
+
+        let forced = Heavier::FullPaths("legal/café.md".into());
+        assert_eq!(weight, Some(ReviewWeight::Full(forced)));
+    }
+
+    #[test]
     fn a_binary_file_counts_as_over_the_line_ceiling() {
         let (_rig, runner) = pm_project("pm_lightens = true\nlight_max_lines = 1000\n");
 
