@@ -29,7 +29,7 @@ A stub written before baselines dropped their binding (`extends: kelpie:pm` and 
 
 Kelpie also writes each shipped agent whole and read-only to `agents/.defaults/<name>.md`, to read and to diff against your file. Nothing loads it, and an edit there is lost: `add` and the dog's start write it again, so an upgrade's restart refreshes it. Override in `agents/<name>.md` instead.
 
-A pass runs `reviews.need` reviewers (2 by default), each once and each the agent board's pick from the candidates it has not run. The pass ends sooner when no candidate can run. Its lineup is every agent file whose role is `reviewer` that `agents.allow` holds, apart from `contributions.security_reviewer`. A project that names the agents it may use lists them there, its implementers included:
+A pass runs `reviews.need` reviewers (2 by default), each once and each the agent board's pick from the candidates it has not run. The pass ends sooner when no candidate can run. A light review (see [The review](review.md#the-review)) runs `reviews.light` reviewers in place of `reviews.need`, and its asks sit at tier `light`, so a cheaper reviewer can take it. Its lineup is every agent file whose role is `reviewer` that `agents.allow` holds, apart from `contributions.security_reviewer`. A project that names the agents it may use lists them there, its implementers included:
 
 ```toml
 [app.dogs.kelpie.agents]

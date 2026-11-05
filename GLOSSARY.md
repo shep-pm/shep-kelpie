@@ -215,6 +215,17 @@ and asked only for what it missed, before its one fix turn. Kelpie ships
 endpoint, run on a model of the maintainer's own.
 _Avoid_: judge, round guard, deep round, pull request reviewer
 
+**Light review**:
+A review that runs `reviews.light` reviewers in place of `reviews.need`, for
+a work item whose change is small or only docs. It is light when no changed
+file is forced full (CI files, manifests and lockfiles, agent files,
+`reviews.full_paths`, an adopted pull request) and every file matches
+`reviews.light_paths`, or the project manager tagged the pick light, the
+project set `reviews.pm_lightens` and the change is at most
+`reviews.light_max_lines` lines. Its reviewer asks sit at tier `light`. A HIGH
+finding, or a fix that leaves the light paths, makes the review full again.
+_Avoid_: quick review, skip review, docs review
+
 **Review bot**:
 A reviewer on the `bot` harness: CodeRabbit, cubic or Codex, summoned on the
 pull request and answering there within a rate **window** of its own,
