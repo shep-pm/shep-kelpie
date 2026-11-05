@@ -17,6 +17,7 @@ use super::dev_server::install::{self, Installed};
 use super::report::{Begin, StepReport};
 use crate::fence;
 use crate::ports::{TestRun, TestRunner};
+use crate::profile;
 use crate::ticket::TicketId;
 use crate::work_item::WorkItem;
 use crate::worktree::{self, Base, Remote, Start, Worktree, WorktreeError};
@@ -467,6 +468,7 @@ impl Runner {
         for (variable, folder) in plan.env {
             fence.env.entry(variable).or_insert(folder);
         }
+        profile::make_build_folders(&fence.env, &item.build);
         install::relax(fence, &item.worktree);
         let run = TestRun {
             command: plan.command,

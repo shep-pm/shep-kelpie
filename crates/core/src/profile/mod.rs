@@ -179,9 +179,16 @@ const KEYCHAIN_COMMANDS: [&str; 6] = [
     "git -c credential*",
 ];
 
-// The caches of `package_managers::MANAGERS` a worker's Go and bun write on
-// every build and install, which the home's copies refuse
-const BUILD_CACHES: [&str; 2] = ["GOCACHE", "BUN_INSTALL_CACHE_DIR"];
+// The caches of `package_managers::MANAGERS` a worker's Go, bun and pnpm write
+// on every build and install, which the home's copies refuse
+const BUILD_CACHES: [&str; 6] = [
+    "GOCACHE",
+    "BUN_INSTALL_CACHE_DIR",
+    "PNPM_CONFIG_STORE_DIR",
+    "PNPM_CONFIG_CACHE_DIR",
+    "PNPM_CONFIG_STATE_DIR",
+    "XDG_RUNTIME_DIR",
+];
 
 // The cache Go's linter writes on every run, whose exit code fails it when the
 // home's copy refuses the write
@@ -480,6 +487,18 @@ pub fn git_config(home: &Path) -> Vec<PathBuf> {
     .map(|file| home.join(file))
     .filter(|path| path.is_file())
     .collect()
+}
+
+/// Makes each folder under `build` that `env` names
+///
+/// pnpm 12 keeps its store operation lock in `XDG_RUNTIME_DIR` and runs without it where that
+/// folder is missing, which it makes none of. A value outside `build` is left alone, since a
+/// port or a proxy flag names no folder. One that cannot be made is left: the tool that needs
+/// it fails as it would without it.
+pub fn make_build_folders(env: &BTreeMap<String, String>, build: &Path) {
+    for folder in env.values().map(Path::new).filter(|f| f.starts_with(build)) {
+        let _ = std::fs::create_dir_all(folder);
+    }
 }
 
 /// Each of `homes` as a deny over the folder whole, less one another already

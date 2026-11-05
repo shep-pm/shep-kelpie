@@ -99,6 +99,19 @@ fn on_a_repo_the_app_covers_a_worker_holds_the_apps_token_and_never_the_maintain
                 "GOLANGCI_LINT_CACHE".to_owned(),
                 "/k/targets/shep/7/golangci-lint".to_owned(),
             ),
+            (
+                "PNPM_CONFIG_CACHE_DIR".to_owned(),
+                "/k/targets/shep/7/pnpm-cache".to_owned(),
+            ),
+            (
+                "PNPM_CONFIG_STATE_DIR".to_owned(),
+                "/k/targets/shep/7/pnpm-state".to_owned(),
+            ),
+            (
+                "PNPM_CONFIG_STORE_DIR".to_owned(),
+                "/k/targets/shep/7/pnpm-store".to_owned(),
+            ),
+            ("XDG_RUNTIME_DIR".to_owned(), "/k/targets/shep/7/pnpm-run".to_owned()),
             ("GH_CONFIG_DIR".to_owned(), "/k/targets/shep/7/gh".to_owned()),
             ("GH_PROMPT_DISABLED".to_owned(), "1".to_owned()),
             ("GIT_TERMINAL_PROMPT".to_owned(), "0".to_owned()),
@@ -150,7 +163,11 @@ fn with_no_app_a_worker_runs_as_the_maintainer_and_its_git_still_skips_housekeep
             "GIT_CONFIG_PARAMETERS",
             "GOCACHE",
             "GOLANGCI_LINT_CACHE",
-            "KELPIE_LEASE_SOCKET"
+            "KELPIE_LEASE_SOCKET",
+            "PNPM_CONFIG_CACHE_DIR",
+            "PNPM_CONFIG_STATE_DIR",
+            "PNPM_CONFIG_STORE_DIR",
+            "XDG_RUNTIME_DIR"
         ]
     );
     // The sandbox's own proxy setting, which this replaces, stays.
@@ -160,6 +177,25 @@ fn with_no_app_a_worker_runs_as_the_maintainer_and_its_git_still_skips_housekeep
     );
     assert!(!fence.no_read.iter().any(|p| p.contains(".config/gh")));
     assert!(!fence.no_commands.contains(&"security".to_owned()));
+}
+
+// pnpm 12 keeps its store, cache, state and store operation lock under the home, which the
+// fence denies (`docs/facts/a-workers-push-gh-and-package-installs.md`).
+#[test]
+fn a_workers_pnpm_folders_are_in_its_build_folder() {
+    let fence = profile(&[], &[]).reach().fence.expect("a worker is fenced");
+    for (name, folder) in [
+        ("PNPM_CONFIG_STORE_DIR", "pnpm-store"),
+        ("PNPM_CONFIG_CACHE_DIR", "pnpm-cache"),
+        ("PNPM_CONFIG_STATE_DIR", "pnpm-state"),
+        ("XDG_RUNTIME_DIR", "pnpm-run"),
+    ] {
+        assert_eq!(
+            fence.env[name],
+            format!("/k/targets/shep/7/{folder}"),
+            "{name}"
+        );
+    }
 }
 
 fn strings(v: &Value) -> Vec<&str> {
@@ -294,6 +330,10 @@ fn build_env_points_into_the_build_folder_beside_cargo() {
             "GOCACHE": "/k/targets/lab/7/go-build",
             "GOLANGCI_LINT_CACHE": "/k/targets/lab/7/lint",
             "KELPIE_LEASE_SOCKET": "/k/dog/lease.sock",
+            "PNPM_CONFIG_CACHE_DIR": "/k/targets/lab/7/pnpm-cache",
+            "PNPM_CONFIG_STATE_DIR": "/k/targets/lab/7/pnpm-state",
+            "PNPM_CONFIG_STORE_DIR": "/k/targets/lab/7/pnpm-store",
+            "XDG_RUNTIME_DIR": "/k/targets/lab/7/pnpm-run",
         })
     );
 }
