@@ -413,6 +413,8 @@ pub struct Runner {
     token_wait: token_wait::TokenWait,
     // When each work item began waiting for a bot's lease, in memory only
     lease_waits: review_bot::lease_wait::LeaseWaits,
+    // When each work item's head first lagged the forge's, in memory only
+    lags: gate::Lags,
     // The turns waiting for a model host that cannot be reached, in memory only
     unreachable: turn::unreachable::Unreachable,
     // Why each work item's due turn did not start on its last step, in memory only
@@ -698,6 +700,7 @@ impl Runner {
             post_unsaved: std::cell::RefCell::default(),
             token_wait: token_wait::TokenWait::default(),
             lease_waits: review_bot::lease_wait::LeaseWaits::default(),
+            lags: gate::Lags::default(),
             unreachable: turn::unreachable::Unreachable::default(),
             held_up: turn::held_up::HeldUps::default(),
             queued_reruns: gate::queued::Reruns::default(),
