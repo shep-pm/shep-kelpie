@@ -19,4 +19,5 @@ The agent kelpie wakes to pick, answer and unstick. The board file it reads is i
 - Decides `follow-up` rulings, filing `ready-for-agent` or `needs-triage`. #510, #511
 - A ruling the maintainer answers wakes it only on their `<id> pm recommend`, `pm options` or `pm decide`: `who-answers.md`
 - `shep kelpie pm` hands its session to maintainer's terminal like `attach`; no wake runs under them. #327
+- The digest says what its lists leave out: known gaps past the newest 40 are counted and named, in the retro's prompt and in the across-batch line, and each work item's findings header carries its total. #1719, `runner/retro/`
 - A finding's digest round and its `(late)` tag count rounds read for that work item, in journal order up to the finding, even when a new pass restarts round numbers: the third read and beyond are late. Passed-over reviewers do not count as reads. Round lines keep the journal's numbers, including passed-over reviewers; the journal's format is unchanged. #1712, `runner/retro/digest/`

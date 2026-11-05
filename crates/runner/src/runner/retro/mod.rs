@@ -49,23 +49,33 @@ fn prompt(
     project: &str,
     issues: &[TicketId],
     build: &Build,
-    gaps: &[String],
+    gaps: &gaps::Open,
     digest: &str,
 ) -> String {
     let named: Vec<String> = issues.iter().map(TicketId::shown).collect();
-    let known = match gaps.is_empty() {
+    let known = match gaps.listed.is_empty() {
         true => "No earlier finding of yours is still open.".to_owned(),
-        false => format!(
-            "These findings of earlier retros are still open (the known gaps):\n{}\n\
-             Report none of them again. Where the batch hit one, count it in the report's \
-             `Known gaps seen again` section as `- <theme>: <number of work items>`, with no \
-             description. The digest's across-the-batch section shows which work items name \
-             each.",
-            gaps.iter()
-                .map(|g| format!("- {g}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        ),
+        false => {
+            let told = match gaps.left_out {
+                0 => "the known gaps".to_owned(),
+                n => format!(
+                    "the known gaps, the newest {} listed and {n} older ones left out",
+                    gaps.listed.len()
+                ),
+            };
+            format!(
+                "These findings of earlier retros are still open ({told}):\n{}\n\
+                 Report none of them again. Where the batch hit one, count it in the report's \
+                 `Known gaps seen again` section as `- <theme>: <number of work items>`, with no \
+                 description. The digest's across-the-batch section shows which work items name \
+                 each.",
+                gaps.listed
+                    .iter()
+                    .map(|g| format!("- {g}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        }
     };
     format!(
         "{} work items of {project} finished since the last retro: {}. Below is a digest \

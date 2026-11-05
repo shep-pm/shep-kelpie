@@ -82,16 +82,17 @@ fn flaky(out: &mut String, items: &[(TicketId, Vec<&Stamped>)]) {
     }
 }
 
-// Each open known gap, with the work items whose friction or wakes name it
+// Each open known gap, with the work items whose friction or wakes name it,
+// and how many known gaps the digest never saw
 fn gaps(out: &mut String, records: &Records<'_>, items: &[(TicketId, Vec<&Stamped>)]) {
-    if records.gaps.is_empty() {
+    if records.gaps.listed.is_empty() {
         return;
     }
     let texts: Vec<(TicketId, String)> = (items.iter())
         .map(|(issue, mine)| (*issue, text_of(mine).to_lowercase()))
         .collect();
     let mut lines = String::new();
-    for gap in records.gaps {
+    for gap in &records.gaps.listed {
         let gap_lower = gap.to_lowercase();
         let named: BTreeSet<TicketId> = (texts.iter())
             .filter(|(_, text)| text.contains(&gap_lower))
@@ -101,12 +102,22 @@ fn gaps(out: &mut String, records: &Records<'_>, items: &[(TicketId, Vec<&Stampe
             let _ = writeln!(lines, "  - {gap}: {}", issue_list(&named));
         }
     }
+    let left_out = match records.gaps.left_out {
+        0 => String::new(),
+        n => format!(
+            ", {n} of {} known gaps left out",
+            records.gaps.listed.len() + n
+        ),
+    };
     match lines.is_empty() {
         true => {
-            let _ = writeln!(out, "- Known gaps named again in this batch: none");
+            let _ = writeln!(
+                out,
+                "- Known gaps named again in this batch{left_out}: none"
+            );
         }
         false => {
-            let _ = writeln!(out, "- Known gaps named again in this batch:");
+            let _ = writeln!(out, "- Known gaps named again in this batch{left_out}:");
             out.push_str(&lines);
         }
     }
