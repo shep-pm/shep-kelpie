@@ -24,6 +24,12 @@ pub enum ReviewWeight {
 pub enum Lighter {
     /// Every changed file matches `reviews.light_paths`
     Docs,
+    /// The project manager tagged it light and it changes this many lines,
+    /// within `reviews.light_max_lines`
+    Pm {
+        /// The lines it adds plus the lines it deletes
+        lines: u32,
+    },
 }
 
 /// Why a change gets the full count
@@ -68,6 +74,8 @@ impl fmt::Display for ReviewWeight {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Light(Lighter::Docs) => f.write_str("light (docs only)"),
+            Self::Light(Lighter::Pm { lines: 1 }) => f.write_str("light (PM, 1 line)"),
+            Self::Light(Lighter::Pm { lines }) => write!(f, "light (PM, {lines} lines)"),
             Self::Full(heavier) => write!(f, "full ({heavier})"),
         }
     }
@@ -117,6 +125,15 @@ mod tests {
         assert_eq!(shown(deep), "full (diff touched src/)");
         let root = full(Heavier::Touched("Makefile".into()));
         assert_eq!(shown(root), "full (diff touched Makefile)");
+    }
+
+    #[test]
+    fn a_project_manager_light_weight_reads_with_its_line_count() {
+        let pm = |lines| shown(ReviewWeight::Light(Lighter::Pm { lines }));
+        assert_eq!(pm(6), "light (PM, 6 lines)");
+        assert_eq!(pm(1), "light (PM, 1 line)");
+        assert_eq!(pm(0), "light (PM, 0 lines)");
+        assert!(ReviewWeight::Light(Lighter::Pm { lines: 6 }).is_light());
     }
 
     #[test]

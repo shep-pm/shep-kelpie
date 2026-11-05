@@ -13,6 +13,9 @@ const NEED: u32 = 2;
 /// The files a docs-only change touches, when the project names none
 const LIGHT_PATHS: [&str; 2] = ["**/*.md", "docs/**"];
 
+/// The most lines a change the project manager tagged light may alter
+const LIGHT_MAX_LINES: u32 = 10;
+
 /// How the review pass is sized
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -35,6 +38,15 @@ pub struct Reviews {
     /// that match `light_paths`. None when absent.
     #[serde(default)]
     pub full_paths: Vec<NonBlank>,
+    /// Whether a small change the project manager tagged light gets the
+    /// `light` count of reviewers too. Off when absent.
+    #[serde(default)]
+    pub pm_lightens: bool,
+    /// The most lines, added plus deleted, a change may alter and still get
+    /// the `light` count from the project manager's tag. At least 1. 10 when
+    /// absent.
+    #[serde(default = "default_light_max_lines")]
+    pub light_max_lines: NonZeroU32,
 }
 
 impl Reviews {
@@ -52,12 +64,18 @@ impl Default for Reviews {
             light: None,
             light_paths: default_light_paths(),
             full_paths: Vec::new(),
+            pm_lightens: false,
+            light_max_lines: default_light_max_lines(),
         }
     }
 }
 
 fn default_need() -> NonZeroU32 {
     NonZeroU32::new(NEED).expect("two is not zero")
+}
+
+fn default_light_max_lines() -> NonZeroU32 {
+    NonZeroU32::new(LIGHT_MAX_LINES).expect("ten is not zero")
 }
 
 fn default_light_paths() -> Vec<NonBlank> {
@@ -141,5 +159,23 @@ mod tests {
     fn a_zero_light_is_refused() {
         let err = parse("[app.dogs.kelpie.reviews]\nlight = 0\n").unwrap_err();
         assert!(err.contains("reviews") && err.contains("light"), "{err}");
+    }
+
+    #[test]
+    fn pm_lightens_is_off_and_light_max_lines_is_ten_when_absent_and_zero_lines_is_refused() {
+        let bare = parse("[app.dogs.kelpie.reviews]\n").unwrap();
+        assert!(!bare.reviews.pm_lightens);
+        assert_eq!(bare.reviews.light_max_lines.get(), 10);
+
+        let set =
+            parse("[app.dogs.kelpie.reviews]\npm_lightens = true\nlight_max_lines = 25\n").unwrap();
+        assert!(set.reviews.pm_lightens);
+        assert_eq!(set.reviews.light_max_lines.get(), 25);
+
+        let err = parse("[app.dogs.kelpie.reviews]\nlight_max_lines = 0\n").unwrap_err();
+        assert!(
+            err.contains("reviews") && err.contains("light_max_lines"),
+            "{err}"
+        );
     }
 }
