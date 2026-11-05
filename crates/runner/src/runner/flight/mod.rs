@@ -584,6 +584,12 @@ impl Runner {
             saved?;
             return Ok(Ended::Recorded(None));
         }
+        // A turn the API refuses for spent credit or a spent limit tells the
+        // board and moves its work item on, with no ruling.
+        if let Some(handed) = self.hand_off_refused(ticket, &result)? {
+            self.flights.flying.remove(&ticket);
+            return Ok(Ended::Recorded(Some(handed)));
+        }
         let again = self.flights.flying.get(&ticket).is_some_and(|f| f.again);
         if !again && matches!(result, Err(AgentError::NoSession(..))) {
             if let Some((call, began)) =
