@@ -164,6 +164,28 @@ pub fn registries(managers: &[&PackageManager]) -> Vec<&'static str> {
     hosts
 }
 
+/// The caches a worker's tools write on every build and install, which the home's copies refuse
+///
+/// They are set whatever the worktree keeps: a project with no lockfile yet, or one below the
+/// folders `found_in` reads, still runs its first install or build in the fence.
+const ALWAYS: [&str; 6] = [
+    "GOCACHE",
+    "BUN_INSTALL_CACHE_DIR",
+    "PNPM_CONFIG_STORE_DIR",
+    "PNPM_CONFIG_CACHE_DIR",
+    "PNPM_CONFIG_STATE_DIR",
+    "XDG_RUNTIME_DIR",
+];
+
+/// The caches every worker gets, whatever its worktree keeps, each once
+pub fn always_caches() -> Vec<(&'static str, &'static str)> {
+    let all: Vec<&PackageManager> = MANAGERS.iter().collect();
+    caches(&all)
+        .into_iter()
+        .filter(|(name, _)| ALWAYS.contains(name))
+        .collect()
+}
+
 /// The cache variables of `managers`, each once, with the folder of the build folder it names
 pub fn caches(managers: &[&PackageManager]) -> Vec<(&'static str, &'static str)> {
     let mut caches: Vec<(&'static str, &'static str)> = Vec::new();

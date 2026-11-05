@@ -117,12 +117,13 @@ impl Ecosystem {
     }
 
     // The variables a worker's settings point into the build folder for this project: the
-    // caches of its manager, as `Worker::build_env_in` gives them.
+    // caches every worker gets and those of its manager, as `Worker::build_env_in` gives them.
     fn build_env(self) -> BTreeMap<EnvName, BuildDir> {
         let managers: Vec<_> = (package_managers::MANAGERS.iter())
             .filter(|m| m.name == self.manager())
             .collect();
-        (package_managers::caches(&managers).into_iter())
+        (package_managers::always_caches().into_iter())
+            .chain(package_managers::caches(&managers))
             .map(|(name, dir)| {
                 (
                     EnvName::try_from(name.to_owned()).unwrap(),

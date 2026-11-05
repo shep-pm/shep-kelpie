@@ -46,6 +46,7 @@ fn build_env_in_gives_the_caches_of_the_managers_the_worktree_keeps() {
     assert_eq!(
         folders,
         [
+            ("BUN_INSTALL_CACHE_DIR", "bun-cache"),
             ("GOCACHE", "go-build"),
             ("GOMODCACHE", "go-mod"),
             ("NPM_CONFIG_STORE_DIR", "pnpm-store"),
@@ -57,9 +58,24 @@ fn build_env_in_gives_the_caches_of_the_managers_the_worktree_keeps() {
     );
 }
 
+// A project with no lockfile yet, or one below the folders the table reads, still runs its
+// first install or build in the fence.
 #[test]
-fn a_worktree_that_keeps_no_manager_gets_no_cache() {
-    assert!(build_env_in(EXAMPLE, &["README.md"]).is_empty());
+fn a_worktree_that_keeps_no_manager_still_gets_the_caches_the_fence_needs() {
+    let env = build_env_in(EXAMPLE, &["README.md"]);
+
+    let names: Vec<_> = env.keys().map(String::as_str).collect();
+    assert_eq!(
+        names,
+        [
+            "BUN_INSTALL_CACHE_DIR",
+            "GOCACHE",
+            "PNPM_CONFIG_CACHE_DIR",
+            "PNPM_CONFIG_STATE_DIR",
+            "PNPM_CONFIG_STORE_DIR",
+            "XDG_RUNTIME_DIR",
+        ]
+    );
 }
 
 #[test]

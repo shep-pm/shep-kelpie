@@ -108,17 +108,24 @@ fn a_workers_call_carries_the_caches_of_its_worktrees_managers() {
             "{name}"
         );
     }
-    assert!(
-        !env.contains_key("BUN_INSTALL_CACHE_DIR"),
-        "bun is not kept"
-    );
+    assert!(!env.contains_key("NPM_CONFIG_CACHE"), "npm is not kept");
 }
 
 #[test]
-fn a_worktree_that_keeps_no_manager_carries_no_manager_cache() {
-    let (env, _) = first_turn_env(&["README.md"], "{}");
+fn a_worktree_that_keeps_no_manager_still_carries_the_caches_the_fence_needs() {
+    let (env, build) = first_turn_env(&["README.md"], "{}");
 
-    for name in ["GOCACHE", "BUN_INSTALL_CACHE_DIR", "PNPM_CONFIG_STORE_DIR"] {
+    for (name, folder) in [
+        ("GOCACHE", "go-build"),
+        ("PNPM_CONFIG_STORE_DIR", "pnpm-store"),
+    ] {
+        assert_eq!(
+            env[name],
+            build.join(folder).display().to_string(),
+            "{name}"
+        );
+    }
+    for name in ["GOMODCACHE", "NPM_CONFIG_CACHE"] {
         assert!(!env.contains_key(name), "{name}");
     }
 }

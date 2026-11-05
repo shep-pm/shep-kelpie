@@ -595,12 +595,15 @@ pub enum HookEvent {
 
 impl Worker {
     /// The variables the worker's commands point into the build folder for `worktree`: the
-    /// caches of the package managers it keeps files for, under the project's own `build_env`
+    /// caches every worker needs, those of the package managers it keeps files for, and the
+    /// project's own `build_env` over them
     ///
     /// The table only adds what it lists, so a `build_env` entry of the same name wins.
     pub fn build_env_in(&self, worktree: &Path) -> BTreeMap<EnvName, BuildDir> {
         let found = crate::package_managers::found_in(worktree);
-        let table = crate::package_managers::caches(&found).into_iter();
+        let table = crate::package_managers::always_caches()
+            .into_iter()
+            .chain(crate::package_managers::caches(&found));
         let mut env: BTreeMap<EnvName, BuildDir> = table
             .filter_map(|(name, folder)| {
                 let name = EnvName::try_from(name.to_owned()).ok()?;

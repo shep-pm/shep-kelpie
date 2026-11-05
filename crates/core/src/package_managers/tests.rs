@@ -88,3 +88,16 @@ fn a_cache_variable_is_named_once_whatever_managers_name_it() {
     assert!(names.contains(&"NPM_CONFIG_CACHE"));
     assert!(names.contains(&"NPM_CONFIG_STORE_DIR"));
 }
+
+#[test]
+fn the_caches_every_worker_gets_are_each_a_cache_of_the_table() {
+    let always = always_caches();
+
+    let names: Vec<_> = always.iter().map(|(name, _)| *name).collect();
+    assert_eq!(names.len(), ALWAYS.len(), "{names:?}");
+    assert!(names.contains(&"GOCACHE") && names.contains(&"XDG_RUNTIME_DIR"));
+    assert!(
+        !names.contains(&"GOMODCACHE"),
+        "the home's module cache is read, not written"
+    );
+}
