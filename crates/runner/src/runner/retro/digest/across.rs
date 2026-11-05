@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
-use super::{Records, mine};
+use super::{Records, mine, rounds_read};
 use crate::runner::retro::flakes;
 use crate::runner::retro::journal::{Entry, Stamped};
 use crate::ticket::TicketId;
@@ -56,9 +56,7 @@ fn conflicts(out: &mut String, items: &[(TicketId, Vec<&Stamped>)]) {
 fn rounds(out: &mut String, items: &[(TicketId, Vec<&Stamped>)]) {
     let _ = writeln!(out, "- Review rounds per work item:");
     for (issue, mine) in items {
-        let read = (mine.iter())
-            .filter(|s| matches!(s.entry, Entry::Round { .. }))
-            .count();
+        let read = rounds_read(mine).count();
         let passed_over = (mine.iter())
             .filter(|s| matches!(s.entry, Entry::ReviewerSkipped { .. }))
             .count();

@@ -77,8 +77,8 @@ fn prompt(
          1. Patterns across the batch: project manager wakes that repeat for one cause, \
          rulings that waited, review findings that were stale or wrong, steps that cost more \
          than the work they did, the files the work items conflicted on most, and review \
-         findings that only a late round found. For a late finding, say its cause where you \
-         can tell (stale base, wording, lifecycle, security).\n\
+         findings first found in the third round read or beyond. For a late finding, say its \
+         cause where you can tell (stale base, wording, lifecycle, security).\n\
          2. Problems in a single work item.\n\
          3. If nothing is worth the maintainer's time, say so in a sentence and write nothing else.\n\
          4. A `## {}` section, last, with one bullet for each new problem, \

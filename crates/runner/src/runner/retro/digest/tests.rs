@@ -547,7 +547,10 @@ fn a_finding_after_two_passed_over_rounds_is_not_late() {
         assert!(item.contains(expected), "{expected}: {item}");
     }
     let table = section(&digest, "## Across the batch");
-    assert!(table.contains("  - #11: 3 read, 2 passed over\n"), "{table}");
+    assert!(
+        table.contains("  - #11: 3 read, 2 passed over\n"),
+        "{table}"
+    );
 }
 
 #[test]
