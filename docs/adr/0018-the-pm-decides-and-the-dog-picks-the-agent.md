@@ -71,7 +71,7 @@ So the roles that decide are cut to one, the project manager, and choosing an ag
 - `reviews.need` stays the full count. `reviews.light` is the count of a light review, `need` when absent and never above `need`.
 - A review is light when no changed file is forced full and either every changed file matches `reviews.light_paths` (`["**/*.md", "docs/**"]` when absent), or `reviews.pm_lightens` is on, the project manager tagged the pick light and the change is at most `reviews.light_max_lines` lines (10 when absent). `pm_lightens` is off when absent.
 - Forced full: CI workflow files, dependency manifests and lockfiles, agent files, a `reviews.full_paths` match (none when absent) and an adopted pull request. A forced-full file beats the project manager's tag.
-- A light item's reviewer asks sit at tier `light`, so the project manager's tier no longer rules out a cheaper reviewer. A HIGH finding, or a fix that leaves the light paths, turns the review full for the rest of the item.
+- A light item's reviewer asks sit at tier `light`, so the project manager's tier no longer rules out a cheaper reviewer. The diff is weighed again before each round, so a fix that takes a docs-only change out of the light paths makes the review full while it stays out. A HIGH finding makes it full for the rest of the item.
 
 ## Considered options
 

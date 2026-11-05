@@ -222,8 +222,9 @@ file is forced full (CI files, manifests and lockfiles, agent files,
 `reviews.full_paths`, an adopted pull request) and every file matches
 `reviews.light_paths`, or the project manager tagged the pick light, the
 project set `reviews.pm_lightens` and the change is at most
-`reviews.light_max_lines` lines. Its reviewer asks sit at tier `light`. A HIGH
-finding, or a fix that leaves the light paths, makes the review full again.
+`reviews.light_max_lines` lines. Its reviewer asks sit at tier `light`. The
+diff is weighed again each round, and a HIGH finding makes the review full for
+the rest of the item.
 _Avoid_: quick review, skip review, docs review
 
 **Review bot**:
