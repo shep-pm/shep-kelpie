@@ -99,6 +99,41 @@ pub enum ForgeError {
     },
 }
 
+impl ForgeError {
+    /// Whether asking again later may succeed with nothing changed
+    ///
+    /// A failed call passes when `gh` reported the forge's own answer of 5xx or
+    /// worse, which it prints as `HTTP 502: Bad Gateway (https://…)` or at the
+    /// end of its own line, `(HTTP 502)`. A write that answered so may have
+    /// landed all the same, so only a read is asked again on this.
+    pub fn passes(&self) -> bool {
+        match self {
+            Self::Failed(said) => printed_status(said).is_some_and(|status| status >= 500),
+            Self::AppBusy(_) | Self::Limited { .. } | Self::Held(_) => true,
+            Self::Spawn(_)
+            | Self::Unreadable(_)
+            | Self::LocalPath { .. }
+            | Self::Hook { .. }
+            | Self::App(_)
+            | Self::NoPermission(_)
+            | Self::NoIssue { .. } => false,
+        }
+    }
+}
+
+// The status `gh` printed for a failed call's answer, of which the last is the
+// one its own line names
+fn printed_status(said: &str) -> Option<u16> {
+    (said.match_indices("HTTP ").filter_map(|(at, mark)| {
+        let (first, last) = (at + mark.len(), at + mark.len() + 3);
+        let code = said.get(first..last)?;
+        code.bytes()
+            .all(|b| b.is_ascii_digit())
+            .then(|| code.parse().ok())?
+    }))
+    .last()
+}
+
 impl fmt::Display for ForgeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -144,6 +179,26 @@ mod tests {
         for none in ["", "Wed, 21 Oct 2026 07:28:00 GMT", "%header{retry-after}"] {
             assert_eq!(Cooldown::read(none, none), Cooldown::default(), "{none:?}");
         }
+    }
+
+    #[test]
+    fn a_failure_naming_a_5xx_status_passes_and_a_4xx_does_not() {
+        for (said, passes) in [
+            (
+                "HTTP 502: 502 Bad Gateway (https://api.github.com/graphql)",
+                true,
+            ),
+            ("gh: Bad Gateway (HTTP 502)", true),
+            ("gh: Not Found (HTTP 404)", false),
+            ("no issue #7", false),
+        ] {
+            assert_eq!(ForgeError::Failed(said.into()).passes(), passes, "{said}");
+        }
+        assert!(ForgeError::AppBusy("GitHub is not answering".into()).passes());
+        assert!(
+            !ForgeError::Unreadable("HTTP 502".into()).passes(),
+            "an answer that was not gh's own"
+        );
     }
 
     #[test]

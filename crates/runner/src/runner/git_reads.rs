@@ -452,9 +452,11 @@ impl Runner {
 
     /// The job that installs the packages of the focused work item's worktree in the worker's
     /// sandbox, or none when the worktree needs none, the step's earlier ask kept the answer, an
-    /// earlier install ran, no pass runs to make it, or the worktree is not made
+    /// earlier install ran, no pass runs to make it, the worktree is not made, or the turn's
+    /// opening read failed
     ///
-    /// The install follows the worktree's making, which the step's `preparing` job kept.
+    /// The install follows the worktree's making, which the step's `preparing` job kept. It
+    /// belongs to the turn that starts its call, which is where a failed install is told.
     pub(in crate::runner) fn installing(&self) -> Option<Begin> {
         let item = self.current().filter(|item| {
             self.reads.git.installed.is_none() && !self.install_ran.contains(&item.issue)
@@ -463,8 +465,14 @@ impl Runner {
             return None;
         }
         let plan = install::worktree(&item.worktree, &item.build)?;
+        let started = self.reads.started(item.issue);
+        // The issue a first turn is prompted with: one whose read failed starts no call, so its
+        // install waits for the step that can, where its own failure reaches the prompt.
+        if matches!(started.issue(), Some(Err(_))) {
+            return None;
+        }
         // The token the turn's start read; a turn that failed to get one fails in its call.
-        let Some(Ok(token)) = self.reads.started(item.issue).token() else {
+        let Some(Ok(token)) = started.token() else {
             return None;
         };
         let mut reach = self
