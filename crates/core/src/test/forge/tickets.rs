@@ -49,6 +49,9 @@ impl Tickets for FakeForge {
         self.issue_reads.fetch_add(1, Ordering::SeqCst);
         self.ask()?;
         self.wait_if_held(held::At::Issue);
+        if let Some(error) = self.issue_errors.lock().unwrap().get(&number) {
+            return Err(error.clone());
+        }
         if self.missing.lock().unwrap().contains(&number) {
             return Err(ForgeError::Failed(format!("no issue #{number}")));
         }

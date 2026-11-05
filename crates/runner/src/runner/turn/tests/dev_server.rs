@@ -45,7 +45,9 @@ fn try_planned(rig: &Rig, edit: impl FnOnce(&Path)) -> Result<(Option<DevRun>, S
     let item = runner.current().expect("an item").clone();
     edit(&item.worktree);
     let session = Session::Resume(item.session.clone());
-    let call = runner.worker_call(&item, session, Some("again".into()), None, true)?;
+    let call = runner
+        .worker_call(&item, session, Some("again".into()), None, true)
+        .map_err(|e| e.why().to_owned())?;
     let told = fs::read_to_string(call.instructions.as_ref().unwrap()).unwrap();
     // The browser may open nothing until the server answers.
     assert_eq!(runner.dev_gate(ticket(7)).get(), None);

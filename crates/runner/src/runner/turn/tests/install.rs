@@ -201,6 +201,88 @@ fn a_failed_install_is_a_logged_step_and_the_first_prompt_names_it() {
     );
 }
 
+// The turn's opening read answering 5xx holds the turn back rather than park it
+// (turn/tests/mod.rs). Its install waits for the step that can start its call,
+// so it runs once and its outcome is still logged.
+#[test]
+fn an_install_waits_for_a_turn_whose_opening_read_failed() {
+    let rig = Rig::new("shep");
+    rig.land("bun.lock", "");
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.claude.script([Scripted::Say("done")]);
+    rig.forge
+        .set_issue_read_error(7, ForgeError::Failed(DOWN.into()));
+
+    let report = step(&runner).unwrap();
+    assert!(
+        matches!(
+            &report,
+            Some(StepReport::GateFailed { issue, .. }) if *issue == ticket(7)
+        ),
+        "{report:?}"
+    );
+    assert!(
+        rig.tests.ran().is_empty(),
+        "the install ran for a turn that starts no call"
+    );
+    assert!(
+        steps(&runner).is_empty(),
+        "an install was logged that never ran"
+    );
+
+    rig.forge.let_issue_read(7);
+    rig.clock.advance(15);
+    assert!(
+        matches!(step(&runner).unwrap(), Some(StepReport::Ended { .. })),
+        "the held turn never went on"
+    );
+    assert_eq!(rig.tests.ran().len(), 1, "the install ran twice");
+    let installs = steps(&runner)
+        .iter()
+        .filter(|s| s["step"] == "packages-installed")
+        .count();
+    assert_eq!(installs, 1);
+}
+
+// The install's own failure reaches the worker's prompt, which is where kelpie
+// tells it that the packages are missing. A turn held back by a 5xx must not
+// spend the install that its next look has no answer for.
+#[test]
+fn a_failed_install_before_a_held_turn_is_told_when_the_turn_starts() {
+    let rig = Rig::new("shep");
+    rig.land("bun.lock", "");
+    rig.tests.script(vec![TestOutcome::Failed {
+        output: "error: lockfile had changes, but lockfile is frozen".to_owned(),
+    }]);
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.claude.script([Scripted::Say("done")]);
+    rig.forge
+        .set_issue_read_error(7, ForgeError::Failed(DOWN.into()));
+
+    assert!(
+        matches!(step(&runner).unwrap(), Some(StepReport::GateFailed { .. })),
+        "the 5xx did not hold the turn back"
+    );
+    assert!(rig.claude.seen().is_empty(), "the worker started anyway");
+
+    rig.forge.let_issue_read(7);
+    rig.clock.advance(15);
+    assert!(
+        matches!(step(&runner).unwrap(), Some(StepReport::Ended { .. })),
+        "the held turn never went on"
+    );
+    let [seen] = rig.claude.seen().try_into().unwrap();
+    assert!(
+        seen.call
+            .prompt
+            .contains("lockfile had changes, but lockfile is frozen"),
+        "{}",
+        seen.call.prompt
+    );
+}
+
 #[test]
 fn an_install_that_did_not_start_or_ran_too_long_fails_with_its_reason() {
     for (outcome, said) in [

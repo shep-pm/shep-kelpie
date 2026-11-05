@@ -186,8 +186,16 @@ impl FakeForge {
     }
 
     /// Lets reads of `number` through again after [`Self::fail_issue_reads_after`]
+    /// or [`Self::set_issue_read_error`]
     pub fn let_issue_read(&self, number: u64) {
         self.unread.lock().unwrap().remove(&number);
+        self.issue_errors.lock().unwrap().remove(&number);
+    }
+
+    /// Makes every read of `number` fail with `error`, as the forge answers it,
+    /// until [`Self::let_issue_read`]
+    pub fn set_issue_read_error(&self, number: u64, error: ForgeError) {
+        self.issue_errors.lock().unwrap().insert(number, error);
     }
 
     /// Makes listing and opening issues fail, or work again
