@@ -186,6 +186,18 @@ per_item_usd = 10
 # so the next pick takes its place.
 # [app.dogs.kelpie.reviews]
 # need = 2
+# How many reviewers read a work item that changes only docs, never more than
+# `need`. `need` when absent, which weighs nothing. Below `need`, a pull
+# request whose every changed file matches `light_paths` gets this many, and
+# the agent board's pick for it asks for tier `light`.
+# light = 1
+# The files a docs-only change touches, globs as a reviewer's `paths` are.
+# `["**/*.md", "docs/**"]` when absent; `[]` never lightens a review.
+# light_paths = ["**/*.md", "docs/**"]
+# Globs of files that always get `need` reviewers, beside a docs-only change
+# too. A workflow, a lockfile or manifest, a harness's own file, an adopted
+# pull request and a diff that names no file always do. None when absent.
+# full_paths = ["docs/adr/**"]
 
 # Turn `enabled` off for a stretch when usage limits do not matter: neither
 # the daily allowance nor the 5-hour window then holds anything, and `status`

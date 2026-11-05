@@ -23,6 +23,8 @@ use crate::settings::{AgentName, ListedReviewer, NonBlank};
 use crate::state::StateError;
 use crate::work_item::{BotSkipped, Phase, Review, WorkItem};
 
+mod weight;
+
 /// What a round's step does about who reads it
 pub(super) enum Chosen {
     /// This reviewer reads
@@ -57,6 +59,15 @@ impl Runner {
             Ok(due) => due,
             Err(reason) => return Ok(Chosen::Failed(reason)),
         };
+        if let Some(item) = self.current() {
+            match self.weigh(item, worktree, base) {
+                Err(reason) => return Ok(Chosen::Failed(reason)),
+                Ok(weight) if weight != item.weight => {
+                    self.update(|item| item.weight = weight)?;
+                }
+                Ok(_) => {}
+            }
+        }
         let Some(item) = self.current().filter(|_| !self.enough_read(review)) else {
             return Ok(Chosen::Ended);
         };
@@ -66,7 +77,10 @@ impl Runner {
         let left_out = self.left_out_of(review);
         let ask = PickAsk {
             kind: item.kind.clone(),
-            tier: item.tier,
+            tier: item
+                .weight
+                .as_ref()
+                .map_or(item.tier, |w| w.tier(item.tier)),
             pin: None,
             slack: Some(self.slack(item.slack)),
             agents: due.iter().map(|r| r.name.clone()).collect(),
@@ -154,7 +168,8 @@ impl Runner {
 
     // Whether `reviews.need` reviewers have read in `review`'s pass.
     fn enough_read(&self, review: &Review) -> bool {
-        self.current().is_some() && self.reads(review) >= self.settings.reviews.need.get()
+        let enough = |item: &WorkItem| self.reads(review) >= self.need_of(item);
+        self.current().is_some_and(enough)
     }
 
     // How many reviewers have read in `review`'s pass: those whose round ran,
@@ -201,10 +216,7 @@ impl Runner {
         if review.unread {
             return Some(joined(self.missed(item, review, true)));
         }
-        let (reads, need) = (
-            self.reads_in(item, review),
-            self.settings.reviews.need.get(),
-        );
+        let (reads, need) = (self.reads_in(item, review), self.need_of(item));
         if review.bots_only || reads >= need {
             return None;
         }
@@ -281,9 +293,11 @@ impl Runner {
         let ran = self.ran_of(&review);
         let next = Review { ran, ..review }.next_round();
         let base = item.review_base(self.item_base(item));
+        // The fix turn that just ended may have changed what the diff touches.
+        let item = &self.reweighed(item, &base);
         // A diff git could not take is the next round's step to report, and a
         // pass no reviewer read ends in a step of its own, which says so.
-        let enough = self.reads_in(item, &next) >= self.settings.reviews.need.get();
+        let enough = self.reads_in(item, &next) >= self.need_of(item);
         let over = enough
             || self
                 .due(&next, &item.worktree, &base)
@@ -389,7 +403,7 @@ pub(in crate::runner) fn touches(paths: &[NonBlank], changed: &[String]) -> bool
 
 /// Whether `path` matches `glob`: `*` and `?` stay inside one folder,
 /// `**` spans folders, and `**/` may match none
-fn matches(glob: &str, path: &str) -> bool {
+pub(super) fn matches(glob: &str, path: &str) -> bool {
     matches_bytes(glob.as_bytes(), path.as_bytes())
 }
 

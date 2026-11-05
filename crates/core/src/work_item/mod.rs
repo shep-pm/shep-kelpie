@@ -26,6 +26,7 @@ mod talked;
 mod tally;
 mod threads;
 mod timings;
+mod weight;
 
 pub use bots::BotSkipped;
 pub use disputes::Dispute;
@@ -39,6 +40,7 @@ pub use talked::{TALK_ROUNDS, Talked};
 pub use tally::{CiFailures, Counts, RoleTally, Tally};
 pub use threads::ThreadAnswer;
 pub use timings::{CallKind, Seconds, Split, TimingPhase, Timings};
+pub use weight::{Heavier, Lighter, ReviewWeight};
 
 /// The work item in flight
 // wire format: changing this is a breaking change to the state file
@@ -141,6 +143,11 @@ pub struct WorkItem {
     /// The minutes past its quickest finish the project manager's pick allows it
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slack: Option<u32>,
+    /// How much review its pull request gets, once a round has weighed its
+    /// change. None until then, and for a project whose `reviews.light` is
+    /// not below `reviews.need`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<ReviewWeight>,
     /// The implementers it was handed off from, oldest first, which the
     /// agent board leaves out of every later pick for it
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -502,6 +509,7 @@ impl WorkItem {
             kind: None,
             tier: None,
             slack: None,
+            weight: None,
             left: Vec::new(),
             handoff: None,
             session,

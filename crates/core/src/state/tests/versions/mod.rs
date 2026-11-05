@@ -880,6 +880,7 @@ fn a_version_53_file_loads_with_no_disputes_and_saves_at_the_current_version() {
 mod handed_off;
 mod picked;
 mod tickets;
+mod weighed;
 
 // A version 74 file has no `disputed` or `deferred` on a work item's counts:
 // none were. Each saves once above 0 and is left out at 0.

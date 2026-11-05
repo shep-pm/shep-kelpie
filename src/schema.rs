@@ -228,6 +228,9 @@ mod tests {
                 "# [app.dogs.kelpie.reviews]\n# need = 2",
                 "[app.dogs.kelpie.reviews]\nneed = 2",
             )
+            .replace("# light = 1", "light = 1")
+            .replace("# light_paths =", "light_paths =")
+            .replace("# full_paths =", "full_paths =")
             .replace("# maintainer =", "maintainer =")
             .replace("# base =", "base =")
             .replace(

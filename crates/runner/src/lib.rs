@@ -29,7 +29,7 @@ use shep_kelpie_protocol::{reply, request, status};
 
 // The leaf crates, each module kept under the name it had here
 use shep_kelpie_facts::{mcp_use, request_use, tool_error};
-use shep_kelpie_process::{spawn, terminal, worktree};
+use shep_kelpie_process::{spawn, terminal, workflows, worktree};
 #[cfg(test)]
 use shep_kelpie_trim::trim;
 use shep_kelpie_worker_folder::worker_folder;
