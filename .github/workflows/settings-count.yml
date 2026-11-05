@@ -1,0 +1,25 @@
+name: settings count
+# Fewer settings: the count of keys in settings.example.toml and
+# kelpie-settings.example.toml may not pass their lines in
+# .github/settings-baseline.txt. A pull request that adds a key runs
+# `python3 scripts/settings-count.py --update` and says why the project
+# manager cannot decide it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  settings-count:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 -I scripts/test_settings_count.py
+      - run: python3 -I scripts/settings-count.py
