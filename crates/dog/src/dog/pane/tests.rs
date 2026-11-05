@@ -65,8 +65,12 @@ fn two_runners() -> FakeShepherd {
     shepherd
 }
 
+async fn client(shepherd: &FakeShepherd) -> Arc<dyn Connection> {
+    Arc::new(shepherd.connect().await)
+}
+
 async fn seen(shepherd: &FakeShepherd) -> Seen {
-    let client = shepherd.connect().await;
+    let client = client(shepherd).await;
     tokio::time::timeout(CALL_PATIENCE, Seen::look(&client))
         .await
         .expect("the look neither ended nor failed in time")
@@ -140,16 +144,19 @@ async fn a_ruling_row_is_keyed_by_project_and_id() {
     assert_eq!(Pane::read(&body).unwrap().sections, pane.sections);
 }
 
-// What the pane's action sent the runners, the reads of `status` left out.
+// What the pane's action sent the runners, the reads of `status` left out, by runner:
+// the triggers go out at once, so the order they arrive in is not one to assert.
 fn sent(shepherd: &mut FakeShepherd) -> Vec<Request> {
     let mut writes = shepherd.writes();
     writes.retain(|r| matches!(r, Request::Trigger { action, .. } if action != "status"));
+    writes.sort_by_key(|r| format!("{r:?}"));
     writes
 }
 
 async fn done(shepherd: &FakeShepherd, action: &str, params: Option<&str>) -> Value {
-    let client = shepherd.connect().await;
-    let body = tokio::time::timeout(CALL_PATIENCE, perform(&client, action, params))
+    let client = client(shepherd).await;
+    let by = Instant::now() + CALL_PATIENCE;
+    let body = tokio::time::timeout(CALL_PATIENCE, perform(&client, action, params, by))
         .await
         .expect("the action neither ended nor failed in time");
     serde_json::from_str(&body).unwrap()
@@ -267,4 +274,53 @@ async fn pause_names_a_runner_that_did_not_drain() {
         said,
         json!({ "draining": ["koji"], "failed": { "rotom": "no drain now" } })
     );
+}
+
+#[tokio::test]
+async fn pause_tries_a_runner_whose_status_cannot_be_read() {
+    let mut shepherd = two_runners();
+    // rotom is in the flock, and answers nothing: its status read and its drain both time out.
+    shepherd.replies("rotom", &[None]);
+
+    let said = done(&shepherd, "pause", None).await;
+
+    assert_eq!(
+        said,
+        json!({ "draining": ["koji"], "failed": { "rotom": "TimedOut" } })
+    );
+    assert_eq!(
+        sent(&mut shepherd),
+        [
+            trigger("koji", "drain", None),
+            trigger("rotom", "drain", None)
+        ]
+    );
+}
+
+#[tokio::test]
+async fn rule_names_a_runner_whose_status_cannot_be_read() {
+    let mut shepherd = two_runners();
+    shepherd.replies("koji", &[None]);
+
+    let said = done(&shepherd, "rule", Some(r##"{"row":"koji#73"}"##)).await;
+
+    let error = said["error"].as_str().expect("koji could not be asked");
+    assert!(error.contains("koji's status could not be read"), "{error}");
+    assert_eq!(sent(&mut shepherd), []);
+}
+
+#[tokio::test]
+async fn an_action_the_handler_gave_up_on_is_not_sent() {
+    let mut shepherd = two_runners();
+    let client = client(&shepherd).await;
+    let gone = Instant::now() - Duration::from_secs(1);
+
+    for (action, params) in [("pause", None), ("rule", Some(r##"{"row":"koji#73"}"##))] {
+        let said = perform(&client, action, params, gone).await;
+        let said: Value = serde_json::from_str(&said).unwrap();
+        let error = said["error"].as_str().expect("the action was refused");
+        assert!(error.contains("was not begun in time"), "{error}");
+    }
+
+    assert_eq!(shepherd.writes(), []);
 }

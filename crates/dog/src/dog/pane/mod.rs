@@ -6,10 +6,10 @@
 //! `pause`, are done by that task: it looks at the runners afresh, sends the
 //! triggers, and the handler waits for what came of them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use shep_client::ReconnectingClient;
@@ -17,6 +17,7 @@ use shep_client::dogs::{Destructive, Pane, Row};
 use shep_client::shep_core::protocol::request::{ActionOutcome, Response};
 use shep_client::shep_core::protocol::{Request, SelectorSpec};
 use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 use tokio::time::MissedTickBehavior;
 
 use crate::shepherd::Connection;
@@ -36,6 +37,8 @@ const ACT_PATIENCE: Duration = Duration::from_secs(20);
 #[derive(Debug, Default, Clone)]
 pub(super) struct Seen {
     runners: BTreeMap<String, Value>,
+    /// The kelpie sheep whose `status` could not be read, and why
+    unread: BTreeMap<String, String>,
 }
 
 /// The cache, shared between the task that fills it and the handlers that read it
@@ -53,6 +56,8 @@ pub(super) struct Forward {
 pub(super) struct Pending {
     action: String,
     params: Option<String>,
+    /// When the handler gives up: an action not begun by then is never begun
+    by: Instant,
     done: std_mpsc::Sender<String>,
 }
 
@@ -65,12 +70,12 @@ pub(super) fn lock(seen: &Shared) -> MutexGuard<'_, Seen> {
 }
 
 impl Seen {
-    /// Every runner of kelpie's that answers `status` now
+    /// Every runner of kelpie's, read for `status` all at once
     ///
     /// # Errors
     ///
     /// A message when the shepherd cannot say which sheep are kelpie's.
-    pub(super) async fn look(client: &dyn Connection) -> Result<Self, String> {
+    pub(super) async fn look(client: &Arc<dyn Connection>) -> Result<Self, String> {
         let dog = super::NAME.to_owned();
         let reply = client.request(Request::DogSheepSettings { dog }).await;
         let projects = match reply {
@@ -78,32 +83,42 @@ impl Seen {
             Ok(other) => return Err(format!("the sheep's tables came back as {other:?}")),
             Err(e) => return Err(format!("cannot read the sheep's tables: {e}")),
         };
-        let mut runners = BTreeMap::new();
-        for project in projects.into_keys() {
-            if let Some(status) = status_of(client, &project).await {
-                runners.insert(project, status);
-            }
+        let asks: Vec<_> = projects
+            .into_keys()
+            .map(|project| Forward {
+                project,
+                action: "status",
+                params: None,
+            })
+            .collect();
+        let projects: Vec<_> = asks.iter().map(|ask| ask.project.clone()).collect();
+        let mut seen = Self::default();
+        for (project, said) in projects.into_iter().zip(trigger_all(client, asks).await) {
+            match said.and_then(status_in) {
+                Ok(status) => seen.runners.insert(project, status).map(drop),
+                Err(why) => seen.unread.insert(project, why).map(drop),
+            };
         }
-        Ok(Self { runners })
+        Ok(seen)
+    }
+
+    // Every runner the pane knows of, one it could not read too: a drain is tried on each.
+    fn projects(&self) -> BTreeSet<&String> {
+        self.runners.keys().chain(self.unread.keys()).collect()
     }
 }
 
-// A runner that is down, or answers with a refusal, is left out of the pane.
-async fn status_of(client: &dyn Connection, project: &str) -> Option<Value> {
-    let request = Request::Trigger {
-        selector: SelectorSpec::Name(project.to_owned()),
-        action: "status".into(),
-        params: None,
+// A runner that is down, or answers with a refusal, is not a status the pane can draw.
+fn status_in(said: ActionOutcome) -> Result<Value, String> {
+    let ActionOutcome::Replied { body } = said else {
+        return Err(format!("{said:?}"));
     };
-    let Ok(Response::Triggered(rows)) = client.request(request).await else {
-        return None;
-    };
-    let Some(ActionOutcome::Replied { body }) = rows.into_iter().next().map(|row| row.outcome)
-    else {
-        return None;
-    };
-    let status: Value = serde_json::from_str(&body).ok()?;
-    status["project"].is_string().then_some(status)
+    let status: Value = serde_json::from_str(&body).map_err(|_| body.clone())?;
+    match (status["error"].as_str(), status["project"].is_string()) {
+        (Some(why), _) => Err(why.to_owned()),
+        (None, true) => Ok(status),
+        (None, false) => Err(format!("answered `status` with {body}")),
+    }
 }
 
 fn text<'a>(value: &'a Value, key: &str) -> &'a str {
@@ -192,14 +207,15 @@ pub(super) fn act(seen: &Seen, action: &str, params: Option<&str>) -> (String, V
             Err(why) => refused(why),
         },
         "pause" => {
-            let forwards = (seen.runners.keys())
+            let projects = seen.projects();
+            let forwards = (projects.iter())
                 .map(|project| Forward {
-                    project: project.clone(),
+                    project: (*project).clone(),
                     action: "drain",
                     params: None,
                 })
                 .collect::<Vec<_>>();
-            let body = json!({ "draining": seen.runners.keys().collect::<Vec<_>>() });
+            let body = json!({ "draining": projects });
             (body.to_string(), forwards)
         }
         other => refused(format!("unknown action `{other}`")),
@@ -213,6 +229,9 @@ fn ruling_of(seen: &Seen, params: Option<&str>) -> Result<(String, String, Strin
     let params: Value = serde_json::from_str(params.ok_or_else(unread)?).map_err(|_| unread())?;
     let row = params["row"].as_str().ok_or_else(unread)?;
     let (project, id) = row.rsplit_once('#').ok_or_else(unread)?;
+    if let Some(why) = seen.unread.get(project) {
+        return Err(format!("{project}'s status could not be read: {why}"));
+    }
     let status =
         (seen.runners.get(project)).ok_or_else(|| format!("no runner of {project} is seen"))?;
     list(status, "rulings")
@@ -222,28 +241,53 @@ fn ruling_of(seen: &Seen, params: Option<&str>) -> Result<(String, String, Strin
         .ok_or_else(|| format!("{project} has no waiting ruling {id}: it may be answered"))
 }
 
+/// Sends every trigger at once, and returns what each runner said, in the order given
+///
+/// Each waits on the shep client's own deadline, so the slowest bounds them all.
+async fn trigger_all(
+    client: &Arc<dyn Connection>,
+    triggers: Vec<Forward>,
+) -> Vec<Result<ActionOutcome, String>> {
+    let mut sent = JoinSet::new();
+    let count = triggers.len();
+    for (at, trigger) in triggers.into_iter().enumerate() {
+        let client = Arc::clone(client);
+        sent.spawn(async move {
+            let request = Request::Trigger {
+                selector: SelectorSpec::Name(trigger.project),
+                action: trigger.action.into(),
+                params: trigger.params,
+            };
+            let said = match client.request(request).await {
+                Ok(Response::Triggered(rows)) => (rows.into_iter().next())
+                    .map(|row| row.outcome)
+                    .ok_or_else(|| "no such runner is running".to_owned()),
+                Ok(other) => Err(format!("{other:?}")),
+                Err(e) => Err(e.to_string()),
+            };
+            (at, said)
+        });
+    }
+    let mut said: Vec<Option<Result<ActionOutcome, String>>> = (0..count).map(|_| None).collect();
+    while let Some(done) = sent.join_next().await {
+        if let Ok((at, one)) = done {
+            said[at] = Some(one);
+        }
+    }
+    (said.into_iter())
+        .map(|one| one.unwrap_or_else(|| Err("the request ended without an answer".to_owned())))
+        .collect()
+}
+
 /// Sends each trigger, and says for each what the runner made of it
-pub(super) async fn forward(client: &dyn Connection, forwards: Vec<Forward>) -> Vec<Sent> {
+pub(super) async fn forward(client: &Arc<dyn Connection>, forwards: Vec<Forward>) -> Vec<Sent> {
+    let named: Vec<_> = (forwards.iter())
+        .map(|f| (f.project.clone(), f.action))
+        .collect();
+    let said = trigger_all(client, forwards).await;
     let mut sent = Vec::new();
-    for Forward {
-        project,
-        action,
-        params,
-    } in forwards
-    {
-        let request = Request::Trigger {
-            selector: SelectorSpec::Name(project.clone()),
-            action: action.into(),
-            params,
-        };
-        let taken = match client.request(request).await {
-            Ok(Response::Triggered(rows)) => match rows.into_iter().next() {
-                Some(row) => taken(row.outcome),
-                None => Err("no such runner is running".to_owned()),
-            },
-            Ok(other) => Err(format!("{other:?}")),
-            Err(e) => Err(e.to_string()),
-        };
+    for ((project, action), said) in named.into_iter().zip(said) {
+        let taken = said.and_then(taken);
         if let Err(why) = &taken {
             println!("pane: {action} to {project} was not taken: {why}");
         }
@@ -292,12 +336,28 @@ fn settle(action: &str, body: String, sent: Vec<Sent>) -> String {
 /// Does a pane action against the runners as they are now, and says what came of it
 ///
 /// The runners are read afresh first, so a runner started since the last look is
-/// drained too, and a ruling answered since is refused by name.
-pub(super) async fn perform(client: &dyn Connection, action: &str, params: Option<&str>) -> String {
+/// drained too, and a ruling answered since is refused by name. Nothing is sent once
+/// `by` has passed, since the handler that asked has given up and said so.
+pub(super) async fn perform(
+    client: &Arc<dyn Connection>,
+    action: &str,
+    params: Option<&str>,
+    by: Instant,
+) -> String {
+    let late = || {
+        let why = format!("`{action}` was not begun in time, and was not sent");
+        json!({ "error": why }).to_string()
+    };
+    if Instant::now() >= by {
+        return late();
+    }
     let seen = match Seen::look(client).await {
         Ok(seen) => seen,
         Err(why) => return json!({ "error": why }).to_string(),
     };
+    if Instant::now() >= by {
+        return late();
+    }
     let (body, forwards) = act(&seen, action, params);
     settle(action, body, forward(client, forwards).await)
 }
@@ -312,6 +372,7 @@ pub(super) fn ask(
     let pending = Pending {
         action: action.to_owned(),
         params: params.map(str::to_owned),
+        by: Instant::now() + ACT_PATIENCE,
         done,
     };
     let said = asks
@@ -327,30 +388,45 @@ pub(super) fn ask(
     })
 }
 
-/// Starts the task that keeps `seen` fresh and does what the handlers ask
+// The cache is replaced by a fresh look, or left as it was when the look fails.
+async fn refresh(client: &Arc<dyn Connection>, seen: &Shared) {
+    match Seen::look(client).await {
+        Ok(looked) => *lock(seen) = looked,
+        Err(e) => println!("pane: {e}"),
+    }
+}
+
+/// Starts the two tasks of the pane: one keeps `seen` fresh, one does what the handlers ask
 ///
-/// The cache is read again every [`LOOK_TICK`], and at once after an action, so the
-/// pane shows what the runner then did.
+/// They are apart, so a slow read of the runners never holds an action back. The cache
+/// is read again every [`LOOK_TICK`], and at once after an action, so the pane shows
+/// what the runner then did.
 pub(super) fn begin(
     client: Arc<ReconnectingClient>,
     seen: Shared,
 ) -> mpsc::UnboundedSender<Pending> {
+    let client: Arc<dyn Connection> = client;
     let (send, mut asked) = mpsc::unbounded_channel::<Pending>();
+    let (reading, shared) = (Arc::clone(&client), Arc::clone(&seen));
     tokio::spawn(async move {
         let mut ticks = tokio::time::interval(LOOK_TICK);
         ticks.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
-            tokio::select! {
-                _ = ticks.tick() => {}
-                Some(Pending { action, params, done }) = asked.recv() => {
-                    let said = perform(&*client, &action, params.as_deref()).await;
-                    let _ = done.send(said);
-                }
-            }
-            match Seen::look(&*client).await {
-                Ok(looked) => *lock(&seen) = looked,
-                Err(e) => println!("pane: {e}"),
-            }
+            ticks.tick().await;
+            refresh(&reading, &shared).await;
+        }
+    });
+    tokio::spawn(async move {
+        while let Some(Pending {
+            action,
+            params,
+            by,
+            done,
+        }) = asked.recv().await
+        {
+            let said = perform(&client, &action, params.as_deref(), by).await;
+            let _ = done.send(said);
+            refresh(&client, &seen).await;
         }
     });
     send
