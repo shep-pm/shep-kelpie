@@ -174,6 +174,36 @@ fn a_fix_call_opens_an_issue_with_what_it_read_and_it_starts_ahead_of_the_board(
 }
 
 #[test]
+fn a_hold_in_the_same_answer_leaves_the_fix_call_settled_and_first_on_the_board() {
+    let (rig, runner) = red_again();
+    let red = &FIX[FIX.find("{\"workflow\"").unwrap()..FIX.len() - 1];
+    let both: &'static str =
+        Box::leak(format!("{{\"pick\": null, \"hold\": [9], \"red\": {red}}}").into_boxed_str());
+
+    let (_, acted, dropped) = answered(Some(answers(&rig, &runner, both)));
+
+    assert_eq!(dropped, [] as [String; 0]);
+    assert_eq!(
+        acted,
+        [
+            "opened fix work item #900 at the front of the board for test",
+            "holds #9",
+        ]
+    );
+    assert_eq!(
+        ask(&rig, &runner, "red_workflows")[0]["doing"],
+        json!("the project manager opened fix work item #900 at the front of the board"),
+        "the hold's save undid the fix call"
+    );
+    assert_eq!(ask(&rig, &runner, "pm")["held"], json!([{ "issue": "9" }]));
+
+    // The head is settled once, and the fix still starts ahead of the ready issues.
+    rig.forge.list_ready(900, false);
+    assert_eq!(dispatched(step(&runner).unwrap()), ticket(900));
+    assert_eq!(rig.forge.created().len(), 1);
+}
+
+#[test]
 fn a_fix_body_the_issue_check_refuses_is_asked_of_the_maintainer_and_never_filed() {
     let (rig, runner) = red_again();
 

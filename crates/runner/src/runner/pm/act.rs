@@ -42,6 +42,8 @@ impl Runner {
     ) -> Result<(Vec<String>, Vec<String>), StateError> {
         let ready = self.board_ready();
         // An answer with no `hold` leaves the holds standing; one with a list replaces them.
+        // The holds go now, before anything else in the answer acts: each later action saves
+        // the state as it stands when it acts, and a copy made before it would write it back out.
         let mut next = self.state.clone();
         if answer.hold.is_some() {
             next.pm_holds.clear();
@@ -60,6 +62,9 @@ impl Runner {
                 let text = self.ready_text(call.issue).unwrap_or_default();
                 next.hold(call.issue, call.until, text);
             }
+        }
+        if next.pm_holds != self.state.pm_holds {
+            self.save(next)?;
         }
         let mut acted = Vec::new();
         // A workflow red on `main` is settled first: a fix work item it opens
@@ -91,7 +96,7 @@ impl Runner {
                 dropped.push(format!(
                     "pick {named}: only {slots} can start from this wake"
                 ));
-            } else if next.pm_holds.iter().any(|h| h.issue == ticket) {
+            } else if self.state.pm_holds.iter().any(|h| h.issue == ticket) {
                 dropped.push(format!("pick {named}: it holds {named} too"));
             } else if !ready.contains(&ticket) {
                 dropped.push(format!("pick {named}: not a ready issue on the board"));
@@ -115,12 +120,9 @@ impl Runner {
         if picking.is_some() {
             self.pm.asked_pick = false;
         }
-        if answer.hold.is_some() && !next.pm_holds.is_empty() {
-            let named: Vec<String> = next.pm_holds.iter().map(PmHeld::to_string).collect();
+        if answer.hold.is_some() && !self.state.pm_holds.is_empty() {
+            let named: Vec<String> = self.state.pm_holds.iter().map(PmHeld::to_string).collect();
             acted.push(format!("holds {}", named.join(", ")));
-        }
-        if next.pm_holds != self.state.pm_holds {
-            self.save(next)?;
         }
         let mut unstuck: Vec<TicketId> = Vec::new();
         for unstick in &answer.unstick {
