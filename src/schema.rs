@@ -338,6 +338,10 @@ mod tests {
             .replace(
                 "# [kelpie.leases]\n# cargo-test",
                 "[kelpie.leases]\ncargo-test",
+            )
+            .replace(
+                "# [kelpie.agent_board]\n# prefer",
+                "[kelpie.agent_board]\nprefer",
             );
         let example: toml::Table = toml::from_str(&example).unwrap();
         let section = toml::to_string(&example["kelpie"]).unwrap();

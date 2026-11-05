@@ -105,6 +105,7 @@ pub(super) fn answer(
         pin: ask.pin.as_ref(),
         slack: ask.slack,
         leave_out: &ask.leave_out,
+        prefer: &view.prefer,
     };
     (agent_board::pick(&item, &candidates).into_iter())
         .map(|choice| Pick {

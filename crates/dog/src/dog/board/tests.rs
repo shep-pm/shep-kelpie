@@ -455,3 +455,86 @@ async fn an_api_agent_ranks_as_any_other() {
     );
     assert_eq!(order(&one), ["billed"], "a pinned API agent is picked");
 }
+
+fn names(list: &[&'static str]) -> Vec<AgentName> {
+    list.iter().map(|a| AgentName::kelpies(a)).collect()
+}
+
+// Two plan agents of known cost and an API agent, with a ledger that prices only the plan agents.
+async fn priced_plans(dir: &Path, prefer: &[&'static str]) -> (View, Availability) {
+    let agents = two_plans_and_a_billed(&dir.join("agents"));
+    let home = dir.join("kelpie");
+    finished(&home, "koji", ("plan-a", "fix"), 5, (600, 1.0));
+    finished(&home, "koji", ("plan-b", "fix"), 5, (600, 2.0));
+    let shown = seen(&agents, &Gateways::default(), 10).await;
+    let board = Mutex::new(Board::new(&agents).preferring(names(prefer)));
+    refresh(&board, &home);
+    let view = lock(&board).view();
+    (view, shown)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_listed_api_agent_ranks_first_and_an_unlisted_one_ranks_as_any_other() {
+    let dir = tempfile::tempdir().unwrap();
+    let (listed, shown) = priced_plans(dir.path(), &["billed"]).await;
+    let (unlisted, _) = priced_plans(dir.path(), &["plan-b"]).await;
+    let ask = ask_of(&["plan-a", "plan-b", "billed"]);
+
+    let first = pick::answer(&listed, &shown, &ask, Timestamp(EPOCH));
+    let other = pick::answer(&unlisted, &shown, &ask, Timestamp(EPOCH));
+
+    assert_eq!(order(&first), ["billed", "plan-a", "plan-b"]);
+    assert_eq!(
+        order(&other),
+        ["plan-b", "plan-a", "billed"],
+        "the list names the plan agent, so the API agent follows on its cost as any other"
+    );
+}
+
+#[test]
+fn the_list_orders_reviewers_as_it_orders_implementers() {
+    let dir = tempfile::tempdir().unwrap();
+    let reader = "---\nrole: reviewer\nharness: stand-in\nmodel: lite\neffort: low\n\
+                  usage: none\ntier: standard\n---\nRead the diff for defects.\n";
+    let folder = dir.path().join("agents");
+    write_in(&folder, "read-a.md", reader);
+    write_in(&folder, "read-b.md", reader);
+    let agents = Agents::load(&folder).unwrap();
+    let ask = ask_of(&["read-a", "read-b"]);
+    let ranked = |prefer: &[&'static str]| {
+        let view = Board::new(&agents).preferring(names(prefer)).view();
+        let picks = pick::answer(&view, &Availability::default(), &ask, Timestamp(EPOCH));
+        order(&picks)
+            .iter()
+            .map(|a| (*a).to_owned())
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(ranked(&[]), ["read-a", "read-b"]);
+    assert_eq!(ranked(&["read-b"]), ["read-b", "read-a"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_handoff_ask_leaves_out_the_agent_left_and_takes_the_next_listed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (view, shown) = priced_plans(dir.path(), &["plan-b", "plan-a", "billed"]).await;
+    let ask = PickAsk {
+        leave_out: names(&["plan-b"]),
+        ..ask_of(&["plan-a", "plan-b", "billed"])
+    };
+
+    let picks = pick::answer(&view, &shown, &ask, Timestamp(EPOCH));
+
+    assert_eq!(order(&picks), ["plan-a", "billed"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_listed_name_with_no_agent_file_is_ignored_and_the_rest_rank() {
+    let dir = tempfile::tempdir().unwrap();
+    let (view, shown) = priced_plans(dir.path(), &["ghost", "billed", "gone"]).await;
+    let ask = ask_of(&["plan-a", "plan-b", "billed"]);
+
+    let picks = pick::answer(&view, &shown, &ask, Timestamp(EPOCH));
+
+    assert_eq!(order(&picks), ["billed", "plan-a", "plan-b"]);
+}

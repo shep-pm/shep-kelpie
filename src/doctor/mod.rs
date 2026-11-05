@@ -12,6 +12,7 @@ mod github;
 mod ignored;
 mod machine;
 mod mcp;
+mod prefer;
 mod project;
 mod registries;
 mod rulings;
@@ -331,6 +332,7 @@ async fn projects(
         lines.extend(dog_keys::checks(&gateways, &agents, here.shep_home));
         lines.extend(unbound::checks(&agents, &folder));
         lines.extend(ignored::check(&agents));
+        lines.extend(prefer::check(&kelpie.agent_board, &agents));
     }
     if ask.test_alert {
         lines.push(rulings::test_alert(kelpie.as_ref(), probes.alerts));
