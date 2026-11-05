@@ -18,6 +18,7 @@ mod e2e;
 mod forge;
 pub mod left_over;
 mod link;
+pub mod pane;
 mod reread;
 mod section;
 pub mod triggers;
@@ -29,6 +30,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use shep_client::dogs::{PANE_ACTION, pane_answer};
 use shep_client::shep_core::protocol::request::{ActionOutcome, Response};
 use shep_client::shep_core::protocol::{Request, SelectorSpec};
 use shep_client::shep_core::status::ProcStatus;
@@ -367,6 +369,24 @@ async fn serve(ports: availability::Ports, alerts: Arc<dyn Alerts>) -> Result<()
             let (body, grants) =
                 lock_desk(&desk).change(|d| d.answer_with(name, params, &shown, shown_now));
             let _ = answered.send(grants);
+            body
+        });
+    }
+    let seen = pane::Shared::default();
+    let forwards = pane::begin(Arc::clone(&client), Arc::clone(&seen));
+    {
+        let seen = Arc::clone(&seen);
+        shepherd.on_action(PANE_ACTION, move |params, _| {
+            pane_answer(params, || pane::build(&pane::lock(&seen)))
+        });
+    }
+    for action in pane::ACTIONS {
+        let (seen, forwards) = (Arc::clone(&seen), forwards.clone());
+        shepherd.on_action(action, move |params, name| {
+            let (body, sends) = pane::act(&pane::lock(&seen), name, params);
+            for send in sends {
+                let _ = forwards.send(send);
+            }
             body
         });
     }

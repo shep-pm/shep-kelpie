@@ -152,6 +152,7 @@ fn row(id: u32, config: &AppConfig) -> ProcessInfo {
             path: config.script.clone(),
             channel: true,
             grants: None,
+            events: Vec::new(),
         })),
         _ => info,
     }
