@@ -11,6 +11,7 @@ mod e2e;
 mod gateways;
 mod github;
 mod ignored;
+mod install;
 mod machine;
 mod mcp;
 mod prefer;
