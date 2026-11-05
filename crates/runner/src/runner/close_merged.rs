@@ -9,6 +9,8 @@
 //! An issue the pull request names is the forge's to close. A board pass
 //! closes one still open [`FORGE_CLOSE_WAIT`] after its merge.
 
+use std::collections::BTreeMap;
+
 use super::Runner;
 use crate::board::ReadyIssue;
 use crate::ports::{SubIssue, SubIssueState};
@@ -16,6 +18,13 @@ use crate::ticket::TicketId;
 
 /// Closes the forge may refuse, one in each step, before the step gives up on an issue
 const TRIES: u32 = 3;
+
+/// The refusals in a row for each merged pull request's issue, by pull request,
+/// kept in memory only
+///
+/// A count is one merge's, so a ticket worked again under another pull request
+/// starts with its own tries and its own comment.
+pub(super) type Tries = BTreeMap<u64, u32>;
 
 /// How long the forge is left to close an issue its merged pull request names
 /// before kelpie closes it itself
@@ -71,7 +80,7 @@ impl Runner {
         }
         match self.ports.tickets.issue(&self.remote, ticket) {
             Ok(read) if !read.open => {
-                self.close_refused.remove(&ticket);
+                self.merged_refused.remove(&pull_request);
                 return None;
             }
             Ok(_) => {}
@@ -88,14 +97,15 @@ impl Runner {
     /// Closes each ready issue a merged pull request left open, once the forge
     /// has had [`FORGE_CLOSE_WAIT`] to close it
     ///
-    /// Only a finished issue on the board's ready list is swept, since the
-    /// board reads no other. A close the forge refuses is tried [`TRIES`] times
-    /// across the passes that follow, with the comment once, and then left be
-    /// until the runner restarts.
+    /// Only a ticket the board lists and still holds as finished is swept: the
+    /// board reads no other issue, and one the forge closed has been let go. A
+    /// close the forge refuses is tried [`TRIES`] times for that merge, with
+    /// the comment once, and then left be until the runner restarts.
     pub(super) fn close_merged_left_open(&mut self, ready: &[ReadyIssue]) {
         let now = self.ports.clock.now();
         let left: Vec<(TicketId, u64)> = ready
             .iter()
+            .filter(|issue| self.state.finished.contains(&issue.ticket))
             .filter_map(|issue| {
                 // A ticket worked twice is what its last work item did with it
                 let record = self
@@ -107,14 +117,15 @@ impl Runner {
                     return None;
                 };
                 let waited = now.0 >= record.at.0.saturating_add(FORGE_CLOSE_WAIT);
-                let given_up = (self.close_refused.get(&issue.ticket)).is_some_and(|n| *n >= TRIES);
+                let given_up =
+                    (self.merged_refused.get(&pull_request)).is_some_and(|n| *n >= TRIES);
                 (waited && !given_up).then_some((issue.ticket, pull_request))
             })
             .collect();
         for (ticket, pull_request) in left {
             match self.ports.tickets.issue(&self.remote, ticket) {
                 Ok(read) if !read.open => {
-                    self.close_refused.remove(&ticket);
+                    self.merged_refused.remove(&pull_request);
                 }
                 Ok(_) => {
                     let text = merged_without_closing(pull_request);
@@ -133,7 +144,7 @@ impl Runner {
     fn close_local(&mut self, ticket: TicketId, pull_request: u64) -> Option<String> {
         match self.ports.tickets.issue(&self.remote, ticket) {
             Ok(read) if !read.open => {
-                self.close_refused.remove(&ticket);
+                self.merged_refused.remove(&pull_request);
                 return None;
             }
             Ok(_) => {}
@@ -155,7 +166,7 @@ impl Runner {
         pull_request: u64,
         text: &str,
     ) -> Option<String> {
-        if !self.close_refused.contains_key(&ticket)
+        if !self.merged_refused.contains_key(&pull_request)
             && let Err(e) = self.comment_on_ticket(ticket, text)
         {
             self.notes.push(format!(
@@ -166,14 +177,15 @@ impl Runner {
         self.close_after_merge(ticket, pull_request)
     }
 
-    // The close itself, with the count of refusals the step gives up on. A
-    // ticket given up on keeps its count, so a later pass leaves it be.
+    // The close itself, with the count of refusals that merge's close gives up
+    // on. A given-up merge keeps its count, so a later pass leaves it be, and
+    // the next pull request counts its own.
     fn close_after_merge(&mut self, ticket: TicketId, pull_request: u64) -> Option<String> {
         let Err(e) = self.ports.tickets.close_issue(&self.remote, ticket) else {
-            self.close_refused.remove(&ticket);
+            self.merged_refused.remove(&pull_request);
             return None;
         };
-        let failures = self.close_refused.entry(ticket).or_default();
+        let failures = self.merged_refused.entry(pull_request).or_default();
         *failures += 1;
         let name = super::turn::ticket_name(ticket);
         let reason = format!("cannot close {name} after merging #{pull_request}: {e}");

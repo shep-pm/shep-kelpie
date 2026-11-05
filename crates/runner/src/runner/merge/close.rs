@@ -63,6 +63,24 @@ fn a_finished_issue_that_did_not_merge_stays_open() {
 }
 
 #[test]
+fn a_reopened_issue_that_merged_once_is_not_closed_again() {
+    let (rig, runner) = merged_leaving_its_issue_open("pelagia");
+    // The forge closes #7, so the board lets it go, and the maintainer reopens
+    // it to work on it again. #40 holds it back, so the board opens no work
+    // item and only the sweep could close it.
+    rig.forge.close_issue(7);
+    assert_eq!(step(&runner).unwrap(), None);
+    rig.forge.reopen_issue(7);
+    rig.forge.block(7, 40);
+
+    rig.clock.advance(FORGE_CLOSE_WAIT);
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert!(rig.forge.closings().is_empty());
+    assert!(rig.forge.comments().is_empty());
+}
+
+#[test]
 fn a_merged_issue_off_the_ready_list_is_not_swept() {
     let (rig, runner, _) = Rig::parked("pelagia");
     rig.forge.set_state(71, PullRequestState::Merged);

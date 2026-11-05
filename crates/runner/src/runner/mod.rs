@@ -290,6 +290,9 @@ pub struct Runner {
     adopt_failing: BTreeMap<u64, adopt::Failing>,
     // The forge's refusals in a row to close a done parent, kept in memory only
     close_refused: parent::Refused,
+    // The refusals in a row to close the issue of each merged pull request, by
+    // pull request, kept in memory only
+    merged_refused: close_merged::Tries,
     // The parents off the ready list that built nothing, kept in memory only
     unbuilt: parent::Unbuilt,
     // What the board's read found before the pass took the lock, until the pass uses it or ends
@@ -650,6 +653,7 @@ impl Runner {
             triage_run: triage::Run::default(),
             adopt_failing: BTreeMap::new(),
             close_refused: parent::Refused::new(),
+            merged_refused: close_merged::Tries::new(),
             unbuilt: parent::Unbuilt::new(),
             board_read: None,
             lineup,
