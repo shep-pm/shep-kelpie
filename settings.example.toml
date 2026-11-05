@@ -198,6 +198,15 @@ per_item_usd = 10
 # too. A workflow, a lockfile or manifest, a harness's own file, an adopted
 # pull request and a diff that names no file always do. None when absent.
 # full_paths = ["docs/adr/**"]
+# Whether a change the project manager tagged `light: true` in its pick gets
+# the `light` count too, when it touches code and changes at most
+# `light_max_lines` lines. Never beside a file that always gets `need`. Does
+# nothing until `light` is below `need`. Off when absent.
+# pm_lightens = true
+# The most lines, added plus deleted over every file, a tagged change may alter
+# and still be lightened; a binary file is over any limit. At least 1; 10 when
+# absent.
+# light_max_lines = 10
 
 # Turn `enabled` off for a stretch when usage limits do not matter: neither
 # the daily allowance nor the 5-hour window then holds anything, and `status`
