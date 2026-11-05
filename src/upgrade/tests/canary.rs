@@ -54,11 +54,12 @@ fn told(said: &[String], what: &str) -> Option<usize> {
 }
 
 // `aria` sorts first, so it is the canary. Its scripted looks: before the dog,
-// the pick, the drain and the merge wait, then `after` from the restart on.
+// then `picked` for the pick, the drain and the merge wait (the last look before
+// the restart), then `after` from the restart on.
 fn canary_says(rig: &Rig, picked: &str, after: &str) {
     rig.runs("aria", &rig.installed.clone(), true);
     rig.shepherd
-        .says("aria", &[IDLE, picked, IDLE, IDLE, after]);
+        .says("aria", &[IDLE, picked, picked, picked, after]);
 }
 
 // What a failed canary leaves: only the dog and the canary restarted, no other
@@ -434,6 +435,40 @@ async fn a_step_failing_before_and_after_the_restart_does_not_fail_the_canary() 
 
     ran.unwrap();
     assert_eq!(rig.restarts(), ["kelpie", "aria", "koji"]);
+}
+
+#[tokio::test]
+async fn a_step_that_began_failing_while_the_canary_drained_does_not_fail_it() {
+    let mut rig = Rig::new().await;
+    rig.runs("aria", &rig.installed.clone(), true);
+    // Clean at the pick, failing at the merge wait just before the restart,
+    // and still failing after it: the old build's failure.
+    rig.shepherd
+        .says("aria", &[IDLE, IDLE, IDLE, FAILING, FAILING]);
+    let new = rig.build("new", "0.3.0", "0.23.0");
+
+    let (ran, _) = rig.install(&new).await;
+
+    ran.unwrap();
+    assert_eq!(rig.restarts(), ["kelpie", "aria", "koji"]);
+}
+
+#[tokio::test]
+async fn a_canary_from_before_passes_passes_once_it_answers_on_the_installed_build() {
+    // A rollback onto such a build must not wait for a count it never sends.
+    for after in [
+        r#"{"build":"{build}","work_items":[]}"#,
+        r#"{"work_items":[]}"#,
+    ] {
+        let mut rig = Rig::new().await;
+        canary_says(&rig, IDLE, after);
+        let new = rig.build("new", "0.3.0", "0.23.0");
+
+        let (ran, _) = rig.install(&new).await;
+
+        ran.unwrap();
+        assert_eq!(rig.restarts(), ["kelpie", "aria", "koji"], "{after}");
+    }
 }
 
 #[tokio::test]

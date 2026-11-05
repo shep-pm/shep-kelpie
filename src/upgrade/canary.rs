@@ -238,6 +238,14 @@ pub(super) fn judge(before: &str, now: &str, installed: &Installed) -> Verdict {
         .is_none_or(|commit| now["commit"].as_str() == Some(commit));
     match now["passes"].as_u64() {
         Some(passes) if passes >= 1 && built && commit => Verdict::Passed,
+        // A build from before `passes` never counts one, and an answer from it
+        // after its restart is all there is to wait for.
+        None if now.get("passes").is_none_or(Value::is_null)
+            && (built || now["build"].is_null())
+            && commit =>
+        {
+            Verdict::Passed
+        }
         _ => Verdict::Waiting,
     }
 }

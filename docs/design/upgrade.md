@@ -14,7 +14,7 @@
 - `pick` asks every running runner for `status` in parallel every `patience.poll` and takes the first that shows none in flight, the first by name when two do at one look.
 - In flight is `merging(&body)` as for the merge wait. A `working` ticket does not count: its turn crosses the handover.
 - A runner that answers no `status` is not quiet. None quiet in `patience.merge` stops the upgrade, names each runner and what it waits on, and says no runner was restarted.
-- The pick's `status` body is kept as the "before" read. A pick found stopped when its turn comes stays stopped, and picking goes on.
+- The pick's `status` body is kept as the "before" read, replaced by the last `status` the merge wait reads just before the restart, so a step that began failing on the old build while the canary drained is not new. A pick found stopped when its turn comes stays stopped, and picking goes on.
 
 ## The check
 
@@ -22,6 +22,7 @@ After the canary's restart, `status` is asked every `patience.poll` and `judge(b
 
 - Passes: `passes` is at least 1 (a first full pass of the loop, #1670), `build` is the installed stamp, and `commit` is the installed commit when the installed build names one.
 - Fails at once: `settings_refused` present, a step in `work_items` newly `failing`, a ticket in the "before" `working` list whose `turn.state` is now `failed`, or another `build` or `commit`.
+- A build from before #1670 sends no `passes`: its first `status` after the restart on the installed build (or with no `build` either) passes, since there is no count to wait for.
 - Fails on silence: no `status` for `patience.start` after the restart, or the runner not running.
 - Otherwise it keeps asking, and Ctrl-C ends it. A step failing before and after the restart is not new.
 

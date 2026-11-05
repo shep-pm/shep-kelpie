@@ -269,11 +269,14 @@ pub async fn restart_all(
         let Some(Picked { name, before }) = picked else {
             break;
         };
-        let restarted = restart_one(client, name, handover, patience, &stages, say);
+        // The pick's read, unless a merge wait looks again before the restart.
+        let mut last = None;
+        let restarted = restart_one(client, name, handover, patience, &stages, &mut last, say);
         let restarted = tokio::select! {
             restarted = restarted => restarted,
             by = &mut stop => Err(stopped_by(client, by, &stages).await),
         };
+        let before = last.unwrap_or(before);
         match restarted? {
             Bounced::Answered => {}
             // It stays stopped, and the next quiet runner is the canary.
@@ -301,8 +304,10 @@ pub async fn restart_all(
             .filter(|&name| Some(name) != first)
             .map(|name| async move {
                 let mut say = voice(shared);
-                let restarted =
-                    restart_one(client, name, handover, patience, stages_ref, &mut say).await;
+                let restarted = restart_one(
+                    client, name, handover, patience, stages_ref, &mut None, &mut say,
+                )
+                .await;
                 (name, restarted)
             }),
     );
@@ -361,12 +366,13 @@ async fn restart_one<'a>(
     handover: Option<&str>,
     patience: Patience,
     stages: &Stages<'a>,
+    last: &mut Option<String>,
     say: &mut dyn FnMut(String),
 ) -> Result<Bounced, String> {
     let Some(installed) = handover else {
         stages.borrow_mut().insert(name, Stage::Restarting);
         let restarted = async {
-            wait_out_merges(client, &[name], patience, Purpose::Upgrade, say).await?;
+            *last = wait_seen(client, &[name], patience, Purpose::Upgrade, say).await?;
             bounce_if_running(client, name, patience, say).await
         }
         .await;
@@ -393,7 +399,7 @@ async fn restart_one<'a>(
     stages.borrow_mut().insert(name, Stage::Draining);
     let restarted = async {
         drain::drain(client, name, patience, Purpose::Upgrade, say).await?;
-        wait_out_merges(client, &[name], patience, Purpose::Upgrade, say).await?;
+        *last = wait_seen(client, &[name], patience, Purpose::Upgrade, say).await?;
         bounce_if_running(client, name, patience, say).await
     }
     .await;
@@ -630,16 +636,34 @@ pub(crate) async fn wait_out_merges(
     purpose: Purpose,
     say: &mut dyn FnMut(String),
 ) -> Result<(), String> {
+    wait_seen(client, names, patience, purpose, say)
+        .await
+        .map(|_| ())
+}
+
+// As `wait_out_merges`, and the last `status` body a runner answered, which is
+// the last look before its restart.
+async fn wait_seen(
+    client: &dyn Connection,
+    names: &[&str],
+    patience: Patience,
+    purpose: Purpose,
+    say: &mut dyn FnMut(String),
+) -> Result<Option<String>, String> {
     let waited = Instant::now();
     let mut told = Vec::new();
     loop {
         let mut busy = Vec::new();
+        let mut seen = None;
         for &name in names {
             let answered = trigger(client, name, "status", None).await?;
             busy.extend(self::busy(name, &answered));
+            if let Answered::Runner(body) = answered {
+                seen = Some(body);
+            }
         }
         if busy.is_empty() {
-            return Ok(());
+            return Ok(seen);
         }
         if waited.elapsed() >= patience.merge {
             return Err(format!(
