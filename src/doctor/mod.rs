@@ -6,6 +6,7 @@
 
 mod ci;
 mod dog_keys;
+mod dog_waiting;
 mod e2e;
 mod gateways;
 mod github;
@@ -231,6 +232,7 @@ pub async fn check(shep_home: &Path, probes: Probes<'_>, here: Here<'_>, ask: As
                 Ok(rows) => machine::dog(&rows),
                 Err(e) => Line::missing("dog", e, "put the shepherd right"),
             });
+            lines.extend(dog_waiting::check(&client).await);
             lines.extend(projects(&client, read, probes, here, ask).await);
         }
         Err(refused) => {
