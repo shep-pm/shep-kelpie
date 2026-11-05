@@ -68,6 +68,7 @@ impl Runner {
         }
         // The item is gone, so a main it could not fetch warns about nothing.
         self.notes.ends(&main_fetch_key(item.issue));
+        self.lags.forget(item.issue);
         let now = self.ports.clock.now();
         let timings = item.split(now, self.timing_phase(item));
         let closed = matches!(item.phase, Phase::Done { closed: true, .. });

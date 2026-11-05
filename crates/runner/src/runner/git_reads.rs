@@ -365,7 +365,14 @@ impl Runner {
             base: self.item_base(item).to_owned(),
         });
         let read = self.read_git(self.reads.git.bases.get(head).cloned(), ask)?;
-        read.map_err(|e| Box::new(self.gate_failed(format!("cannot fetch main: {e}"))))
+        let base =
+            read.map_err(|e| Box::new(self.gate_failed(format!("cannot fetch main: {e}"))))?;
+        match (base, self.current().map(|item| item.issue)) {
+            (Base::Lagging, _) => self.lag_goes_on(head)?,
+            (_, Some(ticket)) => self.lags.forget(ticket),
+            (_, None) => {}
+        }
+        Ok(base)
     }
 
     /// The commits among `tips` that `head`, the forge's head of the work item's branch, carries
