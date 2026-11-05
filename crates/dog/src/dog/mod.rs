@@ -304,13 +304,14 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
     if let Some(why) = refused {
         println!("{why}");
     }
+    let waiters = door::Waiters::default();
     let opened = door::open(&socket).map(|listener| (socket, listener));
     match opened {
         Ok((socket, listener)) => {
             println!("the door is {}, {capacity} at a time", socket.display());
             let grace = door::REJOIN_GRACE;
             let remote = e2e::Remote::default();
-            tokio::spawn(door::serve(
+            tokio::spawn(door::serve_with(
                 listener,
                 Arc::clone(&desk),
                 grace,
@@ -318,6 +319,7 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
                 remote,
                 Arc::clone(&shown),
                 Arc::clone(&board),
+                Arc::clone(&waiters),
             ));
         }
         Err(e) => {

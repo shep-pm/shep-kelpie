@@ -516,6 +516,28 @@ fn the_list_orders_reviewers_as_it_orders_implementers() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_new_prefer_list_orders_the_next_pick_and_not_one_already_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = two_plans_and_a_billed(&dir.path().join("agents"));
+    let home = dir.path().join("kelpie");
+    finished(&home, "koji", ("plan-a", "fix"), 5, (600, 1.0));
+    finished(&home, "koji", ("plan-b", "fix"), 5, (600, 2.0));
+    let shown = seen(&agents, &Gateways::default(), 10).await;
+    let board = Mutex::new(Board::new(&agents).preferring(names(&["billed"])));
+    refresh(&board, &home);
+    let ask = ask_of(&["plan-a", "plan-b", "billed"]);
+    let before = lock(&board).view();
+
+    lock(&board).set_prefer(names(&["plan-b"]));
+    let after = lock(&board).view();
+
+    let old = pick::answer(&before, &shown, &ask, Timestamp(EPOCH));
+    let new = pick::answer(&after, &shown, &ask, Timestamp(EPOCH));
+    assert_eq!(order(&old), ["billed", "plan-a", "plan-b"]);
+    assert_eq!(order(&new), ["plan-b", "plan-a", "billed"]);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_handoff_ask_leaves_out_the_agent_left_and_takes_the_next_listed() {
     let dir = tempfile::tempdir().unwrap();
     let (view, shown) = priced_plans(dir.path(), &["plan-b", "plan-a", "billed"]).await;
