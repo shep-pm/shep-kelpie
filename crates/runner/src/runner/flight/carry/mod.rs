@@ -249,7 +249,8 @@ impl Runner {
         self.flights.flying.insert(
             ticket,
             Flight {
-                deadline: Some(Timestamp(flying.began.0.saturating_add(flying.left))),
+                deadline: Timestamp(flying.began.0.saturating_add(flying.left)),
+                turn: true,
                 left: flying.left,
                 ending,
                 again: flying.again,

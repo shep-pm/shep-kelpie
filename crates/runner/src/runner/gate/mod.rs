@@ -31,9 +31,14 @@ mod borrowed;
 mod catch_up;
 #[cfg(test)]
 mod fix_attempts;
+mod lag;
 pub(super) mod queued;
 mod reads;
 mod rerun;
+
+#[cfg(test)]
+use lag::LAG_LIMIT;
+pub(super) use lag::Lags;
 
 impl Runner {
     pub(super) fn check_ci(&mut self) -> Result<Begin, StateError> {
