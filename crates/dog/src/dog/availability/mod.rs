@@ -5,7 +5,8 @@
 //! each account an agent's `limit` names, at most every [`RECHECK_SECS`].
 //! A failed load read is unknown, never free, and logged when its reason
 //! changes. A failed meter read keeps the last reading, with the time it was
-//! read. `status` shows it, and the agent board's pick waits on it.
+//! read. `status` shows it, and the agent board's pick waits on it. A
+//! refusal a runner reports holds the API as a whole until it may run again.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -17,7 +18,13 @@ use serde_json::{Value, json};
 use tokio::time::MissedTickBehavior;
 
 use crate::agents::Agents;
+use crate::api_refusal::Refusal;
+use crate::board::briefing::date_time;
+use crate::dog::door::{Place, say};
+use crate::dog::lock_desk;
 use crate::forwarder::Upstream;
+use crate::ipc::ServerWriteHalf;
+use crate::lease::door::{Answer, Ask};
 use crate::pacer::RECHECK_SECS;
 use crate::ports::{Clock, LocalLeases, Meter, ModelLoad, Timestamp, Utilization};
 use crate::settings::{Account, GatewayKind, GatewayName, Gateways, Limit, ModelHost};
@@ -61,6 +68,38 @@ pub struct Availability {
     accounts: BTreeMap<Account, Seen<Utilization>>,
     // Why each model's last read failed, so a reason is logged once.
     unread: BTreeMap<ModelKey, String>,
+    // Every `login: api` agent shares one key, so the API is held as a whole.
+    api: Option<ApiHold>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ApiHold {
+    refusal: Refusal,
+    until: Timestamp,
+}
+
+impl ApiHold {
+    // The kind, the time and the one line `shep kelpie status` shows.
+    fn status(self) -> Value {
+        let (kind, said) = match self.refusal {
+            Refusal::NoCredit => ("no_credit", "out of credit"),
+            Refusal::SpendLimit { .. } => ("spend_limit", "spend limit reached"),
+        };
+        let back = match self.refusal {
+            Refusal::SpendLimit { resumes: Some(at) } if at == self.until => {
+                format!("back at {} UTC", date_time(at))
+            }
+            _ => {
+                let day = self.until.0 % 86_400;
+                format!(
+                    "checking again at {:02}:{:02} UTC",
+                    day / 3600,
+                    day % 3600 / 60
+                )
+            }
+        };
+        json!({ "kind": kind, "until": self.until, "line": format!("API: {said}, {back}") })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +128,36 @@ impl Availability {
                 .map(|account| (*account, Seen::default()))
                 .collect(),
             unread: BTreeMap::new(),
+            api: None,
+        }
+    }
+
+    /// Holds the API after `refusal`, seen at `now`, and says until when
+    ///
+    /// A hold still standing is kept when it outlasts the new one.
+    pub(super) fn refused(&mut self, refusal: Refusal, now: Timestamp) -> Timestamp {
+        let new = ApiHold {
+            refusal,
+            until: refusal.hold_until(now),
+        };
+        match self.api {
+            Some(held) if held.until > now && held.until >= new.until => held.until,
+            _ => {
+                self.api = Some(new);
+                new.until
+            }
+        }
+    }
+
+    /// Until when the API is held at `now`, or None when it is not
+    pub(super) fn api_held(&self, now: Timestamp) -> Option<Timestamp> {
+        self.api.map(|held| held.until).filter(|until| *until > now)
+    }
+
+    // Drops a hold whose time has come, so `status` stops showing it.
+    fn release_api(&mut self, now: Timestamp) {
+        if self.api_held(now).is_none() {
+            self.api = None;
         }
     }
 
@@ -115,7 +184,14 @@ impl Availability {
             };
             merged(line, shown)
         });
-        json!({ "models": models.collect::<Vec<_>>(), "accounts": accounts.collect::<Vec<_>>() })
+        let mut shown = json!({
+            "models": models.collect::<Vec<_>>(),
+            "accounts": accounts.collect::<Vec<_>>(),
+        });
+        if let Some(held) = self.api {
+            shown["api"] = held.status();
+        }
+        shown
     }
 
     /// The last load of `model` behind `gateway`, None inside while unknown,
@@ -290,6 +366,7 @@ pub(super) async fn read(
     let logged = (loads.into_iter())
         .filter_map(|(key, load)| lock(shown).loaded(key, load, now))
         .collect();
+    lock(shown).release_api(readers.clock.now());
     let due = lock(shown).due(readers.clock.now());
     for account in due {
         let usage = match readers.meters.get(&account) {
@@ -306,6 +383,20 @@ pub(super) async fn read(
 
 async fn blocking<T: Send + 'static>(read: impl FnOnce() -> T + Send + 'static) -> Option<T> {
     tokio::task::spawn_blocking(read).await.ok()
+}
+
+/// Answers a runner's `refused` ask with the time the API is held until, and ends the visit
+///
+/// Every runner on the key reports the same refusal, so a hold already
+/// standing keeps the later time.
+pub(super) async fn visit(place: &Place, ask: Ask, write: &mut ServerWriteHalf) {
+    let Some(refusal) = ask.refused else {
+        let why = "a refused ask says why the API refused the key".to_owned();
+        return say(write, &Answer::Error(why)).await;
+    };
+    let now = lock_desk(&place.desk).desk.book.now();
+    let until = lock(&place.shown).refused(refusal, now);
+    say(write, &Answer::Held(until.0)).await;
 }
 
 /// What the dog has read, under its lock

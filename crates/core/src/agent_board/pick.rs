@@ -37,6 +37,8 @@ pub struct Candidate<'a> {
     pub typical: Typical,
     /// Whether it runs on a local model, which costs nothing when its history names no cost
     pub local: bool,
+    /// Whether its wait is a hold on its API key, which ranks it behind every agent that can start
+    pub held: bool,
 }
 
 /// An agent the board would pick
@@ -54,15 +56,15 @@ pub struct Choice<'a> {
 
 /// The candidates that fit `item`, in the order the board tries them
 ///
-/// Those within the slack of the soonest finish come first. A listed agent
-/// comes first, in the list's order, a name listed twice at its first place.
-/// The rest go by cost: an agent with a cost comes first, cheapest first, a
-/// local agent whose history names no cost counting as free. Agents with none
-/// follow, lowest tier first as a stand-in for price. Ties go soonest first,
-/// then by name. The agents past the slack follow, soonest first.
+/// Those within the slack of the soonest finish come first, an agent held on
+/// its API key after every one that is not. A listed agent comes first, in the
+/// list's order. The rest go by cost: an agent with a cost comes first,
+/// cheapest first, a local agent with no priced history counting as free.
+/// Agents with none follow, lowest tier first as a stand-in for price. Ties go
+/// soonest first, then by name. The agents past the slack follow, soonest first.
 pub fn pick<'a>(item: &Item<'_>, candidates: &[Candidate<'a>]) -> Vec<Choice<'a>> {
-    // Each fit beside the cost and tier it is ranked on.
-    let mut fits: Vec<(Choice<'a>, Option<f64>, Tier)> = candidates
+    // Each fit beside the cost and tier it is ranked on, and whether it is held.
+    let mut fits: Vec<(Choice<'a>, Option<f64>, Tier, bool)> = candidates
         .iter()
         .filter(|c| item.pin.is_none_or(|pin| pin == c.agent))
         .filter(|c| !item.leave_out.contains(c.agent))
@@ -79,6 +81,7 @@ pub fn pick<'a>(item: &Item<'_>, candidates: &[Candidate<'a>]) -> Vec<Choice<'a>
                 choice,
                 c.typical.cost_usd.or(c.local.then_some(0.0)),
                 c.fit.tier(),
+                c.held,
             ))
         })
         .collect();
@@ -89,9 +92,11 @@ pub fn pick<'a>(item: &Item<'_>, candidates: &[Candidate<'a>]) -> Vec<Choice<'a>
     let (mut eligible, rest): (Vec<_>, Vec<_>) =
         (fits.into_iter()).partition(|(c, ..)| within_slack(c.finish, soonest, item.slack));
     let rank = |agent: &AgentName| item.prefer.iter().position(|p| p == agent);
-    eligible.sort_by(|(a, a_cost, a_tier), (b, b_cost, b_tier)| {
-        preferred(rank(a.agent), rank(b.agent))
-            .then_with(|| cheaper(*a_cost, *b_cost, *a_tier, *b_tier))
+    eligible.sort_by(|(a, a_cost, a_tier, a_held), (b, b_cost, b_tier, b_held)| {
+        a_held.cmp(b_held).then_with(|| {
+            preferred(rank(a.agent), rank(b.agent))
+                .then_with(|| cheaper(*a_cost, *b_cost, *a_tier, *b_tier))
+        })
     });
     eligible.extend(rest);
     eligible.into_iter().map(|(choice, ..)| choice).collect()
@@ -165,6 +170,7 @@ mod tests {
             wait,
             typical: Typical { secs, cost_usd },
             local: false,
+            held: false,
         }
     }
 
@@ -435,6 +441,39 @@ mod tests {
             ["c", "b", "a"],
             "a name listed twice takes its first place"
         );
+    }
+
+    #[test]
+    fn a_held_agent_within_the_slack_ranks_behind_every_agent_that_can_start() {
+        let (held, listed, cheap, dear) =
+            (name("held"), name("listed"), name("cheap"), name("dear"));
+        let any = Fit::default();
+        let candidates = [
+            Candidate {
+                held: true,
+                ..candidate(&held, &any, Some(300), 600, Some(0.01))
+            },
+            candidate(&dear, &any, Some(0), 900, Some(9.0)),
+            candidate(&cheap, &any, Some(0), 900, Some(1.0)),
+            candidate(&listed, &any, Some(0), 900, Some(5.0)),
+        ];
+        let prefer = [held.clone(), listed.clone()];
+        let listed_first = Item {
+            prefer: &prefer,
+            ..Item::default()
+        };
+        assert_eq!(
+            order(&pick(&Item::default(), &candidates)),
+            ["cheap", "listed", "dear", "held"],
+            "it is the cheapest and finishes first, yet waits on the hold"
+        );
+        assert_eq!(
+            order(&pick(&listed_first, &candidates)),
+            ["listed", "cheap", "dear", "held"],
+            "a listed agent on hold does not outrank one that can start"
+        );
+        let alone = [candidates[0]];
+        assert_eq!(order(&pick(&Item::default(), &alone)), ["held"]);
     }
 
     #[test]

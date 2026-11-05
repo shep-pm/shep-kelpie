@@ -10,6 +10,7 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | agent-migration.md | `agents migrate` | `core/agents/legacy.rs` |
 | agent-allow.md | allow list | `core/settings/agents/`, `runner/add.rs` |
 | agent-board.md | pick estimate, the dog's board, the `pick` ask | `core/agent_board/`, `dog/{board,door}/`, `core/lease/door_pick.rs` |
+| agent-board-api.md | the API hold: a refusal, its wait, its `status` line | `core/api_refusal.rs`, `dog/availability/`, `core/lease/door_pick.rs` |
 | agent-board-fit.md | track records, fit, the `fit` ask | `core/agent_board/{record,fit}.rs`, `dog/board/fit.rs`, `core/lease/door_pick.rs` |
 | agent-board-runner.md | dispatch's ask, rework, handoff, the `fit` ask | `runner/add.rs`, `runner/dispatch/`, `runner/turn/handoff/`, `runner/agent_fit.rs` |
 | cli-adapter.md | a new CLI | `adapters/cli/` |

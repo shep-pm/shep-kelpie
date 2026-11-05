@@ -10,8 +10,9 @@ pub mod dog;
 
 // The modules of `shep-kelpie-core` the dog uses, each kept under the name it had here
 use shep_kelpie_core::{
-    agent_board, agents, canonical, forwarder, home, ipc, lease, metrics, pacer, ports, review_bot,
-    settings, shep_home, shepherd, skills, spawn, state, status, usage, webhook,
+    agent_board, agents, api_refusal, board, canonical, forwarder, home, ipc, lease, metrics,
+    pacer, ports, review_bot, settings, shep_home, shepherd, skills, spawn, state, status, usage,
+    webhook,
 };
 
 // The stand-ins the dog's tests use, from core and `test_support`, kept under the

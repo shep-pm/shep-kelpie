@@ -4,14 +4,15 @@
 //! starts by ranking every agent an ask allows in the order the ask lists
 //! them, with no wait, and by saying every agent fits every kind. A test puts
 //! some of them first, ranks its own order, with its own finishes, makes one wait,
-//! ranks nobody, says one agent does not fit a kind, or makes the board unreachable.
+//! ranks nobody, says one agent does not fit a kind, notes the API's refusals, or makes the board unreachable.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use crate::agent_board::Finding;
+use crate::api_refusal::Refusal;
 use crate::lease::door::{FitAsk, Fits, Pick, PickAsk};
-use crate::ports::AgentBoard;
+use crate::ports::{AgentBoard, Timestamp};
 use crate::settings::AgentName;
 
 /// Seconds every ranked agent is said to take
@@ -41,6 +42,9 @@ struct Book {
     fit_asks: Vec<FitAsk>,
     // The seconds each agent a test has set one for waits before it can start
     waits: BTreeMap<AgentName, u64>,
+    refusals: Vec<Refusal>,
+    // What each refusal is answered with, None until a test sets one.
+    hold: Option<Timestamp>,
 }
 
 /// A board that ranks what a test sets
@@ -99,6 +103,16 @@ impl FakeAgentBoard {
         self.book.lock().unwrap().answers = Answers::Unreachable;
     }
 
+    /// Each refusal answers that the API is held until `until`
+    pub fn holds_until(&self, until: Timestamp) {
+        self.book.lock().unwrap().hold = Some(until);
+    }
+
+    /// What each refusal told the board, in order
+    pub fn refusals(&self) -> Vec<Refusal> {
+        self.book.lock().unwrap().refusals.clone()
+    }
+
     /// What each pick was asked, in order
     pub fn asks(&self) -> Vec<PickAsk> {
         self.book.lock().unwrap().asks.clone()
@@ -142,6 +156,15 @@ impl AgentBoard for FakeAgentBoard {
             cost_usd: None,
         });
         Some(picks.collect())
+    }
+
+    fn refused(&self, refusal: &Refusal) -> Option<Timestamp> {
+        let mut book = self.book.lock().unwrap();
+        book.refusals.push(*refusal);
+        if matches!(book.answers, Answers::Unreachable) {
+            return None;
+        }
+        book.hold
     }
 
     fn fit(&self, item: &FitAsk) -> Option<Fits> {

@@ -7,9 +7,10 @@
 
 use std::path::{Path, PathBuf};
 
-use super::door::{Answer, Ask, FIT, FitAsk, Fits, PICK, Pick, PickAsk};
+use super::door::{Answer, Ask, FIT, FitAsk, Fits, PICK, Pick, PickAsk, REFUSED};
 use super::door_pace::answered;
-use crate::ports::AgentBoard;
+use crate::api_refusal::Refusal;
+use crate::ports::{AgentBoard, Timestamp};
 
 /// The agent board as the dog at a door keeps it
 #[derive(Debug)]
@@ -31,6 +32,10 @@ impl AgentBoard for DoorBoard {
 
     fn fit(&self, item: &FitAsk) -> Option<Fits> {
         fits(&self.socket, item)
+    }
+
+    fn refused(&self, refusal: &Refusal) -> Option<Timestamp> {
+        refused(&self.socket, refusal)
     }
 }
 
@@ -60,9 +65,22 @@ pub fn fits(door: &Path, item: &FitAsk) -> Option<Fits> {
     }
 }
 
+/// Tells the dog at `door` the API refused its key, and when it holds the API until, or None when it cannot say
+pub fn refused(door: &Path, refusal: &Refusal) -> Option<Timestamp> {
+    let ask = Ask {
+        refused: Some(*refusal),
+        ..Ask::new(REFUSED, std::process::id(), "refused")
+    };
+    match answered(door, &ask)? {
+        Answer::Held(until) => Some(Timestamp(until)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api_refusal::Refusal;
     use crate::settings::AgentName;
 
     #[test]
@@ -78,6 +96,13 @@ mod tests {
         let nobody = Path::new("/nonexistent/kelpie/lease.sock");
 
         assert_eq!(pick(nobody, &item), None);
+    }
+
+    #[test]
+    fn a_runner_that_cannot_reach_the_dog_reports_no_refusal() {
+        let nobody = Path::new("/nonexistent/kelpie/lease.sock");
+
+        assert_eq!(refused(nobody, &Refusal::NoCredit), None);
     }
 
     #[test]
