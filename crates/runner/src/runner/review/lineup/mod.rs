@@ -294,9 +294,12 @@ impl Runner {
         let next = Review { ran, ..review }.next_round();
         let base = item.review_base(self.item_base(item));
         // The fix turn that just ended may have changed what the diff touches.
-        let item = &self.reweighed(item, &base);
-        // A diff git could not take is the next round's step to report, and a
-        // pass no reviewer read ends in a step of its own, which says so.
+        // A diff git cannot take keeps the pass going, as the next round's
+        // step reports it, so a stale light weight never ends the pass.
+        let Some(item) = &self.reweighed(item, &base) else {
+            return Phase::Review(next);
+        };
+        // A pass no reviewer read ends in a step of its own, which says so.
         let enough = self.reads_in(item, &next) >= self.need_of(item);
         let over = enough
             || self

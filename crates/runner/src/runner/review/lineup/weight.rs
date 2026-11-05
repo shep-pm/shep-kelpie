@@ -59,16 +59,14 @@ impl Runner {
     }
 
     /// `item` with its weight read again from the worktree's head, as a fix
-    /// turn may have changed what the diff touches
-    ///
-    /// A diff git cannot take leaves the stored weight, and the next round
-    /// reports the failure.
-    pub(super) fn reweighed(&self, item: &WorkItem, base: &str) -> WorkItem {
-        let weight = self.weigh(item, &item.worktree, base);
-        WorkItem {
-            weight: weight.unwrap_or_else(|_| item.weight.clone()),
+    /// turn may have changed what the diff touches, or None when git cannot
+    /// take the diff
+    pub(super) fn reweighed(&self, item: &WorkItem, base: &str) -> Option<WorkItem> {
+        let weight = self.weigh(item, &item.worktree, base).ok()?;
+        Some(WorkItem {
+            weight,
             ..item.clone()
-        }
+        })
     }
 
     /// How many reviewers must read `item`'s pull request: the light count
@@ -117,8 +115,9 @@ mod tests {
     use crate::agents::Tier;
     use crate::ports::{Finding, Severity};
     use crate::runner::{Runner, step};
+    use crate::settings::AgentName;
     use crate::test::{Rig, Scripted, ScriptedRound};
-    use crate::work_item::{Heavier, Lighter, ReviewWeight};
+    use crate::work_item::{Heavier, Lighter, Phase, Review, ReviewWeight};
 
     // `two_local`'s project over candidates `mine`, `other` and `claude`,
     // with `reviews.need` 2 and `extra` after it in the `reviews` table.
@@ -363,5 +362,24 @@ mod tests {
         assert!(first.is_some(), "{tiers:?}");
         let heavy = Some(Tier::Heavy);
         assert!(after.unwrap().iter().all(|t| *t == heavy), "{tiers:?}");
+    }
+
+    #[test]
+    fn a_light_pass_whose_diff_git_cannot_take_goes_on_to_a_round_that_reports_it() {
+        let rig = project("light = 1\n");
+        let runner = at_review(&rig, "README.md");
+        let guard = runner.lock().unwrap();
+        let mut item = guard.current().unwrap().clone();
+        item.weight = Some(ReviewWeight::Light(Lighter::Docs));
+        item.arrived = Some("no-such-ref".into());
+        let read_once = Review {
+            reviewer: AgentName::try_from("mine".to_owned()).ok(),
+            unread: false,
+            ..Review::first()
+        };
+
+        let next = guard.after_round_in(&item, read_once, guard.ports.clock.now());
+
+        assert!(matches!(next, Phase::Review(_)), "{next:?}");
     }
 }
