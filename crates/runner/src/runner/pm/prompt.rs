@@ -187,12 +187,15 @@ const ANSWER: &str = concat!(
 ```
 
 A `pick` entry may be `{\"issue\": <a ready issue>, \"tier\": \"light\" | \"standard\" | \"heavy\", \
-\"agent\": \"<an implementer from the Agents section>\", \"slack\": <minutes>}`, each key but `issue` \
+\"agent\": \"<an implementer from the Agents section>\", \"slack\": <minutes>, \
+\"light\": <true | false>}`, each key but `issue` \
 optional: `tier` is the least the work needs, `slack` the minutes past its quickest finish it \
 may take, and `agent` is the implementer tried first, over its `agent:` label. It runs the item \
 only when it can start within the slack, and an agent the Agents section marks out will not; \
-the agent board picks then, and the maintainer's `agent:<name>!` label still pins. An entry with \
-any other key, or naming no implementer, is dropped.
+the agent board picks then, and the maintainer's `agent:<name>!` label still pins. `light: true` \
+is for a change small and low-risk enough to skim, such as a typo, a comment or a one-line \
+config value. Kelpie checks the diff itself and ignores the tag when the change is larger or the \
+project does not allow it. An entry with any other key, or naming no implementer, is dropped.
 
 `hold` names, for each ready issue, the open work item it waits on as `until`. The \
 hold ends when that work item closes or the issue's text changes, and no other \
@@ -617,6 +620,34 @@ mod tests {
         assert!(text.contains("`escalate`"), "{text}");
         assert!(
             text.contains("Never offer a choice the worker cannot carry out"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_pm_prompt_says_when_to_tag_a_pick_light() {
+        let text = wake(
+            "koji",
+            &[Wake::Told],
+            &[],
+            &[],
+            true,
+            &Notes::default(),
+            BOARD,
+        );
+        assert!(text.contains("\"light\": <true | false>"), "{text}");
+        assert!(
+            text.contains(
+                "`light: true` is for a change small and low-risk enough to skim, such as \
+                 a typo, a comment or a one-line config value"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "Kelpie checks the diff itself and ignores the tag when the change is \
+                 larger or the project does not allow it"
+            ),
             "{text}"
         );
     }

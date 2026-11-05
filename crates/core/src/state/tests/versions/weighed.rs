@@ -47,10 +47,30 @@ fn a_stepped_up_weight_saves_as_high_and_loads_again() {
     store.save(&state).unwrap();
 
     let saved = read_back(dir.path());
-    assert_eq!(saved["version"], 97);
+    assert_eq!(saved["version"], VERSION);
     assert_eq!(
         saved["work_items"][0]["weight"],
         serde_json::json!({"full": "high"})
+    );
+    assert_eq!(store.load().unwrap(), Some(state));
+}
+
+#[test]
+fn a_project_manager_light_weight_saves_with_its_lines_and_loads_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path());
+    let mut state = ProjectState::new();
+    let mut item = a_work_item();
+    item.weight = Some(ReviewWeight::Light(Lighter::Pm { lines: 6 }));
+    state.work_items.push(item);
+
+    store.save(&state).unwrap();
+
+    let saved = read_back(dir.path());
+    assert_eq!(saved["version"], 98);
+    assert_eq!(
+        saved["work_items"][0]["weight"],
+        serde_json::json!({"light": {"pm": {"lines": 6}}})
     );
     assert_eq!(store.load().unwrap(), Some(state));
 }

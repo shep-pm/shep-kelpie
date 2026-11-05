@@ -1,13 +1,14 @@
 //! How much review a work item's change gets
 //!
 //! With `reviews.light` below `reviews.need`, a change that touches only
-//! `reviews.light_paths` runs the light count. Whatever else a change touches
-//! runs the full one, and so does an adopted pull request, a diff that
-//! names no file and an item that was sent a HIGH finding.
+//! `reviews.light_paths` runs the light count, and so does a small change the
+//! project manager tagged light under `reviews.pm_lightens`. Whatever else a
+//! change touches runs the full one, and so does an adopted pull request, a
+//! diff that names no file and an item that was sent a HIGH finding.
 
 use std::path::Path;
 
-use super::{changed_files, matches};
+use super::{changed_files, changed_lines, matches};
 use crate::fence;
 use crate::package_managers::MANAGERS;
 use crate::ports::Severity;
@@ -52,10 +53,16 @@ impl Runner {
             return full(why);
         }
         let light = |file: &String| in_any(&reviews.light_paths, file);
-        Ok(Some(match changed.iter().find(|file| !light(file)) {
-            Some(file) => ReviewWeight::Full(Heavier::Touched(file.clone())),
-            None => ReviewWeight::Light(Lighter::Docs),
-        }))
+        let Some(file) = changed.iter().find(|file| !light(file)) else {
+            return Ok(Some(ReviewWeight::Light(Lighter::Docs)));
+        };
+        if reviews.pm_lightens && item.pm_light {
+            let lines = changed_lines(&self.settings.git.checkout, worktree, base)?;
+            if let Some(lines) = lines.filter(|n| *n <= reviews.light_max_lines.get()) {
+                return Ok(Some(ReviewWeight::Light(Lighter::Pm { lines })));
+            }
+        }
+        Ok(Some(ReviewWeight::Full(Heavier::Touched(file.clone()))))
     }
 
     /// `item` with its weight read again from the worktree's head, as a fix
@@ -141,19 +148,151 @@ mod tests {
         runner: &Mutex<Runner>,
         files: &[&str],
     ) -> Result<Option<ReviewWeight>, String> {
+        let written: Vec<(&str, &[u8])> = files.iter().map(|f| (*f, &b"changed\n"[..])).collect();
+        weighed_writing(runner, false, &written)
+    }
+
+    // The weight of the pull request with each of `files` written on top of
+    // what the worker pushed, as the item stands with the project manager's
+    // light tag `tagged`.
+    fn weighed_writing(
+        runner: &Mutex<Runner>,
+        tagged: bool,
+        files: &[(&str, &[u8])],
+    ) -> Result<Option<ReviewWeight>, String> {
         let runner = runner.lock().unwrap();
-        let item = runner.current().unwrap().clone();
-        for file in files {
+        let mut item = runner.current().unwrap().clone();
+        item.pm_light = tagged;
+        for (file, content) in files {
             let path = item.worktree.join(file);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, "changed\n").unwrap();
+            std::fs::write(path, content).unwrap();
         }
         crate::test::git(&item.worktree, &["add", "-A", "-f"]);
-        crate::test::git(&item.worktree, &["commit", "--quiet", "-m", "more"]);
+        crate::test::git(
+            &item.worktree,
+            &["commit", "--quiet", "--allow-empty", "-m", "more"],
+        );
         let base = item.review_base(runner.item_base(&item)).to_owned();
         let weight = runner.weigh(&item, &item.worktree, &base);
         crate::test::git(&item.worktree, &["reset", "--quiet", "--hard", "HEAD~1"]);
         weight
+    }
+
+    // `n` lines of text, one file's worth.
+    fn lines(n: usize) -> Vec<u8> {
+        "line\n".repeat(n).into_bytes()
+    }
+
+    // The worker's push is one line of `src/lib.rs`, so a change is `extra`
+    // more lines beside it.
+    fn pm_project(extra: &str) -> (Rig, Mutex<Runner>) {
+        let rig = project(&format!("light = 1\n{extra}"));
+        let runner = at_review(&rig, "src/lib.rs");
+        (rig, runner)
+    }
+
+    fn pm_light(lines: u32) -> Option<ReviewWeight> {
+        Some(ReviewWeight::Light(Lighter::Pm { lines }))
+    }
+
+    fn touched(file: &str) -> Option<ReviewWeight> {
+        Some(ReviewWeight::Full(Heavier::Touched(file.into())))
+    }
+
+    #[test]
+    fn a_tagged_change_within_the_line_ceiling_runs_the_light_count() {
+        let (_rig, runner) = pm_project("pm_lightens = true\nlight_max_lines = 6\n");
+
+        let five_more = weighed_writing(&runner, true, &[("src/b.rs", &lines(5))]).unwrap();
+        let none_more = weighed_writing(&runner, true, &[]).unwrap();
+
+        assert_eq!(five_more, pm_light(6), "6 lines is the ceiling");
+        assert_eq!(none_more, pm_light(1));
+    }
+
+    #[test]
+    fn a_tagged_change_counts_added_and_deleted_lines_of_every_file() {
+        let (_rig, runner) = pm_project("pm_lightens = true\nlight_max_lines = 5\n");
+        let a = &b"one\ntwo\nthree\n"[..];
+        let b = &b"x\ny\n"[..];
+        let two = weighed_writing(&runner, true, &[("a.rs", a), ("b.rs", b)]).unwrap();
+        // the worker's line, 3 added in a.rs and 2 in b.rs
+        assert_eq!(two, touched("a.rs"), "6 lines is over 5");
+
+        let a = &b"one\ntwo\n"[..];
+        let b = &b"x\n"[..];
+        let under = weighed_writing(&runner, true, &[("a.rs", a), ("b.rs", b)]).unwrap();
+        assert_eq!(under, pm_light(4));
+    }
+
+    #[test]
+    fn a_tag_is_ignored_when_pm_lightens_is_off_or_the_diff_is_over_the_ceiling_or_the_item_is_untagged()
+     {
+        let on = "pm_lightens = true\nlight_max_lines = 3\n";
+        let (_rig, runner) = pm_project(on);
+        let over = weighed_writing(&runner, true, &[("src/b.rs", &lines(3))]).unwrap();
+        let untagged = weighed_writing(&runner, false, &[("src/b.rs", &lines(1))]).unwrap();
+        assert_eq!(over, touched("src/b.rs"), "4 lines is over 3");
+        assert_eq!(untagged, touched("src/b.rs"), "no tag, no lightening");
+
+        let (_rig, runner) = pm_project("light_max_lines = 3\n");
+        let off = weighed_writing(&runner, true, &[("src/b.rs", &lines(1))]).unwrap();
+        assert_eq!(off, touched("src/b.rs"), "pm_lightens is false when absent");
+
+        let (_rig, runner) = pm_project("pm_lightens = false\n");
+        let off = weighed_writing(&runner, true, &[]).unwrap();
+        assert_eq!(off, touched("src/lib.rs"));
+    }
+
+    #[test]
+    fn a_forced_full_file_beats_the_project_managers_tag() {
+        let (_rig, runner) = pm_project("pm_lightens = true\nfull_paths = [\"legal/**\"]\n");
+        let cases = [
+            (".github/workflows/ci.yml", Heavier::Ci),
+            ("Cargo.lock", Heavier::Dependencies),
+            (".mcp.json", Heavier::AgentFiles),
+            (
+                "legal/terms.md",
+                Heavier::FullPaths("legal/terms.md".into()),
+            ),
+        ];
+        for (file, why) in cases {
+            let weight = weighed_writing(&runner, true, &[(file, &lines(1))]).unwrap();
+            assert_eq!(weight, Some(ReviewWeight::Full(why)), "{file}");
+        }
+    }
+
+    #[test]
+    fn a_forced_full_file_with_a_non_ascii_name_beats_the_project_managers_tag() {
+        let (_rig, runner) = pm_project("pm_lightens = true\nfull_paths = [\"legal/**\"]\n");
+
+        let weight = weighed_writing(&runner, true, &[("legal/café.md", &lines(1))]).unwrap();
+
+        let forced = Heavier::FullPaths("legal/café.md".into());
+        assert_eq!(weight, Some(ReviewWeight::Full(forced)));
+    }
+
+    #[test]
+    fn a_binary_file_counts_as_over_the_line_ceiling() {
+        let (_rig, runner) = pm_project("pm_lightens = true\nlight_max_lines = 1000\n");
+
+        let binary = weighed_writing(&runner, true, &[("logo.png", &[0, 159, 146, 150, 0])]);
+
+        assert_eq!(binary.unwrap(), touched("logo.png"));
+    }
+
+    #[test]
+    fn a_tagged_docs_only_change_reads_as_docs_whatever_the_ceiling() {
+        let (_rig, runner) = pm_project("pm_lightens = true\nlight_max_lines = 1\n");
+        let docs = weighed_writing(&runner, true, &[("docs/a.md", &lines(50))]);
+        // src/lib.rs from the worker keeps this one out of the docs case
+        assert_eq!(docs.unwrap(), touched("src/lib.rs"));
+
+        let rig = project("light = 1\npm_lightens = true\nlight_max_lines = 1\n");
+        let runner = at_review(&rig, "README.md");
+        let docs = weighed_writing(&runner, true, &[("docs/a.md", &lines(50))]);
+        assert_eq!(docs.unwrap(), Some(ReviewWeight::Light(Lighter::Docs)));
     }
 
     #[test]

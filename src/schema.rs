@@ -231,6 +231,8 @@ mod tests {
             .replace("# light = 1", "light = 1")
             .replace("# light_paths =", "light_paths =")
             .replace("# full_paths =", "full_paths =")
+            .replace("# pm_lightens =", "pm_lightens =")
+            .replace("# light_max_lines =", "light_max_lines =")
             .replace("# maintainer =", "maintainer =")
             .replace("# base =", "base =")
             .replace(
