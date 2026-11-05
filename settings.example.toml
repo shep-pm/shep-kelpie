@@ -217,8 +217,15 @@ per_item_usd = 10
 enabled = true
 kickoff_hours = 8
 
-# Domains a worker's sandbox may reach besides GitHub: here the crates
-# registry, for a cold cargo cache. An entry is a host such as `crates.io`,
+# Domains a worker's sandbox may reach besides GitHub. A call that works an
+# item always reaches the registries of the package managers its worktree
+# keeps a lockfile or manifest for, in its root or a folder directly under it,
+# so this names only hosts beyond them: npm, pnpm and bun (`registry.npmjs.org`),
+# yarn (`registry.yarnpkg.com` and `registry.npmjs.org`), cargo (`crates.io`,
+# `index.crates.io`, `static.crates.io`), go (`proxy.golang.org`,
+# `sum.golang.org`), and uv and pip (`pypi.org`, `files.pythonhosted.org`).
+# `doctor` names each manager it finds. Here the crates registry is listed as
+# well, for a cold cargo cache before a lockfile exists. An entry is a host such as `crates.io`,
 # with one optional leading `*.` label (`*.crates.io`) and an optional
 # `:port`; a `*` anywhere else, such as `productionresultssa*.blob.core.windows.net`,
 # a scheme or a path is refused when the settings load, since the sandbox would
@@ -234,17 +241,6 @@ kickoff_hours = 8
 [app.dogs.kelpie.worker]
 allowed_domains = ["crates.io", "index.crates.io", "static.crates.io"]
 build_env = {}
-
-# While on, a call that works an item also reaches the registries of the
-# package managers its worktree keeps a lockfile or manifest for, in its root
-# or a folder directly under it, so `allowed_domains` names hosts beyond them:
-# npm, pnpm and bun (`registry.npmjs.org`), yarn (`registry.yarnpkg.com` and
-# `registry.npmjs.org`), cargo (`crates.io`, `index.crates.io`,
-# `static.crates.io`), go (`proxy.golang.org`, `sum.golang.org`), and uv and
-# pip (`pypi.org`, `files.pythonhosted.org`). On when absent; off, only
-# `allowed_domains` adds hosts. `doctor` names each manager it finds and how
-# its registry is reached.
-package_registries = true
 
 # A file of extra worker instructions, appended to kelpie's own: rules the
 # repo's docs don't carry. `~/` is the home folder, and a relative path is
