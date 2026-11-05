@@ -492,20 +492,21 @@ fn reviews(out: &mut String, mine: &[&Stamped]) {
 // so is one an earlier round already sent, since its first fix did not fix it
 fn sent(out: &mut String, mine: &[&Stamped]) {
     let mut lines = Vec::new();
-    for stamped in mine {
+    for (index, stamped) in mine.iter().enumerate() {
         let Entry::Findings {
             round, findings, ..
         } = &stamped.entry
         else {
             continue;
         };
-        let reviewer = mine.iter().find_map(|s| match &s.entry {
+        let preceding = &mine[..index];
+        let reviewer = preceding.iter().rev().find_map(|s| match &s.entry {
             Entry::Round {
                 round: r, reviewer, ..
             } if r == round => Some(reviewer.as_str()),
             _ => None,
         });
-        let round = rounds_read(mine).filter(|r| *r <= *round).count();
+        let round = rounds_read(preceding).count();
         let late = if round >= LATE_ROUND { " (late)" } else { "" };
         for found in findings {
             let line = match found.line {
