@@ -594,6 +594,37 @@ async fn a_held_api_agent_waits_until_the_hold_ends_and_ranks_behind_agents_that
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_short_hold_does_not_lift_an_api_agent_over_agents_that_can_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = plan_api_and_local(dir.path());
+    let mut shown = seen(&agents, &Gateways::default(), 10).await;
+    let now = Timestamp(EPOCH);
+    let view = Board::new(&agents).view();
+    let free = pick::answer(&view, &shown, &ask_all(), now);
+    assert_eq!(order(&free), ["local", "billed", "plan"], "ranked on tier");
+
+    shown.refused(
+        Refusal::SpendLimit {
+            resumes: Some(Timestamp(EPOCH + 60)),
+        },
+        now,
+    );
+    let held = pick::answer(&view, &shown, &ask_all(), now);
+    assert_eq!(
+        order(&held),
+        ["local", "plan", "billed"],
+        "inside the slack it still goes after both that can start"
+    );
+
+    let after = pick::answer(&view, &shown, &ask_all(), Timestamp(EPOCH + 60));
+    assert_eq!(
+        order(&after),
+        ["local", "billed", "plan"],
+        "once the hold ends"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_hold_reaches_an_api_reviewer_as_it_does_an_implementer() {
     let dir = tempfile::tempdir().unwrap();
     let read = |login: &str| {

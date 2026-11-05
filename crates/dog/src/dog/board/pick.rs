@@ -96,6 +96,7 @@ pub(super) fn answer(
                 wait: wait(agent, shown, turn, now),
                 typical,
                 local: !(agent.runs.session()).is_some_and(|(_, limit)| !limit.is_local()),
+                held: bills_api(agent) && shown.api_held(now).is_some(),
             }
         })
         .collect();
@@ -136,6 +137,11 @@ fn estimate(
     )
 }
 
+// Whether `agent` is billed to the API key
+fn bills_api(agent: &Agent) -> bool {
+    (agent.runs.session()).is_some_and(|(model, _)| model.harness.bills_api())
+}
+
 // The API's refusal as a hold, which every agent billed to the key waits out.
 fn api_hold(shown: &Availability, now: Timestamp) -> Option<Hold> {
     Some(Hold {
@@ -154,7 +160,7 @@ fn wait(agent: &Agent, shown: &Availability, turn_secs: u64, now: Timestamp) -> 
         return agent_board::wait(agent_board::Availability::Gateway(load), turn_secs, now);
     }
     let hold = match agent.runs.session() {
-        Some((model, _)) if model.harness.bills_api() => Some(api_hold(shown, now)),
+        Some(_) if bills_api(agent) => Some(api_hold(shown, now)),
         Some((_, Limit::Account(account))) => Some(match shown.usage(*account) {
             Some(usage) => pacer::window(*account, &usage),
             None => Assessment::unreadable(now, "its plan is not read yet".into()).window,
