@@ -167,8 +167,8 @@ per_item_usd = 10
 # representative = "representative"
 # Minutes past the soonest finish that the agent board lets a work item's
 # agent take: a new item opens on the cheapest ranked agent finishing within
-# it, and a later turn moves to the next pick when its own agent would finish
-# past it. 0 keeps only the soonest. A pick of the project manager's own
+# it, and a later turn moves to the next pick when its own agent cannot start
+# within it. 0 keeps only the soonest. A pick of the project manager's own
 # `slack` wins for its item. 60 when absent.
 # slack = 60
 # Read by nothing: the agent board picks each work item's implementer, and

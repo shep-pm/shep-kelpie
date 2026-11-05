@@ -133,7 +133,8 @@ _Avoid_: score, rating
 **Slack**:
 How far past the soonest finish a work item may finish, so the agent board
 can take a cheaper agent: `agents.slack` minutes (60 when absent), unless
-the project manager's pick names its own, such as 0 for a hotfix.
+the project manager's pick names its own, such as 0 for a hotfix. A started
+item keeps its agent while that agent can start within the slack.
 _Avoid_: max wait
 
 **Baseline**:
@@ -337,8 +338,8 @@ drives it yet.
 **Handoff**:
 The document a session writes so the next session can continue: the
 `reset` step's skill. Also a work item moved to another implementer before a
-due turn, because the **agent board** ranks its own past the item's slack of
-the soonest finish. The new implementer starts a session of its own on the
+due turn, because the **agent board** says its own cannot start within the
+item's slack. The new implementer starts a session of its own on the
 same branch, with a note kelpie writes of the commits and the last turn.
 _Avoid_: summary (Claude's compaction output)
 

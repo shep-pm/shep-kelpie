@@ -109,6 +109,13 @@ pub fn within_slack(finish: u64, soonest: u64, slack: Option<u32>) -> bool {
     finish <= soonest.saturating_add(slack)
 }
 
+/// Whether an agent `wait` seconds from starting can start within `slack`
+/// minutes, which keeps a named agent on a new item and an item's own agent on
+/// its turn however long either takes
+pub fn starts_within_slack(wait: u64, slack: Option<u32>) -> bool {
+    within_slack(wait, 0, slack)
+}
+
 // An item with no kind goes only to an agent whose file names no kinds
 pub(super) fn takes(fit: &Fit, kind: Option<&str>) -> bool {
     match (&fit.kinds, kind) {

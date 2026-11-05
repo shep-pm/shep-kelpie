@@ -210,6 +210,7 @@ fn a_refused_turn_after_a_handoff_adds_the_refusal_to_the_note_it_carried() {
     step(&runner).unwrap();
     // The plan agent's next turn goes to the API agent, which then refuses.
     let far = 3 * 60 * 60;
+    rig.agent_board.waits("sonnet-high", far);
     rig.agent_board
         .ranks_finishing(&[("api", 600), ("sonnet-high", far), ("coder", far)]);
     rig.claude

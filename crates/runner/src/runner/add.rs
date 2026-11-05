@@ -7,7 +7,7 @@ use super::briefing::passed_over;
 use super::pace::{Started, Walked};
 use super::pm::Picked;
 use super::trigger::issue_list;
-use crate::agent_board::within_slack;
+use crate::agent_board::starts_within_slack;
 use crate::board::check::label_kind;
 use crate::board::{
     self, LabelError, OpenPullRequest, READY, ReadyIssue, Skip, agent_label, old_worker_label,
@@ -417,7 +417,7 @@ impl Runner {
                 ..ask.clone()
             };
             let picks = self.board_picks(&alone).map_err(AddError::Unpicked)?;
-            if (picks.iter()).any(|pick| within_slack(pick.wait, 0, alone.slack)) {
+            if (picks.iter()).any(|pick| starts_within_slack(pick.wait, alone.slack)) {
                 picked = Some(agent);
             } else {
                 note = Some(format!(
