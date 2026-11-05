@@ -606,3 +606,17 @@ async fn an_agent_folder_that_fails_to_load_keeps_the_old_agents() {
     assert_eq!(dog.pass().await, ["applied agent files: extra"]);
     assert!(dog.ranked().contains(&"extra".to_owned()));
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_file_left_out_of_the_book_changes_no_agent_and_logs_nothing() {
+    let mut dog = started_on(&format!("{PADDOCK}{BASE}")).await;
+    let ranked = dog.ranked();
+
+    write_in(dog.dir.path(), "bad.md", "no front matter\n");
+    let lines = dog.pass().await;
+
+    assert_eq!(lines, Vec::<String>::new());
+    assert_eq!(dog.ranked(), ranked);
+    assert_eq!(dog.models(), [r#""paddock"/"coder""#]);
+    assert_eq!(dog.pass().await, Vec::<String>::new());
+}

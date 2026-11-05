@@ -133,9 +133,14 @@ impl Reread {
         if agents == self.agents {
             return;
         }
+        // A change in only the lists of files left out changes no agent the dog uses.
+        let changed = changed_agents(&self.agents, &agents);
+        if changed.is_empty() {
+            self.agents = agents;
+            return;
+        }
         board::lock(&self.handles.board).set_agents(&agents);
         self.handles.live.set_agents(&agents);
-        let changed = changed_agents(&self.agents, &agents);
         self.agents = agents;
         log.push(format!("applied agent files: {}", changed.join(", ")));
     }
