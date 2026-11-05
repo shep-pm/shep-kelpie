@@ -198,19 +198,15 @@ impl Plan {
 ///
 /// The dog first, then the canary, then every other runner together once the
 /// canary passes. With `keep_calls`, each runner is handed over to the
-/// installed build. One that refuses, predates the handover or is slow to show
-/// the build is drained before its merge wait, and sent `undrain` if not
+/// installed build; one that cannot be is drained, and sent `undrain` if not
 /// restarted after all.
 ///
 /// # Errors
 ///
-/// [`Stopped::Canary`] when the canary fails a check; no other runner was
-/// touched. Otherwise [`Stopped::Other`], a message naming the sheep that could
-/// not be restarted, did not come back, kept a merge in flight past
-/// `patience.merge`, or would not say whether it had one; a drained runner that
-/// kept a call past its ceiling and `patience.margin`; or the interrupt. A
-/// runner silent after its restart is named after the others, the dog at once.
-/// Running the upgrade again finishes what was not restarted.
+/// [`Stopped::Canary`] when the canary fails a check, with no other runner
+/// touched. Otherwise [`Stopped::Other`]: a sheep that could not be restarted
+/// or did not come back, a merge or call that outlasted its wait, or the
+/// interrupt. Running the upgrade again finishes what was not restarted.
 pub async fn restart_all(
     client: &dyn Connection,
     plan: &Plan,
