@@ -4,8 +4,9 @@
 //! up. The runner logs each install as a `packages-installed` step in `steps.jsonl`, so this
 //! reads it from there.
 
-use std::collections::{BTreeMap, VecDeque};
-use std::io::{BufRead, BufReader};
+use std::collections::BTreeMap;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 
 use serde::Deserialize;
 
@@ -14,6 +15,9 @@ use crate::home::{ProjectPaths, STEPS_FILE};
 
 /// How many of the file's last lines are read
 const LAST_LINES: usize = 200;
+
+/// How many bytes are read back from the end at a time
+const CHUNK: u64 = 64 * 1024;
 
 #[derive(Deserialize)]
 struct Step {
@@ -27,20 +31,14 @@ struct Step {
 /// A line for each work item whose latest install in the last 200 steps failed, in the order
 /// of its issue's number as text: none where the file is missing or holds no such step
 pub(super) fn lines(subject: &dyn Fn(&str) -> String, paths: &ProjectPaths) -> Vec<Line> {
-    let Ok(file) = std::fs::File::open(paths.folder.join(STEPS_FILE)) else {
+    let Ok(mut file) = std::fs::File::open(paths.folder.join(STEPS_FILE)) else {
         return Vec::new();
     };
-    let mut last: VecDeque<String> = VecDeque::with_capacity(LAST_LINES);
-    for line in BufReader::new(file).lines().map_while(Result::ok) {
-        if last.len() == LAST_LINES {
-            last.pop_front();
-        }
-        last.push_back(line);
-    }
+    let last = last_lines(&mut file);
     let mut latest: BTreeMap<String, Option<String>> = BTreeMap::new();
     for step in last
         .iter()
-        .filter_map(|line| serde_json::from_str::<Step>(line).ok())
+        .filter_map(|line| serde_json::from_slice::<Step>(line).ok())
     {
         if step.step == "packages-installed" {
             latest.insert(step.issue, step.failed);
@@ -70,4 +68,32 @@ fn error_line(output: &str) -> &str {
         .find(|l| l.to_ascii_lowercase().contains("error"))
         .or_else(|| lines().next_back())
         .unwrap_or_default()
+}
+
+// The last `LAST_LINES` lines of `file`, read backward from its end so a long history costs
+// only the bytes of those lines. A file that cannot be read gives none.
+fn last_lines(file: &mut File) -> Vec<Vec<u8>> {
+    let Ok(mut start) = file.seek(SeekFrom::End(0)) else {
+        return Vec::new();
+    };
+    let mut bytes: Vec<u8> = Vec::new();
+    // One newline more than the lines wanted proves the first line read is whole.
+    while start > 0 && bytes.iter().filter(|b| **b == b'\n').count() <= LAST_LINES {
+        let take = start.min(CHUNK);
+        start -= take;
+        let mut chunk = vec![0; take as usize];
+        if file.seek(SeekFrom::Start(start)).is_err() || file.read_exact(&mut chunk).is_err() {
+            return Vec::new();
+        }
+        chunk.extend_from_slice(&bytes);
+        bytes = chunk;
+    }
+    let mut lines: Vec<Vec<u8>> = bytes.split(|b| *b == b'\n').map(<[u8]>::to_vec).collect();
+    // The text after the last newline is empty, or a line still being written.
+    lines.pop();
+    if start > 0 {
+        lines.remove(0);
+    }
+    let skip = lines.len().saturating_sub(LAST_LINES);
+    lines.split_off(skip)
 }

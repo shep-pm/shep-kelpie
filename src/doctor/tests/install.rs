@@ -73,3 +73,43 @@ async fn a_later_good_install_of_the_issue_names_nothing() {
         report.render()
     );
 }
+
+// Steps of a long run, each wider than a few hundred bytes
+fn filler(count: usize) -> Vec<Value> {
+    (0..count)
+        .map(|n| json!({"at": "2026-11-05T10:02:00.000Z", "step": "ended", "n": n, "pad": "x".repeat(900)}))
+        .collect()
+}
+
+#[tokio::test]
+async fn an_install_among_the_last_200_steps_of_a_long_log_is_named() {
+    let scene = Scene::new().await;
+    scene.runs("golbat", |_| {});
+    let mut steps = filler(300);
+    steps.push(installed("7", json!("error: no network")));
+    steps.extend(filler(150));
+    logs(&scene, &steps);
+
+    let report = scene.report().await;
+
+    unsure(&report, "golbat: package install #7");
+}
+
+#[tokio::test]
+async fn an_install_before_the_last_200_steps_is_not_read() {
+    let scene = Scene::new().await;
+    scene.runs("golbat", |_| {});
+    let mut steps = vec![installed("7", json!("error: no network"))];
+    steps.extend(filler(200));
+    logs(&scene, &steps);
+
+    let report = scene.report().await;
+
+    assert!(
+        !subjects(&report)
+            .iter()
+            .any(|subject| subject.starts_with("golbat: package install")),
+        "{:#?}",
+        report.render()
+    );
+}
