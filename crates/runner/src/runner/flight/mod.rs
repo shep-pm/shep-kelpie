@@ -4,9 +4,9 @@
 //! no thread of the runner's waits on one. The call's end comes back on a
 //! channel, which wakes the runner's loop, and its next pass records it. A
 //! work item has at most one call in flight, and the open work items' calls
-//! run at once, beside the project manager's one call. A turn's ceiling is
-//! a deadline each pass checks, and a call past it is ended through its own
-//! process group.
+//! run at once, beside the project manager's one call. Every call has a
+//! ceiling, a deadline each pass checks, and a call past it is ended through
+//! its own process group.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -36,6 +36,9 @@ use crate::settings::Harness;
 use crate::state::StateError;
 use crate::ticket::TicketId;
 use crate::usage::{CallKind, Draft};
+
+/// How long a review call gets to read one head, in seconds
+pub(in crate::runner) const REVIEW_CEILING: u64 = 60 * 60;
 
 /// What one pass of the runner's loop did
 #[derive(Debug)]
@@ -110,9 +113,7 @@ impl Flights {
     /// time the worker's: a stop leaves one marked, and so does a restart
     /// until a pass resumes it.
     pub(super) fn runs_turn(&self, ticket: TicketId) -> bool {
-        self.flying
-            .get(&ticket)
-            .is_some_and(|f| f.deadline.is_some())
+        self.flying.get(&ticket).is_some_and(|f| f.turn)
     }
 
     /// Forgets `ticket`'s call in flight, once its end is heard
@@ -125,7 +126,7 @@ impl Flights {
     pub(super) fn turn_call(&self, ticket: TicketId) -> Option<(AgentCall, bool, u64)> {
         let flight = self.flying.get(&ticket)?;
         let call = flight.watched.call.clone()?;
-        (flight.deadline.is_some() && !flight.compact).then_some((call, flight.first, flight.left))
+        (flight.turn && !flight.compact).then_some((call, flight.first, flight.left))
     }
 
     /// When `ticket`'s call in flight started
@@ -171,10 +172,14 @@ impl Flights {
 // One call in flight
 #[derive(Debug)]
 struct Flight {
-    // The turn's ceiling for a worker's turn, and none for a review call
-    deadline: Option<Timestamp>,
-    // How much of the ceiling the turn had when it started, which it has
-    // again from when it gets the lease it waited for
+    // When it is ended if it is still running: `worker.turn_timeout` for a
+    // turn, `REVIEW_CEILING` for a review call
+    deadline: Timestamp,
+    // Whether it is a worker's turn, which the deadline cannot tell: a review
+    // call has one too
+    turn: bool,
+    // How much of its ceiling it had when it started, which it has again from
+    // when it gets the lease it waited for
     left: u64,
     ending: Ending,
     // Whether this call starts over a session that died before it began
@@ -224,20 +229,20 @@ impl Runner {
         self.flights.wake = Some(wake);
     }
 
-    /// How long until the soonest ceiling of a turn in flight that has not
-    /// been ended yet, or `None` with no such turn
+    /// How long until the soonest ceiling of a call in flight that has not
+    /// been ended yet, or `None` with no such call
     pub fn next_ceiling(&self) -> Option<Duration> {
         let now = self.ports.clock.now();
-        let turns = (self.flights.flying.values())
+        let items = (self.flights.flying.values())
             .filter(|flight| !flight.ending.asked())
-            .filter_map(|flight| flight.deadline);
+            .map(|flight| flight.deadline);
         let pm = (self.flights.pm.iter())
             .filter(|(_, ending)| !ending.asked())
             .map(|(deadline, _)| *deadline);
         let securing = (self.flights.securing.iter()).filter_map(security::Securing::ceiling);
         let triaging = (self.flights.triaging.iter()).filter_map(triage::Triaging::ceiling);
         let retro = (self.flights.retro.iter()).filter_map(retro::Retrospecting::ceiling);
-        turns
+        items
             .chain(pm)
             .chain(securing)
             .chain(triaging)
@@ -246,12 +251,13 @@ impl Runner {
             .min()
     }
 
-    // Ends each call in flight past its turn's ceiling. Its end comes back
-    // as a call that timed out, and parks as one.
+    // Ends each call in flight past its ceiling. A turn's end comes back as
+    // one that timed out, and parks as one; a review call's as a round that
+    // failed.
     fn end_overdue(&self) {
         let now = self.ports.clock.now();
         for flight in self.flights.flying.values() {
-            if flight.deadline.is_some_and(|deadline| deadline <= now) {
+            if flight.deadline <= now {
                 flight.ending.end();
             }
         }
@@ -317,19 +323,19 @@ impl Runner {
         self.flights.pm = Some((Timestamp(now.0.saturating_add(ceiling)), ending));
     }
 
-    // Counts `ticket`'s turn ceiling from now, once its call has the lease it
+    // Counts `ticket`'s call ceiling from now, once it has the lease it
     // waited for, and starts the board's quiet clock from the same moment.
     fn began(&mut self, ticket: TicketId) {
         let now = self.ports.clock.now();
         let told = self.flights.flying.get_mut(&ticket).map(|flight| {
             let told = flight.watched.told.take();
             let said = flight.watched.woken;
-            let turn = flight.watched.call.is_some();
+            let turn = flight.turn;
             let waited = told.map_or(0, |(since, _)| now.0.saturating_sub(since.0));
             flight.watched.granted = Some(now);
             flight.watched.woken = false;
-            if flight.deadline.is_some() {
-                flight.deadline = Some(Timestamp(now.0.saturating_add(flight.left)));
+            flight.deadline = Timestamp(now.0.saturating_add(flight.left));
+            if flight.turn {
                 flight.ending.carry(flight.flying(now));
             }
             let model = flight
@@ -422,7 +428,8 @@ impl Runner {
             },
         );
         // A turn's harness, which a turn that cannot start names
-        let (deadline, again, first, harness) = match &launch {
+        let now = self.ports.clock.now();
+        let (deadline, turn, again, first, harness) = match &launch {
             Launch::Turn {
                 call,
                 deadline,
@@ -430,16 +437,22 @@ impl Runner {
                 first,
                 ..
             } => (
-                Some(*deadline),
+                *deadline,
+                true,
                 *again,
                 *first,
                 Some(call.harness.harness()),
             ),
-            Launch::Review(_) => (None, false, false, None),
+            Launch::Review(_) => (
+                Timestamp(now.0.saturating_add(REVIEW_CEILING)),
+                false,
+                false,
+                false,
+                None,
+            ),
         };
         let compact = matches!(launch, Launch::Turn { compact: true, .. });
         let role = harness.map_or("reviewer", |_| "worker");
-        let now = self.ports.clock.now();
         let watched = Watched {
             started: now,
             call: match &launch {
@@ -490,9 +503,10 @@ impl Runner {
             item,
         ));
         let reviewer = Arc::clone(&self.ports.reviewer);
-        let left = deadline.map_or(0, |deadline| deadline.0.saturating_sub(now.0));
+        let left = deadline.0.saturating_sub(now.0);
         let flight = Flight {
             deadline,
+            turn,
             left,
             ending,
             again,
@@ -509,8 +523,8 @@ impl Runner {
             },
             record_gone: None,
         };
-        // Only a turn has a ceiling to carry, for its record on disk.
-        if flight.deadline.is_some() {
+        // Only a turn carries its ceiling, for its record on disk.
+        if turn {
             flight.ending.carry(flight.flying(now));
         }
         let held = flight.ending.clone();
