@@ -276,7 +276,7 @@ impl Runner {
     }
 
     // The limit `agent`'s sessions run under, None when it runs none.
-    fn agent_limit(&self, agent: &AgentName) -> Option<Limit> {
+    pub(super) fn agent_limit(&self, agent: &AgentName) -> Option<Limit> {
         let session = (self.book.get(agent)).and_then(|agent| agent.runs.session());
         session.map(|(_, limit)| limit.clone())
     }
