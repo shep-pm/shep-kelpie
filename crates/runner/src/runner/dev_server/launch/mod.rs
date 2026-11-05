@@ -29,8 +29,9 @@ pub(super) struct Configuration {
     pub(super) runtime_args: Vec<String>,
     pub(super) port: Option<u16>,
     pub(super) cwd: Option<String>,
+    /// `None` when the file says nothing, which the runner reads as its own rule
     #[serde(default)]
-    pub(super) auto_port: bool,
+    pub(super) auto_port: Option<bool>,
 }
 
 /// Whether `origin/<base>` of `checkout` has the file
