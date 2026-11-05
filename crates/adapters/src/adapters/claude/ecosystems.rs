@@ -15,6 +15,7 @@ use std::time::SystemTime;
 
 use super::sandbox::policy;
 use crate::adapters::SandboxRuntime;
+use crate::package_managers;
 use crate::ports::{AgentCall, Policy, Reach, Role, Sandbox, Session, SessionId, Tools};
 use crate::profile::WorkerProfile;
 use crate::settings::{AgentHarness, BuildDir, Effort, EnvName, GuardHook, HookEvent, NonBlank};
@@ -105,17 +106,31 @@ impl Ecosystem {
         }
     }
 
-    // The variables the project's settings point into the build folder. npm's
-    // cache is none of the fence's own, so a project that installs names it.
-    fn build_env(self) -> BTreeMap<EnvName, BuildDir> {
-        let mut env = BTreeMap::new();
-        if matches!(self, Self::Npm) {
-            env.insert(
-                EnvName::try_from("NPM_CONFIG_CACHE".to_owned()).unwrap(),
-                BuildDir::try_from("npm-cache".to_owned()).unwrap(),
-            );
+    // The package manager the fixture keeps files for, in the table.
+    fn manager(self) -> &'static str {
+        match self {
+            Self::Rust => "cargo",
+            Self::Go => "go",
+            Self::Bun => "bun",
+            Self::Npm => "npm",
         }
-        env
+    }
+
+    // The variables a worker's settings point into the build folder for this project: the
+    // caches every worker gets and those of its manager, as `Worker::build_env_in` gives them.
+    fn build_env(self) -> BTreeMap<EnvName, BuildDir> {
+        let managers: Vec<_> = (package_managers::MANAGERS.iter())
+            .filter(|m| m.name == self.manager())
+            .collect();
+        (package_managers::always_caches().into_iter())
+            .chain(package_managers::caches(&managers))
+            .map(|(name, dir)| {
+                (
+                    EnvName::try_from(name.to_owned()).unwrap(),
+                    BuildDir::try_from(dir.to_owned()).unwrap(),
+                )
+            })
+            .collect()
     }
 
     // Puts the toolchain's own home under the fake home, as the machine has it.
@@ -157,6 +172,8 @@ impl Ecosystem {
             Self::Go => vec![
                 var("GOPATH", &home.join("go")),
                 ("GOTOOLCHAIN".to_owned(), "local".to_owned()),
+                // The module cache is in the build folder, which a run removes whole.
+                ("GOFLAGS".to_owned(), "-modcacherw".to_owned()),
                 on_path(&[home.join("go/bin")]),
             ],
             Self::Bun => vec![

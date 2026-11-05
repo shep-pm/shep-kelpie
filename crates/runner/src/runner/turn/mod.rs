@@ -721,6 +721,7 @@ impl Runner {
         }
         let login_token = self.maintainers_login(token)?;
         let registries = Self::registries(&item.worktree);
+        let build_env = self.settings.worker.build_env_in(&item.worktree);
         let profile = WorkerProfile {
             worktree: &item.worktree,
             build: &item.build,
@@ -738,7 +739,7 @@ impl Runner {
             repo: &self.settings.git.checkout,
             allowed_domains: &self.settings.worker.allowed_domains,
             registries: &registries,
-            build_env: &self.settings.worker.build_env,
+            build_env: &build_env,
             home: &self.home,
             shep_home: &self.paths.shep_home,
             door: &self.paths.door,

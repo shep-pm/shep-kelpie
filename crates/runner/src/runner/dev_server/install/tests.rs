@@ -52,7 +52,7 @@ fn the_packages_are_installed_from_the_lockfile_before_the_server_starts() {
     assert_eq!(run.args[3], cwd.display().to_string());
     assert_eq!(run.args[4], "/build/install-unfinished");
     assert_eq!(run.args[5..], ["npm", "run", "dev"]);
-    assert_eq!(run.env["npm_config_cache"], "/build/npm-cache");
+    assert_eq!(run.env["NPM_CONFIG_CACHE"], "/build/npm-cache");
     assert_eq!(run.policy.hosts, ["app.example.com", "registry.npmjs.org"]);
     assert!(run.ready_within > Duration::from_secs(60));
 }
@@ -252,7 +252,7 @@ fn a_pnpm_plan_names_its_store_cache_state_and_lock_folders() {
     let plan = worktree(dir.path(), Path::new("/build")).unwrap();
 
     for (name, folder) in [
-        ("npm_config_store_dir", "pnpm-store"),
+        ("NPM_CONFIG_STORE_DIR", "pnpm-store"),
         ("PNPM_CONFIG_STORE_DIR", "pnpm-store"),
         ("PNPM_CONFIG_CACHE_DIR", "pnpm-cache"),
         ("PNPM_CONFIG_STATE_DIR", "pnpm-state"),
@@ -303,8 +303,8 @@ fn each_folder_that_lacks_packages_is_installed_by_its_own_manager() {
     assert!(plan.command.contains("pnpm install --frozen-lockfile"));
     assert!(plan.command.contains("npm ci --ignore-scripts"));
     assert!(!plan.command.contains("yarn"));
-    assert_eq!(plan.env["npm_config_store_dir"], "/build/pnpm-store");
-    assert_eq!(plan.env["npm_config_cache"], "/build/npm-cache");
+    assert_eq!(plan.env["NPM_CONFIG_STORE_DIR"], "/build/pnpm-store");
+    assert_eq!(plan.env["NPM_CONFIG_CACHE"], "/build/npm-cache");
 }
 
 #[test]
