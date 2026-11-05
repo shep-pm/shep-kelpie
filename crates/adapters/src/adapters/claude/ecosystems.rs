@@ -66,6 +66,7 @@ pub(crate) enum Ecosystem {
     Go,
     Bun,
     Npm,
+    Pnpm,
 }
 
 impl Ecosystem {
@@ -75,6 +76,7 @@ impl Ecosystem {
             Self::Go => "go",
             Self::Bun => "bun",
             Self::Npm => "npm",
+            Self::Pnpm => "pnpm",
         }
     }
 
@@ -94,6 +96,12 @@ impl Ecosystem {
                 "npm run test",
                 "npm run lint",
             ],
+            Self::Pnpm => &[
+                "pnpm install --frozen-lockfile --offline",
+                "pnpm run build",
+                "pnpm run test",
+                "pnpm run lint",
+            ],
         }
     }
 
@@ -103,6 +111,7 @@ impl Ecosystem {
             Self::Rust | Self::Go => "pre-push: make lint",
             Self::Bun => "pre-push: bun run lint",
             Self::Npm => "pre-push: npm run lint",
+            Self::Pnpm => "pre-push: pnpm run lint",
         }
     }
 
@@ -113,6 +122,7 @@ impl Ecosystem {
             Self::Go => "go",
             Self::Bun => "bun",
             Self::Npm => "npm",
+            Self::Pnpm => "pnpm",
         }
     }
 
@@ -149,7 +159,7 @@ impl Ecosystem {
                 copy_tool("golangci-lint", &home.join("go/bin"));
             }
             Self::Bun => copy_tool("bun", &home.join(".bun/bin")),
-            Self::Npm => {}
+            Self::Npm | Self::Pnpm => {}
         }
     }
 
@@ -181,6 +191,7 @@ impl Ecosystem {
                 on_path(&[home.join(".bun/bin")]),
             ],
             Self::Npm => vec![("NPM_CONFIG_UPDATE_NOTIFIER".to_owned(), "false".to_owned())],
+            Self::Pnpm => Vec::new(),
         }
     }
 
@@ -205,6 +216,10 @@ impl Ecosystem {
             }
             Self::Npm => {
                 w.outside(&wt, "npm ci --no-audit --no-fund", env);
+                fs::remove_dir_all(wt.join("node_modules")).unwrap();
+            }
+            Self::Pnpm => {
+                w.outside(&wt, "pnpm install --frozen-lockfile", env);
                 fs::remove_dir_all(wt.join("node_modules")).unwrap();
             }
         }
@@ -455,6 +470,8 @@ pub(crate) fn project(through: &Through, eco: Ecosystem) {
         ])
         .chain(eco.env(&w))
         .collect();
+    // A runner makes the folders the settings name before the install runs.
+    crate::profile::make_build_folders(&fence.env, &w.path("build"));
     eco.warm(&w, &env);
 
     let before = w.outside_the_grants(&call, through);
@@ -520,6 +537,12 @@ fn a_bun_project_installs_tests_and_pushes_inside_the_fence() {
 #[ignore = "runs the real sandbox with Node, after `cargo build`"]
 fn an_npm_project_installs_tests_and_pushes_inside_the_fence() {
     project(&CLAUDE_CODE, Ecosystem::Npm);
+}
+
+#[test]
+#[ignore = "runs the real sandbox with pnpm 12, after `cargo build`"]
+fn a_pnpm_project_installs_tests_and_pushes_inside_the_fence() {
+    project(&CLAUDE_CODE, Ecosystem::Pnpm);
 }
 
 #[test]
