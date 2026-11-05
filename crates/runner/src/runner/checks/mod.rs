@@ -5,7 +5,7 @@
 //! record, and what was posted is kept in memory only, so a restart posts
 //! each check once more and GitHub shows the newest of a name.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::Runner;
@@ -37,7 +37,7 @@ struct Sent {
 pub(super) struct Book {
     // By work item and head, then by the check's name
     heads: BTreeMap<(TicketId, String), BTreeMap<String, Sent>>,
-    // The head and pull request each work item's checks were last posted on
+    // The head and pull request each work item's checks stand on
     last: BTreeMap<TicketId, (String, u64)>,
     // How the ruling each work item was parked on was answered, until the
     // check that waited on it is closed
@@ -215,9 +215,12 @@ impl Runner {
             return;
         }
         let mut wanted = Vec::new();
-        let mut gone: Vec<TicketId> = self.checks.last.keys().copied().collect();
+        // A work item with a check posted and no open item ended or was dropped.
+        let mut gone: BTreeSet<TicketId> = (self.checks.heads.keys())
+            .map(|(issue, _)| *issue)
+            .collect();
         for item in &self.state.work_items {
-            gone.retain(|issue| *issue != item.issue);
+            gone.remove(&item.issue);
             let Some(pr) = item.pull_request else {
                 continue;
             };
@@ -243,6 +246,8 @@ impl Runner {
                 pr,
                 answered: self.checks.answers.get(&item.issue).copied(),
             };
+            // The head its checks stand on, which is what its end closes.
+            self.checks.last.insert(item.issue, (head.clone(), pr));
             wanted.extend(self.checks.changed(item.issue, &head, &at));
             // A head the item moved on from is not gated any more.
             let left = Standing {
@@ -273,13 +278,21 @@ impl Runner {
                 answered: self.checks.answers.get(&issue).copied(),
             };
             wanted.extend(self.checks.changed(issue, &head, &at));
+            // Every head it stood on is closed too, as one the item left.
+            let left = Standing {
+                phase: &Phase::Implement,
+                ..at
+            };
+            for old in self.checks.other_heads(issue, &head) {
+                wanted.extend(self.checks.changed(issue, &old, &left));
+            }
             self.checks.prune(issue, &phase);
         }
         if wanted.is_empty() || !self.app_covers() {
             return;
         }
         let voice = Arc::clone(&self.ports.voice);
-        for (issue, pr, head, check) in wanted {
+        for (issue, head, check) in wanted {
             let key = (issue, head.clone());
             let id = (self.checks.heads.get(&key))
                 .and_then(|p| p.get(&check.name))
@@ -315,7 +328,6 @@ impl Runner {
                     id
                 }
             };
-            self.checks.last.insert(issue, (head, pr));
             (self.checks.heads.entry(key).or_default())
                 .insert(check.name.clone(), Sent { id, check });
         }
@@ -329,7 +341,7 @@ impl Book {
         issue: TicketId,
         head: &str,
         at: &Standing<'_>,
-    ) -> Vec<(TicketId, u64, String, GateCheck)> {
+    ) -> Vec<(TicketId, String, GateCheck)> {
         let posted = self.heads.get(&(issue, head.to_owned()));
         let state = |name: &str| posted.and_then(|p| p.get(name)).map(|s| s.check.state);
         let same = |check: &GateCheck| {
@@ -337,7 +349,7 @@ impl Book {
         };
         (gate_checks(at, state).into_iter())
             .filter(|check| !same(check))
-            .map(|check| (issue, at.pr, head.to_owned(), check))
+            .map(|check| (issue, head.to_owned(), check))
             .collect()
     }
 
