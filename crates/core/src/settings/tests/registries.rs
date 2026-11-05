@@ -1,13 +1,23 @@
-//! `worker.package_registries`
+//! `worker.package_registries`, which is gone: detection is always on
 
-use super::{EXAMPLE, parse};
+use super::{EXAMPLE, parse_err};
 
 #[test]
-fn it_is_on_in_the_example_and_when_absent_and_off_when_set_off() {
-    let absent = EXAMPLE.replace("package_registries = true\n", "");
-    let off = EXAMPLE.replace("package_registries = true", "package_registries = false");
+fn the_old_key_is_refused_by_name() {
+    let text = EXAMPLE.replace(
+        "build_env = {}\n",
+        "build_env = {}\npackage_registries = true\n",
+    );
+    assert!(
+        text.contains("package_registries = true"),
+        "the example's worker table moved"
+    );
 
-    assert!(parse(EXAMPLE).unwrap().worker.package_registries);
-    assert!(parse(&absent).unwrap().worker.package_registries);
-    assert!(!parse(&off).unwrap().worker.package_registries);
+    let err = parse_err(&text);
+
+    assert!(
+        err.contains("`worker.package_registries` is no longer a setting"),
+        "{err}"
+    );
+    assert!(err.contains("delete it"), "{err}");
 }
