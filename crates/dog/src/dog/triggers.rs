@@ -8,6 +8,7 @@ use super::availability::Availability;
 use super::desk::{Delivery, Desk, deliveries};
 use crate::lease::book::Asked;
 use crate::lease::{Holder, LeaseKind};
+use crate::ports::Timestamp;
 
 /// What `status` shows beside the leases: the agent board and the records
 #[derive(Debug, Clone, Copy)]
@@ -16,15 +17,41 @@ pub struct Shown<'a> {
     pub board: &'a Value,
     /// Each agent's track record
     pub records: &'a Value,
+    /// What the dog's reread of its `[kelpie]` section holds back
+    pub settings: &'a SettingsState,
+}
+
+/// What a reread of the `[kelpie]` section left for the maintainer to act on
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SettingsState {
+    /// Each restart-only key whose value differs from the one the dog started with
+    pub waiting: Vec<&'static str>,
+    /// The change the dog refused, while one stands
+    pub refused: Option<Refused>,
+}
+
+/// A change to the section the dog refused, and since when
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refused {
+    /// What did not hold
+    pub reason: String,
+    /// When it was first refused
+    pub at: Timestamp,
 }
 
 static EMPTY: LazyLock<Value> = LazyLock::new(|| json!({}));
+
+static NOTHING_HELD: SettingsState = SettingsState {
+    waiting: Vec::new(),
+    refused: None,
+};
 
 impl Default for Shown<'_> {
     fn default() -> Self {
         Self {
             board: &EMPTY,
             records: &EMPTY,
+            settings: &NOTHING_HELD,
         }
     }
 }
@@ -41,7 +68,8 @@ impl Desk {
 
     /// Answers one of the maintainer's triggers with a JSON body
     ///
-    /// `status` lists every lease, `availability` and the `board` and `records` given. `take`
+    /// `status` lists every lease, `availability`, the `board` and `records` given, and the
+    /// settings the dog is waiting on a restart for. `take`
     /// and `return` name a book lease and act for the maintainer. Asking
     /// with `take` again is how a waiting maintainer learns of the grant.
     pub fn answer_with(
@@ -94,12 +122,17 @@ impl Desk {
         let mut leases = vec![json!(self.tests.status())];
         leases.extend(self.e2e.values().map(|l| json!(l.status())));
         leases.extend(self.book.status().iter().map(|l| json!(l)));
-        json!({
+        let mut status = json!({
             "leases": leases,
             "availability": availability.status(),
             "board": shown.board,
             "records": shown.records,
-        })
+            "waiting_for_restart": shown.settings.waiting,
+        });
+        if let Some(Refused { reason, at }) = &shown.settings.refused {
+            status["settings_refused"] = json!({ "reason": reason, "at": at });
+        }
+        status
     }
 }
 
@@ -107,7 +140,7 @@ impl Desk {
 mod tests {
     use serde_json::json;
 
-    use super::{ACTIONS, Shown};
+    use super::{ACTIONS, Refused, SettingsState, Shown};
     use crate::agent_board::DEFAULT_SECS;
     use crate::dog::availability::{Availability, Sources};
     use crate::dog::board::Board;
@@ -158,7 +191,37 @@ mod tests {
                 "since": null,
                 "queue": [],
                 "window": { "quota": 1, "summons": [], "opens": null },
-            }], "availability": { "models": [], "accounts": [] }, "board": {}, "records": {} })
+            }], "availability": { "models": [], "accounts": [] }, "board": {}, "records": {},
+               "waiting_for_restart": [] })
+        );
+    }
+
+    #[test]
+    fn status_lists_the_keys_waiting_for_a_restart_and_a_standing_refusal() {
+        let mut w = world();
+        let settings = SettingsState {
+            waiting: vec!["webhook.url", "gateways"],
+            refused: Some(Refused {
+                reason: "the section does not parse".into(),
+                at: Timestamp(EPOCH),
+            }),
+        };
+        let shown = Shown {
+            settings: &settings,
+            ..Shown::default()
+        };
+        let (body, _) = w
+            .desk
+            .answer_with("status", None, &Availability::default(), shown);
+        let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+        assert_eq!(
+            body["waiting_for_restart"],
+            json!(["webhook.url", "gateways"])
+        );
+        assert_eq!(
+            body["settings_refused"],
+            json!({ "reason": "the section does not parse", "at": EPOCH })
         );
     }
 
@@ -194,6 +257,7 @@ mod tests {
             Shown {
                 board: &board,
                 records: &records,
+                ..Shown::default()
             },
         );
         let body: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -227,6 +291,7 @@ mod tests {
             Shown {
                 board: &board,
                 records: &records,
+                ..Shown::default()
             },
         );
         let body: serde_json::Value = serde_json::from_str(&body).unwrap();
