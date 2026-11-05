@@ -293,6 +293,7 @@ fn info(id: usize, sheep: &Sheep) -> ProcessInfo {
                 path: sheep.config.script.clone(),
                 channel,
                 grants: None,
+                events: Vec::new(),
             }))
             .handshook(Some(sheep.heard == Heard::Named))
             .dog_stale(Some(sheep.heard == Heard::GivenUp));

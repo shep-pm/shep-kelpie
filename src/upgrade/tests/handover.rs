@@ -44,7 +44,7 @@ async fn upgrade_hands_over_a_runner_that_can_and_drains_none() {
     // image never answers `handover`: it is replaced as it takes it.
     rig.shepherd.says("koji", &[IDLE, IDLE, OLD, NEW]);
     rig.shepherd.hands("koji", &[None]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
 
@@ -73,7 +73,7 @@ async fn upgrade_drains_a_runner_that_predates_the_handover() {
             Some("unknown action: handover"),
         ],
     );
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
 
@@ -98,7 +98,7 @@ async fn upgrade_drains_a_runner_that_refuses_and_names_the_reason() {
     let mut rig = Rig::new().await;
     rig.shepherd.says("koji", &[IDLE, IDLE, DRAINED]);
     rig.shepherd.hands("koji", &[Some(REFUSED)]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
 
@@ -131,7 +131,7 @@ async fn a_handover_that_never_shows_the_new_build_is_drained_and_named() {
             r#"{"handover":"waiting for the runner's quiet point"}"#,
         )],
     );
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let patience = Patience {
         start: Duration::from_millis(30),
         ..FAST
@@ -163,7 +163,7 @@ async fn a_runner_stopped_while_it_hands_over_stays_stopped() {
     let looks = [IDLE, IDLE, OLD, OLD, OLD, OLD, OLD, OLD, OLD, OLD, OLD];
     rig.shepherd.says("koji", &looks);
     rig.shepherd.hands("koji", &[None]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     // Stopped once the upgrade has looked at it a few times.
     let stopping = async {
         while rig.shepherd.answers_left("koji") > looks.len() - 4 {
@@ -190,7 +190,7 @@ async fn a_runner_that_shows_no_build_is_said_to_show_none() {
     rig.shepherd
         .says("koji", &[IDLE, IDLE, none, none, none, none, DRAINED]);
     rig.shepherd.hands("koji", &[None]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let patience = Patience {
         start: Duration::from_millis(30),
         ..FAST
@@ -215,7 +215,7 @@ async fn a_runner_still_opening_is_not_taken_for_a_handover_in_progress() {
         .replies("koji", &[Some(IDLE), Some(IDLE), opening]);
     rig.shepherd
         .hands("koji", &[Some("unknown action: handover")]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let patience = Patience {
         start: Duration::from_millis(30),
         merge: Duration::from_millis(100),
@@ -242,7 +242,7 @@ async fn a_ctrl_c_while_a_runner_hands_over_stops_the_upgrade() {
     let mut rig = Rig::new().await;
     rig.shepherd.says("koji", &[IDLE, IDLE, OLD]);
     rig.shepherd.hands("koji", &[None]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let scene = Scene {
         interrupt: Interrupt::After(Duration::from_millis(100)),
         ..rig.scene(FAST)

@@ -108,7 +108,7 @@ async fn the_dog_restarts_first_then_the_canary_and_no_other_runner_before_its_p
         "aria",
         &[IDLE, IDLE, IDLE, IDLE, NO_PASS, NO_PASS, NO_PASS, IDLE],
     );
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
 
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
@@ -142,7 +142,7 @@ async fn the_canary_is_the_first_runner_to_show_nothing_in_flight() {
     rig.shepherd.says("aria", &[IDLE, MERGING, IDLE]);
     // `koji` has a worker turn going, which does not hold it back.
     rig.shepherd.says("koji", &[WORKING]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
 
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
@@ -165,7 +165,7 @@ async fn two_quiet_runners_at_one_look_pick_the_first_by_name() {
     // Added after `koji` and `zed`, so insertion order does not decide it.
     rig.runs("zed", &rig.installed.clone(), true);
     rig.runs("aria", &rig.installed.clone(), true);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
 
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
@@ -190,7 +190,7 @@ async fn the_other_runners_are_not_drained_or_handed_over_while_the_canary_is_ch
     // `aria` never shows a first pass, so the check goes on until Ctrl-C.
     rig.shepherd
         .says("aria", &[IDLE, IDLE, IDLE, IDLE, NO_PASS]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let scene = Scene {
         interrupt: Interrupt::After(Duration::from_millis(300)),
         ..rig.scene(FAST)
@@ -221,7 +221,7 @@ async fn the_rest_wait_for_the_canarys_first_pass() {
     let mut looks = vec![NO_PASS; 12];
     looks.push(IDLE);
     rig.shepherd.says("aria", &looks);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
 
     let (ran, _) = rig.install(&new).await;
     ran.unwrap();
@@ -269,7 +269,7 @@ async fn a_runner_waiting_on_a_merge_does_not_hold_back_the_runners_after_it() {
     rig.runs("zed", &rig.installed.clone(), true);
     // `aria` is quiet at the dog's look and then merges for good.
     rig.shepherd.says("aria", &[IDLE, MERGING]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let patience = Patience {
         merge: Duration::from_millis(300),
         ..FAST
@@ -293,7 +293,7 @@ async fn no_runner_going_quiet_within_the_merge_wait_restarts_nothing_and_names_
     for name in ["aria", "koji"] {
         rig.shepherd.says(name, &[IDLE, MERGING]);
     }
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let patience = Patience {
         merge: Duration::from_millis(100),
         ..FAST
@@ -313,7 +313,7 @@ async fn no_runner_going_quiet_within_the_merge_wait_restarts_nothing_and_names_
 async fn a_pick_stopped_meanwhile_stays_stopped_and_picking_goes_on() {
     let mut rig = Rig::new().await;
     rig.runs("aria", &rig.installed.clone(), true);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let scene = rig.scene(FAST);
     let action = Action::Install(Source::Binary(new));
     let mut said = Vec::new();
@@ -348,7 +348,7 @@ async fn a_pick_stopped_meanwhile_stays_stopped_and_picking_goes_on() {
 async fn a_canary_showing_another_build_fails_and_no_other_runner_is_touched() {
     let mut rig = Rig::new().await;
     canary_says(&rig, IDLE, ANOTHER_BUILD);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
 
     let err = rig.install(&new).await.0.unwrap_err();
 
@@ -378,7 +378,7 @@ async fn a_canary_showing_another_commit_fails_and_no_other_runner_is_touched() 
 async fn a_canary_refusing_its_settings_fails_and_no_other_runner_is_touched() {
     let mut rig = Rig::new().await;
     canary_says(&rig, IDLE, REFUSED);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
 
     let err = rig.install(&new).await.0.unwrap_err();
 
@@ -393,7 +393,7 @@ async fn a_canary_refusing_its_settings_fails_and_no_other_runner_is_touched() {
 async fn a_canary_whose_step_newly_fails_fails_and_no_other_runner_is_touched() {
     let mut rig = Rig::new().await;
     canary_says(&rig, IDLE, FAILING);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
 
     let err = rig.install(&new).await.0.unwrap_err();
 
@@ -408,7 +408,7 @@ async fn a_canary_whose_step_newly_fails_fails_and_no_other_runner_is_touched() 
 async fn a_canary_whose_working_ticket_is_now_failed_fails_and_no_other_runner_is_touched() {
     let mut rig = Rig::new().await;
     canary_says(&rig, WORKING, TURN_FAILED);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
 
     let err = rig.install(&new).await.0.unwrap_err();
 
@@ -429,7 +429,7 @@ async fn a_canary_that_answers_no_status_within_the_start_wait_fails_and_no_othe
         "aria",
         &[Some(IDLE), Some(IDLE), Some(IDLE), Some(IDLE), None],
     );
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let patience = Patience {
         start: Duration::from_millis(50),
         ..FAST
@@ -452,7 +452,7 @@ async fn a_canary_that_answers_no_status_within_the_start_wait_fails_and_no_othe
 async fn a_step_failing_before_and_after_the_restart_does_not_fail_the_canary() {
     let mut rig = Rig::new().await;
     canary_says(&rig, FAILING, FAILING);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
 
     let (ran, _) = rig.install(&new).await;
 
@@ -468,7 +468,7 @@ async fn a_step_that_began_failing_while_the_canary_drained_does_not_fail_it() {
     // and still failing after it: the old build's failure.
     rig.shepherd
         .says("aria", &[IDLE, IDLE, IDLE, FAILING, FAILING]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
 
     let (ran, _) = rig.install(&new).await;
 
@@ -485,7 +485,7 @@ async fn a_canary_that_counts_no_passes_yet_waits_for_its_first_instead_of_passi
     looks.extend([NO_COUNT; 12]);
     looks.push(IDLE);
     rig.shepherd.says("aria", &looks);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
 
     let (ran, _) = rig.install(&new).await;
 
@@ -505,7 +505,7 @@ async fn a_canary_from_before_passes_passes_once_the_start_wait_has_gone_by_with
     for after in [NO_COUNT, r#"{"work_items":[]}"#] {
         let mut rig = Rig::new().await;
         canary_says(&rig, IDLE, after);
-        let new = rig.build("new", "0.3.0", "0.23.0");
+        let new = rig.build("new", "0.3.0", "0.24.2");
 
         let (ran, said) = rig.install(&new).await;
 
@@ -526,7 +526,7 @@ async fn a_canary_from_before_passes_passes_once_the_start_wait_has_gone_by_with
 async fn a_bare_upgrade_whose_canary_fails_offers_no_rollback() {
     let mut rig = Rig::new().await;
     canary_says(&rig, IDLE, ANOTHER_BUILD);
-    rig.cargo_installs("0.3.0", "0.23.0");
+    rig.cargo_installs("0.3.0", "0.24.2");
 
     let err = rig.upgrade(Action::Installed).await.0.unwrap_err();
 
@@ -545,8 +545,8 @@ async fn a_bare_upgrade_whose_canary_fails_offers_no_rollback() {
 async fn a_rollbacks_failed_canary_says_a_second_rollback_swaps_forward_again() {
     let mut rig = Rig::new().await;
     rig.runs("aria", &rig.installed.clone(), true);
-    let first = rig.build("first", "0.2.0", "0.23.0");
-    let second = rig.build("second", "0.3.0", "0.23.0");
+    let first = rig.build("first", "0.2.0", "0.24.2");
+    let second = rig.build("second", "0.3.0", "0.24.2");
     rig.install(&first).await.0.unwrap();
     rig.install(&second).await.0.unwrap();
     rig.restarts();
