@@ -5,6 +5,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use super::*;
+use crate::api_refusal::{CREDIT_RECHECK_SECS, Refusal};
 use crate::dog::availability::{Availability, Readers, Sources, read};
 use crate::lease::door::PickAsk;
 use crate::ports::{Meter, Timestamp, Utilization};
@@ -537,4 +538,93 @@ async fn a_listed_name_with_no_agent_file_is_ignored_and_the_rest_rank() {
     let picks = pick::answer(&view, &shown, &ask, Timestamp(EPOCH));
 
     assert_eq!(order(&picks), ["billed", "plan-a", "plan-b"]);
+}
+
+// Held for the whole of a day from `EPOCH`, as a spend limit that resumes then.
+const HELD_FOR: u64 = 86_400;
+
+fn limit_hit() -> Refusal {
+    Refusal::SpendLimit {
+        resumes: Some(Timestamp(EPOCH + HELD_FOR)),
+    }
+}
+
+// Only an agent finishing within ten minutes of the soonest ranks by cost.
+fn ask_soon() -> PickAsk {
+    PickAsk {
+        slack: Some(10),
+        ..ask_all()
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_held_api_agent_waits_until_the_hold_ends_and_ranks_behind_agents_that_can_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = plan_api_and_local(dir.path());
+    let mut shown = seen(&agents, &Gateways::default(), 10).await;
+    let now = Timestamp(EPOCH);
+    let view = Board::new(&agents).view();
+    let before = pick::answer(&view, &shown, &ask_soon(), now);
+    let billed = |picks: &[crate::lease::door::Pick]| {
+        picks.iter().find(|p| p.agent.as_str() == "billed").cloned()
+    };
+    assert_eq!(billed(&before).unwrap().wait, 0);
+
+    shown.refused(limit_hit(), now);
+    let picks = pick::answer(&view, &shown, &ask_soon(), now);
+    let status = view.status(&shown, now);
+
+    assert_eq!(billed(&picks).unwrap().wait, HELD_FOR);
+    assert_eq!(status["billed"]["wait"], HELD_FOR);
+    assert_eq!(order(&picks).last(), Some(&"billed"), "{:?}", order(&picks));
+    let pinned = PickAsk {
+        pin: Some(AgentName::kelpies("billed")),
+        ..ask_soon()
+    };
+    let one = pick::answer(&view, &shown, &pinned, now);
+    assert_eq!(
+        order(&one),
+        ["billed"],
+        "a pinned item is not stopped by the hold"
+    );
+
+    let ended = Timestamp(EPOCH + HELD_FOR);
+    let after = pick::answer(&view, &shown, &ask_soon(), ended);
+    assert_eq!(billed(&after).unwrap().wait, 0, "the hold has ended");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_hold_reaches_an_api_reviewer_as_it_does_an_implementer() {
+    let dir = tempfile::tempdir().unwrap();
+    let read = |login: &str| {
+        format!(
+            "---\nrole: reviewer\nharness: claude-code\nmodel: claude-sonnet-5-5\n\
+             effort: high\n{login}tier: standard\n---\nRead the diff for defects.\n"
+        )
+    };
+    write_in(dir.path(), "read-api.md", &read("login: api\n"));
+    write_in(dir.path(), "read-plan.md", &read(""));
+    let agents = Agents::load(dir.path()).unwrap();
+    let mut shown = seen(&agents, &Gateways::default(), 10).await;
+    shown.refused(limit_hit(), Timestamp(EPOCH));
+    let ask = ask_of(&["read-api", "read-plan"]);
+
+    let picks = pick::answer(&Board::new(&agents).view(), &shown, &ask, Timestamp(EPOCH));
+
+    let waits: Vec<_> = picks.iter().map(|p| (p.agent.as_str(), p.wait)).collect();
+    assert_eq!(waits, [("read-plan", 0), ("read-api", HELD_FOR)]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_plan_agent_is_not_held_by_an_api_refusal() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = plan_api_and_local(dir.path());
+    let mut shown = seen(&agents, &Gateways::default(), 10).await;
+    shown.refused(Refusal::NoCredit, Timestamp(EPOCH));
+
+    let status = Board::new(&agents).view().status(&shown, Timestamp(EPOCH));
+
+    assert_eq!(status["plan"]["wait"], 0);
+    assert_eq!(status["local"]["wait"], 0);
+    assert_eq!(status["billed"]["wait"], CREDIT_RECHECK_SECS);
 }

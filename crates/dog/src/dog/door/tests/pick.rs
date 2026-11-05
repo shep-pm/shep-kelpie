@@ -5,15 +5,16 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::agents::{Agents, Tier};
+use crate::api_refusal::{CREDIT_RECHECK_SECS, Refusal};
 use crate::dog::availability::{Readers, Sources, read};
 use crate::dog::board::refresh;
 use crate::dog::board::tests::finished;
 use crate::forwarder::Upstream;
 use crate::lease::door::{Pick, PickAsk};
-use crate::lease::door_pick::pick;
-use crate::ports::{LocalLeases, Meter, ModelLoad, PaddockHolder, Utilization};
+use crate::lease::door_pick::{pick, refused};
+use crate::ports::{LocalLeases, Meter, ModelLoad, PaddockHolder, Timestamp, Utilization};
 use crate::settings::{Account, AgentName, Gateway, GatewayName, Gateways};
-use crate::test::{FakeMeter, utilization, write_in};
+use crate::test::{EPOCH, FakeMeter, utilization, write_in};
 
 const FREE: ModelLoad = ModelLoad {
     slots: 1,
@@ -337,4 +338,25 @@ async fn a_reviewer_below_the_asks_tier_is_not_ranked() {
     let picks = picked(&dog.socket, ask).await;
 
     assert_eq!(agents_of(&picks), ["heavy"]);
+}
+
+#[tokio::test]
+async fn a_refusal_a_runner_reports_holds_every_api_agent_for_the_next_pick() {
+    let billed = "---\nrole: implementer\nharness: claude-code\nmodel: claude-sonnet-5-5\n\
+                  effort: high\nlogin: api\n---\n";
+    let files = [
+        ("billed.md", billed.to_owned()),
+        ("fast.md", on_paddock("fast-coder", "")),
+    ];
+    let dog = dog(&files, &[("fast-coder", FREE)]).await;
+    let socket = dog.socket.clone();
+
+    let held = off_the_runtime(move || refused(&socket, &Refusal::NoCredit)).await;
+
+    // The dog's book stands at the epoch.
+    let until = Timestamp(EPOCH + CREDIT_RECHECK_SECS);
+    assert_eq!(held, Some(until));
+    let picks = picked(&dog.socket, item(None, &["billed", "fast"])).await;
+    let waits: Vec<_> = picks.iter().map(|p| (p.agent.as_str(), p.wait)).collect();
+    assert_eq!(waits, [("fast", 0), ("billed", CREDIT_RECHECK_SECS)]);
 }

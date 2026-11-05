@@ -12,7 +12,7 @@ use crate::dog::door::{Place, say};
 use crate::dog::lock_desk;
 use crate::ipc::ServerWriteHalf;
 use crate::lease::door::{Answer, Ask, Pick, PickAsk};
-use crate::pacer::{self, Assessment};
+use crate::pacer::{self, Assessment, Hold, HoldKind};
 use crate::ports::Timestamp;
 use crate::settings::Limit;
 
@@ -136,8 +136,17 @@ fn estimate(
     )
 }
 
-// Seconds before `agent` can start, from its model's load or its plan's
-// window, or None with no window. A model the dog reads no load for, behind
+// The API's refusal as a hold, which every agent billed to the key waits out.
+fn api_hold(shown: &Availability, now: Timestamp) -> Option<Hold> {
+    Some(Hold {
+        kind: HoldKind::Window,
+        reason: "the API refused the key".into(),
+        until: shown.api_held(now)?,
+    })
+}
+
+// Seconds before `agent` can start, from its model's load, its plan's
+// window or the API's hold, or None with no window. A model the dog reads no load for, behind
 // a gateway other than paddock, starts at once. An unread plan waits a recheck.
 fn wait(agent: &Agent, shown: &Availability, turn_secs: u64, now: Timestamp) -> Option<u64> {
     let load = (agent.runs.gateway()).and_then(|(gateway, model)| shown.load(gateway, model));
@@ -145,6 +154,7 @@ fn wait(agent: &Agent, shown: &Availability, turn_secs: u64, now: Timestamp) -> 
         return agent_board::wait(agent_board::Availability::Gateway(load), turn_secs, now);
     }
     let hold = match agent.runs.session() {
+        Some((model, _)) if model.harness.bills_api() => Some(api_hold(shown, now)),
         Some((_, Limit::Account(account))) => Some(match shown.usage(*account) {
             Some(usage) => pacer::window(*account, &usage),
             None => Assessment::unreadable(now, "its plan is not read yet".into()).window,

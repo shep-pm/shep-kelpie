@@ -20,7 +20,11 @@ use tokio::time::MissedTickBehavior;
 use crate::agents::Agents;
 use crate::api_refusal::Refusal;
 use crate::board::briefing::date_time;
+use crate::dog::door::{Place, say};
+use crate::dog::lock_desk;
 use crate::forwarder::Upstream;
+use crate::ipc::ServerWriteHalf;
+use crate::lease::door::{Answer, Ask};
 use crate::pacer::RECHECK_SECS;
 use crate::ports::{Clock, LocalLeases, Meter, ModelLoad, Timestamp, Utilization};
 use crate::settings::{Account, GatewayKind, GatewayName, Gateways, Limit, ModelHost};
@@ -379,6 +383,20 @@ pub(super) async fn read(
 
 async fn blocking<T: Send + 'static>(read: impl FnOnce() -> T + Send + 'static) -> Option<T> {
     tokio::task::spawn_blocking(read).await.ok()
+}
+
+/// Answers a runner's `refused` ask with the time the API is held until, and ends the visit
+///
+/// Every runner on the key reports the same refusal, so a hold already
+/// standing keeps the later time.
+pub(super) async fn visit(place: &Place, ask: Ask, write: &mut ServerWriteHalf) {
+    let Some(refusal) = ask.refused else {
+        let why = "a refused ask says why the API refused the key".to_owned();
+        return say(write, &Answer::Error(why)).await;
+    };
+    let now = lock_desk(&place.desk).desk.book.now();
+    let until = lock(&place.shown).refused(refusal, now);
+    say(write, &Answer::Held(until.0)).await;
 }
 
 /// What the dog has read, under its lock
