@@ -96,6 +96,11 @@ impl Board {
         self.prefer = prefer.into();
     }
 
+    #[cfg(test)]
+    pub(super) fn prefer(&self) -> Vec<AgentName> {
+        self.prefer.to_vec()
+    }
+
     /// What it holds now, for a pick, a `fit` ask or `status` to read without the lock
     pub(super) fn view(&self) -> View {
         View {

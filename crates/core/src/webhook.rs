@@ -50,7 +50,7 @@ pub struct KelpieSettings {
     #[serde(default)]
     pub gateways: BTreeMap<GatewayName, Gateway>,
     /// How the agent board orders the agents that finish in time, shared by
-    /// every project. The dog reads it when it starts.
+    /// every project. The dog reads it again every 30 seconds.
     #[serde(default)]
     pub agent_board: AgentBoardSettings,
 }

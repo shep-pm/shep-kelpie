@@ -56,6 +56,12 @@
 # `shep kelpie doctor` prints a `replies` line while the topic is trusted.
 # Without `trusted`, every reply needs the authenticator code.
 # `shep kelpie doctor --test-alert` posts a test through these settings.
+#
+# The dog reads the webhook only when it starts, so a change waits for
+# `shep restart kelpie`, and `status` lists the changed keys under
+# `waiting_for_restart`. A change the dog would refuse at its start, such as an
+# unreadable `ca_cert`, is refused at its next reread: it keeps its old settings,
+# `status` shows `settings_refused`, and the webhook it started with is told.
 [kelpie.webhook]
 kind = "ntfy"
 url = "https://ntfy.sh/your-private-topic"
@@ -82,8 +88,9 @@ url = "https://ntfy.sh/your-private-topic"
 # How many commands may hold the `cargo-test` lease at once, 3 when absent.
 # A worker runs its test suite under it, as does anything on this machine
 # that runs `shep kelpie lease run cargo-test -- <command>`, and the rest
-# queue. The dog reads this when it starts, so after a change run
-# `shep restart kelpie`.
+# queue. The dog rereads this every 30 seconds, so a change needs no restart.
+# A higher count grants the waiting commands at once. A lower one holds new
+# grants off until fewer commands hold it, and takes no command's lease back.
 # [kelpie.leases]
 # cargo-test = 3
 
@@ -92,8 +99,8 @@ url = "https://ntfy.sh/your-private-topic"
 # unlisted one whatever it costs, and the rest go by cost as before. An agent
 # past the slack stays behind those within it. Shared by every project; a name
 # no implementer or reviewer file holds is ignored, and `doctor` says so.
-# Absent or empty, nothing is ranked. The dog reads this when it starts, so
-# after a change run `shep restart kelpie`.
+# Absent or empty, nothing is ranked. The dog rereads this every 30 seconds, so
+# a change needs no restart.
 # [kelpie.agent_board]
 # prefer = ["sonnet-high", "opus-high"]
 

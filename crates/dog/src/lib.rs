@@ -20,7 +20,8 @@ use shep_kelpie_core::{
 #[cfg(test)]
 mod test {
     pub use shep_kelpie_core::test::{
-        EPOCH, FakeClock, FakeMeter, FakeShepherd, LeaseReads, RecordedSink, utilization,
+        EPOCH, FakeAlerts, FakeClock, FakeMeter, FakeShepherd, LeaseReads, RecordedSink,
+        utilization,
     };
     pub use shep_kelpie_test_support::{CALL_PATIENCE, write_in, write_script};
 

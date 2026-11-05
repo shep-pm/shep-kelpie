@@ -201,7 +201,7 @@ fn main() -> ExitCode {
             .iter()
             .all(|key| std::env::var_os(key).is_some()) =>
         {
-            shep_kelpie::dog::run(dog_ports())
+            shep_kelpie::dog::run(dog_ports(), Arc::new(shep_kelpie::adapters::Curl))
         }
         _ => {
             if let Some(gone) = shep_kelpie::settings::removed_command(&args) {

@@ -18,6 +18,7 @@ mod e2e;
 mod forge;
 pub mod left_over;
 mod link;
+mod reread;
 mod section;
 pub mod triggers;
 mod watch;
@@ -40,14 +41,14 @@ use crate::home;
 use crate::lease::saved::{BookFile, SavedBook};
 use crate::lease::wire::{GRANT, grant_params};
 use crate::metrics::{Recorder, ShepherdSink};
-use crate::ports::{Clock, LocalPace, SystemClock};
+use crate::ports::{Alerts, Clock, LocalPace, SystemClock};
 use crate::review_bot::{Bot, Reviewers};
 use crate::settings::AgentName;
 use crate::shep_home;
 use crate::skills;
 use bus::{Bus, Sent};
 use desk::{Delivery, Desk};
-use triggers::{ACTIONS, Shown};
+use triggers::{ACTIONS, SettingsState, Shown};
 
 /// The dog's name, which kelpie is adopted under and `shep kelpie lease` triggers
 pub const NAME: &str = crate::shepherd::DOG;
@@ -60,13 +61,13 @@ const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 const WINDOW_TICK: Duration = Duration::from_secs(10);
 
 /// Runs the dog until the shepherd stops it, as the adopted kelpie's start
-pub fn run(ports: availability::Ports) -> ExitCode {
+pub fn run(ports: availability::Ports, alerts: Arc<dyn Alerts>) -> ExitCode {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build();
     let served = match runtime {
         Ok(runtime) => {
-            let served = runtime.block_on(serve(ports));
+            let served = runtime.block_on(serve(ports, alerts));
             // A plan meter's read can take half a minute, and the dog does not wait for it.
             runtime.shutdown_background();
             served
@@ -256,7 +257,7 @@ fn windows_of(agents: &Agents) -> Reviewers {
     })
 }
 
-async fn serve(ports: availability::Ports) -> Result<(), String> {
+async fn serve(ports: availability::Ports, alerts: Arc<dyn Alerts>) -> Result<(), String> {
     let shepherd = shep_channel::serve();
     if !shepherd.is_active() {
         return Err(crate::shepherd::no_channel());
@@ -279,7 +280,8 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
             .map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
     }
     println!("the book is {}", file.path().display());
-    let settings = section::settings(&client).await?;
+    let started = section::settings(&*client).await?;
+    let settings = &started.settings;
     let metrics = Arc::new(Recorder::new(Arc::new(ShepherdSink::new(shepherd.clone()))));
     refresh_baselines();
     migrate_agents();
@@ -289,7 +291,7 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
     let capacity = settings.leases.cargo_test_capacity();
     kept.desk.set_test_capacity(capacity);
     let desk = Arc::new(Mutex::new(kept));
-    let shown = availability::begin(&agents, &settings, ports);
+    let shown = availability::begin(&agents, settings, ports);
     // Never `KELPIE_HOME`: shep starts the adopted dog without it.
     let kelpie_home = home::under(&shep_home);
     let board = board::begin(
@@ -305,6 +307,15 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
         println!("{why}");
     }
     let waiters = door::Waiters::default();
+    let standing = Arc::<Mutex<SettingsState>>::default();
+    let handles = reread::Handles {
+        desk: Arc::clone(&desk),
+        board: Arc::clone(&board),
+        waiters: Arc::clone(&waiters),
+        alerts,
+        standing: Arc::clone(&standing),
+    };
+    reread::begin(reread::Reread::new(&started, handles), client.clone());
     let opened = door::open(&socket).map(|listener| (socket, listener));
     match opened {
         Ok((socket, listener)) => {
@@ -331,6 +342,7 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
     for action in ACTIONS {
         let (desk, answered) = (Arc::clone(&desk), answered.clone());
         let (shown, board) = (Arc::clone(&shown), Arc::clone(&board));
+        let standing = Arc::clone(&standing);
         shepherd.on_action(action, move |params, name| {
             let shown = availability::lock(&shown).clone();
             // The board's medians and records are worked out before the desk is held for
@@ -343,9 +355,14 @@ async fn serve(ports: availability::Ports) -> Result<(), String> {
                 }
                 _ => Default::default(),
             };
+            let settings = standing
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
             let shown_now = Shown {
                 board: &board,
                 records: &records,
+                settings: &settings,
             };
             let (body, grants) =
                 lock_desk(&desk).change(|d| d.answer_with(name, params, &shown, shown_now));
