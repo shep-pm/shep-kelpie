@@ -67,6 +67,7 @@ impl From<&WorkItemStatus<'_>> for wire::WorkItemStatus {
             waiting: item.waiting.map(Into::into),
             held_up: item.held_up.as_ref().map(Into::into),
             failing: item.failing.as_ref().map(Into::into),
+            install_failed: item.install_failed.clone(),
             checks: item.checks.map(str::to_owned),
             build_bytes: item.build_bytes,
             session: item.session.clone(),

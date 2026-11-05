@@ -340,6 +340,10 @@ pub struct Runner {
     // an install that left no `node_modules` would be planned every turn, and after a failure
     // the worker's own install would be wiped by another. Kept in memory only
     install_ran: BTreeSet<TicketId>,
+    // Why each work item's last install failed, to the first line that names an error, until a
+    // good install or the item's leaving clears it. Kept in memory only: a restart empties
+    // `install_ran` too, and the next turn's install sets it again where packages are missing
+    install_failed: BTreeMap<TicketId, String>,
     // The calls this process has in flight, kept in memory only
     flights: flight::Flights,
     // The browsers opened for turns about to launch, kept in memory only
@@ -667,6 +671,7 @@ impl Runner {
             notes: told,
             started: Vec::new(),
             install_ran: BTreeSet::new(),
+            install_failed: BTreeMap::new(),
             flights: flight::Flights::default(),
             opened: browser::Opened::default(),
             planned: dev_server::Planned::default(),
@@ -837,6 +842,7 @@ impl Runner {
             waiting: self.model_wait(ticket),
             held_up: self.held_up.of(ticket),
             failing: self.looks.failing(ticket),
+            install_failed: self.install_failed.get(&ticket).cloned(),
             checks: self.no_checks_of(item),
             build_bytes: self.builds.folder_bytes(ticket),
             ..WorkItemStatus::new(item, self.settings.budget.per_item_usd, split)
@@ -888,6 +894,10 @@ impl Runner {
         self.threads
             .settled(&self.state, &next, self.ports.clock.now());
         self.state = next;
+        // What a work item that left no longer has to remember of its install
+        let open = |issue: &TicketId| self.state.item(*issue).is_some();
+        self.install_ran.retain(open);
+        self.install_failed.retain(|issue, _| open(issue));
         self.metrics.work_items(&self.state);
         Ok(())
     }

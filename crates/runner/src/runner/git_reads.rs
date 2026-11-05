@@ -510,6 +510,10 @@ impl Runner {
             return;
         };
         self.install_ran.insert(issue);
+        match installed.failed.as_deref().map(error_line) {
+            Some(line) => self.install_failed.insert(issue, line),
+            None => self.install_failed.remove(&issue),
+        };
         self.started.push(StepReport::PackagesInstalled {
             issue,
             folders: installed.folders,
@@ -549,6 +553,16 @@ impl Runner {
             base: self.item_base(item).to_owned(),
         })
     }
+}
+
+// The first line of an install's output that names an error, else the last line it printed
+fn error_line(output: &str) -> String {
+    let lines = || output.lines().map(str::trim).filter(|l| !l.is_empty());
+    let named = lines().find(|l| l.to_ascii_lowercase().contains("error"));
+    named
+        .or_else(|| lines().next_back())
+        .unwrap_or_default()
+        .to_owned()
 }
 
 #[cfg(test)]
