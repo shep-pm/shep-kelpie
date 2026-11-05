@@ -222,6 +222,21 @@ fn a_worker_reads_go_s_and_bun_s_homes_and_builds_into_its_own_caches() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, "x\n").unwrap();
     }
+    // The caches of the managers its worktree keeps, as `Worker::build_env_in` gives them.
+    std::fs::create_dir_all(&worktree).unwrap();
+    for file in ["go.mod", "bun.lock"] {
+        std::fs::write(worktree.join(file), "").unwrap();
+    }
+    let caches = crate::package_managers::caches(&crate::package_managers::found_in(&worktree));
+    let build_env: BTreeMap<EnvName, BuildDir> = caches
+        .into_iter()
+        .map(|(name, dir)| {
+            (
+                EnvName::try_from(name.to_owned()).unwrap(),
+                BuildDir::try_from(dir.to_owned()).unwrap(),
+            )
+        })
+        .collect();
     let s = WorkerProfile {
         worktree: &worktree,
         build: &build,
@@ -236,7 +251,7 @@ fn a_worker_reads_go_s_and_bun_s_homes_and_builds_into_its_own_caches() {
         guard_hooks: &[],
         allowed_domains: &[],
         registries: &[],
-        build_env: &BTreeMap::new(),
+        build_env: &build_env,
         home: &home,
         shep_home: &home,
         skills: &home.join("skills"),

@@ -110,8 +110,7 @@ fn the_folders_an_install_names_exist_before_the_install_runs() {
     );
 }
 
-// A worker's own `pnpm install` runs where kelpie planned none: the lockfile is two folders
-// down, past what its plan reads.
+// A worker's own `pnpm install` runs where kelpie planned none: the packages are already there.
 #[test]
 fn a_workers_own_call_finds_the_build_folders_its_env_names() {
     let rig = Rig::new("shep");
@@ -121,7 +120,8 @@ fn a_workers_own_call_finds_the_build_folders_its_env_names() {
             "build_env = { PNPM_CONFIG_STATE_DIR = \"state\" }",
         )
     });
-    rig.land("web/app/pnpm-lock.yaml", "");
+    rig.land("pnpm-lock.yaml", "");
+    rig.land("node_modules/vite/package.json", "{}\n");
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.claude

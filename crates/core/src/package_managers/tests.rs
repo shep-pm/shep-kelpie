@@ -73,3 +73,18 @@ fn the_dev_servers_managers_each_have_a_lockfile_to_run_from() {
         assert!(!m.lockfiles.is_empty(), "{}", m.name);
     }
 }
+
+#[test]
+fn a_cache_variable_is_named_once_whatever_managers_name_it() {
+    let dir = worktree(&["pnpm-lock.yaml", "package-lock.json", "go.mod"]);
+    let found = found_in(dir.path());
+
+    let names: Vec<_> = caches(&found).into_iter().map(|(name, _)| name).collect();
+
+    let mut once = names.clone();
+    once.sort_unstable();
+    once.dedup();
+    assert_eq!(names.len(), once.len(), "{names:?}");
+    assert!(names.contains(&"NPM_CONFIG_CACHE"));
+    assert!(names.contains(&"NPM_CONFIG_STORE_DIR"));
+}

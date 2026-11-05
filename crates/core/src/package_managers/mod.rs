@@ -19,6 +19,8 @@ pub struct PackageManager {
     /// The registries it fetches from
     pub hosts: &'static [&'static str],
     /// The variables that put its cache in the build folder, with the folder in it
+    ///
+    /// Each name is uppercase, since a `build_env` name is.
     pub caches: &'static [(&'static str, &'static str)],
     /// What installs the packages from the lockfile as it stands, with no package's install
     /// script, for the managers the dev server installs with
@@ -38,7 +40,7 @@ pub const MANAGERS: [PackageManager; 8] = [
         lockfiles: &["package-lock.json"],
         manifests: &["package.json"],
         hosts: &[NPM_HOST],
-        caches: &[("npm_config_cache", "npm-cache")],
+        caches: &[("NPM_CONFIG_CACHE", "npm-cache")],
         install: Some("npm ci --ignore-scripts --no-audit --no-fund"),
     },
     PackageManager {
@@ -47,9 +49,9 @@ pub const MANAGERS: [PackageManager; 8] = [
         manifests: &[],
         hosts: &[NPM_HOST],
         caches: &[
-            // pnpm 12 reads `PNPM_CONFIG_*` and ignores `npm_config_*`, which older pnpm reads.
+            // pnpm 12 reads `PNPM_CONFIG_*` and ignores `NPM_CONFIG_*`, which older pnpm reads.
             // Its store operation lock sits in `XDG_RUNTIME_DIR`, which it will not make.
-            ("npm_config_store_dir", "pnpm-store"),
+            ("NPM_CONFIG_STORE_DIR", "pnpm-store"),
             ("PNPM_CONFIG_STORE_DIR", "pnpm-store"),
             ("PNPM_CONFIG_CACHE_DIR", "pnpm-cache"),
             ("PNPM_CONFIG_STATE_DIR", "pnpm-state"),
@@ -160,6 +162,17 @@ pub fn registries(managers: &[&PackageManager]) -> Vec<&'static str> {
         }
     }
     hosts
+}
+
+/// The cache variables of `managers`, each once, with the folder of the build folder it names
+pub fn caches(managers: &[&PackageManager]) -> Vec<(&'static str, &'static str)> {
+    let mut caches: Vec<(&'static str, &'static str)> = Vec::new();
+    for cache in managers.iter().flat_map(|m| m.caches) {
+        if !caches.iter().any(|(name, _)| *name == cache.0) {
+            caches.push(*cache);
+        }
+    }
+    caches
 }
 
 #[cfg(test)]
