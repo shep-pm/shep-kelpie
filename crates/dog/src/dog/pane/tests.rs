@@ -120,7 +120,7 @@ async fn the_pane_lists_each_runners_items_and_rulings() {
             ],
         )
         .row_action("rule", "Say yes", Destructive::Yes)
-        .action("pause", "Pause every runner", Destructive::Yes);
+        .action("pause", "Drain every runner", Destructive::Yes);
 
     assert_eq!(build(&seen), expected);
 }
@@ -182,7 +182,7 @@ async fn rule_refuses_a_row_it_cannot_read() {
 }
 
 #[tokio::test]
-async fn pause_sends_pausing_to_every_runner() {
+async fn pause_sends_drain_to_every_runner() {
     let mut shepherd = two_runners();
     let seen = seen(&shepherd).await;
     shepherd.writes();
@@ -196,8 +196,8 @@ async fn pause_sends_pausing_to_every_runner() {
     assert_eq!(
         shepherd.writes(),
         [
-            trigger("koji", "pausing", None),
-            trigger("rotom", "pausing", None)
+            trigger("koji", "drain", None),
+            trigger("rotom", "drain", None)
         ]
     );
 }

@@ -151,14 +151,14 @@ pub(super) fn build(seen: &Seen) -> Pane {
         )
         .table("rulings", ["PROJECT", "ID", "KIND", "QUESTION"], rulings)
         .row_action("rule", "Say yes", Destructive::Yes)
-        .action("pause", "Pause every runner", Destructive::Yes)
+        .action("pause", "Drain every runner", Destructive::Yes)
 }
 
 /// Answers a pane action with a JSON body, and the triggers it sends the runners
 ///
 /// `rule` takes a row of the rulings table, `{"row": "<project>#<id>"}`, and says yes to
 /// that ruling: a row carries no text, so `no`, `rework` and an answer stay on `shep
-/// kelpie rule`. `pause` sends every runner seen `pausing`.
+/// kelpie rule`. `pause` sends every runner seen `drain`.
 pub(super) fn act(seen: &Seen, action: &str, params: Option<&str>) -> (String, Vec<Forward>) {
     let refused = |why: String| (json!({ "error": why }).to_string(), Vec::new());
     match action {
@@ -178,11 +178,11 @@ pub(super) fn act(seen: &Seen, action: &str, params: Option<&str>) -> (String, V
             let forwards = (seen.runners.keys())
                 .map(|project| Forward {
                     project: project.clone(),
-                    action: "pausing",
+                    action: "drain",
                     params: None,
                 })
                 .collect::<Vec<_>>();
-            let body = json!({ "pausing": seen.runners.keys().collect::<Vec<_>>() });
+            let body = json!({ "draining": seen.runners.keys().collect::<Vec<_>>() });
             (body.to_string(), forwards)
         }
         other => refused(format!("unknown action `{other}`")),

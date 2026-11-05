@@ -32,7 +32,7 @@ fn declared(version: &str) -> Probe<'_> {
         .ask_for_channel()
         .pane()
         .action("rule", "Say yes to a ruling, by its row `<project>#<id>`")
-        .action("pause", "Send every runner `pausing`")
+        .action("pause", "Send every runner `drain`")
         .verb(verb())
 }
 
