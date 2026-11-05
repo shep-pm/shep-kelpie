@@ -29,6 +29,8 @@ pub struct FakeForge {
     visibilities: Arc<Mutex<HashMap<String, Visibility>>>,
     missing: Arc<Mutex<HashSet<u64>>>,
     unread: Arc<Mutex<BTreeMap<u64, usize>>>,
+    // How reading one issue fails, as the forge answers it
+    issue_errors: Arc<Mutex<BTreeMap<u64, ForgeError>>>,
     labels: Arc<Mutex<HashMap<u64, Vec<String>>>>,
     ready: Arc<Mutex<Vec<ReadyIssue>>>,
     // The ready issues read with only the labels they carry, which need not pass the check
@@ -166,6 +168,7 @@ impl FakeForge {
             account_reads: Arc::default(),
             missing: Arc::default(),
             unread: Arc::default(),
+            issue_errors: Arc::default(),
             labels: Arc::default(),
             ready: Arc::default(),
             unchecked: Arc::default(),

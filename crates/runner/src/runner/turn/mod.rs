@@ -31,8 +31,8 @@ use crate::board::briefing::{closest, missing_paths, names_a_path};
 use crate::guard::Pause;
 use crate::pacer::Scope;
 use crate::ports::{
-    AgentCall, AgentError, AgentReply, COMPACT, Cost, InstallationToken, Issue, Reach, Role,
-    Session, ThreadComment, Timestamp, Tools,
+    AgentCall, AgentError, AgentReply, COMPACT, Cost, ForgeError, InstallationToken, Issue, Reach,
+    Role, Session, ThreadComment, Timestamp, Tools,
 };
 use crate::profile::{self, WorkerProfile};
 use crate::settings::{AgentHarness, Effort, Limit};
@@ -44,6 +44,7 @@ use crate::worker_folder;
 use crate::worktree::{self, Start};
 use handover::{Handover, Refused};
 use held_up::Reason;
+use unfinished::StartFailure;
 use unfinished::{awaits_a_push, timed_out, uncommitted_prompt};
 pub(super) use unfinished::{failed, named_files};
 
@@ -467,6 +468,12 @@ impl Runner {
                 }
                 return Ok(self.idle(Reason::Token));
             }
+            // The forge answered the turn's opening read with a 5xx, which is
+            // the forge failing and not the ask: the step is tried again at the
+            // next look, and the work item is never parked on a ruling.
+            Err(StartFailure::Hold(reason)) => {
+                return Ok(Begin::Report(StepReport::GateFailed { issue, reason }));
+            }
             Ok(call) => {
                 // `prepare` mints the worker's GitHub token and prepares its
                 // worktree with the runner's lock held, and a `drain` that lands
@@ -504,7 +511,8 @@ impl Runner {
             Err(reason) => {
                 let names = self.names();
                 let restore = self.restorable(issue);
-                Begin::Report(failed(names, &mut next, issue, now, reason, restore, false))
+                let why = reason.why().to_owned();
+                Begin::Report(failed(names, &mut next, issue, now, why, restore, false))
             }
         };
         if let Err(e) = self.save(next) {
@@ -532,13 +540,13 @@ impl Runner {
         session: Session,
         prompt: Option<String>,
         lost: Option<&str>,
-    ) -> Result<AgentCall, String> {
+    ) -> Result<AgentCall, StartFailure> {
         // A session with no prompt (attach) or only a compaction runs no browser.
         let browses = prompt
             .as_deref()
             .is_none_or(|p| !p.is_empty() && p != COMPACT);
         let call = self.worker_call(item, session, prompt, lost, browses)?;
-        self.prepared(call)
+        self.prepared(call).map_err(StartFailure::Park)
     }
 
     // The worker's call for `item`, with its worktree, build folder, settings
@@ -552,7 +560,7 @@ impl Runner {
         prompt: Option<String>,
         lost: Option<&str>,
         browses: bool,
-    ) -> Result<AgentCall, String> {
+    ) -> Result<AgentCall, StartFailure> {
         let start = start_of(item);
         let WorkerAgent {
             harness,
@@ -629,7 +637,7 @@ impl Runner {
                 let ticket = item.issue;
                 let issue = (started.issue())
                     .unwrap_or_else(|| self.ports.tickets.issue(&self.remote, ticket))
-                    .map_err(|e| format!("cannot read {}: {e}", ticket.shown()))?;
+                    .map_err(|e| read_failure(ticket, &e))?;
                 let comments = self.maintainer_comments(ticket, started.comments())?;
                 let first = first_prompt(ticket, &issue, &comments);
                 let moved = moved_paths(&issue.body, || {
@@ -913,6 +921,17 @@ fn moved_paths(body: &str, read_tree: impl FnOnce() -> Vec<String>) -> String {
 // neither a rework nor adopted, which has no prompt of its own
 fn takes_issue(item: &WorkItem, prompt: Option<&str>) -> bool {
     prompt.is_none() && !item.rework && !item.adopted
+}
+
+// The issue a turn is opened with could not be read. The forge answering 5xx
+// failed rather than refused the ask, so the step is tried again at the next
+// look; anything else parks the work item on a ruling.
+fn read_failure(ticket: TicketId, error: &ForgeError) -> StartFailure {
+    let why = format!("cannot read {}: {error}", ticket.shown());
+    match error.passes() {
+        true => StartFailure::Hold(why),
+        false => StartFailure::Park(why),
+    }
 }
 
 pub(super) fn write(folder: &Path, file: &Path, text: &str) -> Result<(), String> {

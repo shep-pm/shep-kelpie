@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::home::shepherd_address;
-use crate::ports::{Cost, Usage};
+use crate::ports::{Cost, ForgeError, Usage};
 use crate::profile;
 use crate::runner::step;
 use crate::runner::turn::paused::PAUSED;
@@ -803,6 +803,68 @@ fn a_trigger_is_answered_while_a_worktree_is_prepared() {
         matches!(pass, Ok(crate::runner::flight::Pass::Started)),
         "the turn did not start: {pass:?}"
     );
+}
+
+// The issue read that opens a turn, as GitHub answers it when its own server
+// is failing, and as it answers for an issue that is not there
+const DOWN: &str = "HTTP 502: 502 Bad Gateway (https://api.github.com/repos/koji/koji/issues/7)";
+const GONE: &str = "gh: Not Found (HTTP 404)";
+
+#[test]
+fn a_5xx_on_the_opening_read_holds_the_turn_back() {
+    let (rig, runner) = with_issue_7("koji");
+    rig.claude.script([Scripted::Say("done")]);
+    rig.forge
+        .set_issue_read_error(7, ForgeError::Failed(DOWN.into()));
+
+    let report = step(&runner).unwrap();
+
+    assert!(
+        matches!(
+            &report,
+            Some(StepReport::GateFailed { issue, reason })
+                if *issue == ticket(7)
+                    && reason.contains("cannot read #7")
+                    && reason.contains("502")
+        ),
+        "{report:?}"
+    );
+    assert_eq!(rig.claude.all_calls(), [], "the worker started anyway");
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"], json!([]), "a 5xx raised a ruling");
+    assert_eq!(status["work_item"]["turn"]["state"], "due");
+
+    // The read is not asked again at once, and is at the next look.
+    assert_eq!(step(&runner).unwrap(), None, "the turn was stepped again");
+    rig.forge.let_issue_read(7);
+    rig.clock.advance(15);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::Ended { .. })
+    ));
+}
+
+#[test]
+fn a_404_on_the_opening_read_still_parks() {
+    let (rig, runner) = with_issue_7("koji");
+    rig.forge
+        .set_issue_read_error(7, ForgeError::Failed(GONE.into()));
+
+    let report = step(&runner).unwrap();
+
+    assert!(
+        matches!(
+            &report,
+            Some(StepReport::Failed { issue, question, .. })
+                if *issue == ticket(7)
+                    && question.contains(&format!("cannot read #7: gh failed: {GONE}"))
+        ),
+        "{report:?}"
+    );
+    assert_eq!(rig.claude.all_calls(), [], "the worker started anyway");
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["turn"]["state"], "failed");
+    assert_eq!(status["rulings"].as_array().unwrap().len(), 1);
 }
 
 mod base;
