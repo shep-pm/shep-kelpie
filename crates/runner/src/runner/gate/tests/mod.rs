@@ -825,6 +825,25 @@ fn a_head_that_catches_up_goes_on_with_no_alert() {
     assert_eq!(lag_alerts(&rig), Vec::<String>::new());
 }
 
+// A lag seen on one forge head and never cleared must not make a later push's usual
+// lag, on another head, alert at once.
+#[test]
+fn a_lag_on_another_forge_head_starts_its_own_clock() {
+    let (rig, runner, _head, _rebased) = lagging_after_a_rebase("webapp");
+    assert_eq!(step(&runner).unwrap(), None);
+    rig.clock.advance(LAG_LIMIT - 1);
+    assert_eq!(step(&runner).unwrap(), None);
+
+    rig.forge.set_lagging(71, Some(&"0".repeat(40)));
+    rig.clock.advance(1);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(lag_alerts(&rig), Vec::<String>::new());
+
+    rig.clock.advance(LAG_LIMIT);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(lag_alerts(&rig).len(), 1);
+}
+
 #[test]
 fn a_short_lag_stays_quiet() {
     let (rig, runner, _head, _rebased) = lagging_after_a_rebase("webapp");

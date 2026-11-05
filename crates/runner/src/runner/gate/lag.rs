@@ -2,7 +2,8 @@
 //!
 //! The forge's head lags a push by a moment, and a step idles until the two
 //! match. A forge that stops updating the pull request never lets them, so one
-//! alert names both heads once the lag passes [`LAG_LIMIT`].
+//! alert names both heads once the lag passes [`LAG_LIMIT`]. A lag belongs to
+//! the forge head it began on: a step that finds another head starts a new one.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -22,8 +23,9 @@ pub(super) const LAG_LIMIT: u64 = 15 * 60;
 #[derive(Debug, Default)]
 pub(in crate::runner) struct Lags(RefCell<BTreeMap<TicketId, Lag>>);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Lag {
+    forged: String,
     since: Timestamp,
     alerted: bool,
 }
@@ -43,10 +45,17 @@ impl Runner {
             return Ok(());
         };
         let now = self.ports.clock.now();
-        let lag = *self.lags.0.borrow_mut().entry(ticket).or_insert(Lag {
-            since: now,
-            alerted: false,
-        });
+        let lag = {
+            let mut lags = self.lags.0.borrow_mut();
+            let kept = lags.get(&ticket).filter(|lag| lag.forged == forged);
+            let lag = kept.cloned().unwrap_or_else(|| Lag {
+                forged: forged.to_owned(),
+                since: now,
+                alerted: false,
+            });
+            lags.insert(ticket, lag.clone());
+            lag
+        };
         if lag.alerted || now.0.saturating_sub(lag.since.0) < LAG_LIMIT {
             return Ok(());
         }
