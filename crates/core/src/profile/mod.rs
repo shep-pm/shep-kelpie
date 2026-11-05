@@ -489,6 +489,18 @@ pub fn git_config(home: &Path) -> Vec<PathBuf> {
     .collect()
 }
 
+/// Makes each folder under `build` that `env` names
+///
+/// pnpm 12 keeps its store operation lock in `XDG_RUNTIME_DIR` and runs without it where that
+/// folder is missing, which it makes none of. A value outside `build` is left alone, since a
+/// port or a proxy flag names no folder. One that cannot be made is left: the tool that needs
+/// it fails as it would without it.
+pub fn make_build_folders(env: &BTreeMap<String, String>, build: &Path) {
+    for folder in env.values().map(Path::new).filter(|f| f.starts_with(build)) {
+        let _ = std::fs::create_dir_all(folder);
+    }
+}
+
 /// Each of `homes` as a deny over the folder whole, less one another already
 /// covers: denying `/k` needs no rule for `/k/shep`
 pub fn home_denials<'a>(homes: impl IntoIterator<Item = &'a Path>) -> Vec<String> {

@@ -110,6 +110,36 @@ fn the_folders_an_install_names_exist_before_the_install_runs() {
     );
 }
 
+// A worker's own `pnpm install` runs where kelpie planned none: the lockfile is two folders
+// down, past what its plan reads.
+#[test]
+fn a_workers_own_call_finds_the_build_folders_its_env_names() {
+    let rig = Rig::new("shep");
+    rig.edit_settings(|s| {
+        s.replace(
+            "build_env = {}",
+            "build_env = { PNPM_CONFIG_STATE_DIR = \"state\" }",
+        )
+    });
+    rig.land("web/app/pnpm-lock.yaml", "");
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.claude
+        .script([Scripted::Reply(usage(1), Cost(20_085_300))]);
+    step(&runner).unwrap();
+
+    assert_eq!(rig.tests.ran(), [], "kelpie planned no install");
+    let build = rig.build_7();
+    assert!(build.join("state").is_dir(), "the project's own folder");
+    for folder in ["pnpm-store", "pnpm-cache", "pnpm-run"] {
+        assert!(build.join(folder).is_dir(), "{folder}");
+    }
+    assert!(
+        !build.join("pnpm-state").exists(),
+        "the project's own folder stands in for the manager's"
+    );
+}
+
 #[test]
 fn a_worktree_that_holds_node_modules_is_not_installed_again() {
     let (rig, runner) = first_turn(&["bun.lock", "node_modules/vite/package.json"], Vec::new());
