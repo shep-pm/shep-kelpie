@@ -170,6 +170,30 @@ gh: You have exceeded a secondary rate limit. Please wait a few minutes before y
     }
 
     #[test]
+    fn a_failure_the_forge_answered_5xx_may_be_asked_again() {
+        assert!(failure(PAGE).passes(), "{:?}", failure(PAGE));
+        assert!(
+            failure("gh: Bad Gateway (HTTP 502)\n").passes(),
+            "gh's own line names the status it answered with"
+        );
+        assert!(
+            !failure("gh: Not Found (HTTP 404)\n").passes(),
+            "a refused ask is not the forge failing"
+        );
+        assert!(
+            !failure("GraphQL: Could not resolve to a node with the global id of 'X'. (node)\n")
+                .passes(),
+            "a failure that names no status is not the forge failing"
+        );
+    }
+
+    #[test]
+    fn a_used_up_limit_wins_over_the_status_of_the_answer() {
+        let stderr = "gh: API rate limit exceeded for user ID 1. (HTTP 502)\n";
+        assert!(matches!(failure(stderr), ForgeError::Limited { .. }));
+    }
+
+    #[test]
     fn the_last_response_s_headers_are_the_ones_read() {
         let stderr = "< HTTP/2.0 502 Bad Gateway\n< Retry-After: 5\n<\n\
                       < HTTP/2.0 403 Forbidden\n< Retry-After: 120\n<\n\

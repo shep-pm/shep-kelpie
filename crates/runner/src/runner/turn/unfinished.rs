@@ -374,6 +374,40 @@ pub(super) fn timed_out(names: Names, next: &mut ProjectState, issue: TicketId) 
     }
 }
 
+/// Why a worker's turn could not start
+///
+/// `Hold` is the forge failing rather than the ask: the step is tried again at
+/// the next look and nothing parks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::runner) enum StartFailure {
+    /// The turn parks on a ruling carrying this reason
+    Park(String),
+    /// The step is tried again at the next look, with this reason for the log
+    Hold(String),
+}
+
+impl StartFailure {
+    /// What to tell the log or the ruling
+    pub(in crate::runner) fn why(&self) -> &str {
+        match self {
+            Self::Park(why) | Self::Hold(why) => why,
+        }
+    }
+}
+
+impl From<String> for StartFailure {
+    /// A failure of anything else parks the work item
+    fn from(why: String) -> Self {
+        Self::Park(why)
+    }
+}
+
+impl std::fmt::Display for StartFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.why())
+    }
+}
+
 // Marks the turn failed and parks the work item on a ruling carrying why,
 // keeping the turn as it stood so a yes can put it back. `comment_failed` is
 // filled in afterwards, once the ruling has actually been posted.
