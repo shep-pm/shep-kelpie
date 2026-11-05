@@ -1,0 +1,6 @@
+# Batch retro
+
+The project manager reads the batch. Finding round numbers and late tags: [pm.md](pm.md).
+
+- Retro moved from worker to PM: batch after every 10 finished items and at a drain, one call with the PM's agent over a digest (`journal.jsonl`, rulings, ledger). Worker keeps a PR-body `Friction` section. Off unless `skills.retro`; no slot, never retried, saved unread (agents acting on retros loop). Digest counts conflicts per file, rounds, late findings, known flakes (also in CI fix prompts). #361, #566, #657, `runner/retro/`
+- The digest counts a round that read the pull request and a reviewer passed over, each numbered with its reason; a wake belongs to an item only where the PM woke for it, picked it or acted on it, never where its id sits in a holds list, and a wake that only held issues back or named no action is one that changed nothing; an item's entries cover its own run, so a revived issue is two runs; a first retro's totals start at its batch's first item; an energy-priced call reads `local, $0.04 of electricity`, a metered one with no price `local, 12 Wh, unpriced`, any other `unpriced` call `local, unpriced` and a killed turn `timed out, usage not read`, never `$0.00`. #1316

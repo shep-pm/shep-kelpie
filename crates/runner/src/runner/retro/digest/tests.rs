@@ -509,6 +509,90 @@ fn rounds_per_item_and_each_findings_round_are_given() {
 }
 
 #[test]
+fn a_finding_after_two_passed_over_rounds_is_not_late() {
+    let mut journal = vec![
+        stamped(1100, passed_over(11, 1, "cubic", "no review")),
+        stamped(1200, passed_over(11, 2, "greptile", "no review")),
+    ];
+    for (at, number, what) in [
+        (1300, 3, "first read"),
+        (1400, 4, "second read"),
+        (1500, 5, "third read"),
+    ] {
+        journal.push(stamped(at, round(11, number, 1)));
+        journal.push(stamped(
+            at + 1,
+            Entry::Findings {
+                issue: ticket(11),
+                round: number,
+                findings: vec![held(Severity::High, "src/gate.rs", 88, what)],
+            },
+        ));
+    }
+
+    let digest = across(&journal, &[]);
+
+    let item = section(&digest, "## #11:");
+    let expected = "- Findings sent to the worker:\n  \
+        - round 1 by claude, high, src/gate.rs:88: first read\n  \
+        - round 2 by claude, high, src/gate.rs:88: second read\n  \
+        - round 3 (late) by claude, high, src/gate.rs:88: third read\n";
+    assert!(item.contains(expected), "{item}");
+    for expected in [
+        "- Review rounds: 3 read, 2 passed over, the latest numbered 5",
+        "  - #11 round 3 by claude: 1 findings",
+        "  - #11 round 4 by claude: 1 findings",
+        "  - #11 round 5 by claude: 1 findings",
+    ] {
+        assert!(item.contains(expected), "{expected}: {item}");
+    }
+    let table = section(&digest, "## Across the batch");
+    assert!(
+        table.contains("  - #11: 3 read, 2 passed over\n"),
+        "{table}"
+    );
+}
+
+#[test]
+fn findings_count_reads_in_journal_order_across_review_passes() {
+    let mut journal = Vec::new();
+    for (at, number, reviewer, what) in [
+        (1100, 1, "claude", "first read"),
+        (1200, 2, "claude", "second read"),
+        (1300, 1, "codex", "third read"),
+        (1400, 1, "claude", "fourth read"),
+    ] {
+        journal.push(stamped(
+            at,
+            Entry::Round {
+                issue: ticket(11),
+                round: number,
+                reviewer: reviewer.into(),
+                findings: 1,
+            },
+        ));
+        journal.push(stamped(
+            at,
+            Entry::Findings {
+                issue: ticket(11),
+                round: number,
+                findings: vec![held(Severity::High, "src/gate.rs", 88, what)],
+            },
+        ));
+    }
+
+    let digest = across(&journal, &[]);
+
+    let item = section(&digest, "## #11:");
+    let expected = "- Findings sent to the worker:\n  \
+        - round 1 by claude, high, src/gate.rs:88: first read\n  \
+        - round 2 by claude, high, src/gate.rs:88: second read\n  \
+        - round 3 (late) by codex, high, src/gate.rs:88: third read\n  \
+        - round 4 (late) by claude, high, src/gate.rs:88: fourth read\n";
+    assert!(item.contains(expected), "{item}");
+}
+
+#[test]
 fn a_clean_round_and_a_passed_over_reviewer_each_show_numbered() {
     let journal = [
         stamped(

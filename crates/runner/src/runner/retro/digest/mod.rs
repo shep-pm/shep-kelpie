@@ -25,8 +25,8 @@ const WAKES_LISTED: usize = 12;
 /// The most findings listed under one work item
 const FINDINGS_LISTED: usize = 20;
 
-/// The round from which a finding is called late
-const LATE_ROUND: u32 = 3;
+/// The number of rounds read at which a finding is called late
+const LATE_ROUND: usize = 3;
 
 /// Everything a digest is built from
 pub(super) struct Records<'a> {
@@ -420,14 +420,19 @@ fn rulings(out: &mut String, records: &Records<'_>, finished: &Finished) {
     }
 }
 
+fn rounds_read(mine: &[&Stamped]) -> impl Iterator<Item = u32> {
+    mine.iter().filter_map(|s| match s.entry {
+        Entry::Round { round, .. } => Some(round),
+        _ => None,
+    })
+}
+
 fn reviews(out: &mut String, mine: &[&Stamped]) {
     let rounds: Vec<&Entry> = (mine.iter())
         .map(|s| &s.entry)
         .filter(|e| matches!(e, Entry::Round { .. } | Entry::ReviewerSkipped { .. }))
         .collect();
-    let read = (rounds.iter())
-        .filter(|e| matches!(e, Entry::Round { .. }))
-        .count();
+    let read = rounds_read(mine).count();
     let passed_over = rounds.len() - read;
     let latest = (rounds.iter())
         .filter_map(|e| match e {
@@ -482,25 +487,27 @@ fn reviews(out: &mut String, mine: &[&Stamped]) {
     }
 }
 
-// Each finding sent to the worker, with its round; one from a late round is
-// marked, since a defect found that late was missed in the rounds before, and
+// Each finding sent to the worker, numbered by rounds read; a late finding is
+// marked, since a defect found that late was missed in the reads before, and
 // so is one an earlier round already sent, since its first fix did not fix it
 fn sent(out: &mut String, mine: &[&Stamped]) {
     let mut lines = Vec::new();
-    for stamped in mine {
+    for (index, stamped) in mine.iter().enumerate() {
         let Entry::Findings {
             round, findings, ..
         } = &stamped.entry
         else {
             continue;
         };
-        let reviewer = mine.iter().find_map(|s| match &s.entry {
+        let preceding = &mine[..index];
+        let reviewer = preceding.iter().rev().find_map(|s| match &s.entry {
             Entry::Round {
                 round: r, reviewer, ..
             } if r == round => Some(reviewer.as_str()),
             _ => None,
         });
-        let late = if *round >= LATE_ROUND { " (late)" } else { "" };
+        let round = rounds_read(preceding).count();
+        let late = if round >= LATE_ROUND { " (late)" } else { "" };
         for found in findings {
             let line = match found.line {
                 0 => String::new(),
