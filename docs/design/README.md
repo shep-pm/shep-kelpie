@@ -4,7 +4,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 
 ## Always
 
-- Gates, locks, rate windows live in code; Claude only for work, judgement. ADR 0001
+- Gates, locks, rate windows live in code; Claude only for work, judgement. ADR 0001, ADR 0020
 - Kelpie controls each agent's context growth. `runner/turn/`
 - Naming: dog = adopted `kelpie` (lease dog); project = sheep; agent calls = lambs. One kelpie for all projects. ADR 0001 to 0004
 - Binary is the dog with no args + `SHEP_DOG_NAME` and `SHEP_NAME` set; needs the `shep adopt` channel; names itself in the handshake, never `silent`. `src/sheep/mod.rs`
