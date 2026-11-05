@@ -1,5 +1,5 @@
-//! A due turn whose own implementer finishes past the slack, handed to the
-//! agent board's next pick, driven a step at a time through the stand-ins
+//! A due turn whose own implementer cannot start within the slack, handed to
+//! the agent board's next pick, driven a step at a time through the stand-ins
 
 use std::sync::Mutex;
 
@@ -89,12 +89,31 @@ fn handed_off(from_finish: u64) -> StepReport {
     }
 }
 
-#[test]
-fn a_later_turn_whose_agent_finishes_within_the_slack_stays() {
-    let (rig, runner) = later_turn_due(&[]);
-    let own = SOON + SLACK;
+// The board ranks `first` soonest and `sonnet-high` `wait` seconds from starting,
+// and the seconds to `sonnet-high`'s finish
+fn falls_behind(rig: &Rig, first: &str, wait: u64) -> u64 {
+    let own = SOON + wait;
+    rig.agent_board.waits("sonnet-high", wait);
     rig.agent_board
-        .ranks_finishing(&[("coder", SOON), ("sonnet-high", own)]);
+        .ranks_finishing(&[(first, SOON), ("sonnet-high", own)]);
+    own
+}
+
+#[test]
+fn a_later_turn_whose_agent_starts_within_the_slack_stays() {
+    let (rig, runner) = later_turn_due(&[]);
+    falls_behind(&rig, "coder", SLACK);
+    let (model, session) = next_turn(&rig, &runner);
+    assert_eq!(model, "claude-sonnet-5-5");
+    assert!(resumed(&session), "{session:?}");
+    assert_eq!(item(&rig, &runner)["agent"], "sonnet-high");
+}
+
+#[test]
+fn a_slow_agent_free_to_start_keeps_its_turn_however_far_past_the_soonest_finish() {
+    let (rig, runner) = later_turn_due(&[]);
+    rig.agent_board
+        .ranks_finishing(&[("coder", SOON), ("sonnet-high", SOON + SLACK + 1)]);
     let (model, session) = next_turn(&rig, &runner);
     assert_eq!(model, "claude-sonnet-5-5");
     assert!(resumed(&session), "{session:?}");
@@ -105,9 +124,7 @@ fn a_later_turn_whose_agent_finishes_within_the_slack_stays() {
 fn a_later_turn_past_the_slack_hands_off_on_a_fresh_session_with_a_note() {
     let (rig, runner) = later_turn_due(&[]);
     let before = item(&rig, &runner)["session"].clone();
-    let own = SOON + SLACK + 1;
-    rig.agent_board
-        .ranks_finishing(&[("coder", SOON), ("sonnet-high", own)]);
+    let own = falls_behind(&rig, "coder", SLACK + 1);
 
     let report = step(&runner).unwrap().expect("a report");
     assert_eq!(report, handed_off(own));
@@ -144,9 +161,7 @@ fn a_later_turn_past_the_slack_hands_off_on_a_fresh_session_with_a_note() {
 #[test]
 fn a_later_turn_past_a_short_settings_slack_hands_off() {
     let (rig, runner) = later_turn_slacking(10);
-    let own = SOON + 30 * 60;
-    rig.agent_board
-        .ranks_finishing(&[("coder", SOON), ("sonnet-high", own)]);
+    falls_behind(&rig, "coder", 30 * 60);
     step(&runner).unwrap();
     assert_eq!(item(&rig, &runner)["agent"], "coder");
     let ask = rig.agent_board.asks().pop().expect("an ask");
@@ -156,9 +171,7 @@ fn a_later_turn_past_a_short_settings_slack_hands_off() {
 #[test]
 fn a_later_turn_within_a_long_settings_slack_stays() {
     let (rig, runner) = later_turn_slacking(120);
-    let own = SOON + SLACK + 1;
-    rig.agent_board
-        .ranks_finishing(&[("coder", SOON), ("sonnet-high", own)]);
+    falls_behind(&rig, "coder", SLACK + 1);
     next_turn(&rig, &runner);
     assert_eq!(item(&rig, &runner)["agent"], "sonnet-high");
     let ask = rig.agent_board.asks().pop().expect("an ask");
@@ -175,8 +188,7 @@ fn an_items_own_slack_wins_over_the_settings() {
         .item_mut(ticket(7))
         .expect("the item")
         .slack = Some(0);
-    rig.agent_board
-        .ranks_finishing(&[("coder", SOON), ("sonnet-high", SOON + 1)]);
+    falls_behind(&rig, "coder", 1);
     step(&runner).unwrap();
     assert_eq!(item(&rig, &runner)["agent"], "coder");
     let ask = rig.agent_board.asks().pop().expect("an ask");
@@ -186,9 +198,7 @@ fn an_items_own_slack_wins_over_the_settings() {
 #[test]
 fn the_agent_an_item_left_is_left_out_of_every_later_ask() {
     let (rig, runner) = later_turn_due(&[]);
-    let own = SOON + SLACK + 1;
-    rig.agent_board
-        .ranks_finishing(&[("coder", SOON), ("sonnet-high", own)]);
+    falls_behind(&rig, "coder", SLACK + 1);
     step(&runner).unwrap();
     next_turn(&rig, &runner);
 
@@ -200,15 +210,14 @@ fn the_agent_an_item_left_is_left_out_of_every_later_ask() {
 #[test]
 fn a_pinned_item_never_hands_off() {
     let (rig, runner) = later_turn_due(&["agent:sonnet-high!"]);
-    rig.agent_board
-        .ranks_finishing(&[("coder", SOON), ("sonnet-high", SOON + SLACK + 1)]);
+    falls_behind(&rig, "coder", SLACK + 1);
     let (model, session) = next_turn(&rig, &runner);
     assert_eq!(model, "claude-sonnet-5-5");
     assert!(resumed(&session), "{session:?}");
 }
 
-#[test]
-fn an_item_the_project_manager_picked_an_agent_for_hands_off_once_that_agent_is_out() {
+// Issue 7 open on `sonnet-high`, the project manager's pick, its first turn ended
+fn picked_by_the_project_manager() -> (Rig, Mutex<Runner>) {
     let rig = Rig::new("acme");
     rig.pm("pm");
     rig.write_agent("coder", CODER);
@@ -226,11 +235,24 @@ fn an_item_the_project_manager_picked_an_agent_for_hands_off_once_that_agent_is_
     until(&runner, |r| matches!(r, StepReport::Ended { .. }));
     assert_eq!(item(&rig, &runner)["agent"], "sonnet-high");
     assert_eq!(item(&rig, &runner)["pinned"], Value::Null, "not pinned");
+    (rig, runner)
+}
 
-    // The agent has fallen behind: it is out, as a spent week leaves it.
-    let own = SOON + SLACK + 1;
+#[test]
+fn an_item_the_project_manager_picked_a_slow_agent_for_stays_while_that_agent_is_free() {
+    let (rig, runner) = picked_by_the_project_manager();
     rig.agent_board
-        .ranks_finishing(&[("coder", SOON), ("sonnet-high", own)]);
+        .ranks_finishing(&[("coder", SOON), ("sonnet-high", SOON + SLACK + 1)]);
+    let (_, session) = next_turn(&rig, &runner);
+    assert!(resumed(&session), "{session:?}");
+    assert_eq!(item(&rig, &runner)["agent"], "sonnet-high");
+}
+
+#[test]
+fn an_item_the_project_manager_picked_an_agent_for_hands_off_once_that_agent_is_out() {
+    let (rig, runner) = picked_by_the_project_manager();
+    // The agent has fallen behind: it is out, as a spent week leaves it.
+    let own = falls_behind(&rig, "coder", SLACK + 1);
 
     assert_eq!(step(&runner).unwrap(), Some(handed_off(own)));
     assert_eq!(item(&rig, &runner)["agent"], "coder");
@@ -257,8 +279,7 @@ fn a_board_ranking_nobody_leaves_the_turn_on_its_own_agent() {
 #[test]
 fn a_ranking_the_pacer_holds_leaves_the_turn_on_its_own_agent() {
     let (rig, runner) = later_turn_due(&[]);
-    rig.agent_board
-        .ranks_finishing(&[("codex", SOON), ("sonnet-high", SOON + SLACK + 1)]);
+    falls_behind(&rig, "codex", SLACK + 1);
     // Codex's 5-hour window is past what the pacer lets a turn start on.
     rig.codex_meter.set(Rig::utilization(0, 55));
     let (model, session) = next_turn(&rig, &runner);
@@ -275,9 +296,7 @@ fn last_prompt(rig: &Rig) -> String {
 // Hands issue 7 off from `sonnet-high` to `coder`, as the board ranks them
 fn handed_to_coder() -> (Rig, Mutex<Runner>) {
     let (rig, runner) = later_turn_due(&[]);
-    let own = SOON + SLACK + 1;
-    rig.agent_board
-        .ranks_finishing(&[("coder", SOON), ("sonnet-high", own)]);
+    let own = falls_behind(&rig, "coder", SLACK + 1);
     assert_eq!(step(&runner).unwrap(), Some(handed_off(own)));
     (rig, runner)
 }
@@ -310,6 +329,7 @@ fn a_session_that_dies_unborn_after_a_handoff_starts_over_with_the_note() {
 fn a_second_handoff_before_the_new_agent_ran_keeps_the_first_note() {
     let (rig, runner) = handed_to_coder();
     let far = SOON + SLACK + 1;
+    rig.agent_board.waits("coder", SLACK + 1);
     rig.agent_board
         .ranks_finishing(&[("codex", SOON), ("coder", far), ("sonnet-high", far)]);
     let report = step(&runner).unwrap();
@@ -340,8 +360,7 @@ fn an_own_agent_the_board_leaves_unranked_hands_off_with_no_finish() {
 #[test]
 fn every_ranked_agent_held_keeps_the_turn_and_the_held_agent_asks_no_more() {
     let (rig, runner) = later_turn_due(&[]);
-    rig.agent_board
-        .ranks_finishing(&[("codex", SOON), ("sonnet-high", SOON + SLACK + 1)]);
+    falls_behind(&rig, "codex", SLACK + 1);
     rig.codex_meter.set(Rig::utilization(0, 55));
     rig.meter.set(Rig::utilization(0, 55));
     step(&runner).unwrap();
@@ -357,8 +376,7 @@ fn every_ranked_agent_held_keeps_the_turn_and_the_held_agent_asks_no_more() {
 #[test]
 fn a_pick_whose_usage_is_unread_is_read_once_then_takes_the_item() {
     let (rig, runner) = later_turn_due(&[]);
-    rig.agent_board
-        .ranks_finishing(&[("codex", SOON), ("sonnet-high", SOON + SLACK + 1)]);
+    falls_behind(&rig, "codex", SLACK + 1);
     rig.codex_meter.set(Rig::utilization(0, 0));
     let report = step(&runner).unwrap();
     assert!(
@@ -375,9 +393,7 @@ fn a_first_turn_handed_off_before_its_worktree_exists_names_no_commits() {
     rig.agent_board.ranks(&["sonnet-high", "coder"]);
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
-    let own = SOON + SLACK + 1;
-    rig.agent_board
-        .ranks_finishing(&[("coder", SOON), ("sonnet-high", own)]);
+    let own = falls_behind(&rig, "coder", SLACK + 1);
     assert_eq!(step(&runner).unwrap(), Some(handed_off(own)));
     next_turn(&rig, &runner);
     let prompt = last_prompt(&rig);

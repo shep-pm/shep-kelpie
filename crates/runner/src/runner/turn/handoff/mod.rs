@@ -2,16 +2,17 @@
 //!
 //! Before each due turn the runner asks the board, pinning nothing and leaving
 //! out the agents the item has left. The turn goes on when its own agent is
-//! ranked and finishes within the slack of the soonest finish. Otherwise the
-//! item goes to the first ranked agent the pacer lets start, on a session of
-//! its own, with a note of where the work stands. A pinned item never moves,
-//! nor does one on an agent the board may not rank, one the board cannot
-//! answer or ranks nobody for, or one whose ranking the pacer holds.
+//! ranked and can start within the slack, however long it takes, as dispatch
+//! judged it. Otherwise the item goes to the first ranked agent the pacer lets
+//! start, on a session of its own, with a note of where the work stands. A
+//! pinned item never moves, nor does one on an agent the board may not rank,
+//! one the board cannot answer or ranks nobody for, or one whose ranking the
+//! pacer holds.
 
 use super::super::Runner;
 use super::super::pace::Walked;
 use super::super::report::{Begin, StepReport};
-use crate::agent_board::within_slack;
+use crate::agent_board::starts_within_slack;
 use crate::lease::door::PickAsk;
 use crate::pacer::Scope;
 use crate::settings::AgentName;
@@ -46,21 +47,22 @@ impl Runner {
         let Ok(picks) = self.board_picks(&ask) else {
             return Ok(None);
         };
-        let Some(soonest) = picks.iter().map(|pick| pick.finish).min() else {
-            return Ok(None);
-        };
-        let from = item.agent.clone();
-        let from_finish = (picks.iter().find(|pick| pick.agent == from)).map(|pick| pick.finish);
-        if from_finish.is_some_and(|own| within_slack(own, soonest, Some(slack))) {
+        if picks.is_empty() {
             return Ok(None);
         }
+        let from = item.agent.clone();
+        let own = picks.iter().find(|pick| pick.agent == from);
+        if own.is_some_and(|pick| starts_within_slack(pick.wait, Some(slack))) {
+            return Ok(None);
+        }
+        let from_finish = own.map(|pick| pick.finish);
         let to = match self.first_unpaced(picks.iter().map(|pick| &pick.agent), Scope::Turn)? {
             Walked::Opens(to) if to != from => to,
             Walked::Reads(reads) => return Ok(Some(reads)),
             Walked::Opens(_) | Walked::Held { .. } => return Ok(None),
         };
         let to_finish = (picks.iter().find(|pick| pick.agent == to)).map_or(0, |pick| pick.finish);
-        let why = "another agent would finish it sooner";
+        let why = "its agent could not start within the slack";
         self.move_item(to, from_finish, to_finish, why, false)
             .map(|report| report.map(Begin::Report))
     }
