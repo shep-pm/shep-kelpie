@@ -374,7 +374,7 @@ async fn serve(ports: availability::Ports, alerts: Arc<dyn Alerts>) -> Result<()
         });
     }
     let seen = pane::Shared::default();
-    let forwards = pane::begin(Arc::clone(&client), Arc::clone(&seen));
+    let asks = pane::begin(Arc::clone(&client), Arc::clone(&seen));
     {
         let seen = Arc::clone(&seen);
         shepherd.on_action(PANE_ACTION, move |params, _| {
@@ -382,14 +382,8 @@ async fn serve(ports: availability::Ports, alerts: Arc<dyn Alerts>) -> Result<()
         });
     }
     for action in pane::ACTIONS {
-        let (seen, forwards) = (Arc::clone(&seen), forwards.clone());
-        shepherd.on_action(action, move |params, name| {
-            let (body, sends) = pane::act(&pane::lock(&seen), name, params);
-            for send in sends {
-                let _ = forwards.send(send);
-            }
-            body
-        });
+        let asks = asks.clone();
+        shepherd.on_action(action, move |params, name| pane::ask(&asks, name, params));
     }
     let (stop, mut stopped) = mpsc::unbounded_channel();
     shepherd.on_shutdown(move || {

@@ -140,23 +140,63 @@ async fn a_ruling_row_is_keyed_by_project_and_id() {
     assert_eq!(Pane::read(&body).unwrap().sections, pane.sections);
 }
 
+// What the pane's action sent the runners, the reads of `status` left out.
+fn sent(shepherd: &mut FakeShepherd) -> Vec<Request> {
+    let mut writes = shepherd.writes();
+    writes.retain(|r| matches!(r, Request::Trigger { action, .. } if action != "status"));
+    writes
+}
+
+async fn done(shepherd: &FakeShepherd, action: &str, params: Option<&str>) -> Value {
+    let client = shepherd.connect().await;
+    let body = tokio::time::timeout(CALL_PATIENCE, perform(&client, action, params))
+        .await
+        .expect("the action neither ended nor failed in time");
+    serde_json::from_str(&body).unwrap()
+}
+
 #[tokio::test]
 async fn rule_forwards_yes_to_the_rulings_project() {
     let mut shepherd = two_runners();
-    let seen = seen(&shepherd).await;
-    shepherd.writes();
 
-    let (body, forwards) = act(&seen, "rule", Some(r##"{"row":"koji#73"}"##));
-    let client = shepherd.connect().await;
-    tokio::time::timeout(CALL_PATIENCE, forward(&client, forwards))
-        .await
-        .expect("the forward neither ended nor failed in time");
+    let said = done(&shepherd, "rule", Some(r##"{"row":"koji#73"}"##)).await;
 
+    assert_eq!(said, json!({ "rule": "koji#73", "answer": "yes" }));
     assert_eq!(
-        serde_json::from_str::<Value>(&body).unwrap(),
-        json!({ "rule": "koji#73", "answer": "yes" })
+        sent(&mut shepherd),
+        [trigger("koji", "rule", Some("73 yes"))]
     );
-    assert_eq!(shepherd.writes(), [trigger("koji", "rule", Some("73 yes"))]);
+}
+
+#[tokio::test]
+async fn rule_says_what_the_runner_refused() {
+    let mut shepherd = two_runners();
+    let refusal = json!({ "error": "takes no such yes" }).to_string();
+    shepherd.says("koji", &[&koji().to_string(), &refusal]);
+
+    let said = done(&shepherd, "rule", Some(r##"{"row":"koji#73"}"##)).await;
+
+    let error = said["error"].as_str().expect("the yes was not taken");
+    assert!(error.contains("koji did not take the yes"), "{error}");
+    assert!(error.contains("takes no such yes"), "{error}");
+    assert_eq!(said.get("answer"), None, "{said}");
+    assert_eq!(sent(&mut shepherd).len(), 1);
+}
+
+#[tokio::test]
+async fn rule_refuses_a_ruling_answered_since_the_last_look() {
+    let mut shepherd = two_runners();
+    let mut answered = koji();
+    answered["rulings"] = json!([]);
+    shepherd.says("koji", &[&answered.to_string()]);
+
+    let said = done(&shepherd, "rule", Some(r##"{"row":"koji#73"}"##)).await;
+
+    let error = said["error"]
+        .as_str()
+        .expect("there was no ruling to say yes to");
+    assert!(error.contains("koji has no waiting ruling 73"), "{error}");
+    assert_eq!(sent(&mut shepherd), []);
 }
 
 #[tokio::test]
@@ -184,20 +224,47 @@ async fn rule_refuses_a_row_it_cannot_read() {
 #[tokio::test]
 async fn pause_sends_drain_to_every_runner() {
     let mut shepherd = two_runners();
-    let seen = seen(&shepherd).await;
-    shepherd.writes();
 
-    let (_, forwards) = act(&seen, "pause", None);
-    let client = shepherd.connect().await;
-    tokio::time::timeout(CALL_PATIENCE, forward(&client, forwards))
-        .await
-        .expect("the forward neither ended nor failed in time");
+    let said = done(&shepherd, "pause", None).await;
 
+    assert_eq!(said, json!({ "draining": ["koji", "rotom"] }));
     assert_eq!(
-        shepherd.writes(),
+        sent(&mut shepherd),
         [
             trigger("koji", "drain", None),
             trigger("rotom", "drain", None)
         ]
+    );
+}
+
+#[tokio::test]
+async fn pause_drains_a_runner_started_since_the_last_look() {
+    let mut shepherd = FakeShepherd::new();
+    runner(&shepherd, "koji", &koji());
+    // The pane's cache has only koji; rotom comes up before the maintainer presses pause.
+    runner(&shepherd, "rotom", &rotom());
+
+    done(&shepherd, "pause", None).await;
+
+    assert_eq!(
+        sent(&mut shepherd),
+        [
+            trigger("koji", "drain", None),
+            trigger("rotom", "drain", None)
+        ]
+    );
+}
+
+#[tokio::test]
+async fn pause_names_a_runner_that_did_not_drain() {
+    let shepherd = two_runners();
+    let refusal = json!({ "error": "no drain now" }).to_string();
+    shepherd.says("rotom", &[&rotom().to_string(), &refusal]);
+
+    let said = done(&shepherd, "pause", None).await;
+
+    assert_eq!(
+        said,
+        json!({ "draining": ["koji"], "failed": { "rotom": "no drain now" } })
     );
 }
