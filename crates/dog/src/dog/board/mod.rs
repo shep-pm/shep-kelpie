@@ -70,12 +70,8 @@ impl View {
 impl Board {
     /// The implementers and reviewers among `agents`, with no ledger read yet
     pub(super) fn new(agents: &Agents) -> Self {
-        let ranked = (agents.iter())
-            .filter(|(_, agent)| ranks(agent.role))
-            .map(|(name, agent)| (name.clone(), agent.clone()))
-            .collect();
         Self {
-            ranked: Arc::new(ranked),
+            ranked: Arc::new(ranked(agents)),
             ledgers: BTreeMap::new(),
             marks: Marks::new(),
             prefer: Arc::default(),
@@ -96,6 +92,13 @@ impl Board {
         self.prefer = prefer.into();
     }
 
+    /// Ranks the implementers and reviewers among `agents` from the next `view` on
+    ///
+    /// A `View` already copied out keeps the agents it was copied with.
+    pub(super) fn set_agents(&mut self, agents: &Agents) {
+        self.ranked = Arc::new(ranked(agents));
+    }
+
     #[cfg(test)]
     pub(super) fn prefer(&self) -> Vec<AgentName> {
         self.prefer.to_vec()
@@ -114,6 +117,14 @@ impl Board {
             prefer: Arc::clone(&self.prefer),
         }
     }
+}
+
+// The implementers and reviewers among `agents`
+fn ranked(agents: &Agents) -> BTreeMap<AgentName, Agent> {
+    (agents.iter())
+        .filter(|(_, agent)| ranks(agent.role))
+        .map(|(name, agent)| (name.clone(), agent.clone()))
+        .collect()
 }
 
 // Whether the board ranks an agent of `role`: an implementer builds an item
