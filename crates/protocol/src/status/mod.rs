@@ -237,6 +237,10 @@ pub struct WorkItemStatus {
     /// What kelpie ran of the tests reviewers attached to findings, per finding
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub test_checks: Vec<TestCheck>,
+    /// How much review its pull request gets and why, as `light (docs only)`;
+    /// left out until the review is sized
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<String>,
     /// Where its wall time went, and the phase it is in now
     pub timings: Split,
 }

@@ -458,3 +458,31 @@ fn a_json_status_is_the_runner_s_object_as_it_came() {
         format!("koji (finishing): {RECORDED}")
     );
 }
+
+#[test]
+fn a_work_item_with_a_review_weight_shows_it_on_its_own_line() {
+    let body = r#"{"project":"koji","work_items":[
+        {"issue":"7","title":"Add a thing","phase":{"state":"review"},
+         "turn":{"state":"ended"},"pull_request":71,"review":"light (docs only)"},
+        {"issue":"8","title":"Change code","phase":{"state":"review"},
+         "turn":{"state":"ended"},"pull_request":72,"review":"full (diff touched src/)"},
+        {"issue":"9","title":"Fix the other","phase":{"state":"implement"},
+         "turn":{"state":"running"},"pull_request":null}],"rulings":[]}"#;
+
+    assert_eq!(
+        plain_status("koji", body, None),
+        [
+            "koji",
+            "  run: running",
+            "  build: not recorded",
+            "  work items:",
+            "    #7 Add a thing: phase review, turn ended, PR #71",
+            "      review: light (docs only)",
+            "    #8 Change code: phase review, turn ended, PR #72",
+            "      review: full (diff touched src/)",
+            "    #9 Fix the other: phase implement, turn running, no PR",
+            "  rulings waiting: none",
+            "  pacer: on",
+        ]
+    );
+}
