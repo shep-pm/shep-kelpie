@@ -6,7 +6,8 @@
 //! work item has at most one call in flight, and the open work items' calls
 //! run at once, beside the project manager's one call. Every call has a
 //! ceiling, a deadline each pass checks, and a call past it is ended through
-//! its own process group.
+//! its own process group, except one still waiting for its model, whose
+//! ceiling counts from the grant it waits on.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -198,6 +199,13 @@ struct Flight {
 }
 
 impl Flight {
+    // Whether its ceiling can still end it: it has not been asked to end, and
+    // is not a call still waiting for its model. A waiting call has spent none
+    // of its ceiling, and gets it back from the grant. A drain ends one anyway.
+    fn ends_at_ceiling(&self, draining: bool) -> bool {
+        !self.ending.asked() && (draining || self.watched.told.is_none())
+    }
+
     // What the call's record keeps of this flight, counting from `began`
     fn flying(&self, began: Timestamp) -> Flying {
         Flying {
@@ -231,10 +239,14 @@ impl Runner {
 
     /// How long until the soonest ceiling of a call in flight that has not
     /// been ended yet, or `None` with no such call
+    ///
+    /// A call still waiting for its model is no such call, since its ceiling
+    /// counts from a grant with no date.
     pub fn next_ceiling(&self) -> Option<Duration> {
         let now = self.ports.clock.now();
+        let draining = self.draining();
         let items = (self.flights.flying.values())
-            .filter(|flight| !flight.ending.asked())
+            .filter(|flight| flight.ends_at_ceiling(draining))
             .map(|flight| flight.deadline);
         let pm = (self.flights.pm.iter())
             .filter(|(_, ending)| !ending.asked())
@@ -251,13 +263,15 @@ impl Runner {
             .min()
     }
 
-    // Ends each call in flight past its ceiling. A turn's end comes back as
-    // one that timed out, and parks as one; a review call's as a round that
-    // failed.
+    // Ends each call in flight past its ceiling. A call still waiting for its
+    // model is left, having spent none of it. A drain ends one all the same.
+    // A turn's end comes back as one that timed out, and parks as one; a
+    // review call's as a round that failed.
     fn end_overdue(&self) {
         let now = self.ports.clock.now();
+        let draining = self.draining();
         for flight in self.flights.flying.values() {
-            if flight.deadline <= now {
+            if flight.deadline <= now && flight.ends_at_ceiling(draining) {
                 flight.ending.end();
             }
         }

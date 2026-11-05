@@ -9,12 +9,16 @@ use serde_json::{Value, json};
 use crate::guard::Pause;
 use crate::ports::{CLEAN, Cost, Role, Usage};
 use crate::runner::drain::PAUSE_HOLD;
+use crate::runner::flight::tests::{Driven, seven_queued};
 use crate::runner::gate::CHECKS_SETTLE;
 use crate::runner::turn::paused::PAUSED;
 use crate::runner::turn::tests::step_paused_in_a_tool;
-use crate::runner::{CallRole, Pass, Runner, advance, answer, step};
-use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
+use crate::runner::{CallRole, Pass, Runner, StepReport, advance, answer, step};
+use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, ticket};
 use crate::work_item::Turn;
+
+// The rig's `worker.turn_timeout`, which is also the ceiling a drain is waited out by
+const CEILING: u64 = 3600;
 
 // A running project with issue 7 open and its first turn due
 fn seven_due(project: &str) -> (Rig, Mutex<Runner>) {
@@ -75,6 +79,45 @@ fn drain_answers_the_calls_still_running_until_they_end() {
     }
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(rig.claude.calls().len(), 1, "nothing started after it");
+}
+
+// A call queued at its model's lease is left past its ceiling while the runner
+// runs, since its ceiling counts from the grant it is waiting on. A drain is
+// waited out by that same ceiling, so a drain ends it.
+#[test]
+fn a_drain_ends_a_call_still_queued_for_a_lease() {
+    let (rig, runner, _queue) = seven_queued("acme", Scripted::Say("done"));
+    let driven = Driven::new(&runner);
+    driven.started();
+    let drained = rig.ask(&runner, "drain", None);
+    assert_eq!(
+        drained["draining"],
+        json!({ "calls": [{ "issue": "7", "role": "worker" }], "ceiling": CEILING }),
+        "{drained}"
+    );
+
+    rig.clock.advance(CEILING - 1);
+    assert!(
+        matches!(driven.pass(), Pass::Idle),
+        "the drain ended the call before its ceiling"
+    );
+    assert_eq!(
+        rig.claude.calls(),
+        [],
+        "the queued call ran before its lease"
+    );
+
+    rig.clock.advance(1);
+    assert!(matches!(driven.pass(), Pass::Idle));
+    assert!(
+        matches!(
+            driven.landed(),
+            Some(StepReport::TimedOut { issue, .. }) if issue == ticket(7)
+        ),
+        "the drain left the queued call in flight"
+    );
+    assert_eq!(rig.claude.calls(), [], "it spawned only to be ended");
+    assert_eq!(draining(&rig, &runner)["calls"], json!([]));
 }
 
 #[test]
