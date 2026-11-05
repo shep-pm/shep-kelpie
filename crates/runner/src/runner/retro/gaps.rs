@@ -4,7 +4,8 @@
 //! `- <theme>: <what>`. Reports stay in `retro-reports/unverified` until the
 //! maintainer consolidates them, so the themes of the reports still there are
 //! the open known gaps. The next retro is told them, asked for new findings
-//! only, and asked to count a gap that recurs by its theme.
+//! only, and asked to count a gap that recurs by its theme. The list holds the
+//! newest [`LISTED`] of them and counts the older ones it left out.
 
 use std::fs;
 use std::path::Path;
@@ -13,7 +14,7 @@ use std::path::Path;
 pub(super) const HEADING: &str = "New findings";
 
 /// The most themes the prompt lists
-const LISTED: usize = 40;
+pub(super) const LISTED: usize = 40;
 
 /// The most characters of a theme
 const THEME_LEN: usize = 80;
@@ -44,12 +45,22 @@ fn is_heading(line: &str) -> bool {
     words.eq_ignore_ascii_case(HEADING)
 }
 
+/// The open known gaps the retro is told, and what its limit left out
+#[derive(Debug, Default)]
+pub(super) struct Open {
+    /// The themes the prompt lists, oldest report first, each once
+    pub listed: Vec<String>,
+    /// How many themes older than these the limit dropped
+    pub left_out: usize,
+}
+
 /// The open known gaps: the themes in `project`'s reports kept in `folder`,
-/// oldest report first, each once, and the newest [`LISTED`] of them. A
-/// folder or report that cannot be read adds none.
-pub(super) fn open(folder: &Path, project: &str) -> Vec<String> {
+/// oldest report first, each once, and the newest [`LISTED`] of them, with how
+/// many older ones that left out. A folder or report that cannot be read adds
+/// none.
+pub(super) fn open(folder: &Path, project: &str) -> Open {
     let Ok(entries) = fs::read_dir(folder) else {
-        return Vec::new();
+        return Open::default();
     };
     // The folder is every project's, and a report's name begins with its project's.
     let prefix = format!("{project}-batch-");
@@ -69,8 +80,12 @@ pub(super) fn open(folder: &Path, project: &str) -> Vec<String> {
             }
         }
     }
-    gaps.drain(..gaps.len().saturating_sub(LISTED));
-    gaps
+    let left_out = gaps.len().saturating_sub(LISTED);
+    gaps.drain(..left_out);
+    Open {
+        listed: gaps,
+        left_out,
+    }
 }
 
 #[cfg(test)]
@@ -110,15 +125,20 @@ mod tests {
         )
         .unwrap();
 
+        let gaps = open(dir.path(), "koji");
         assert_eq!(
-            open(dir.path(), "koji"),
+            gaps.listed,
             [
                 "Sandbox cannot bind a socket",
                 "state VERSION conflicts",
                 "slow CI"
             ]
         );
-        assert_eq!(open(&dir.path().join("none"), "koji"), Vec::<String>::new());
+        assert_eq!(gaps.left_out, 0);
+        assert_eq!(
+            open(&dir.path().join("none"), "koji").listed,
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -136,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn past_the_limit_the_newest_themes_are_kept() {
+    fn gaps_past_the_limit_are_counted() {
         let dir = tempfile::tempdir().unwrap();
         for n in 0..LISTED + 5 {
             let file = dir.path().join(format!("koji-batch-{n:03}.md"));
@@ -145,8 +165,9 @@ mod tests {
 
         let gaps = open(dir.path(), "koji");
 
-        assert_eq!(gaps.len(), LISTED);
-        assert_eq!(gaps.first().unwrap(), "gap 5");
-        assert_eq!(gaps.last().unwrap(), &format!("gap {}", LISTED + 4));
+        assert_eq!(gaps.listed.len(), LISTED);
+        assert_eq!(gaps.left_out, 5);
+        assert_eq!(gaps.listed.first().unwrap(), "gap 5");
+        assert_eq!(gaps.listed.last().unwrap(), &format!("gap {}", LISTED + 4));
     }
 }
