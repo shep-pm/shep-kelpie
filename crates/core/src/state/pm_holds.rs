@@ -33,11 +33,7 @@ pub struct PmHeld {
 impl PmHeld {
     /// A hold of `issue` waiting on `until`, made when `issue` read as `text`
     pub fn new(issue: TicketId, until: Option<TicketId>, text: String) -> Self {
-        Self {
-            issue,
-            until,
-            text,
-        }
+        Self { issue, until, text }
     }
 
     /// What the hold waits on, as the board shows it
