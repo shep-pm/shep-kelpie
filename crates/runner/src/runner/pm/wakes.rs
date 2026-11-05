@@ -222,15 +222,22 @@ impl Runner {
         }
     }
 
-    /// Notes what saving `now` changes that wakes the project manager: a
-    /// work item parked on a stuck ruling, or one closing, which lets its
-    /// holds go. A pick of an issue stands whatever opens or closes, since
+    /// Notes what saving `now` changes: a work item closing ends the holds that
+    /// waited on it, and a work item parked on a stuck ruling wakes the project
+    /// manager. The holds go whether or not one stands, since the state file
+    /// keeps them. A pick of an issue stands whatever opens or closes, since
     /// dispatch checks the board for it.
     pub(in crate::runner) fn pm_noticed(&mut self, now: &mut ProjectState) {
+        let was = &self.state;
+        let closed: Vec<TicketId> = (was.work_items.iter())
+            .map(|i| i.issue)
+            .filter(|&issue| now.item(issue).is_none())
+            .collect();
+        // A hold waits on the work item it names, or on any when it names none.
+        now.end_holds_on(&closed);
         if self.agents.pm.is_none() {
             return;
         }
-        let was = &self.state;
         let raised = (now.rulings.iter()).filter(|r| !was.rulings.iter().any(|w| w.id == r.id));
         let stuck: Vec<Wake> = raised
             .filter_map(|ruling| {
@@ -239,17 +246,11 @@ impl Runner {
                 stuck_wake(ticket, ruling).filter(|_| !ended)
             })
             .collect();
-        let closed: Vec<TicketId> = (was.work_items.iter())
-            .map(|i| i.issue)
-            .filter(|&issue| now.item(issue).is_none())
-            .collect();
         self.pm_asked(now);
         for wake in stuck {
             self.pm_due(wake);
         }
         if !closed.is_empty() {
-            // A hold waits on the work item it names, or on any when it names none.
-            now.end_holds_on(&closed);
             let open = now.open_tickets();
             self.pm.after_end.retain(|ticket, _| open.contains(ticket));
             (self.pm.left_alone).retain(|ticket, _| open.contains(ticket));

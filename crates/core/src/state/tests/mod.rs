@@ -86,6 +86,29 @@ fn read_back(dir: &Path) -> serde_json::Value {
 }
 
 #[test]
+fn a_hold_ends_on_the_close_it_waits_on_and_no_hold_ends_on_no_close() {
+    let mut state = ProjectState::new();
+    state.hold(ticket(9), Some(ticket(7)), "c0ffee".into());
+    state.hold(ticket(12), None, "a1b2".into());
+    let held = |state: &ProjectState| -> Vec<TicketId> {
+        state.pm_holds.iter().map(|h| h.issue).collect()
+    };
+
+    state.end_holds_on(&[]);
+    assert_eq!(
+        held(&state),
+        vec![ticket(9), ticket(12)],
+        "nothing closed, so no hold goes"
+    );
+
+    state.end_holds_on(&[ticket(8)]);
+    assert_eq!(held(&state), vec![ticket(9)], "#12 waits on any close");
+
+    state.end_holds_on(&[ticket(7)]);
+    assert!(held(&state).is_empty(), "#9 waits on #7");
+}
+
+#[test]
 fn a_saved_state_loads_back_whole() {
     let dir = tempfile::tempdir().unwrap();
     let store = store_in(dir.path());

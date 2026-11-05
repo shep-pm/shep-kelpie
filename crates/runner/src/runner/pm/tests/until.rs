@@ -35,6 +35,18 @@ fn held(rig: &Rig, runner: &Mutex<Runner>) -> Value {
     rig.ask(runner, "status", None)["pm"]["held"].clone()
 }
 
+// The holds as the state file keeps them, without the text digest each saves with it
+fn saved(rig: &Rig) -> Value {
+    let text = std::fs::read_to_string(rig.paths().state).unwrap();
+    let mut saved = serde_json::from_str::<Value>(&text).unwrap()["pm_holds"].clone();
+    if let Some(held) = saved.as_array_mut() {
+        for held in held {
+            held.as_object_mut().unwrap().remove("text");
+        }
+    }
+    saved
+}
+
 const UNTIL_7: &str = "{\"pick\": null, \"hold\": [{\"issue\": 9, \"until\": 7}]}";
 
 #[test]
@@ -145,6 +157,26 @@ fn a_hold_survives_a_restart() {
         json!([{ "issue": "9", "until": "7" }]),
         "the board's read ends no hold"
     );
+}
+
+#[test]
+fn a_hold_ends_when_what_it_waits_on_closes_with_no_project_manager() {
+    let (rig, runner, _) = held_by(UNTIL_7);
+    // The project manager goes, with its hold standing in the state file.
+    rig.edit_settings(|s| s.replace("pm = \"pm\"\n", ""));
+    drop(runner);
+    let runner = rig.open().unwrap();
+
+    rig.clock.advance(61);
+    step(&runner).unwrap();
+    let board = std::fs::read_to_string(rig.paths().board).unwrap();
+    assert!(board.contains("held by you until #7 closes"), "{board}");
+
+    rig.ask(&runner, "drop", Some("7"));
+    step(&runner).unwrap();
+    let board = std::fs::read_to_string(rig.paths().board).unwrap();
+    assert!(!board.contains("held by you"), "{board}");
+    assert_eq!(saved(&rig), json!(null), "#7 closing ends the hold");
 }
 
 #[test]

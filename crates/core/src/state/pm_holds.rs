@@ -81,8 +81,12 @@ impl ProjectState {
     }
 
     /// Ends every hold waiting on one of `closed`, which are the work items
-    /// that just ended. A hold naming no work item waits on any of them.
+    /// that just ended. A hold naming no work item waits on any of them, so
+    /// none goes when nothing closed.
     pub fn end_holds_on(&mut self, closed: &[TicketId]) {
+        if closed.is_empty() {
+            return;
+        }
         self.pm_holds
             .retain(|held| !held.until.is_none_or(|until| closed.contains(&until)));
     }
