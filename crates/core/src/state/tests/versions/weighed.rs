@@ -67,7 +67,7 @@ fn a_project_manager_light_weight_saves_with_its_lines_and_loads_again() {
     store.save(&state).unwrap();
 
     let saved = read_back(dir.path());
-    assert_eq!(saved["version"], 98);
+    assert_eq!(saved["version"], VERSION);
     assert_eq!(
         saved["work_items"][0]["weight"],
         serde_json::json!({"light": {"pm": {"lines": 6}}})
