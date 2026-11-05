@@ -15,6 +15,7 @@ mod lease;
 mod notices;
 mod numbered;
 mod open_thread;
+mod pm_holds;
 mod projects;
 mod red;
 mod removed;
@@ -33,6 +34,7 @@ pub use events::{BoardEvent, EVENTS_KEPT};
 pub use lease::{LeaseHeld, Resource};
 pub use notices::{MainNotice, MergeNotice, Notice};
 pub use open_thread::OpenThread;
+pub use pm_holds::PmHeld;
 pub use projects::Projects;
 pub use red::{Handled, RedWorkflow};
 pub use removed::OldWorker;
@@ -67,7 +69,7 @@ use crate::work_item::{Attached, Known, Phase, Priced, Review, Seconds, Tally, T
 pub const STATE_FILE: &str = "state.json";
 
 /// The state file's format version, bumped when the file gains a field or value an older kelpie refuses
-pub const VERSION: u32 = 98;
+pub const VERSION: u32 = 99;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -213,6 +215,9 @@ pub struct ProjectState {
     /// answered wake, oldest first
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pm_told: Vec<String>,
+    /// The ready issues the project manager holds back, oldest hold first
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pm_holds: Vec<PmHeld>,
     /// Whether `pm-archive.md` holds notes the project manager has not read
     /// into `pm-standing.md` yet. A roll sets it, and a `standing` answer
     /// clears it, so a wake that rolled and then failed still owes the ask.
@@ -314,6 +319,7 @@ impl ProjectState {
             pm_seen: None,
             pm_session: None,
             pm_told: Vec::new(),
+            pm_holds: Vec::new(),
             pm_unmined: false,
             pm_attached: None,
             finishing: false,

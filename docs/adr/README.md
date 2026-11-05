@@ -21,8 +21,9 @@ Each ADR below is one decision that is hard to reverse. A later ADR can reopen p
 - 0015 [Crates use only what is below them](0015-crates-use-only-what-is-below-them.md): the code is a Cargo workspace where a crate uses only what is below or beside it, so a module that reaches the wrong way fails to build, with five leaf crates and a dev-only `test_support` first.
 - 0016 [Kelpie takes any shepherd from its pinned shep on](0016-kelpie-takes-any-shepherd-from-its-pinned-shep-on.md): kelpie refuses only a shepherd on an earlier shep than it is built with, and leaves wire compatibility to shep's protocol handshake.
 - 0017 [The runner answers on a socket of its own](0017-the-runner-answers-on-a-socket-of-its-own.md): each runner answers a typed, versioned protocol and pushes its status stream on a local socket under kelpie's home, and the verbs use `shep trigger` for one release when no runner answers.
-- 0018 [The project manager decides, and the dog picks the agent](0018-the-pm-decides-and-the-dog-picks-the-agent.md): the panel, the issue writer and per-project agent lists go, the project manager answers the ruling kinds `rulings.pm_decides` gives it, an issue skill and a code check replace the issue writer with the triager only on issues that fail it, and the dog's agent board picks each implementer and reviewer at dispatch from the agent files by kind, tier, availability and `agents.slack`. Reopens two lines of 0006.
+- 0018 [The project manager decides, and the dog picks the agent](0018-the-pm-decides-and-the-dog-picks-the-agent.md): the panel, the issue writer and per-project agent lists go, the project manager answers the ruling kinds `rulings.pm_decides` gives it, an issue skill and a code check replace the issue writer with the triager only on issues that fail it, and the dog's agent board picks each implementer and reviewer at dispatch from the agent files by kind, tier, availability and `agents.slack`. Reopens two lines of 0006, and 0020 amends the board's ranking, the kinds the map refuses and the review count keys.
 - 0019 [Each worker has a clone of its own](0019-each-worker-has-a-clone-of-its-own.md): a worker's worktree is a clone with a git dir of its own beside it, borrowing the checkout's objects through alternates on every platform, so the fence grants it nothing in the checkout's `.git` that Windows cannot grant.
+- 0020 [The project manager makes the calls, and settings hold only what it cannot](0020-the-project-manager-makes-the-calls.md): free text on a ruling or a pull request goes to the project manager, which sets each item's agent and review plan at the pick and answers every kind `rulings.pm_decides` can hold, the dog reports who is available and ranks no more, a setting holds the agent files, that map or a fact kelpie cannot detect, and the gates hold in code with no setting. A direction, with no code moved yet.
 
 ## Decided against
 
@@ -89,6 +90,12 @@ Check this list before proposing an option. Where a later ADR reopened the decis
 - a project manager that watches every lock and meter itself (0018)
 - `CREATOR OWNER` or `OWNER RIGHTS` on the refs folder for a Windows worker (0019)
 - a Windows-only clone, with linked worktrees elsewhere (0019)
+- keep the settings as the rulebook for each call (0020)
+- keep the agent board's ranking with the project manager overriding it (0020)
+- wake the project manager for each decision (0020)
+- let the project manager relax a gate (0020)
+- a per-item setting the maintainer edits (0020)
+- keep `merge` out of `rulings.pm_decides` (0020)
 
 ### Decided against without an ADR
 

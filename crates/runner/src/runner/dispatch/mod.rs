@@ -171,7 +171,7 @@ impl Runner {
             &self.state.dropped,
             &implementers,
         );
-        let held = self.pm_holds(&all, &ready);
+        let held = self.pm_holds(&all, &ready)?;
         ready.retain(|issue| !held.contains(&issue.ticket));
         let mut paced = false;
         // Issues the agent board or the pacer could not start, and the first pacer hold,

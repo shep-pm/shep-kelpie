@@ -4,7 +4,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 
 ## Always
 
-- Gates, locks, rate windows live in code; Claude only for work, judgement. ADR 0001
+- Gates, locks, rate windows live in code; Claude only for work, judgement. ADR 0001, ADR 0020
 - Kelpie controls each agent's context growth. `runner/turn/`
 - Naming: dog = adopted `kelpie` (lease dog); project = sheep; agent calls = lambs. One kelpie for all projects. ADR 0001 to 0004
 - Binary is the dog with no args + `SHEP_DOG_NAME` and `SHEP_NAME` set; needs the `shep adopt` channel; names itself in the handshake, never `silent`. `src/sheep/mod.rs`
@@ -13,7 +13,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 - The shepherd is reached through the `Dial` port (`core/shepherd/connection.rs`): `Socket` is the real one; tests dial `FakeShepherd`. #587
 - Socket path over 103 bytes: no start. #1147
 - Home never moved from `~/.kelpie`: no start, names each old file, exit 78 (`stop_exit_codes`). #311, #345
-- State file version 98 (`VERSION` in `core/state/mod.rs`); each change one way: rollback = finish or drop open items. `core/state/removed/mod.rs`
+- State file version 99 (`VERSION` in `core/state/mod.rs`); each change one way: rollback = finish or drop open items. `core/state/removed/mod.rs`
 - Business code is Rust; Tauri GUI after MVP. #5
 - A runner serves the typed protocol on `run/<project>.sock`; verbs fall back to `shep trigger`. ADR 0017. runner-socket.md
 - Crates under `crates/` use nothing above them; the root holds the binary, verbs (`src/{flock,upgrade,sheep,doctor,issues}/`, `src/schema.rs`). ADR 0015

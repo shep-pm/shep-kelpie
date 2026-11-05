@@ -9,13 +9,12 @@
 //! each, and one naming the same item twice acts once.
 
 use super::answer::{Action, Answer, Unstick};
-use super::maintainer::Held;
 use super::red::Settled;
 use super::{Pick, Picked, StuckState, stuck_on};
 use crate::board::briefing::ticket_ref;
 use crate::runner::thread_replies::Settler;
 use crate::runner::{Answer as Ruled, RuleError, Runner};
-use crate::state::{RulingKind, StateError};
+use crate::state::{PmHeld, RulingKind, StateError};
 use crate::ticket::TicketId;
 use crate::work_item::Phase;
 
@@ -43,10 +42,12 @@ impl Runner {
     ) -> Result<(Vec<String>, Vec<String>), StateError> {
         let ready = self.board_ready();
         // An answer with no `hold` leaves the holds standing; one with a list replaces them.
-        let mut held: Vec<Held> = match &answer.hold {
-            Some(_) => Vec::new(),
-            None => self.pm.held.clone(),
-        };
+        // The holds go now, before anything else in the answer acts: each later action saves
+        // the state as it stands when it acts, and a copy made before it would write it back out.
+        let mut next = self.state.clone();
+        if answer.hold.is_some() {
+            next.pm_holds.clear();
+        }
         let mut dropped = answer.unread.clone();
         let open = self.state.open_tickets();
         for call in answer.hold.iter().flatten() {
@@ -57,14 +58,13 @@ impl Runner {
             } else if let Some(until) = waits {
                 let until = ticket_ref(until);
                 dropped.push(format!("hold {named}: {until} is no open work item"));
-            } else if !held.iter().any(|h| h.issue == call.issue) {
+            } else {
                 let text = self.ready_text(call.issue).unwrap_or_default();
-                held.push(Held {
-                    issue: call.issue,
-                    until: call.until,
-                    text,
-                });
+                next.hold(call.issue, call.until, text);
             }
+        }
+        if next.pm_holds != self.state.pm_holds {
+            self.save(next)?;
         }
         let mut acted = Vec::new();
         // A workflow red on `main` is settled first: a fix work item it opens
@@ -96,7 +96,7 @@ impl Runner {
                 dropped.push(format!(
                     "pick {named}: only {slots} can start from this wake"
                 ));
-            } else if held.iter().any(|h| h.issue == ticket) {
+            } else if self.state.pm_holds.iter().any(|h| h.issue == ticket) {
                 dropped.push(format!("pick {named}: it holds {named} too"));
             } else if !ready.contains(&ticket) {
                 dropped.push(format!("pick {named}: not a ready issue on the board"));
@@ -120,11 +120,10 @@ impl Runner {
         if picking.is_some() {
             self.pm.asked_pick = false;
         }
-        if answer.hold.is_some() && !held.is_empty() {
-            let named: Vec<String> = held.iter().map(Held::to_string).collect();
+        if answer.hold.is_some() && !self.state.pm_holds.is_empty() {
+            let named: Vec<String> = self.state.pm_holds.iter().map(PmHeld::to_string).collect();
             acted.push(format!("holds {}", named.join(", ")));
         }
-        self.pm.held = held;
         let mut unstuck: Vec<TicketId> = Vec::new();
         for unstick in &answer.unstick {
             if unstuck.contains(&unstick.item) {

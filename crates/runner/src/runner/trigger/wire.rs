@@ -67,6 +67,7 @@ impl From<&WorkItemStatus<'_>> for wire::WorkItemStatus {
             waiting: item.waiting.map(Into::into),
             held_up: item.held_up.as_ref().map(Into::into),
             failing: item.failing.as_ref().map(Into::into),
+            install_failed: item.install_failed.clone(),
             checks: item.checks.map(str::to_owned),
             build_bytes: item.build_bytes,
             session: item.session.clone(),
@@ -208,19 +209,19 @@ impl From<&r::PmStatus<'_>> for wire::PmStatus {
             attached: pm.attached,
             down_until: pm.down_until,
             told: pm.told.to_vec(),
-            held: pm.held.iter().map(Into::into).collect(),
+            held: pm.held.iter().map(held).collect(),
             settled: pm.settled.iter().map(Into::into).collect(),
             reply: pm.reply.map(str::to_owned),
         }
     }
 }
 
-impl From<&r::pm::Held> for wire::Held {
-    fn from(held: &r::pm::Held) -> Self {
-        Self {
-            issue: held.issue,
-            until: held.until,
-        }
+// The `status` mirror of one hold. A `From` impl would name two types from
+// other crates, which the orphan rule refuses.
+fn held(held: &r::pm::PmHeld) -> wire::Held {
+    wire::Held {
+        issue: held.issue,
+        until: held.until,
     }
 }
 

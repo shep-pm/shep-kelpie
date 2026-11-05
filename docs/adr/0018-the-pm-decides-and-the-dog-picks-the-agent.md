@@ -71,7 +71,17 @@ So the roles that decide are cut to one, the project manager, and choosing an ag
 - `reviews.need` stays the full count. `reviews.light` is the count of a light review, `need` when absent and never above `need`.
 - A review is light when no changed file is forced full and either every changed file matches `reviews.light_paths` (`["**/*.md", "docs/**"]` when absent), or `reviews.pm_lightens` is on, the project manager tagged the pick light and the change is at most `reviews.light_max_lines` lines (10 when absent). `pm_lightens` is off when absent.
 - Forced full: CI workflow files, dependency manifests and lockfiles, agent files, a `reviews.full_paths` match (none when absent) and an adopted pull request. A forced-full file beats the project manager's tag.
-- A light item's reviewer asks sit at tier `light`, so the project manager's tier no longer rules out a cheaper reviewer. The diff is weighed again before each round, so a fix that takes a docs-only change out of the light paths makes the review full while it stays out. A HIGH finding makes it full for the rest of the item.
+- A light item's reviewer asks sit at tier `light`, so the project manager's tier no longer rules out a cheaper reviewer. The diff is weighed again before each round, so a fix that takes a docs-only change out of the light paths makes the review full while it stays out. A HIGH finding makes it full for the rest of the item, until ADR 0020 takes the review count out of the settings.
+
+### Amendment, 2026-11-05: the dog reports availability, and the project manager makes the calls (ADR 0020)
+
+A direction recorded ahead of the code. It amends three lines here, and the rest of this record stands.
+
+- **The pick.** The dog answers the `pick` ask with what it knows about each agent, when it could start and what its work has cost, and ranks none. The slack window, the cost and tier order and `[kelpie.agent_board] prefer` go with the ranking, and `agents.slack` with them. The project manager names the agent at the pick, and an item it wants to wait for one is held.
+- **The kinds the map refuses.** `rulings.pm_decides` may hold `true` for every kind it knows, `merge`, `security` and `contribution-merge` among them, and then no ruling reaches the maintainer. What keeps a bad head out is the gate, ADR 0008's green head among it, and not who answers the card.
+- **The review count.** `reviews.need`, `reviews.light`, `reviews.light_paths`, `reviews.full_paths`, `reviews.pm_lightens` and `reviews.light_max_lines` stop deciding an item's plan, which the pick carries, and kelpie asks for one more read only when a round sent a finding above a nit, which the project manager rules on. The light review's HIGH step-up goes with those keys.
+
+What stands: the agent file's `description`, `kinds` and `tier`, the dog's reading of availability, the track record and its one route through the typical time, and `agent-fit` as the ruling that proposes a `kinds` change, which kelpie never applies itself.
 
 ## Considered options
 

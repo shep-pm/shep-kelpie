@@ -3,8 +3,9 @@
 Kelpie runs Claude Code workers on a maintainer's projects, holds their merge
 gates and shared review resources, and keeps each agent's context small. Named
 for the working sheepdog that works a mob on its own initiative. Vocabulary
-accepted 2026-09-25, revised 2026-10-05 for the flow in ADR 0006, and
-revised 2026-10-06 for the code as it stands after the cleanup.
+accepted 2026-09-25, revised 2026-10-05 for the flow in ADR 0006, revised
+2026-10-06 for the code as it stands after the cleanup, and revised
+2026-11-05 for what a setting may hold in ADR 0020.
 
 _Avoid_: harness (the working name before 2026-09-25), control room
 
@@ -63,6 +64,7 @@ The ready issues the PM keeps waiting, each until the open work item it names
 (`until`) closes. A hold ends when that work item closes or the issue's text
 changes, and on no other close; one naming none ends at any close. An answer
 with a hold list replaces the last; one without leaves the holds as they are.
+Kelpie saves the holds, so a restart starts none of them.
 
 **Worker**:
 Owns one work item: its branch, pull request and sessions. Builds it
@@ -120,7 +122,8 @@ The dog's reading of every agent across projects, for choosing an
 implementer: how soon each could start a turn, from its model's load or its
 plan's hold, and its typical time and cost for a kind of work, from the
 usage ledger. It orders the agents that fit a work item by when each would
-finish and what it costs.
+finish and what it costs. ADR 0020 leaves that ordering to the project
+manager and keeps the dog to the reading.
 _Avoid_: board (one project's work items), queue
 
 **Track record**:
@@ -354,6 +357,16 @@ issue once the pull request merges.
 
 ## Kelpie's mechanics
 
+**Setting**:
+A project's or kelpie's own Flockfile key. It holds the agent files,
+`rulings.pm_decides`, and a fact kelpie cannot detect, such as a checkout
+path, a gateway's URL or whether the repo runs CI at all. A judgement, such
+as which agent runs a work item or how many reviewers it gets, is not a
+setting: the project manager makes it for the item in front of it. A limit
+that keeps a bad call out, the fence, a lease or a spend cap, is code with no
+setting. ADR 0020.
+_Avoid_: config, knob, preference
+
 **Board**:
 The project's open work items and ready issues, as kelpie's code sees them.
 Kelpie's code writes it out as `<kelpie home>/<project>/board.md` whenever it
@@ -477,9 +490,11 @@ window, which holds new work items, and a stop at 50% of the 5-hour
 window, which holds every turn.
 
 **Ruling**:
-A decision only the maintainer makes, one of seven kinds: `merge`,
+A decision kelpie cannot make on its own, one of seven kinds: `merge`,
 `question`, `stuck` (with its reason), `agent-files`, `agent-fit`,
-`foreign-change` and `follow-up`. A `stuck` ruling's reason is one of `rebase`, `still-red`,
+`foreign-change` and `follow-up`. The maintainer answers it, or the project
+manager for the kinds `rulings.pm_decides` sets `true` (ADR 0018, ADR 0020).
+A `stuck` ruling's reason is one of `rebase`, `still-red`,
 `merge-refused`, `closed`, `fix-not-pushed`,
 `unpushed`, `turn-timeout` and `turn-failed`. A worker waiting on one is
 **parked**, and its work item gives up its slot under `concurrency.active_items`, which

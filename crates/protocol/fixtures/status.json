@@ -191,6 +191,7 @@
     },
     "calls": 2,
     "cost_usd": 0.0,
+    "install_failed": "error: lockfile had changes, but lockfile is frozen",
     "issue": "7",
     "phase": {
       "id": "71",
@@ -254,6 +255,7 @@
       },
       "calls": 2,
       "cost_usd": 0.0,
+      "install_failed": "error: lockfile had changes, but lockfile is frozen",
       "issue": "7",
       "phase": {
         "id": "71",

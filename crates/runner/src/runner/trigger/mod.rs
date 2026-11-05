@@ -232,6 +232,10 @@ pub struct WorkItemStatus<'a> {
     /// Its step that failed again and again, from the second failure in a row
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failing: Option<super::looks::Failing>,
+    /// The first line of its last package install's output that names an error, while that
+    /// install is the last and failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_failed: Option<String>,
     /// `"none"` while its wait on CI has had no check reported, beside the
     /// wait's `since` in `phase`
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -318,6 +322,7 @@ impl<'a> WorkItemStatus<'a> {
             waiting: None,
             held_up: None,
             failing: None,
+            install_failed: None,
             checks: None,
             build_bytes: None,
             session: &item.session,
