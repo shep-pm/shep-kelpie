@@ -23,16 +23,26 @@ fn verb() -> Verb {
     verb
 }
 
+/// What kelpie tells shep about itself, before it answers a probe
+///
+/// The pane is the dog's board in lookout, with the two actions it offers: `rule`
+/// on a ruling's row and `pause`.
+fn declared(version: &str) -> Probe<'_> {
+    Probe::new(env!("CARGO_PKG_NAME"), version)
+        .ask_for_channel()
+        .pane()
+        .action("rule", "Say yes to a ruling, by its row `<project>#<id>`")
+        .action("pause", "Send every runner `drain`")
+        .verb(verb())
+}
+
 /// Answers `--version` or `--schema` and exits, or returns when neither was asked
 ///
 /// The first line of `main`, before anything opens a socket. The version
 /// answer asks for the shepherd channel, which the lease dog serves.
 pub fn probe() {
     let version = crate::home::probe_version();
-    Probe::new(env!("CARGO_PKG_NAME"), &version)
-        .ask_for_channel()
-        .verb(verb())
-        .answer_with_sheep::<KelpieSettings, Settings>();
+    declared(&version).answer_with_sheep::<KelpieSettings, Settings>();
 }
 
 #[cfg(test)]
@@ -43,6 +53,18 @@ mod tests {
     use shep_client::dogs::{SECRET_KEY, SHEEP_SCHEMA_KEY, config_schema_with_sheep};
 
     use super::*;
+
+    #[test]
+    fn the_manifest_declares_a_pane_and_its_actions() {
+        let declared = format!("{:?}", declared("1.0.0"));
+        assert!(declared.contains("pane: true"), "{declared}");
+        for action in crate::dog::pane::ACTIONS {
+            assert!(
+                declared.contains(&format!("name: {action:?}")),
+                "{declared}"
+            );
+        }
+    }
 
     #[test]
     fn the_manifest_declares_every_top_level_verb() {

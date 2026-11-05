@@ -538,6 +538,40 @@ async fn a_new_prefer_list_orders_the_next_pick_and_not_one_already_read() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn new_agents_order_the_next_pick_and_not_one_already_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("agents");
+    let agents = two_plans_and_a_billed(&folder);
+    let shown = seen(&agents, &Gateways::default(), 10).await;
+    let board = Mutex::new(Board::new(&agents));
+    let ask = ask_of(&["plan-a", "plan-b", "billed"]);
+    let before = lock(&board).view();
+
+    // plan-a now takes only docs, and plan-b is light, so it ranks before billed.
+    write_in(
+        &folder,
+        "plan-a.md",
+        &format!("{ON_CLAUDE}kinds: [docs]\n---\n"),
+    );
+    write_in(
+        &folder,
+        "plan-b.md",
+        &format!("{ON_CLAUDE}tier: light\n---\n"),
+    );
+    lock(&board).set_agents(&Agents::load(&folder).unwrap());
+    let after = lock(&board).view();
+
+    let old = pick::answer(&before, &shown, &ask, Timestamp(EPOCH));
+    let new = pick::answer(&after, &shown, &ask, Timestamp(EPOCH));
+    assert_eq!(order(&old), ["billed", "plan-a", "plan-b"]);
+    assert_eq!(
+        order(&new),
+        ["plan-b", "billed"],
+        "plan-a no longer takes `fix`, and plan-b's lighter tier ranks it first"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_handoff_ask_leaves_out_the_agent_left_and_takes_the_next_listed() {
     let dir = tempfile::tempdir().unwrap();
     let (view, shown) = priced_plans(dir.path(), &["plan-b", "plan-a", "billed"]).await;

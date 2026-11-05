@@ -18,6 +18,7 @@ mod e2e;
 mod forge;
 pub mod left_over;
 mod link;
+pub mod pane;
 mod reread;
 mod section;
 pub mod triggers;
@@ -29,6 +30,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use shep_client::dogs::{PANE_ACTION, pane_answer};
 use shep_client::shep_core::protocol::request::{ActionOutcome, Response};
 use shep_client::shep_core::protocol::{Request, SelectorSpec};
 use shep_client::shep_core::status::ProcStatus;
@@ -163,6 +165,13 @@ fn open(
         last,
         pace: Arc::new(LocalPace::new()),
     }
+}
+
+// The folder of the agent files in kelpie's home, None when the home cannot be worked out.
+fn agents_folder() -> Option<std::path::PathBuf> {
+    home::kelpie_home()
+        .ok()
+        .map(|home| home.join(agents::FOLDER))
 }
 
 // The agent files in kelpie's home, or kelpie's own when they cannot be read.
@@ -315,6 +324,8 @@ async fn serve(ports: availability::Ports, alerts: Arc<dyn Alerts>) -> Result<()
         alerts,
         standing: Arc::clone(&standing),
         live,
+        agents: agents_folder(),
+        loaded: agents.clone(),
     };
     reread::begin(reread::Reread::new(&started, handles), client.clone());
     let opened = door::open(&socket).map(|listener| (socket, listener));
@@ -370,6 +381,18 @@ async fn serve(ports: availability::Ports, alerts: Arc<dyn Alerts>) -> Result<()
             let _ = answered.send(grants);
             body
         });
+    }
+    let seen = pane::Shared::default();
+    let asks = pane::begin(Arc::clone(&client), Arc::clone(&seen));
+    {
+        let seen = Arc::clone(&seen);
+        shepherd.on_action(PANE_ACTION, move |params, _| {
+            pane_answer(params, || pane::build(&pane::lock(&seen)))
+        });
+    }
+    for action in pane::ACTIONS {
+        let asks = asks.clone();
+        shepherd.on_action(action, move |params, name| pane::ask(&asks, name, params));
     }
     let (stop, mut stopped) = mpsc::unbounded_channel();
     shepherd.on_shutdown(move || {

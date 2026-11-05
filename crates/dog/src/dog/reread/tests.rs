@@ -32,7 +32,7 @@ struct Dog {
     shown: Arc<Mutex<Availability>>,
     clock: FakeClock,
     reread: Reread,
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
 }
 
 async fn started_on(section: &str) -> Dog {
@@ -51,9 +51,6 @@ async fn started_on(section: &str) -> Dog {
     kept.desk
         .set_test_capacity(started.settings.leases.cargo_test_capacity());
     let desk = Arc::new(Mutex::new(kept));
-    let board =
-        Board::new(&Agents::embedded()).preferring(started.settings.agent_board.prefer.clone());
-    let board = Arc::new(Mutex::new(board));
     let (waiters, alerts) = (Waiters::default(), FakeAlerts::on(clock.clone()));
     let standing = Arc::default();
     // One agent on the paddock gateway `paddock`, which the section names or not.
@@ -69,6 +66,8 @@ async fn started_on(section: &str) -> Dog {
         codex_meter: |_| Arc::new(FakeMeter::idle()),
     };
     let agents = Agents::load(dir.path()).unwrap();
+    let board = Board::new(&agents).preferring(started.settings.agent_board.prefer.clone());
+    let board = Arc::new(Mutex::new(board));
     let (shown, live) = availability::begin(&agents, &started.settings, ports);
     let reread = Reread::new(
         &started,
@@ -79,6 +78,8 @@ async fn started_on(section: &str) -> Dog {
             alerts: Arc::new(alerts.clone()),
             standing: Arc::clone(&standing),
             live,
+            agents: Some(dir.path().to_owned()),
+            loaded: agents,
         },
     );
     Dog {
@@ -92,7 +93,7 @@ async fn started_on(section: &str) -> Dog {
         shown,
         clock,
         reread,
-        _dir: dir,
+        dir,
     }
 }
 
@@ -152,6 +153,13 @@ impl Dog {
         let models = status["models"].as_array().unwrap().clone();
         let name = |m: &serde_json::Value| format!("{}/{}", m["gateway"], m["model"]);
         models.iter().map(name).collect()
+    }
+
+    // The implementers the board ranks, by name.
+    fn ranked(&self) -> Vec<String> {
+        let view = crate::dog::board::lock(&self.board).view();
+        let status = view.status(&Availability::default(), Timestamp(EPOCH));
+        status.as_object().unwrap().keys().cloned().collect()
     }
 
     fn state(&self) -> SettingsState {
@@ -322,7 +330,7 @@ async fn a_webhook_that_would_stop_the_dog_is_refused_before_a_restart() {
 #[tokio::test(start_paused = true)]
 async fn a_refused_section_applies_once_its_ca_cert_file_appears() {
     let mut dog = started_on(&format!("{NTFY}{BASE}")).await;
-    let ca = dog._dir.path().join("ca.pem");
+    let ca = dog.dir.path().join("ca.pem");
     let section = format!(
         "{NTFY}ca_cert = {:?}\n[leases]\ncargo-test = 6\n",
         ca.display().to_string()
@@ -544,4 +552,71 @@ async fn the_pass_runs_every_load_tick() {
     shepherd.holds_section("[leases]\ncargo-test = 2\n");
     tokio::time::advance(LOAD_TICK).await;
     until("the second tick never applied the change", 2).await;
+}
+
+const CODER: &str = "---\nrole: implementer\nharness: pi\nmodel: coder\neffort: low\n\
+                     gateway: paddock\ncontext: 65536\n---\n";
+
+#[tokio::test(start_paused = true)]
+async fn a_changed_agent_file_applies_at_the_next_pass() {
+    let mut dog = started_on(&format!("{PADDOCK}{BASE}")).await;
+    assert_eq!(dog.models(), [r#""paddock"/"coder""#]);
+    assert!(dog.ranked().contains(&"coder".to_owned()));
+    assert_eq!(dog.pass().await, Vec::<String>::new(), "no edit, no line");
+
+    write_in(
+        dog.dir.path(),
+        "coder.md",
+        &CODER.replace("model: coder", "model: coder-2"),
+    );
+    write_in(dog.dir.path(), "extra.md", &CODER.replace("coder", "extra"));
+    let lines = dog.pass().await;
+
+    assert_eq!(lines, ["applied agent files: coder, extra"]);
+    assert_eq!(
+        dog.models(),
+        [r#""paddock"/"coder-2""#, r#""paddock"/"extra""#]
+    );
+    assert!(dog.ranked().contains(&"extra".to_owned()));
+    assert_eq!(dog.pass().await, Vec::<String>::new(), "applied once");
+    assert_eq!(dog.state(), SettingsState::default(), "nothing waits");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_agent_folder_that_fails_to_load_keeps_the_old_agents() {
+    let mut dog = started_on(&format!("{PADDOCK}{BASE}")).await;
+    let ranked = dog.ranked();
+
+    // Not UTF-8, so the file cannot be read.
+    std::fs::write(dog.dir.path().join("broken.md"), [0xff, 0xfe]).unwrap();
+    write_in(dog.dir.path(), "extra.md", &CODER.replace("coder", "extra"));
+    let lines = dog.pass().await;
+
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].starts_with("the agent files are not read and the old ones stand:"),
+        "{lines:?}"
+    );
+    assert!(lines[0].contains("broken.md"), "{lines:?}");
+    assert_eq!(dog.ranked(), ranked);
+    assert_eq!(dog.models(), [r#""paddock"/"coder""#]);
+    assert_eq!(dog.pass().await, Vec::<String>::new(), "said once");
+
+    std::fs::remove_file(dog.dir.path().join("broken.md")).unwrap();
+    assert_eq!(dog.pass().await, ["applied agent files: extra"]);
+    assert!(dog.ranked().contains(&"extra".to_owned()));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_file_left_out_of_the_book_changes_no_agent_and_logs_nothing() {
+    let mut dog = started_on(&format!("{PADDOCK}{BASE}")).await;
+    let ranked = dog.ranked();
+
+    write_in(dog.dir.path(), "bad.md", "no front matter\n");
+    let lines = dog.pass().await;
+
+    assert_eq!(lines, Vec::<String>::new());
+    assert_eq!(dog.ranked(), ranked);
+    assert_eq!(dog.models(), [r#""paddock"/"coder""#]);
+    assert_eq!(dog.pass().await, Vec::<String>::new());
 }

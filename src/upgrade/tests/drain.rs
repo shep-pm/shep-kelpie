@@ -44,7 +44,7 @@ async fn a_runner_is_drained_and_restarted_once_no_call_runs() {
     // running, then none.
     rig.shepherd
         .says("koji", &[IDLE, IDLE, RUNNING_7, RUNNING_7, DRAINED]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
 
@@ -82,7 +82,7 @@ async fn a_runner_is_drained_and_restarted_once_no_call_runs() {
 async fn a_ctrl_c_while_a_runner_drains_undrains_it() {
     let mut rig = Rig::new().await;
     rig.shepherd.says("koji", &[IDLE, IDLE, RUNNING_7]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let scene = Scene {
         interrupt: Interrupt::After(Duration::from_millis(100)),
         ..rig.scene(FAST)
@@ -115,7 +115,7 @@ async fn a_runner_that_answers_drain_on_its_second_ask_is_drained() {
             Some(DRAINED),
         ],
     );
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
     let writes = rig.shepherd.writes();
@@ -146,7 +146,7 @@ async fn a_runner_that_answers_drain_on_its_second_ask_is_drained() {
 async fn a_call_that_outlasts_its_ceiling_leaves_the_runner_undrained_on_the_old_build() {
     let mut rig = Rig::new().await;
     rig.shepherd.says("koji", &[IDLE, IDLE, RUNNING_7]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let patience = Patience {
         margin: Duration::from_millis(100),
         ..FAST
@@ -177,7 +177,7 @@ async fn a_call_that_outlasts_its_ceiling_leaves_the_runner_undrained_on_the_old
 async fn a_merge_that_outlasts_its_wait_after_the_drain_undrains_the_runner() {
     let mut rig = Rig::new().await;
     rig.shepherd.says("koji", &[IDLE, IDLE, DRAINED, MERGING]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let patience = Patience {
         merge: Duration::from_millis(100),
         ..FAST
@@ -195,7 +195,7 @@ async fn a_merge_that_outlasts_its_wait_after_the_drain_undrains_the_runner() {
 async fn now_restarts_without_draining() {
     let mut rig = Rig::new().await;
     rig.shepherd.says("koji", &[IDLE, RUNNING_7]);
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let scene = Scene {
         now: true,
         ..rig.scene(FAST)
@@ -225,7 +225,7 @@ async fn a_runner_from_before_drain_is_restarted_as_before() {
         "koji",
         &[Some(IDLE), Some(IDLE), old, Some(IDLE), old, Some(IDLE)],
     );
-    let new = rig.build("new", "0.3.0", "0.23.0");
+    let new = rig.build("new", "0.3.0", "0.24.2");
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
     assert_eq!(rig.restarts(), ["kelpie", "koji"]);
