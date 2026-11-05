@@ -57,14 +57,20 @@ impl Runner {
     /// `item` with its weight read again from the worktree's head, as a fix
     /// turn may have changed what the diff touches
     ///
-    /// A diff git cannot take leaves the weight out, so the full count
-    /// stands, and the next round reports the failure.
-    pub(super) fn reweighed(&self, item: &WorkItem, base: &str) -> WorkItem {
-        let weight = self.weigh(item, &item.worktree, base);
-        WorkItem {
-            weight: weight.unwrap_or(None),
+    /// A diff git cannot take leaves the weight out of the copy, so the full
+    /// count stands for this round, and the next round reports the failure.
+    /// The weight read is None then, and the item keeps the one it has.
+    pub(super) fn reweighed(
+        &self,
+        item: &WorkItem,
+        base: &str,
+    ) -> (WorkItem, Option<Option<ReviewWeight>>) {
+        let read = self.weigh(item, &item.worktree, base).ok();
+        let copy = WorkItem {
+            weight: read.clone().unwrap_or(None),
             ..item.clone()
-        }
+        };
+        (copy, read)
     }
 
     /// How many reviewers must read `item`'s pull request: the light count
@@ -114,7 +120,7 @@ mod tests {
     use crate::ports::{Finding, Severity};
     use crate::runner::{Runner, step};
     use crate::test::{Rig, Scripted, ScriptedRound};
-    use crate::work_item::{Heavier, Lighter, ReviewWeight};
+    use crate::work_item::{Heavier, Lighter, Phase, ReviewWeight};
 
     // `two_local`'s project over candidates `mine`, `other` and `claude`,
     // with `reviews.need` 2 and `extra` after it in the `reviews` table.
@@ -328,5 +334,23 @@ mod tests {
         assert_eq!(phase, "ci", "no reviewer is left to read the fix");
         let touched = Heavier::Touched("src/lib.rs".into());
         assert_eq!(weight_of(&runner), Some(ReviewWeight::Full(touched)));
+    }
+
+    #[test]
+    fn a_round_that_cannot_list_the_diff_keeps_the_weight_the_item_had() {
+        let rig = project("light = 1\n");
+        let runner = at_review(&rig, "README.md");
+        let guard = runner.lock().unwrap();
+        let mut item = guard.current().unwrap().clone();
+        item.weight = Some(ReviewWeight::Light(Lighter::Docs));
+        item.worktree = item.worktree.join("gone");
+        let Phase::Review(review) = item.phase.clone() else {
+            panic!("the item is in review");
+        };
+
+        let now = guard.ports.clock.now();
+        guard.after_round_in(&item, review, now).apply(&mut item);
+
+        assert_eq!(item.weight, Some(ReviewWeight::Light(Lighter::Docs)));
     }
 }
