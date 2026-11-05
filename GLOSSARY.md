@@ -63,6 +63,7 @@ The ready issues the PM keeps waiting, each until the open work item it names
 (`until`) closes. A hold ends when that work item closes or the issue's text
 changes, and on no other close; one naming none ends at any close. An answer
 with a hold list replaces the last; one without leaves the holds as they are.
+Kelpie saves the holds, so a restart starts none of them.
 
 **Worker**:
 Owns one work item: its branch, pull request and sessions. Builds it

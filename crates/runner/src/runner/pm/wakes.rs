@@ -226,7 +226,7 @@ impl Runner {
     /// work item parked on a stuck ruling, or one closing, which lets its
     /// holds go. A pick of an issue stands whatever opens or closes, since
     /// dispatch checks the board for it.
-    pub(in crate::runner) fn pm_noticed(&mut self, now: &ProjectState) {
+    pub(in crate::runner) fn pm_noticed(&mut self, now: &mut ProjectState) {
         if self.agents.pm.is_none() {
             return;
         }
@@ -249,7 +249,7 @@ impl Runner {
         }
         if !closed.is_empty() {
             // A hold waits on the work item it names, or on any when it names none.
-            (self.pm.held).retain(|held| held.until.is_some_and(|until| !closed.contains(&until)));
+            now.end_holds_on(&closed);
             let open = now.open_tickets();
             self.pm.after_end.retain(|ticket, _| open.contains(ticket));
             (self.pm.left_alone).retain(|ticket, _| open.contains(ticket));

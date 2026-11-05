@@ -6,7 +6,7 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 |---|---|---|
 | work.md | projects, slots, issues | `src/{issues/check,flock/verbs}.rs`, `runner/slots.rs`, `core/board/check.rs` |
 | board.md | board, items, adoption | `core/board/`, `runner/{dispatch,adopt}/` |
-| pm.md | the project manager | `runner/pm/` |
+| pm.md | the project manager | `runner/pm/`, `core/state/pm_holds.rs` |
 | pm-board.md | its board | `core/board/briefing/`, `runner/briefing/` |
 | pm-notes.md | its notes files: the log, the archive, the standing notes and their ends | `runner/pm/notes.rs` |
 | workers.md | runner loop, turns | `runner/{turn,flight}/` |

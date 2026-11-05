@@ -122,6 +122,32 @@ fn a_hold_until_what_is_no_open_work_item_is_refused_with_a_note() {
 }
 
 #[test]
+fn a_hold_survives_a_restart() {
+    let (rig, runner, _) = held_by(UNTIL_7);
+    // With #9 the only ready issue, no worker starts to take a scripted reply.
+    rig.forge.unlist_ready(12);
+    drop(runner);
+    let runner = rig.open().unwrap();
+
+    assert_eq!(
+        held(&rig, &runner),
+        json!([{ "issue": "9", "until": "7" }]),
+        "the hold was saved with the state"
+    );
+
+    // The board reads again, still passes #9 over, and still says what it waits on.
+    rig.clock.advance(61);
+    step(&runner).unwrap();
+    let board = std::fs::read_to_string(rig.paths().board).unwrap();
+    assert!(board.contains("held by you until #7 closes"), "{board}");
+    assert_eq!(
+        held(&rig, &runner),
+        json!([{ "issue": "9", "until": "7" }]),
+        "the board's read ends no hold"
+    );
+}
+
+#[test]
 fn a_hold_ends_when_the_held_issue_is_edited() {
     let (rig, runner, _) = held_by(UNTIL_7);
 
