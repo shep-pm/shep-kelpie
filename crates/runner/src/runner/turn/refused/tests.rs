@@ -197,3 +197,62 @@ fn a_plan_agents_failure_that_reads_as_a_refusal_tells_the_board_nothing() {
     parked_on(&rig, &runner, "sonnet-high", "credit balance is too low");
     assert_eq!(rig.agent_board.refusals(), []);
 }
+
+#[test]
+fn a_refused_turn_after_a_handoff_adds_the_refusal_to_the_note_it_carried() {
+    let rig = Rig::new("acme");
+    rig.write_agent("api", CLAUDE_API);
+    rig.write_agent("coder", CODER);
+    rig.agent_board.ranks(&["sonnet-high", "api", "coder"]);
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.claude.script([Scripted::Commit("work.txt", "work\n")]);
+    step(&runner).unwrap();
+    // The plan agent's next turn goes to the API agent, which then refuses.
+    let far = 3 * 60 * 60;
+    rig.agent_board
+        .ranks_finishing(&[("api", 600), ("sonnet-high", far), ("coder", far)]);
+    rig.claude
+        .script([refused_with(Harness::ClaudeCode, NO_CREDIT)]);
+    let moved = |report: Option<StepReport>, to: &str| {
+        assert!(
+            matches!(&report, Some(StepReport::HandedOff { to: got, .. }) if got.as_str() == to),
+            "{report:?}"
+        );
+    };
+    moved(step(&runner).unwrap(), "api");
+    moved(step(&runner).unwrap(), "coder");
+
+    rig.claude.script([Scripted::Say("done")]);
+    step(&runner).unwrap();
+    let prompt = rig
+        .claude
+        .calls()
+        .pop()
+        .expect("the next pick's call")
+        .prompt;
+    assert!(prompt.contains("from sonnet-high"), "{prompt}");
+    assert!(prompt.contains("the API refused the key"), "{prompt}");
+    assert!(prompt.contains("credit balance is too low"), "{prompt}");
+}
+
+#[test]
+fn a_read_the_pacer_asks_for_names_the_agent_it_is_for_not_one_it_held_ahead() {
+    let rig = Rig::new("acme");
+    rig.write_agent("api", CLAUDE_API);
+    rig.write_codex_implementer();
+    rig.agent_board.ranks(&["api", "codex", "sonnet-high"]);
+    // The Codex account is past its window when the item opens, the Claude one unread.
+    rig.codex_meter.set(Rig::utilization(0, 55));
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.claude
+        .script([refused_with(Harness::ClaudeCode, NO_CREDIT)]);
+
+    let report = step(&runner).unwrap();
+
+    assert!(
+        matches!(&report, Some(StepReport::HandedOff { to, .. }) if to.as_str() == "sonnet-high"),
+        "{report:?}"
+    );
+}

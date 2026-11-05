@@ -61,18 +61,20 @@ impl Runner {
         };
         let to_finish = (picks.iter().find(|pick| pick.agent == to)).map_or(0, |pick| pick.finish);
         let why = "another agent would finish it sooner";
-        self.move_item(to, from_finish, to_finish, why)
+        self.move_item(to, from_finish, to_finish, why, false)
             .map(|report| report.map(Begin::Report))
     }
 
     // Hands the current work item to `to` on a session of its own, with a note
-    // that says `why`, or None when kelpie cannot draw a session id.
+    // that says `why`, or None when kelpie cannot draw a session id. A `refused`
+    // item that holds a note from an earlier handoff has `why` added to it.
     pub(in crate::runner::turn) fn move_item(
         &mut self,
         to: AgentName,
         from_finish: Option<u64>,
         to_finish: u64,
         why: &str,
+        refused: bool,
     ) -> Result<Option<StepReport>, StateError> {
         let Some(item) = self.current() else {
             return Ok(None);
@@ -92,9 +94,18 @@ impl Runner {
         let Some(item) = next.item_mut(issue) else {
             return Ok(None);
         };
-        // An agent that never ran adds nothing to the note it was handed.
-        if item.handoff.is_none() {
-            item.handoff = Some(self.handoff_note(item, why));
+        // An agent that never ran adds nothing to the note it was handed, but
+        // the agent after it is told why the work moved on.
+        match item.handoff.take() {
+            None => item.handoff = Some(self.handoff_note(item, why)),
+            Some(note) if refused => {
+                let issue = item.issue.shown();
+                item.handoff = Some(format!(
+                    "{note}\n\nKelpie then handed {issue} to {to} from {}, since {why}.",
+                    item.agent
+                ));
+            }
+            Some(note) => item.handoff = Some(note),
         }
         item.left
             .push(std::mem::replace(&mut item.agent, to.clone()));

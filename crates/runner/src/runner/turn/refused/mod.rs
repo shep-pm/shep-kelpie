@@ -60,7 +60,7 @@ impl Runner {
             return Ok(None);
         };
         let why = format!("the API refused the key it ran on: {}", quoted(text));
-        let handed = self.move_item(to, None, finish, &why)?;
+        let handed = self.move_item(to, None, finish, &why, true)?;
         if let Some(StepReport::HandedOff {
             issue, from, to, ..
         }) = &handed
@@ -97,19 +97,17 @@ impl Runner {
         let others: Vec<_> = (picks.iter())
             .filter(|pick| self.agent_limit(&pick.agent) != Some(Limit::Api))
             .collect();
-        let Some(first) = others.first().map(|pick| pick.agent.clone()) else {
-            return Ok(None);
-        };
-        let to = match self.first_unpaced(others.iter().map(|pick| &pick.agent), Scope::Turn)? {
-            Walked::Opens(to) => to,
-            // The turn that begins on `first` reads the account before it starts.
-            Walked::Reads(_) => first,
-            Walked::Held { .. } => return Ok(None),
-        };
-        Ok(others
-            .iter()
-            .find(|pick| pick.agent == to)
-            .map(|pick| (to, pick.finish)))
+        // Each agent is walked alone, so a read the pacer asks for names the
+        // agent it is for, and the agents it held ahead of it stay passed over.
+        for pick in others {
+            match self.first_unpaced([&pick.agent], Scope::Turn)? {
+                Walked::Opens(to) => return Ok(Some((to, pick.finish))),
+                // The turn that begins on it reads its account before it starts.
+                Walked::Reads(_) => return Ok(Some((pick.agent.clone(), pick.finish))),
+                Walked::Held { .. } => {}
+            }
+        }
+        Ok(None)
     }
 }
 
