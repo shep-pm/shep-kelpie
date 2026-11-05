@@ -97,7 +97,7 @@ key_env = "LITELLM_KEY"
 
 An `openai` gateway knows nothing of paddock's routes. Kelpie lists its models from `GET /v1/models`, checks the key with that same route (`200` is taken, `401` or `403` refused, any other status unsure), and asks it for nothing under `/paddock/`. It holds no lease, so a call on it starts at once, and the gateway may evict a model a turn is running on.
 
-A runner reads its gateways when it starts. A `pi` agent or an `endpoint` reviewer then names the gateway in place of `url`, with `model` as the gateway knows it:
+A runner reads its gateways when it starts, and the dog reads them again every 30 seconds, so a gateway added or taken out needs no `shep restart kelpie`. The dog sees a new `key_env` variable only from a fresh spawn: until `shep disable kelpie` and `shep enable kelpie`, its models read as unknown. A `pi` agent or an `endpoint` reviewer then names the gateway in place of `url`, with `model` as the gateway knows it:
 
 ```markdown
 ---
@@ -140,7 +140,7 @@ effort: medium
 CODEX_HOME="${SHEP_HOME:-$HOME/.shep}/kelpie/codex" codex login --device-auth
 ```
 
-Each Codex call gets a home of its own with that login linked in, so no call sees another's sessions. A runner reads `codex_home` when it starts. A worker on Codex can't have `worker.guard_hooks`, the same as pi. Kelpie's checks run as Codex's own hooks: `confine` on every `apply_patch`, `guard` on every command. A reviewer and a retro have no write tool of their own. Codex has no read tool, so they read the repo through a shell that runs `kelpie guard --read-only`: `cat`, `head`, `tail`, `ls`, `tree`, `grep`, `rg`, `find`, `wc`, `file`, `stat` and `nl` as plain words, with pipes between them. It refuses redirects, `$`, backticks, git and any other command. A call with no fence gets no shell.
+Each Codex call gets a home of its own with that login linked in, so no call sees another's sessions. A runner reads `codex_home` when it starts, and the dog reads it again every 30 seconds. A `codex_home` the dog cannot use, a relative path or your `~/.codex`, refuses the whole `[kelpie]` change. A worker on Codex can't have `worker.guard_hooks`, the same as pi. Kelpie's checks run as Codex's own hooks: `confine` on every `apply_patch`, `guard` on every command. A reviewer and a retro have no write tool of their own. Codex has no read tool, so they read the repo through a shell that runs `kelpie guard --read-only`: `cat`, `head`, `tail`, `ls`, `tree`, `grep`, `rg`, `find`, `wc`, `file`, `stat` and `nl` as plain words, with pipes between them. It refuses redirects, `$`, backticks, git and any other command. A call with no fence gets no shell.
 
 A local implementer is one whose usage is `none`. Each account keeps its own daily allowance and 5-hour stop, shown under its name in `status.pacer`, and a new work item waits on every account its roles spend. `shep kelpie doctor` checks Codex answers for a project that spends it. A `none` agent is never paced, and kelpie queues nothing for it: a model behind a gateway waits in the gateway's queue, and `status.local_leases` shows the holder of the gateway's lease on it.
 
