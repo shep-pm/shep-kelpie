@@ -142,6 +142,17 @@ fn lockfile_folder(worktree: &Path, cwd: &Path) -> Option<(PathBuf, &'static Pac
         })
 }
 
+/// Makes each folder under `build` that `env` names
+///
+/// pnpm 12 keeps its store operation lock in `XDG_RUNTIME_DIR` and runs without it where that
+/// folder is missing, which it does not make. A value outside `build` is left alone, since a
+/// port or a proxy flag names no folder.
+pub(in crate::runner) fn make_folders(env: &BTreeMap<String, String>, build: &Path) {
+    for folder in env.values().map(Path::new).filter(|f| f.starts_with(build)) {
+        let _ = std::fs::create_dir_all(folder);
+    }
+}
+
 /// Has `run` install the packages its checkout keeps a lockfile for before it starts the server
 ///
 /// Does nothing where no lockfile is in the server's folder or above it in the checkout. The
@@ -173,6 +184,7 @@ pub(super) fn before(run: &mut DevRun, worktree: &Path, build: &Path) {
         (run.env.entry((*variable).to_owned()))
             .or_insert_with(|| build.join(folder).display().to_string());
     }
+    make_folders(&run.env, build);
     (run.policy.hosts).extend(manager.hosts.iter().map(|&h| h.to_owned()));
     if !folder.join("node_modules").is_dir() || mark.exists() {
         run.ready_within = INSTALL_WITHIN;

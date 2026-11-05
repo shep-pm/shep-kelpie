@@ -467,6 +467,7 @@ impl Runner {
         for (variable, folder) in plan.env {
             fence.env.entry(variable).or_insert(folder);
         }
+        install::make_folders(&fence.env, &item.build);
         install::relax(fence, &item.worktree);
         let run = TestRun {
             command: plan.command,

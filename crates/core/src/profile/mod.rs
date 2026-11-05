@@ -179,9 +179,16 @@ const KEYCHAIN_COMMANDS: [&str; 6] = [
     "git -c credential*",
 ];
 
-// The caches of `package_managers::MANAGERS` a worker's Go and bun write on
-// every build and install, which the home's copies refuse
-const BUILD_CACHES: [&str; 2] = ["GOCACHE", "BUN_INSTALL_CACHE_DIR"];
+// The caches of `package_managers::MANAGERS` a worker's Go, bun and pnpm write
+// on every build and install, which the home's copies refuse
+const BUILD_CACHES: [&str; 6] = [
+    "GOCACHE",
+    "BUN_INSTALL_CACHE_DIR",
+    "PNPM_CONFIG_STORE_DIR",
+    "PNPM_CONFIG_CACHE_DIR",
+    "PNPM_CONFIG_STATE_DIR",
+    "XDG_RUNTIME_DIR",
+];
 
 // The cache Go's linter writes on every run, whose exit code fails it when the
 // home's copy refuses the write

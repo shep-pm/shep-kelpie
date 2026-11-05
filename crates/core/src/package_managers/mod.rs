@@ -46,7 +46,15 @@ pub const MANAGERS: [PackageManager; 8] = [
         lockfiles: &["pnpm-lock.yaml"],
         manifests: &[],
         hosts: &[NPM_HOST],
-        caches: &[("npm_config_store_dir", "pnpm-store")],
+        caches: &[
+            // pnpm 12 reads `PNPM_CONFIG_*` and ignores `npm_config_*`, which older pnpm reads.
+            // Its store operation lock sits in `XDG_RUNTIME_DIR`, which it will not make.
+            ("npm_config_store_dir", "pnpm-store"),
+            ("PNPM_CONFIG_STORE_DIR", "pnpm-store"),
+            ("PNPM_CONFIG_CACHE_DIR", "pnpm-cache"),
+            ("PNPM_CONFIG_STATE_DIR", "pnpm-state"),
+            ("XDG_RUNTIME_DIR", "pnpm-run"),
+        ],
         install: Some("pnpm install --frozen-lockfile --ignore-scripts"),
     },
     PackageManager {
