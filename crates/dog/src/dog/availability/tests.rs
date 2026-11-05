@@ -10,7 +10,7 @@ use crate::api_refusal::{CREDIT_RECHECK_SECS, Refusal};
 use crate::pacer::RECHECK_SECS;
 use crate::ports::{Meter, MeterError, ModelLoad, Timestamp};
 use crate::settings::{Account, Gateway, GatewayName, Gateways};
-use crate::test::{CALL_PATIENCE, EPOCH, FakeClock, FakeMeter, LeaseReads, utilization, write_in};
+use crate::test::{EPOCH, FakeClock, FakeMeter, LeaseReads, utilization, write_in};
 use crate::webhook::KelpieSettings;
 
 // One paddock, one OpenAI-compatible gateway, and a key for each.
@@ -470,16 +470,13 @@ fn live_ports(leases: &Arc<LeaseReads>, codex_meter: fn(PathBuf) -> Arc<dyn Mete
     }
 }
 
-// Yields until `seen` holds, with the clock paused so only the dog's own tasks move.
+// Yields until `seen` holds, by the wall clock: the paused clock never moves while a task yields.
 async fn until(what: &str, seen: impl Fn() -> bool) {
-    let waited = async {
-        while !seen() {
-            tokio::task::yield_now().await;
-        }
-    };
-    tokio::time::timeout(CALL_PATIENCE, waited)
-        .await
-        .unwrap_or_else(|_| panic!("{what}"));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !seen() {
+        assert!(std::time::Instant::now() < deadline, "{what}");
+        tokio::task::yield_now().await;
+    }
 }
 
 fn account(shown: &Mutex<Availability>, name: &str) -> Value {

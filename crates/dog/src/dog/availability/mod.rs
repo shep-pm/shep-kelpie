@@ -439,13 +439,12 @@ impl Live {
     }
 }
 
-/// Why `settings` names a Codex home the dog refuses, or None when it is fine or the dog has no home to check it against
+/// Why `settings` names a Codex home the dog refuses, or None when it is fine
+///
+/// A home folder or kelpie's home that cannot be worked out is refused too, as the start
+/// leaves the account unknown for it.
 pub(super) fn refused_codex_home(settings: &KelpieSettings) -> Option<String> {
-    let home = crate::home::user_home()?;
-    let kelpie_home = crate::home::kelpie_home().ok()?;
-    (settings.codex_home(&home, &kelpie_home))
-        .err()
-        .map(|e| e.to_string())
+    codex_home(settings).err()
 }
 
 fn codex_home(settings: &KelpieSettings) -> Result<PathBuf, String> {
