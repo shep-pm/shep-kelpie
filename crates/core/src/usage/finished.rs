@@ -7,7 +7,7 @@ use super::{RoleLine, is_zero};
 use crate::agents::Tier;
 use crate::ports::{Severity, Timestamp};
 use crate::ticket::TicketId;
-use crate::work_item::{CiFailures, QwenTally, WorkItem};
+use crate::work_item::{CiFailures, QwenTally, ReviewWeight, WorkItem};
 
 /// A finished work item, merged, closed with no change or dropped, and what
 /// it spent
@@ -77,6 +77,10 @@ pub struct FinishedLine {
     /// The findings its worker deferred, counted the same way
     #[serde(default, skip_serializing_if = "is_zero")]
     pub deferred: u32,
+    /// Whether its review ended light, so a step-up to the full count leaves
+    /// it false
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub light: bool,
 }
 
 /// A finished work item's findings above a nit, by severity
@@ -138,6 +142,7 @@ impl FinishedLine {
             held,
             disputed: tally.counts.disputed,
             deferred: tally.counts.deferred,
+            light: item.weight.as_ref().is_some_and(ReviewWeight::is_light),
         }
     }
 }
@@ -150,7 +155,7 @@ mod tests {
     use crate::ports::Finding;
     use crate::state::Finished;
     use crate::test::a_work_item;
-    use crate::work_item::Seconds;
+    use crate::work_item::{Heavier, Lighter, ReviewWeight, Seconds};
 
     // The harness and model are left to the runner, which reads the agent's file.
     #[test]
@@ -260,5 +265,32 @@ mod tests {
         )
         .unwrap();
         assert_eq!((before.kind, before.tier), (None, None));
+    }
+
+    #[test]
+    fn a_finished_line_says_light_only_when_the_review_ended_light() {
+        let mut item = a_work_item();
+        let record = Finished {
+            issue: item.issue,
+            title: item.title.clone(),
+            pull_request: Some(71),
+            merged: true,
+            closed: false,
+            at: Timestamp(9),
+            wall: 9,
+            seconds: Seconds::default(),
+            spend: None,
+        };
+        let light_of = |item: &WorkItem| {
+            let line = serde_json::to_value(FinishedLine::of(&record, item, item.issue)).unwrap();
+            line.get("light").cloned()
+        };
+        assert_eq!(light_of(&item), None, "no weight");
+
+        item.weight = Some(ReviewWeight::Full(Heavier::Touched("src/a.rs".into())));
+        assert_eq!(light_of(&item), None, "a step-up to full");
+
+        item.weight = Some(ReviewWeight::Light(Lighter::Docs));
+        assert_eq!(light_of(&item), Some(json!(true)));
     }
 }

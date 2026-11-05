@@ -182,6 +182,7 @@ mod tests {
             held: HeldFindings::default(),
             disputed: 0,
             deferred: 0,
+            light: false,
         }
     }
 

@@ -70,6 +70,7 @@ fn finished(issue: u64, merged: bool, worker: u64, reviewer: u64, wall: u64) -> 
         held: HeldFindings::default(),
         disputed: 0,
         deferred: 0,
+        light: false,
     })
 }
 
@@ -579,4 +580,23 @@ fn an_energy_line_writes_its_source_as_wall_or_parts() {
 
     assert_eq!(written["energy_wh"], 1.0);
     assert_eq!(written["energy_source"], "wall");
+}
+
+#[test]
+fn a_line_from_before_light_reads_back_false() {
+    let before = r#"{"line":"finished","at":200,"issue":7,"title":"t","pull_request":71,
+        "merged":true,"wall":90,"units":30,"cost_usd":0.5,
+        "worker":{"calls":2,"tokens":{"input":30,"cache_write":0,"cache_read":0,"output":0},"units":30,"cost_usd":0.5},
+        "reviewer":{"calls":0,"tokens":{"input":0,"cache_write":0,"cache_read":0,"output":0},"units":0,"cost_usd":0.0},
+        "qwen":{"rounds":0,"seconds":0},"review_rounds":2,"fix_turns":1,"rulings":0}"#;
+    let Line::Finished(read) = ledger_line(before) else {
+        panic!("a finished line");
+    };
+    assert!(!read.light);
+
+    let mut light = read;
+    light.light = true;
+    let written = serde_json::to_value(Line::Finished(light.clone())).unwrap();
+    assert_eq!(written["light"], json!(true), "{written}");
+    assert_eq!(ledger_line(&written.to_string()), Line::Finished(light));
 }

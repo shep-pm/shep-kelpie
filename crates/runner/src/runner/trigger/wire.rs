@@ -94,6 +94,7 @@ impl From<&WorkItemStatus<'_>> for wire::WorkItemStatus {
             reviewers_skipped: item.reviewers_skipped.to_vec(),
             unreviewed: item.unreviewed.map(str::to_owned),
             test_checks: item.test_checks.to_vec(),
+            review: item.review.clone(),
             timings: item.timings.clone(),
         }
     }

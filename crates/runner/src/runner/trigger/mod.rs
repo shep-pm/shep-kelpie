@@ -288,6 +288,9 @@ pub struct WorkItemStatus<'a> {
     /// outcome before the fix and after it, per finding
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     pub test_checks: &'a [TestCheck],
+    /// How much review its pull request gets and why, as `light (docs only)`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review: Option<String>,
     /// Where its wall time went, and the phase it is in now
     pub timings: Split,
 }
@@ -338,6 +341,7 @@ impl<'a> WorkItemStatus<'a> {
             reviewers_skipped: &item.reviewers_skipped,
             unreviewed: item.unreviewed.as_deref(),
             test_checks: &item.test_checks,
+            review: item.weight.as_ref().map(ToString::to_string),
             timings,
         }
     }

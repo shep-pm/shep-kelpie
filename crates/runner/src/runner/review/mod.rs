@@ -33,7 +33,7 @@ mod foreign;
 mod green;
 mod lineup;
 use lineup::Chosen;
-pub(super) use lineup::{changed_files, touches};
+pub(super) use lineup::{RoundNext, changed_files, touches};
 #[cfg(test)]
 mod local;
 #[cfg(test)]
@@ -471,7 +471,7 @@ impl Runner {
             }
         } else {
             let next = self.after_round(review, self.ports.clock.now());
-            self.update(|item| item.phase = next)?;
+            self.update(|item| next.apply(item))?;
         }
         Ok(Begin::Report(match left_open {
             Some((threads, reason)) => StepReport::ThreadsLeftOpen {
@@ -515,7 +515,7 @@ impl Runner {
             Answered::LeftOpen { threads, reason } => left_open = Some((threads, reason)),
         }
         let next = self.after_round(review, self.ports.clock.now());
-        self.update(|item| item.phase = next)?;
+        self.update(|item| next.apply(item))?;
         if let Some((threads, reason)) = left_open {
             return Ok(Begin::Report(StepReport::ThreadsLeftOpen {
                 issue,
@@ -615,7 +615,7 @@ impl Runner {
         };
         if findings.is_empty() {
             let next = self.after_round(review, self.ports.clock.now());
-            self.update(|item| item.phase = next)?;
+            self.update(|item| next.apply(item))?;
             return Ok(Begin::Report(StepReport::ReviewFindingsSent {
                 issue,
                 pull_request: number,
@@ -828,7 +828,7 @@ impl Runner {
                 if !item.reviewers_skipped.contains(&reviewer) {
                     item.reviewers_skipped.push(reviewer.clone());
                 }
-                item.phase = self.after_round_in(item, review, now);
+                self.after_round_in(item, review, now).apply(item);
                 StepReport::ReviewerSkipped {
                     issue,
                     pull_request: number,
@@ -872,7 +872,7 @@ impl Runner {
                     if !item.reviewers_blank.contains(&reviewer) {
                         item.reviewers_blank.push(reviewer.clone());
                     }
-                    item.phase = self.after_round_in(item, review, now);
+                    self.after_round_in(item, review, now).apply(item);
                     StepReport::LocalRoundFailed {
                         issue,
                         pull_request: number,
@@ -896,7 +896,7 @@ impl Runner {
                     ended = Some(findings.clone());
                     // Nothing found: the pass goes on to the next reviewer at once.
                     if findings.is_empty() {
-                        item.phase = self.after_round(review, now);
+                        self.after_round(review, now).apply(item);
                         StepReport::ReviewFindingsSent {
                             issue,
                             pull_request: number,

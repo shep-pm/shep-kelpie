@@ -125,3 +125,18 @@ fn a_status_from_a_build_with_the_panel_still_reads() {
     let role: CallRole = serde_json::from_value(json!("panel")).unwrap();
     assert_eq!(role, CallRole::Attached("panel".into()));
 }
+
+#[test]
+fn a_work_item_status_keeps_its_review_text_and_leaves_it_out_when_none() {
+    let mut status: Status = serde_json::from_value(recorded()).expect("the status reads");
+    let item = &mut status.work_items[0];
+    assert_eq!(item.review, None, "the recorded status has no review");
+    let shown = serde_json::to_value(&*item).unwrap();
+    assert_eq!(shown.get("review"), None, "{shown}");
+
+    item.review = Some("light (docs only)".to_owned());
+    let shown = serde_json::to_value(&*item).unwrap();
+    assert_eq!(shown["review"], "light (docs only)", "{shown}");
+    let read: WorkItemStatus = serde_json::from_value(shown).expect("it reads back");
+    assert_eq!(read.review.as_deref(), Some("light (docs only)"));
+}
