@@ -364,9 +364,10 @@ pub(super) fn begin(
         clock: Arc::new(crate::ports::SystemClock),
     };
     let live = Live {
-        agents: agents.clone(),
         shown: Arc::clone(&shown),
         reading: Arc::new(Mutex::new(Reading {
+            agents: agents.clone(),
+            gateways: settings.gateways(),
             sources,
             readers,
             home: None,
@@ -380,18 +381,17 @@ pub(super) fn begin(
 
 // What the next pass reads, and the Codex home its meter was built on.
 struct Reading {
+    agents: Agents,
+    gateways: Gateways,
     sources: Sources,
     readers: Readers,
     // None before the first apply.
     home: Option<Result<PathBuf, String>>,
 }
 
-/// What the availability task reads, which a reread of the settings changes
-///
-/// The agents are the ones the dog started with, since agent files are read at the start.
+/// What the availability task reads, which a reread of the settings and of the agent files changes
 #[derive(Clone)]
 pub(super) struct Live {
-    agents: Agents,
     shown: Arc<Mutex<Availability>>,
     reading: Arc<Mutex<Reading>>,
     codex_meter: fn(PathBuf) -> Arc<dyn Meter>,
@@ -409,8 +409,9 @@ impl Live {
     pub(super) fn apply(&self, settings: &KelpieSettings) {
         let gateways = settings.gateways();
         crate::spawn::hide(gateways.key_vars());
-        let mut sources = Sources::of(&self.agents, &gateways);
         let mut reading = self.reading.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut sources = Sources::of(&reading.agents, &gateways);
+        reading.gateways = gateways;
         sources.epoch = reading.sources.epoch + 1;
         let home = codex_home(settings);
         let changed = reading.home.as_ref() != Some(&home);
@@ -429,6 +430,19 @@ impl Live {
         }
         let reset: &[Account] = if changed { &[Account::Codex] } else { &[] };
         lock(&self.shown).rename(&sources, reset);
+        reading.sources = sources;
+    }
+
+    /// Reads the models and accounts `agents` name from the next pass
+    ///
+    /// Each model and account still named keeps its reading and a new one is
+    /// unknown until read.
+    pub(super) fn set_agents(&self, agents: &Agents) {
+        let mut reading = self.reading.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut sources = Sources::of(agents, &reading.gateways);
+        sources.epoch = reading.sources.epoch + 1;
+        lock(&self.shown).rename(&sources, &[]);
+        reading.agents = agents.clone();
         reading.sources = sources;
     }
 

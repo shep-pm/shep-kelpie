@@ -4,10 +4,12 @@
 //! differs from the last good one is read whole, as the start reads it, with
 //! no salvage. A good read applies `leases.cargo-test`, `agent_board.prefer`,
 //! `gateways` and `codex_home`. The webhook waits for a restart, and `status` names
-//! its keys. A read that fails applies nothing, and the webhook the dog started
-//! with is told once per reason.
+//! its keys. A read that fails applies nothing, and the webhook is told once per reason.
+//!
+//! The pass loads the agents folder again too, and a changed load applies to the
+//! board and the availability. A folder that fails to load keeps the old agents.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -20,6 +22,7 @@ use super::door::{self, Waiters};
 use super::section::{self, Asked, Started};
 use super::triggers::{Refused, SettingsState};
 use super::{Kept, lock_desk};
+use crate::agents::Agents;
 use crate::ports::{Alert, Alerts, Timestamp};
 use crate::settings::{AgentName, Gateway, GatewayName};
 use crate::shepherd::Connection;
@@ -36,6 +39,10 @@ pub(super) struct Handles {
     pub(super) alerts: Arc<dyn Alerts>,
     pub(super) standing: Arc<Mutex<SettingsState>>,
     pub(super) live: Live,
+    /// The agents folder, None when the dog could not work out kelpie's home
+    pub(super) agents: Option<PathBuf>,
+    /// The agents the start read, which the first reread compares with
+    pub(super) loaded: Agents,
 }
 
 // A refused section: why, since when, and whether the webhook was told or there is none to tell.
@@ -62,13 +69,16 @@ pub(super) struct Reread {
     refusal: Option<Refusal>,
     // Why the last ask returned no section, so it is said once.
     unreadable: Option<String>,
+    // The agents last applied.
+    agents: Agents,
+    // Why the agents folder last failed to load, so it is said once.
+    unloaded: Option<String>,
 }
 
 impl Reread {
     /// A reread whose baseline is what the start read
     pub(super) fn new(started: &Started, handles: Handles) -> Self {
         Self {
-            handles,
             started: started.settings.clone(),
             text: started.text.clone(),
             capacity: started.settings.leases.cargo_test_capacity(),
@@ -78,6 +88,9 @@ impl Reread {
             waiting: Vec::new(),
             refusal: None,
             unreadable: None,
+            agents: handles.loaded.clone(),
+            unloaded: None,
+            handles,
         }
     }
 
@@ -100,8 +113,40 @@ impl Reread {
                 self.unreadable = Some(why);
             }
         }
+        self.reload_agents(&mut log).await;
         self.publish();
         log
+    }
+
+    // Loads the agents folder again, and applies the agents when they differ from the last applied.
+    async fn reload_agents(&mut self, log: &mut Vec<String>) {
+        let Some(folder) = self.handles.agents.clone() else {
+            return;
+        };
+        let loaded = tokio::task::spawn_blocking(move || Agents::load(&folder)).await;
+        let agents = match loaded {
+            Ok(Ok(agents)) => agents,
+            Ok(Err(e)) => return self.keep_agents(e.to_string(), log),
+            Err(e) => return self.keep_agents(e.to_string(), log),
+        };
+        self.unloaded = None;
+        if agents == self.agents {
+            return;
+        }
+        board::lock(&self.handles.board).set_agents(&agents);
+        self.handles.live.set_agents(&agents);
+        let changed = changed_agents(&self.agents, &agents);
+        self.agents = agents;
+        log.push(format!("applied agent files: {}", changed.join(", ")));
+    }
+
+    fn keep_agents(&mut self, why: String, log: &mut Vec<String>) {
+        if self.unloaded.as_ref() != Some(&why) {
+            log.push(format!(
+                "the agent files are not read and the old ones stand: {why}"
+            ));
+        }
+        self.unloaded = Some(why);
     }
 
     async fn read(&mut self, text: &str, log: &mut Vec<String>) {
@@ -253,6 +298,15 @@ impl Reread {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = state;
     }
+}
+
+// The names of the agents that were added, changed or removed, in order.
+fn changed_agents(was: &Agents, now: &Agents) -> Vec<String> {
+    let names: BTreeSet<_> = was.iter().chain(now.iter()).map(|(name, _)| name).collect();
+    (names.into_iter())
+        .filter(|name| was.get(name) != now.get(name))
+        .map(|name| name.as_str().to_owned())
+        .collect()
 }
 
 // The restart-only keys whose value differs from the one the dog started with, by name.
