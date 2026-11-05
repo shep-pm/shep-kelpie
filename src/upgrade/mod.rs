@@ -8,6 +8,7 @@
 //! (`version --json`) and the shepherd its version. An earlier shep, or a refused protocol,
 //! stops the upgrade there. Each runner is handed over in place or drained, unless `--now`.
 
+pub mod canary;
 pub mod drain;
 pub mod fetch;
 pub mod handover;
@@ -22,6 +23,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use canary::Stopped;
 use install::{Change, Layout};
 use lock::Lock;
 use restart::{Interrupt, Patience, Plan};
@@ -303,28 +305,7 @@ pub async fn run(
         say,
     )
     .await
-    .map_err(|e| {
-        // A bare upgrade swapped nothing, so there is no swap for `--rollback` to undo.
-        // After a rollback the installed build is the older one, and another
-        // `--rollback` swaps forward again.
-        let (installed_is, still_runs, swapped) = match action {
-            Action::Installed => ("The new build", "the old one", String::new()),
-            Action::Install(_) => (
-                "The new build",
-                "the old one",
-                " `--rollback` would swap the builds back, not finish them".to_owned(),
-            ),
-            Action::Rollback => (
-                "The rolled back build",
-                "the build it replaced",
-                " `--rollback` would swap the builds forward again, not finish them".to_owned(),
-            ),
-        };
-        format!(
-            "{e}\n{installed_is} is installed at {installed}, and a sheep not yet restarted \
-                 may still run {still_runs}. To finish the restarts: {finish}.{swapped}"
-        )
-    })?;
+    .map_err(|stopped| stopped_message(stopped, action, &installed, &finish))?;
     // Only a finished restart is recorded, so a bare run after a stop finishes it.
     if let Err(e) = taken.and_then(|taken| seen::record(&layout, &taken)) {
         say(format!(
@@ -337,6 +318,47 @@ pub async fn run(
         restart::still_behind(&client, &plan, &commit, say).await;
     }
     Ok(())
+}
+
+// What a stopped restart tells the maintainer to do next. A bare upgrade swapped
+// nothing, so there is no swap for `--rollback` to undo; after a rollback the
+// installed build is the older one, and another `--rollback` swaps forward again.
+fn stopped_message(stopped: Stopped, action: &Action, installed: &str, finish: &str) -> String {
+    let (installed_is, still_runs) = match action {
+        Action::Installed | Action::Install(_) => ("The new build", "the old one"),
+        Action::Rollback => ("The rolled back build", "the build it replaced"),
+    };
+    match stopped {
+        Stopped::Other(e) => {
+            let swapped = match action {
+                Action::Installed => "",
+                Action::Install(_) => " `--rollback` would swap the builds back, not finish them",
+                Action::Rollback => {
+                    " `--rollback` would swap the builds forward again, not finish them"
+                }
+            };
+            format!(
+                "{e}\n{installed_is} is installed at {installed}, and a sheep not yet restarted \
+                 may still run {still_runs}. To finish the restarts: {finish}.{swapped}"
+            )
+        }
+        Stopped::Canary(e) => {
+            let undo = match action {
+                Action::Installed => " Cargo kept no copy of the build it replaced to put back.",
+                Action::Install(_) => {
+                    " `shep kelpie upgrade --rollback` puts the previous build back."
+                }
+                Action::Rollback => {
+                    " `shep kelpie upgrade --rollback` swaps the builds forward again."
+                }
+            };
+            format!(
+                "{e}\nThe dog and the canary run {}, and the other runners {still_runs}, \
+                 untouched. Nothing was rolled back.{undo}",
+                installed_is.to_lowercase()
+            )
+        }
+    }
 }
 
 async fn connect(scene: &Scene<'_>) -> Result<Box<dyn crate::shepherd::Connection>, String> {

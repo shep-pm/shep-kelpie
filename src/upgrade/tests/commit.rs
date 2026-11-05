@@ -5,13 +5,19 @@ use super::*;
 // A runner whose `status` names the build it was already running, one naming
 // the installed commit with uncommitted changes on top of it, and one naming
 // the installed build itself, made from a tree with changes on top.
-const ON_OLD: &str = r#"{"work_items":[],"commit":"1f2e3a4"}"#;
-const ON_DIRTY: &str = r#"{"work_items":[],"commit":"9c8b7a6-dirty"}"#;
-const ON_INSTALLED: &str = r#"{"work_items":[],"commit":"9c8b7a6"}"#;
+const ON_OLD: &str = r#"{"build":"{build}","passes":1,"work_items":[],"commit":"1f2e3a4"}"#;
+const ON_DIRTY: &str = r#"{"build":"{build}","passes":1,"work_items":[],"commit":"9c8b7a6-dirty"}"#;
+const ON_INSTALLED: &str = r#"{"build":"{build}","passes":1,"work_items":[],"commit":"9c8b7a6"}"#;
+
+// A healthy runner whose `status` names `commit`, which the canary must see.
+fn on(commit: &str) -> String {
+    format!(r#"{{"build":"{{build}}","passes":1,"work_items":[],"commit":"{commit}"}}"#)
+}
 
 #[tokio::test]
 async fn an_install_says_which_commit_the_build_it_installed_was_made_from() {
     let rig = Rig::new().await;
+    rig.shepherd.says("koji", &[&on("1f2e3a4")]);
     let new = rig.built_from("new", "0.3.0", "1f2e3a4");
 
     let (ran, said) = rig.install(&new).await;
@@ -30,9 +36,12 @@ async fn a_rollback_says_which_commit_the_build_it_put_back_was_made_from() {
     // Two installs: the second keeps the first as the previous build.
     let first = rig.built_from("first", "0.2.0", "1f2e3a4");
     let second = rig.built_from("second", "0.3.0", "9c8b7a6");
+    rig.shepherd.says("koji", &[&on("1f2e3a4")]);
     rig.install(&first).await.0.unwrap();
+    rig.shepherd.says("koji", &[&on("9c8b7a6")]);
     rig.install(&second).await.0.unwrap();
 
+    rig.shepherd.says("koji", &[&on("1f2e3a4")]);
     let (ran, said) = rig.upgrade(Action::Rollback).await;
 
     ran.unwrap();
@@ -47,7 +56,10 @@ async fn a_rollback_says_which_commit_the_build_it_put_back_was_made_from() {
 async fn an_upgrade_names_a_runner_still_on_another_commit() {
     let rig = Rig::new().await;
     // The stand-in runner is restarted and still answers with the build it
-    // was already running, as one whose restart did not take would.
+    // was already running, as one whose restart did not take would. `aria`
+    // goes first, as the canary, and shows the installed commit.
+    rig.runs("aria", &rig.installed.clone(), true);
+    rig.shepherd.says("aria", &[ON_INSTALLED]);
     rig.shepherd.says("koji", &[ON_OLD]);
     let new = rig.built_from("new", "0.3.0", "9c8b7a6");
 
@@ -81,6 +93,8 @@ async fn an_upgrade_names_a_runner_on_an_uncommitted_build_of_the_installed_comm
     // The runner runs a build made from changes on top of the commit the
     // installed build was made from, which is a different binary.
     let rig = Rig::new().await;
+    rig.runs("aria", &rig.installed.clone(), true);
+    rig.shepherd.says("aria", &[ON_INSTALLED]);
     rig.shepherd.says("koji", &[ON_DIRTY]);
     let new = rig.built_from("new", "0.3.0", "9c8b7a6");
 
@@ -112,6 +126,8 @@ async fn an_upgrade_names_a_runner_whose_build_names_no_commit() {
     // The stand-in runner answers with a build from before a build named its
     // own commit, which is not known to be the installed one.
     let rig = Rig::new().await;
+    rig.runs("aria", &rig.installed.clone(), true);
+    rig.shepherd.says("aria", &[ON_INSTALLED]);
     let new = rig.built_from("new", "0.3.0", "9c8b7a6");
 
     let (ran, said) = rig.install(&new).await;
@@ -126,6 +142,7 @@ async fn an_upgrade_names_a_runner_whose_build_names_no_commit() {
 #[tokio::test]
 async fn a_runner_left_stopped_is_not_named_as_behind() {
     let rig = Rig::new().await;
+    rig.shepherd.says("koji", &[ON_INSTALLED]);
     rig.runs("lab", &rig.installed, false);
     let new = rig.built_from("new", "0.3.0", "9c8b7a6");
 

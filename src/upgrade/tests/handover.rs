@@ -3,13 +3,14 @@
 use super::*;
 
 // A runner still on the old build, and one that reports the installed file
-const OLD: &str = r#"{"build":"1 1.000000000","work_items":[]}"#;
-const NEW: &str = r#"{"build":"{build}","work_items":[]}"#;
+const OLD: &str = r#"{"build":"1 1.000000000","passes":1,"work_items":[]}"#;
+const NEW: &str = r#"{"build":"{build}","passes":1,"work_items":[]}"#;
 
 const REFUSED: &str = r#"{"error":"handover refused: a call has just ended and is being read"}"#;
 
 // A runner draining with no call left
-const DRAINED: &str = r#"{"work_items":[],"draining":{"calls":[],"ceiling":3600}}"#;
+const DRAINED: &str =
+    r#"{"build":"{build}","passes":1,"work_items":[],"draining":{"calls":[],"ceiling":3600}}"#;
 
 // The triggers sent to `sheep`, by action
 fn triggers(writes: &[Request], sheep: &str) -> Vec<String> {
@@ -41,7 +42,7 @@ async fn upgrade_hands_over_a_runner_that_can_and_drains_none() {
     let mut rig = Rig::new().await;
     // The dog's look, then the old build until the handover lands. The old
     // image never answers `handover`: it is replaced as it takes it.
-    rig.shepherd.says("koji", &[IDLE, OLD, NEW]);
+    rig.shepherd.says("koji", &[IDLE, IDLE, OLD, NEW]);
     rig.shepherd.hands("koji", &[None]);
     let new = rig.build("new", "0.3.0", "0.23.0");
     let (ran, said) = rig.install(&new).await;
@@ -51,7 +52,7 @@ async fn upgrade_hands_over_a_runner_that_can_and_drains_none() {
     assert_eq!(restarted(&writes), ["kelpie"], "only the dog restarts");
     assert_eq!(
         triggers(&writes, "koji"),
-        ["status", "handover", "status", "status"]
+        ["status", "status", "handover", "status", "status", "status"]
     );
     assert!(
         said.iter()
@@ -64,7 +65,7 @@ async fn upgrade_hands_over_a_runner_that_can_and_drains_none() {
 async fn upgrade_drains_a_runner_that_predates_the_handover() {
     let mut rig = Rig::new().await;
     // An old build answers `status` and takes no `handover`, twice.
-    rig.shepherd.says("koji", &[IDLE, IDLE, DRAINED]);
+    rig.shepherd.says("koji", &[IDLE, IDLE, IDLE, DRAINED]);
     rig.shepherd.hands(
         "koji",
         &[
@@ -81,7 +82,8 @@ async fn upgrade_drains_a_runner_that_predates_the_handover() {
     assert_eq!(
         triggers(&writes, "koji"),
         [
-            "status", "handover", "status", "handover", "drain", "status", "status", "status"
+            "status", "status", "handover", "status", "handover", "drain", "status", "status",
+            "status", "status"
         ]
     );
     assert!(
@@ -94,7 +96,7 @@ async fn upgrade_drains_a_runner_that_predates_the_handover() {
 #[tokio::test]
 async fn upgrade_drains_a_runner_that_refuses_and_names_the_reason() {
     let mut rig = Rig::new().await;
-    rig.shepherd.says("koji", &[IDLE, DRAINED]);
+    rig.shepherd.says("koji", &[IDLE, IDLE, DRAINED]);
     rig.shepherd.hands("koji", &[Some(REFUSED)]);
     let new = rig.build("new", "0.3.0", "0.23.0");
     let (ran, said) = rig.install(&new).await;
@@ -104,7 +106,9 @@ async fn upgrade_drains_a_runner_that_refuses_and_names_the_reason() {
     assert_eq!(restarted(&writes), ["kelpie", "koji"]);
     assert_eq!(
         triggers(&writes, "koji"),
-        ["status", "handover", "drain", "status", "status", "status"]
+        [
+            "status", "status", "handover", "drain", "status", "status", "status", "status"
+        ]
     );
     assert!(
         said.iter().any(|l| l
@@ -114,13 +118,13 @@ async fn upgrade_drains_a_runner_that_refuses_and_names_the_reason() {
     );
 }
 
-#[tokio::test]
+// The clock is paused, so the handover's wait is exactly four looks at 10ms apart
+// in 30ms: the four old builds, then the drain's answer.
+#[tokio::test(start_paused = true)]
 async fn a_handover_that_never_shows_the_new_build_is_drained_and_named() {
     let mut rig = Rig::new().await;
-    rig.shepherd.says(
-        "koji",
-        &[IDLE, OLD, OLD, OLD, OLD, OLD, OLD, OLD, OLD, DRAINED],
-    );
+    rig.shepherd
+        .says("koji", &[IDLE, IDLE, OLD, OLD, OLD, OLD, DRAINED]);
     rig.shepherd.hands(
         "koji",
         &[Some(
@@ -156,7 +160,7 @@ async fn a_handover_that_never_shows_the_new_build_is_drained_and_named() {
 #[tokio::test]
 async fn a_runner_stopped_while_it_hands_over_stays_stopped() {
     let mut rig = Rig::new().await;
-    let looks = [IDLE, OLD, OLD, OLD, OLD, OLD, OLD, OLD, OLD, OLD];
+    let looks = [IDLE, IDLE, OLD, OLD, OLD, OLD, OLD, OLD, OLD, OLD, OLD];
     rig.shepherd.says("koji", &looks);
     rig.shepherd.hands("koji", &[None]);
     let new = rig.build("new", "0.3.0", "0.23.0");
@@ -179,11 +183,12 @@ async fn a_runner_stopped_while_it_hands_over_stays_stopped() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_runner_that_shows_no_build_is_said_to_show_none() {
     let rig = Rig::new().await;
+    let none = r#"{"work_items":[]}"#;
     rig.shepherd
-        .says("koji", &[IDLE, r#"{"work_items":[]}"#, DRAINED]);
+        .says("koji", &[IDLE, IDLE, none, none, none, none, DRAINED]);
     rig.shepherd.hands("koji", &[None]);
     let new = rig.build("new", "0.3.0", "0.23.0");
     let patience = Patience {
@@ -206,7 +211,8 @@ async fn a_runner_still_opening_is_not_taken_for_a_handover_in_progress() {
     let rig = Rig::new().await;
     // Neither `handover` nor `status` is taken yet, and never is.
     let opening = Some("unknown action: status");
-    rig.shepherd.replies("koji", &[Some(IDLE), opening]);
+    rig.shepherd
+        .replies("koji", &[Some(IDLE), Some(IDLE), opening]);
     rig.shepherd
         .hands("koji", &[Some("unknown action: handover")]);
     let new = rig.build("new", "0.3.0", "0.23.0");
@@ -234,7 +240,7 @@ async fn a_runner_still_opening_is_not_taken_for_a_handover_in_progress() {
 #[tokio::test]
 async fn a_ctrl_c_while_a_runner_hands_over_stops_the_upgrade() {
     let mut rig = Rig::new().await;
-    rig.shepherd.says("koji", &[IDLE, OLD]);
+    rig.shepherd.says("koji", &[IDLE, IDLE, OLD]);
     rig.shepherd.hands("koji", &[None]);
     let new = rig.build("new", "0.3.0", "0.23.0");
     let scene = Scene {

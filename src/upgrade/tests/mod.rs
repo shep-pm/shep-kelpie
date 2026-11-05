@@ -22,6 +22,7 @@ use crate::shepherd::Dial;
 use crate::test::ticket;
 use crate::test::{CALL_PATIENCE, FakeShepherd, waits_for, write_script};
 
+mod canary;
 mod commit;
 mod drain;
 mod files;
@@ -39,8 +40,9 @@ const FAST: Patience = Patience {
     tool: Duration::from_secs(10),
 };
 
-const MERGING: &str = r#"{"work_items":[{"issue":"7","phase":{"state":"merge","head":"abc"}}]}"#;
-const IDLE: &str = r#"{"work_items":[{"issue":"7","phase":{"state":"implement"}}]}"#;
+const MERGING: &str = r#"{"build":"{build}","passes":1,"work_items":[{"issue":"7","phase":{"state":"merge","head":"abc"}}]}"#;
+const IDLE: &str =
+    r#"{"build":"{build}","passes":1,"work_items":[{"issue":"7","phase":{"state":"implement"}}]}"#;
 
 /// A shepherd whose adopted dog and a runner for `koji` run a stand-in
 /// kelpie, a kelpie home, and a folder of stand-in builds
@@ -108,6 +110,8 @@ impl Rig {
         };
         let runner = launch.runner(&ProjectName::try_from(name).unwrap(), table);
         self.shepherd.holds(runner, online);
+        // Healthy by default, so a test that is not about the canary passes it.
+        self.shepherd.says(name, &[IDLE]);
     }
 
     // A stand-in build: a script that answers `version --json`.

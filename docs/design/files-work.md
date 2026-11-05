@@ -16,4 +16,5 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | runner-lock-worktrees.md | worktree jobs | `runner/worktree_jobs.rs` |
 | compaction.md | when a session compacts, `COMPACT` | `runner/compact/`, `adapters/{pi/compact,goose/compact,codex/context}.rs` |
 | handover.md | in-flight turns handed on | `src/{sheep/handover/,upgrade/handover.rs}`, `runner/flight/carry/`, `adapters/process/adopt/` |
+| upgrade.md | restart order, the canary | `src/upgrade/{restart,canary}.rs` |
 | local-tickets.md | local ticket store, `ticket` verbs | `core/local_tickets/`, `src/flock/ticket.rs`, `runner/close_merged.rs` |
