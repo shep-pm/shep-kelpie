@@ -70,6 +70,9 @@ pub struct Availability {
     unread: BTreeMap<ModelKey, String>,
     // Every `login: api` agent shares one key, so the API is held as a whole.
     api: Option<ApiHold>,
+    // Which apply of the settings the sources came from: a pass that began on an older one
+    // writes nothing, since what it read is of a login or gateway no longer named.
+    epoch: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,14 +132,17 @@ impl Availability {
                 .collect(),
             unread: BTreeMap::new(),
             api: None,
+            epoch: sources.epoch,
         }
     }
 
     /// Keeps the reading of each model and account `sources` still names, and lists a new one unknown
     ///
     /// A model or account no longer named is dropped with its logged reason, so
-    /// it is logged again if it comes back. `renewed` is asked again at the next pass.
-    pub(super) fn rename(&mut self, sources: &Sources, renewed: &[Account]) {
+    /// it is logged again if it comes back. `reset` accounts are unknown until read, since
+    /// the login they were read on is gone.
+    pub(super) fn rename(&mut self, sources: &Sources, reset: &[Account]) {
+        self.epoch = sources.epoch;
         self.models
             .retain(|key, _| sources.models.contains_key(key));
         for key in sources.models.keys() {
@@ -149,9 +155,9 @@ impl Availability {
         for account in &sources.accounts {
             self.accounts.entry(*account).or_default();
         }
-        for account in renewed {
+        for account in reset {
             if let Some(seen) = self.accounts.get_mut(account) {
-                seen.asked = None;
+                *seen = Seen::default();
             }
         }
     }
@@ -236,8 +242,12 @@ impl Availability {
         key: ModelKey,
         load: Result<ModelLoad, String>,
         now: Timestamp,
+        epoch: u64,
     ) -> Option<String> {
         // A pass that began before a reread can end on a model no longer named.
+        if epoch != self.epoch {
+            return None;
+        }
         let seen = self.models.get_mut(&key)?;
         seen.last = load.as_ref().ok().map(|load| (*load, now));
         seen.asked = Some(now);
@@ -252,7 +262,16 @@ impl Availability {
         (self.unread.insert(key, why.clone()) != Some(why)).then_some(line)
     }
 
-    fn metered(&mut self, account: Account, usage: Option<Utilization>, now: Timestamp) {
+    fn metered(
+        &mut self,
+        account: Account,
+        usage: Option<Utilization>,
+        now: Timestamp,
+        epoch: u64,
+    ) {
+        if epoch != self.epoch {
+            return;
+        }
         let Some(seen) = self.accounts.get_mut(&account) else {
             return;
         };
@@ -263,7 +282,10 @@ impl Availability {
     }
 
     // The accounts not asked within the last `RECHECK_SECS`.
-    fn due(&self, now: Timestamp) -> Vec<Account> {
+    fn due(&self, now: Timestamp, epoch: u64) -> Vec<Account> {
+        if epoch != self.epoch {
+            return Vec::new();
+        }
         let due = |seen: &Seen<_>| seen.asked.is_none_or(|at| now.0 >= at.0 + RECHECK_SECS);
         (self.accounts.iter())
             .filter(|(_, seen)| due(seen))
@@ -285,6 +307,8 @@ pub(super) struct Sources {
     // The reason where the model cannot be asked, such as an unset key.
     models: BTreeMap<ModelKey, Result<Upstream, String>>,
     accounts: BTreeSet<Account>,
+    // The apply of the settings these came from, 0 at the start.
+    epoch: u64,
 }
 
 impl Sources {
@@ -305,7 +329,11 @@ impl Sources {
                 Limit::Unqueued | Limit::Gateway | Limit::Api => None,
             })
             .collect();
-        Self { models, accounts }
+        Self {
+            models,
+            accounts,
+            epoch: 0,
+        }
     }
 }
 
@@ -338,12 +366,24 @@ pub(super) fn begin(
     let live = Live {
         agents: agents.clone(),
         shown: Arc::clone(&shown),
-        reading: Arc::new(Mutex::new((sources, readers))),
+        reading: Arc::new(Mutex::new(Reading {
+            sources,
+            readers,
+            home: None,
+        })),
         codex_meter: ports.codex_meter,
     };
     live.apply(settings);
     tokio::spawn(keep(Arc::clone(&shown), live.clone()));
     (shown, live)
+}
+
+// What the next pass reads, and the Codex home its meter was built on.
+struct Reading {
+    sources: Sources,
+    readers: Readers,
+    // None before the first apply.
+    home: Option<Result<PathBuf, String>>,
 }
 
 /// What the availability task reads, which a reread of the settings changes
@@ -353,7 +393,7 @@ pub(super) fn begin(
 pub(super) struct Live {
     agents: Agents,
     shown: Arc<Mutex<Availability>>,
-    reading: Arc<Mutex<(Sources, Readers)>>,
+    reading: Arc<Mutex<Reading>>,
     codex_meter: fn(PathBuf) -> Arc<dyn Meter>,
 }
 
@@ -361,33 +401,41 @@ impl Live {
     /// Reads the gateways and the Codex home in `settings` from the next pass
     ///
     /// Each model and account still named keeps its reading and a new one is
-    /// unknown until read. Every gateway key variable is hidden from the
-    /// processes the dog starts from now on, and none is shown again. A gateway's
-    /// new key reaches the dog's environment only from a fresh spawn.
+    /// unknown until read. A Codex home that differs from the last builds the meter
+    /// again, and the Codex account is unknown until that login is read. Every
+    /// gateway key variable is hidden from the processes the dog starts from now
+    /// on, and none is shown again. A gateway's new key reaches the dog's
+    /// environment only from a fresh spawn.
     pub(super) fn apply(&self, settings: &KelpieSettings) {
         let gateways = settings.gateways();
         crate::spawn::hide(gateways.key_vars());
-        let sources = Sources::of(&self.agents, &gateways);
+        let mut sources = Sources::of(&self.agents, &gateways);
         let mut reading = self.reading.lock().unwrap_or_else(PoisonError::into_inner);
-        lock(&self.shown).rename(&sources, &[Account::Codex]);
-        let mut meters = reading.1.meters.clone();
-        match codex_home(settings) {
-            Ok(home) => _ = meters.insert(Account::Codex, (self.codex_meter)(home)),
-            Err(e) => {
-                println!("{e}: the Codex account's plan is not read");
-                meters.remove(&Account::Codex);
+        sources.epoch = reading.sources.epoch + 1;
+        let home = codex_home(settings);
+        let changed = reading.home.as_ref() != Some(&home);
+        if changed {
+            match &home {
+                Ok(home) => {
+                    let meter = (self.codex_meter)(home.clone());
+                    reading.readers.meters.insert(Account::Codex, meter);
+                }
+                Err(e) => {
+                    println!("{e}: the Codex account's plan is not read");
+                    reading.readers.meters.remove(&Account::Codex);
+                }
             }
+            reading.home = Some(home);
         }
-        reading.1.meters = meters;
-        reading.0 = sources;
+        let reset: &[Account] = if changed { &[Account::Codex] } else { &[] };
+        lock(&self.shown).rename(&sources, reset);
+        reading.sources = sources;
     }
 
     // What the next pass reads, taken whole so a pass ends on what it began with.
     fn now(&self) -> (Sources, Readers) {
-        self.reading
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        let reading = self.reading.lock().unwrap_or_else(PoisonError::into_inner);
+        (reading.sources.clone(), reading.readers.clone())
     }
 }
 
@@ -448,10 +496,10 @@ pub(super) async fn read(
     let loads = loads.await.unwrap_or_else(unread);
     let now = readers.clock.now();
     let logged = (loads.into_iter())
-        .filter_map(|(key, load)| lock(shown).loaded(key, load, now))
+        .filter_map(|(key, load)| lock(shown).loaded(key, load, now, sources.epoch))
         .collect();
     lock(shown).release_api(readers.clock.now());
-    let due = lock(shown).due(readers.clock.now());
+    let due = lock(shown).due(readers.clock.now(), sources.epoch);
     for account in due {
         let usage = match readers.meters.get(&account) {
             Some(meter) => {
@@ -460,7 +508,7 @@ pub(super) async fn read(
             }
             None => None,
         };
-        lock(shown).metered(account, usage, readers.clock.now());
+        lock(shown).metered(account, usage, readers.clock.now(), sources.epoch);
     }
     logged
 }

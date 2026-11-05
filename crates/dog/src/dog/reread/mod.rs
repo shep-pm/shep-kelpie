@@ -110,9 +110,14 @@ impl Reread {
             return;
         }
         // A runner's reread checks the Codex home as its start does. The dog's start leaves the
-        // account unknown instead, but a reread refuses so the maintainer hears of it now.
+        // account unknown instead, so only a home that changed is refused: an edit elsewhere
+        // still applies while the home the dog runs on stands.
         let read = section::read_whole(text).and_then(|settings| {
-            match availability::refused_codex_home(&settings) {
+            let changed = settings.codex_home != self.codex_home;
+            match changed
+                .then(|| availability::refused_codex_home(&settings))
+                .flatten()
+            {
                 Some(reason) => Err(reason),
                 None => Ok(settings),
             }

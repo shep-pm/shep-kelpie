@@ -455,6 +455,21 @@ async fn a_codex_home_the_dog_refuses_refuses_the_whole_section() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_edit_elsewhere_applies_while_the_dog_runs_on_a_codex_home_it_started_with() {
+    let mut dog = started_on(&format!("codex_home = \"logins/codex\"\n{NTFY}{BASE}")).await;
+
+    dog.edit(&format!(
+        "codex_home = \"logins/codex\"\n{NTFY}[leases]\ncargo-test = 9\n"
+    ));
+    let lines = dog.pass().await;
+
+    assert_eq!(dog.capacity(), 9);
+    assert_eq!(dog.state().refused, None);
+    assert_eq!(dog.alerts.posts().len(), 0);
+    assert!(lines.iter().all(|l| !l.contains("refused")), "{lines:?}");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_section_that_cannot_be_asked_for_keeps_the_settings_and_logs_once() {
     let mut dog = started_on(BASE).await;
     dog.edit("[leases]\ncargo-test = 5\n");

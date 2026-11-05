@@ -586,13 +586,25 @@ fn idle_meter() -> Arc<dyn Meter> {
     Arc::new(FakeMeter::idle())
 }
 
-// The Codex meter of the login at `/srv/codex-live` reads 40% of the week, any other 0%.
+// The Codex meter of the login at `/srv/codex-live` reads 40% of the week, the one at
+// `/srv/codex-new` fails as a login not signed in does, and any other reads 0%.
 fn codex_meter_by_login(home: PathBuf) -> Arc<dyn Meter> {
     let meter = FakeMeter::idle();
     if home == std::path::Path::new("/srv/codex-live") {
         meter.set(utilization(40, 12));
     }
+    if home == std::path::Path::new("/srv/codex-new") {
+        meter.fail(MeterError::TimedOut);
+    }
     Arc::new(meter)
+}
+
+fn codex_agent() -> (tempfile::TempDir, Agents) {
+    agents(&[(
+        "gpt.md",
+        "---\nrole: implementer\nharness: codex\nmodel: gpt-6-sol\neffort: medium\n---\n"
+            .to_owned(),
+    )])
 }
 
 #[tokio::test(start_paused = true)]
@@ -619,4 +631,43 @@ async fn a_changed_codex_home_builds_the_meter_on_the_new_login() {
         account(&shown, "codex")["week"]["used_pct"] == 40
     })
     .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_codex_home_with_no_reading_shows_the_account_unknown_not_the_old_logins_usage() {
+    let (_dir, agents) = codex_agent();
+    let leases = Arc::new(LeaseReads::default());
+    let on_live = KelpieSettings::from_section("codex_home = \"/srv/codex-live\"\n").unwrap();
+    let (shown, live) = begin(&agents, &on_live, live_ports(&leases, codex_meter_by_login));
+    until("the old login never read", || {
+        account(&shown, "codex")["week"]["used_pct"] == 40
+    })
+    .await;
+
+    live.apply(&KelpieSettings::from_section("codex_home = \"/srv/codex-new\"\n").unwrap());
+    assert_eq!(account(&shown, "codex")["unknown"], true);
+
+    let (sources, readers) = live.now();
+    read(&shown, &sources, &readers).await;
+    assert_eq!(
+        account(&shown, "codex")["unknown"],
+        true,
+        "a login that cannot be read is unknown, never the old one's usage"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pass_that_began_on_the_old_login_cannot_put_its_reading_back() {
+    let (_dir, agents) = codex_agent();
+    let leases = Arc::new(LeaseReads::default());
+    let on_live = KelpieSettings::from_section("codex_home = \"/srv/codex-live\"\n").unwrap();
+    let (shown, live) = begin(&agents, &on_live, live_ports(&leases, codex_meter_by_login));
+    first_pass_done(&shown).await;
+    let (old_sources, old_readers) = live.now();
+
+    live.apply(&KelpieSettings::from_section("").unwrap());
+    // A pass on the old readers ends after the reread, reading the old login.
+    read(&shown, &old_sources, &old_readers).await;
+
+    assert_eq!(account(&shown, "codex")["unknown"], true);
 }
