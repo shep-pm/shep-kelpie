@@ -713,7 +713,7 @@ impl Wait {
     }
 }
 
-/// The runner's hold on one call in flight, to end it past its turn's ceiling
+/// The runner's hold on one call in flight, to end it past its ceiling
 ///
 /// Clones share the one call. The adapter running it ends its process
 /// group once asked, however soon after the call began that is. A call that
@@ -815,7 +815,7 @@ pub enum AgentError {
     NoSession(Harness, SessionId),
     /// The call was ended because the runner is stopping
     Stopped,
-    /// The call ran past its turn's ceiling and was ended
+    /// The call ran past its ceiling and was ended
     TimedOut(Harness),
     /// The harness exited without a result it reports as a success
     Failed(Harness, String),
@@ -835,7 +835,7 @@ impl fmt::Display for AgentError {
             Self::Spawn(h, error) => write!(f, "cannot run {}: {error}", h.command()),
             Self::NoSession(h, id) => write!(f, "{} has no session {}", h.command(), id.0),
             Self::Stopped => f.write_str("the agent was stopped with the runner"),
-            Self::TimedOut(h) => write!(f, "{} ran past its turn's ceiling", h.command()),
+            Self::TimedOut(h) => write!(f, "{} ran past its ceiling", h.command()),
             Self::Failed(h, detail) => write!(f, "{} failed: {}", h.command(), detail.trim()),
             Self::Unreachable(h, detail) => write!(
                 f,

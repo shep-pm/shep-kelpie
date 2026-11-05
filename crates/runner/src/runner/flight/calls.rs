@@ -20,9 +20,9 @@ impl super::Flights {
     pub(in crate::runner) fn running(&self) -> Vec<CallRunning> {
         let items = self.flying.iter().map(|(&ticket, flight)| CallRunning {
             issue: Some(ticket),
-            role: match flight.deadline {
-                Some(_) => CallRole::Worker,
-                None => CallRole::Reviewer,
+            role: match flight.turn {
+                true => CallRole::Worker,
+                false => CallRole::Reviewer,
             },
         });
         let pm = self.pm.iter().map(|_| CallRunning {
