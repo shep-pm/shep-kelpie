@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use crate::ports::{AgentError, Forge, Role, Session, Timestamp, Tools};
 use crate::runner::flight::advance;
+use crate::runner::retro::gaps::LISTED;
 use crate::runner::retro::journal;
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::settings::Harness;
@@ -749,6 +750,43 @@ fn an_open_known_gap_is_listed_and_one_that_recurs_is_counted_not_described_agai
         "{prompt}"
     );
     assert!(!prompt.contains("tests need a port"), "{prompt}");
+}
+
+#[test]
+fn the_prompt_names_how_many_known_gaps_it_left_out() {
+    const LEFT_OUT: usize = 5;
+    let (rig, runner) = parked_after_set(9, |rig| {
+        let themes = (0..LISTED + LEFT_OUT)
+            .map(|n| format!("- gap {n}: what slowed it down"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        keep_report(
+            rig,
+            &format!("# Batch retro\n\n## New findings\n\n{themes}\n"),
+        );
+    });
+    rig.claude.script_for(Role::Pm, [Scripted::Say(REPORT)]);
+    merge(&rig, &runner);
+
+    let [retro] = retros(&rig).try_into().unwrap();
+    let prompt = &retro.call.prompt;
+    assert!(
+        prompt.contains(&format!(
+            "(the known gaps, the newest {} listed and {LEFT_OUT} older ones left out)",
+            LISTED
+        )),
+        "{prompt}"
+    );
+    // The digest says the same number, and the prompt keeps the newest themes
+    assert!(
+        prompt.contains(&format!(
+            "named again in this batch, {LEFT_OUT} of {} known gaps left out: none",
+            LISTED + LEFT_OUT
+        )),
+        "{prompt}"
+    );
+    assert!(prompt.contains("\n- gap 44\n"), "{prompt}");
+    assert!(!prompt.contains("\n- gap 4\n"), "{prompt}");
 }
 
 #[test]
