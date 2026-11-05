@@ -5,13 +5,25 @@
 //! then waits on it. Once a work item's merge is recorded, a step reads the
 //! issue and closes it if the forge still shows it open. A local ticket's pull
 //! request has no closing reference, so the step always closes it.
+//!
+//! An issue the pull request names is the forge's to close. A board pass
+//! closes one still open [`FORGE_CLOSE_WAIT`] after its merge.
 
 use super::Runner;
+use crate::board::ReadyIssue;
 use crate::ports::{SubIssue, SubIssueState};
 use crate::ticket::TicketId;
 
 /// Closes the forge may refuse, one in each step, before the step gives up on an issue
 const TRIES: u32 = 3;
+
+/// How long the forge is left to close an issue its merged pull request names
+/// before kelpie closes it itself
+///
+/// GitHub closes a named issue about three seconds after the merge, so ten
+/// minutes is past any close the forge means to make, and short enough that
+/// what the issue blocks waits little on it.
+pub(super) const FORGE_CLOSE_WAIT: u64 = 600;
 
 /// What kelpie says on an issue it closes after the pull request merged
 /// without closing it
@@ -70,14 +82,50 @@ impl Runner {
                 return None;
             }
         }
-        if !self.close_refused.contains_key(&ticket)
-            && let Err(e) = self.comment_on_issue(issue, &merged_without_closing(pull_request))
-        {
-            self.notes.push(format!(
-                "cannot comment on issue #{issue} before closing it: {e}"
-            ));
+        self.close_with_comment(ticket, pull_request, &merged_without_closing(pull_request))
+    }
+
+    /// Closes each ready issue a merged pull request left open, once the forge
+    /// has had [`FORGE_CLOSE_WAIT`] to close it
+    ///
+    /// Only a finished issue on the board's ready list is swept, since the
+    /// board reads no other. A close the forge refuses is tried [`TRIES`] times
+    /// across the passes that follow, with the comment once, and then left be
+    /// until the runner restarts.
+    pub(super) fn close_merged_left_open(&mut self, ready: &[ReadyIssue]) {
+        let now = self.ports.clock.now();
+        let left: Vec<(TicketId, u64)> = ready
+            .iter()
+            .filter_map(|issue| {
+                // A ticket worked twice is what its last work item did with it
+                let record = self
+                    .state
+                    .history
+                    .iter()
+                    .rfind(|r| r.issue == issue.ticket)?;
+                let (true, Some(pull_request)) = (record.merged, record.pull_request) else {
+                    return None;
+                };
+                let waited = now.0 >= record.at.0.saturating_add(FORGE_CLOSE_WAIT);
+                let given_up = (self.close_refused.get(&issue.ticket)).is_some_and(|n| *n >= TRIES);
+                (waited && !given_up).then_some((issue.ticket, pull_request))
+            })
+            .collect();
+        for (ticket, pull_request) in left {
+            match self.ports.tickets.issue(&self.remote, ticket) {
+                Ok(read) if !read.open => {
+                    self.close_refused.remove(&ticket);
+                }
+                Ok(_) => {
+                    let text = merged_without_closing(pull_request);
+                    self.close_with_comment(ticket, pull_request, &text);
+                }
+                Err(e) => self.notes.push(format!(
+                    "cannot read {} a merge left open: {e}",
+                    super::turn::ticket_name(ticket)
+                )),
+            }
         }
-        self.close_after_merge(ticket, pull_request)
     }
 
     // Closes a local ticket that is still open after `pull_request` merged, with
@@ -97,8 +145,18 @@ impl Runner {
                 return None;
             }
         }
+        self.close_with_comment(ticket, pull_request, &merged_local(pull_request))
+    }
+
+    // The comment, on the first try only, and the close that follows it
+    fn close_with_comment(
+        &mut self,
+        ticket: TicketId,
+        pull_request: u64,
+        text: &str,
+    ) -> Option<String> {
         if !self.close_refused.contains_key(&ticket)
-            && let Err(e) = self.comment_on_ticket(ticket, &merged_local(pull_request))
+            && let Err(e) = self.comment_on_ticket(ticket, text)
         {
             self.notes.push(format!(
                 "cannot comment on {} before closing it: {e}",
@@ -108,7 +166,8 @@ impl Runner {
         self.close_after_merge(ticket, pull_request)
     }
 
-    // The close itself, with the count of refusals the step gives up on
+    // The close itself, with the count of refusals the step gives up on. A
+    // ticket given up on keeps its count, so a later pass leaves it be.
     fn close_after_merge(&mut self, ticket: TicketId, pull_request: u64) -> Option<String> {
         let Err(e) = self.ports.tickets.close_issue(&self.remote, ticket) else {
             self.close_refused.remove(&ticket);
@@ -121,7 +180,6 @@ impl Runner {
         if *failures < TRIES {
             return Some(reason);
         }
-        self.close_refused.remove(&ticket);
         self.notes.push(format!("{reason}, refused {TRIES} times"));
         None
     }

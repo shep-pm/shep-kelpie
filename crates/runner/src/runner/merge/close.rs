@@ -1,12 +1,104 @@
 //! Closing the issue of a merged pull request through the runner's stand-ins
 
+use std::sync::Mutex;
+
 use serde_json::json;
 
 use super::tests::{finished, ready_then_merge};
 use crate::ports::PullRequestState;
-use crate::runner::{StepReport, step};
+use crate::runner::close_merged::FORGE_CLOSE_WAIT;
+use crate::runner::{Runner, StepReport, step};
 use crate::test::Rig;
 use crate::test::ticket;
+
+// The work item whose pull request merged while its issue stayed open: #71
+// merged, the forge named #7 for itself to close, and never closed it
+fn merged_leaving_its_issue_open(project: &str) -> (Rig, Mutex<Runner>) {
+    let (rig, runner, _) = Rig::parked(project);
+    rig.forge.list_ready(7, false);
+    rig.ask(&runner, "rule", Some("71 yes"));
+    rig.forge.set_state(71, PullRequestState::Merged);
+    assert!(finished(step(&runner).unwrap()));
+    assert!(rig.forge.closings().is_empty(), "the forge has the close");
+    assert!(rig.forge.comments().is_empty(), "and no comment");
+    (rig, runner)
+}
+
+#[test]
+fn a_merged_issue_still_open_after_the_wait_is_closed_with_one_comment() {
+    let (rig, runner) = merged_leaving_its_issue_open("koji");
+
+    rig.clock.advance(FORGE_CLOSE_WAIT);
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(rig.forge.closings(), [7]);
+    let comments = rig.forge.comments();
+    assert_eq!(comments.len(), 1, "{comments:?}");
+    assert_eq!(comments[0].0, 7);
+    assert!(comments[0].1.contains("#71"), "{comments:?}");
+}
+
+#[test]
+fn a_merged_issue_still_open_inside_the_wait_is_left_to_the_forge() {
+    let (rig, runner) = merged_leaving_its_issue_open("golbat");
+
+    rig.clock.advance(FORGE_CLOSE_WAIT - 1);
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert!(rig.forge.closings().is_empty());
+    assert!(rig.forge.comments().is_empty());
+}
+
+#[test]
+fn a_finished_issue_that_did_not_merge_stays_open() {
+    let (rig, runner, _) = Rig::parked("chelone");
+    rig.forge.list_ready(7, false);
+    rig.ask(&runner, "drop", None);
+
+    rig.clock.advance(FORGE_CLOSE_WAIT);
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert!(rig.forge.closings().is_empty());
+    assert!(rig.forge.comments().is_empty());
+}
+
+#[test]
+fn a_merged_issue_off_the_ready_list_is_not_swept() {
+    let (rig, runner, _) = Rig::parked("pelagia");
+    rig.forge.set_state(71, PullRequestState::Merged);
+    assert!(finished(step(&runner).unwrap()));
+    assert!(rig.forge.closings().is_empty());
+
+    rig.clock.advance(FORGE_CLOSE_WAIT);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert!(
+        rig.forge.closings().is_empty(),
+        "the board reads no issue it does not list"
+    );
+}
+
+#[test]
+fn a_sweep_the_forge_refuses_comments_once() {
+    let (rig, runner) = merged_leaving_its_issue_open("rotom");
+    rig.forge.set_closes_down(true);
+
+    rig.clock.advance(FORGE_CLOSE_WAIT);
+    for look in 0..4 {
+        assert_eq!(step(&runner).unwrap(), None, "{look}");
+        rig.next_look();
+    }
+
+    assert_eq!(rig.forge.closes_refused(), 3, "the sweep gives up");
+    assert!(rig.forge.closings().is_empty());
+    assert_eq!(rig.forge.comments().len(), 1, "{:?}", rig.forge.comments());
+    let notes = runner.lock().unwrap().take_notes();
+    let refused: Vec<&String> = notes
+        .iter()
+        .filter(|n| n.contains("cannot close issue #7"))
+        .collect();
+    assert_eq!(refused.len(), 1, "{notes:?}");
+    assert!(refused[0].contains("refused 3 times"), "{notes:?}");
+}
 
 #[test]
 fn a_pull_request_merged_without_a_closing_reference_gets_its_issue_closed() {
