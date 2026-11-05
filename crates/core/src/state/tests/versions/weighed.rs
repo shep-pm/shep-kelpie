@@ -28,7 +28,10 @@ fn a_version_95_work_item_loads_with_no_weight_and_keeps_one_once_set() {
     state.work_items[0].weight = Some(ReviewWeight::Light(Lighter::Docs));
     store.save(&state).unwrap();
     let saved = read_back(dir.path());
-    assert_eq!(saved["work_items"][0]["weight"], serde_json::json!({"light": "docs"}));
+    assert_eq!(
+        saved["work_items"][0]["weight"],
+        serde_json::json!({"light": "docs"})
+    );
     assert_eq!(store.load().unwrap(), Some(state));
 }
 

@@ -6,7 +6,7 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 |---|---|---|
 | review.md | review and the review bots | `runner/{review/,review_bot/}`, `core/{state/{mod,bots}.rs,work_item/bots.rs}` |
 | rulings.md | rulings | `runner/ruling/`, `core/webhook.rs` |
-| review-pick.md | each round's reviewer, `reviews.need` | `runner/review/lineup.rs` |
+| review-pick.md | each round's reviewer, `reviews.need` | `runner/review/lineup/mod.rs` |
 | review-outcomes.md | fix turn outcomes | `runner/review/outcomes/` |
 | local-review.md | local reviewers, kept rounds | `runner/review/keep.rs`, `core/settings/{local_rounds,local}.rs`, `adapters/local/` |
 | merge.md | CI, catch-up, merge | `runner/{gate,merge}/`, `runner/close_merged.rs` |
