@@ -1,6 +1,6 @@
 //! The board in lookout: the pane the dog answers `shep.pane` with
 //!
-//! `on_action` handlers are sync and the dog's client is async, so [`Seen`] is a
+//! `on_action` handlers are sync and the dog's client is async, so `Seen` is a
 //! cache a task refreshes from each runner's `status`, and a handler only reads
 //! it. The two actions the pane offers, [`rule`](ACTIONS) on a ruling's row and
 //! `pause`, forward to the runners as triggers, off the handler's thread.
