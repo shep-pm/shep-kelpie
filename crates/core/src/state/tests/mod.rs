@@ -17,7 +17,7 @@ fn store_in(dir: &Path) -> StateStore {
 // deliberate edit here and shows in review. Every other test reads `VERSION`.
 #[test]
 fn the_state_file_version_is_pinned() {
-    assert_eq!(VERSION, 98);
+    assert_eq!(VERSION, 99);
 }
 
 // Large, so a kill is likely to land inside a write, and uniform, so a
@@ -48,6 +48,64 @@ fn assert_whole(state: &ProjectState) {
 fn no_file_loads_as_no_state() {
     let dir = tempfile::tempdir().unwrap();
     assert_eq!(store_in(dir.path()).load().unwrap(), None);
+}
+
+// A version 98 file has no `pm_holds`, so it loads with none, and the holds a
+// runner adds round trip through a save.
+#[test]
+fn a_state_file_with_no_holds_loads_as_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path());
+    let mut old = serde_json::to_value(ProjectState::new()).unwrap();
+    old["version"] = 98.into();
+    assert_eq!(old.get("pm_holds"), None, "left out while empty");
+    fs::write(dir.path().join(STATE_FILE), old.to_string()).unwrap();
+
+    let mut loaded = store.load().unwrap().expect("a saved state");
+    assert!(loaded.pm_holds.is_empty());
+
+    loaded.hold(ticket(9), Some(ticket(7)), "c0ffee".into());
+    loaded.hold(ticket(12), None, "a1b2".into());
+    store.save(&loaded).unwrap();
+
+    let saved = read_back(dir.path());
+    assert_eq!(saved["version"], VERSION);
+    assert_eq!(
+        saved["pm_holds"],
+        serde_json::json!([
+            { "issue": "9", "until": "7", "text": "c0ffee" },
+            { "issue": "12", "text": "a1b2" },
+        ])
+    );
+    assert_eq!(store.load().unwrap(), Some(loaded));
+}
+
+fn read_back(dir: &Path) -> serde_json::Value {
+    let text = fs::read_to_string(dir.join(STATE_FILE)).unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
+#[test]
+fn a_hold_ends_on_the_close_it_waits_on_and_no_hold_ends_on_no_close() {
+    let mut state = ProjectState::new();
+    state.hold(ticket(9), Some(ticket(7)), "c0ffee".into());
+    state.hold(ticket(12), None, "a1b2".into());
+    let held = |state: &ProjectState| -> Vec<TicketId> {
+        state.pm_holds.iter().map(|h| h.issue).collect()
+    };
+
+    state.end_holds_on(&[]);
+    assert_eq!(
+        held(&state),
+        vec![ticket(9), ticket(12)],
+        "nothing closed, so no hold goes"
+    );
+
+    state.end_holds_on(&[ticket(8)]);
+    assert_eq!(held(&state), vec![ticket(9)], "#12 waits on any close");
+
+    state.end_holds_on(&[ticket(7)]);
+    assert!(held(&state).is_empty(), "#9 waits on #7");
 }
 
 #[test]

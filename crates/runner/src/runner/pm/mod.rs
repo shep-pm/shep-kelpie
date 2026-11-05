@@ -49,7 +49,7 @@ mod wakes;
 
 pub(super) use asked::{PmReply, pm_reply};
 pub(super) use ci_logs::wake_off_lock;
-pub use maintainer::{Held, PmAttaching, PmError, PmStatus, Settled};
+pub use maintainer::{PmAttaching, PmError, PmHeld, PmStatus, Settled};
 pub(super) use picked::Picked;
 
 use answer::Action;
@@ -266,8 +266,6 @@ pub(super) struct Desk {
     pick: Option<Pick>,
     // Each of its picks kelpie dropped, in words, until a wake tells it
     lost: Vec<String>,
-    // Each ready issue it holds back, with what it waits on
-    held: Vec<Held>,
     // Each ready issue the last try could not start an agent for, which wakes no pick,
     // with when the pacer's hold that kept it lapses
     unstartable: BTreeMap<TicketId, Option<Timestamp>>,
@@ -372,34 +370,39 @@ impl Runner {
     /// those the board could start. A hold on an issue whose text changed
     /// since goes, since the project manager held what it read. With no work
     /// item open, a hold over every one of them has nothing to wait for, so
-    /// it goes.
+    /// it goes. Each that goes is saved, so a restart starts none of them.
+    ///
+    /// # Errors
+    ///
+    /// [`StateError`] when the holds that went cannot be saved.
     pub(super) fn pm_holds(
         &mut self,
         takeable: &[TicketId],
         ready: &[ReadyIssue],
-    ) -> Vec<TicketId> {
-        let edited = |held: &Held| {
-            let issue = ready.iter().find(|r| r.ticket == held.issue);
-            issue.is_some_and(|r| r.fingerprint() != held.text)
-        };
-        self.pm.held.retain(|held| !edited(held));
+    ) -> Result<Vec<TicketId>, StateError> {
+        let mut next = self.state.clone();
+        next.end_changed_holds(ready);
         self.pm_forget_unstartable(takeable);
-        let held = |n: &TicketId| self.pm.held.iter().any(|h| h.issue == *n);
-        let all = !takeable.is_empty() && takeable.iter().all(held);
-        if all && self.state.work_items.is_empty() {
-            self.notes.push(
-                "the project manager holds every issue the board could start, with no work \
-                 item open to wait for, so its holds go"
-                    .to_owned(),
-            );
-            self.pm.held.clear();
+        let stalled = next.holds_stalled(takeable);
+        if stalled {
+            next.pm_holds.clear();
         }
-        self.pm.held.iter().map(|h| h.issue).collect()
+        if next.pm_holds != self.state.pm_holds {
+            self.save(next)?;
+            if stalled {
+                self.notes.push(
+                    "the project manager holds every issue the board could start, with no work \
+                     item open to wait for, so its holds go"
+                        .to_owned(),
+                );
+            }
+        }
+        Ok(self.state.pm_holds.iter().map(|h| h.issue).collect())
     }
 
     /// The ready issues the project manager holds back, as the board shows them
-    pub(super) fn pm_held(&self) -> &[Held] {
-        &self.pm.held
+    pub(super) fn pm_held(&self) -> &[PmHeld] {
+        &self.state.pm_holds
     }
 
     /// What dispatch starts out of `takeable`, the ready issues the board

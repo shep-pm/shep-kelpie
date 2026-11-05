@@ -35,6 +35,18 @@ fn held(rig: &Rig, runner: &Mutex<Runner>) -> Value {
     rig.ask(runner, "status", None)["pm"]["held"].clone()
 }
 
+// The holds as the state file keeps them, without the text digest each saves with it
+fn saved(rig: &Rig) -> Value {
+    let text = std::fs::read_to_string(rig.paths().state).unwrap();
+    let mut saved = serde_json::from_str::<Value>(&text).unwrap()["pm_holds"].clone();
+    if let Some(held) = saved.as_array_mut() {
+        for held in held {
+            held.as_object_mut().unwrap().remove("text");
+        }
+    }
+    saved
+}
+
 const UNTIL_7: &str = "{\"pick\": null, \"hold\": [{\"issue\": 9, \"until\": 7}]}";
 
 #[test]
@@ -119,6 +131,52 @@ fn a_hold_until_what_is_no_open_work_item_is_refused_with_a_note() {
         held(&rig, &runner),
         json!([{ "issue": "12", "until": "7" }])
     );
+}
+
+#[test]
+fn a_hold_survives_a_restart() {
+    let (rig, runner, _) = held_by(UNTIL_7);
+    // With #9 the only ready issue, no worker starts to take a scripted reply.
+    rig.forge.unlist_ready(12);
+    drop(runner);
+    let runner = rig.open().unwrap();
+
+    assert_eq!(
+        held(&rig, &runner),
+        json!([{ "issue": "9", "until": "7" }]),
+        "the hold was saved with the state"
+    );
+
+    // The board reads again, still passes #9 over, and still says what it waits on.
+    rig.clock.advance(61);
+    step(&runner).unwrap();
+    let board = std::fs::read_to_string(rig.paths().board).unwrap();
+    assert!(board.contains("held by you until #7 closes"), "{board}");
+    assert_eq!(
+        held(&rig, &runner),
+        json!([{ "issue": "9", "until": "7" }]),
+        "the board's read ends no hold"
+    );
+}
+
+#[test]
+fn a_hold_ends_when_what_it_waits_on_closes_with_no_project_manager() {
+    let (rig, runner, _) = held_by(UNTIL_7);
+    // The project manager goes, with its hold standing in the state file.
+    rig.edit_settings(|s| s.replace("pm = \"pm\"\n", ""));
+    drop(runner);
+    let runner = rig.open().unwrap();
+
+    rig.clock.advance(61);
+    step(&runner).unwrap();
+    let board = std::fs::read_to_string(rig.paths().board).unwrap();
+    assert!(board.contains("held by you until #7 closes"), "{board}");
+
+    rig.ask(&runner, "drop", Some("7"));
+    step(&runner).unwrap();
+    let board = std::fs::read_to_string(rig.paths().board).unwrap();
+    assert!(!board.contains("held by you"), "{board}");
+    assert_eq!(saved(&rig), json!(null), "#7 closing ends the hold");
 }
 
 #[test]

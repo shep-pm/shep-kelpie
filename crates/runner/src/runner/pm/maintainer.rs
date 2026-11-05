@@ -7,11 +7,11 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::Wake;
-use crate::board::briefing::ticket_ref;
 use crate::ports::{Session, SessionId, Timestamp};
 use crate::runner::attach::{live, running};
 use crate::runner::{AttachError, Runner};
 use crate::settings::{AgentName, PmAgent};
+pub use crate::state::PmHeld;
 use crate::state::StateError;
 use crate::terminal::Foreground;
 use crate::ticket::TicketId;
@@ -38,46 +38,13 @@ pub struct PmStatus<'a> {
     pub told: &'a [String],
     /// The ready issues it holds, each with the open work item it waits on
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
-    pub held: &'a [Held],
+    pub held: &'a [PmHeld],
     /// The last few worker questions it answered or passed on, newest last
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     pub settled: &'a [Settled],
     /// Its last message to the maintainer
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply: Option<&'a str>,
-}
-
-/// A ready issue the project manager holds back
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Held {
-    /// The ready issue
-    pub issue: TicketId,
-    /// The open work item it waits on, or none for any work item closing
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub until: Option<TicketId>,
-    // The issue's text as the hold was made, which an edit changes
-    #[serde(skip)]
-    pub(super) text: String,
-}
-
-impl Held {
-    /// What the hold waits on, as the board shows it
-    pub fn waits(&self) -> String {
-        match self.until {
-            Some(until) => format!("until {} closes", ticket_ref(until)),
-            None => "until an open work item closes".to_owned(),
-        }
-    }
-}
-
-impl fmt::Display for Held {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", ticket_ref(self.issue))?;
-        match self.until {
-            Some(until) => write!(f, " until {}", ticket_ref(until)),
-            None => Ok(()),
-        }
-    }
 }
 
 /// A worker's question the project manager answered or passed on
@@ -337,7 +304,7 @@ impl Runner {
             attached: self.state.pm_attached.is_some(),
             down_until: self.pm.down_until,
             told: &self.state.pm_told,
-            held: &self.pm.held,
+            held: &self.state.pm_holds,
             settled: &self.pm.settled,
             reply: self.pm.reply.as_deref(),
         })
