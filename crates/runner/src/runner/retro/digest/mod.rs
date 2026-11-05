@@ -10,6 +10,7 @@ use std::fmt::Write;
 
 use serde::Serialize;
 
+use super::gaps::Open;
 use super::journal::{self, Entry, Stamped};
 use crate::runner::ruling::{Answerer, Record};
 use crate::state::Finished;
@@ -38,8 +39,8 @@ pub(super) struct Records<'a> {
     pub ledger: &'a [Line],
     /// When the last retro started, or zero with none
     pub since: u64,
-    /// The retro's own earlier findings still open, by theme
-    pub gaps: &'a [String],
+    /// The retro's own earlier findings still open, and what its limit left out
+    pub gaps: &'a Open,
 }
 
 /// What a digest is for, as a line names it
@@ -526,7 +527,7 @@ fn sent(out: &mut String, mine: &[&Stamped]) {
     if lines.is_empty() {
         return;
     }
-    let _ = writeln!(out, "- Findings sent to the worker:");
+    let _ = writeln!(out, "- Findings sent to the worker: {}", lines.len());
     for line in lines.iter().take(FINDINGS_LISTED) {
         let _ = writeln!(out, "{line}");
     }
