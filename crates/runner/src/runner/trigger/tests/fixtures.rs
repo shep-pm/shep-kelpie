@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::ports::BranchRun;
+use crate::ports::{BranchRun, TestOutcome};
 use crate::runner::{Attaching, PmAttaching};
 use crate::state::ProjectState;
 use crate::terminal::Foreground;
@@ -148,6 +148,12 @@ fn name_pm(rig: &Rig) {
 /// A project manager, a red workflow on `main`, and three finished work items
 pub(in crate::runner) fn rich(rig: &Rig) {
     name_pm(rig);
+    // Work item 7's package install fails, so its status carries `install_failed`.
+    rig.land("bun.lock", "");
+    rig.tests.script(vec![TestOutcome::Failed {
+        output: "Resolving packages\nerror: lockfile had changes, but lockfile is frozen\n"
+            .to_owned(),
+    }]);
     seed(rig, 3);
     rig.forge.set_branch_runs(
         "main",
