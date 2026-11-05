@@ -5,7 +5,9 @@
 
 use std::fmt;
 
+use crate::api_refusal::Refusal;
 use crate::lease::door::{FitAsk, Fits, Pick, PickAsk};
+use crate::ports::Timestamp;
 
 /// The board a runner asks, at dispatch, which agents may start a work item
 pub trait AgentBoard: Send + Sync + fmt::Debug {
@@ -19,4 +21,8 @@ pub trait AgentBoard: Send + Sync + fmt::Debug {
     ///
     /// [`Fits::No`] is the finding a runner raises an `agent-fit` ruling from.
     fn fit(&self, item: &FitAsk) -> Option<Fits>;
+
+    /// Tells the board the API refused the key, and returns when it holds every
+    /// API agent until, or None when it cannot be asked
+    fn refused(&self, refusal: &Refusal) -> Option<Timestamp>;
 }

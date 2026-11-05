@@ -14,6 +14,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::agent_board::Finding;
 use crate::agents::Tier;
+use crate::api_refusal::Refusal;
 use crate::home;
 use crate::ipc::{self, ClientStream};
 use crate::settings::AgentName;
@@ -119,6 +120,10 @@ pub const PICK: &str = "pick";
 /// a kind of work: the dog answers one line and closes
 pub const FIT: &str = "fit";
 
+/// What an ask names to tell the dog the API refused the key: the dog holds
+/// every API agent and answers [`Answer::Held`], then closes
+pub const REFUSED: &str = "refused";
+
 /// What the dog says, first, when the project that asked for [`E2E`] has no
 /// host to run it on
 pub const NO_E2E_HOST: &str = "this project has no e2e host";
@@ -158,11 +163,14 @@ pub struct Ask {
     /// The agent and kind a `fit` ask is about
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fit: Option<FitAsk>,
+    /// Why the API refused the key, in a `refused` ask
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused: Option<Refusal>,
 }
 
 impl Ask {
     /// An ask for the counted lease `take` from process `pid`, running
-    /// `what`, with no folder, forge ask, pick or fit, from a command not yet
+    /// `what`, with no folder, forge ask, pick, fit or refusal, from a command not yet
     /// under a grant
     pub fn new(take: impl Into<String>, pid: u32, what: impl Into<String>) -> Self {
         Self {
@@ -174,6 +182,7 @@ impl Ask {
             forge: None,
             pick: None,
             fit: None,
+            refused: None,
         }
     }
 }
@@ -270,7 +279,8 @@ pub enum Answer {
     Go,
     /// A forge call waits this many seconds, then asks again
     Wait(u64),
-    /// The forge is held until this time, in seconds since the epoch
+    /// The forge, or the API after a `refused` ask, is held until this time,
+    /// in seconds since the epoch
     Held(u64),
     /// A line of an e2e run's output, as it arrives
     Output(String),
@@ -386,6 +396,7 @@ mod tests {
 
     use super::*;
     use crate::agent_board::Measure;
+    use crate::ports::Timestamp;
 
     #[test]
     fn a_worker_never_gets_shep_s_socket_or_a_relative_one() {
@@ -559,6 +570,21 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&picks).unwrap(),
             json!({ "picks": [{ "agent": "sonnet-high", "finish": 600, "wait": 0 }] })
+        );
+        let refused = Ask {
+            take: REFUSED.into(),
+            refused: Some(Refusal::SpendLimit {
+                resumes: Some(Timestamp(1_788_220_800)),
+            }),
+            ..ask.clone()
+        };
+        assert_eq!(
+            serde_json::to_value(&refused).unwrap()["refused"],
+            json!({ "spend_limit": { "resumes": 1_788_220_800 } })
+        );
+        assert_eq!(
+            serde_json::to_value(Refusal::NoCredit).unwrap(),
+            json!("no_credit")
         );
         let fit = Ask {
             take: FIT.into(),
