@@ -14,6 +14,7 @@ use super::super::report::{Begin, StepReport};
 use crate::agent_board::within_slack;
 use crate::lease::door::PickAsk;
 use crate::pacer::Scope;
+use crate::settings::AgentName;
 use crate::skills::split_command;
 use crate::state::StateError;
 use crate::work_item::{Turn, WorkItem, new_session_id};
@@ -48,7 +49,7 @@ impl Runner {
         let Some(soonest) = picks.iter().map(|pick| pick.finish).min() else {
             return Ok(None);
         };
-        let (issue, from) = (item.issue, item.agent.clone());
+        let from = item.agent.clone();
         let from_finish = (picks.iter().find(|pick| pick.agent == from)).map(|pick| pick.finish);
         if from_finish.is_some_and(|own| within_slack(own, soonest, Some(slack))) {
             return Ok(None);
@@ -58,6 +59,25 @@ impl Runner {
             Walked::Reads(reads) => return Ok(Some(reads)),
             Walked::Opens(_) | Walked::Held { .. } => return Ok(None),
         };
+        let to_finish = (picks.iter().find(|pick| pick.agent == to)).map_or(0, |pick| pick.finish);
+        let why = "another agent would finish it sooner";
+        self.move_item(to, from_finish, to_finish, why)
+            .map(|report| report.map(Begin::Report))
+    }
+
+    // Hands the current work item to `to` on a session of its own, with a note
+    // that says `why`, or None when kelpie cannot draw a session id.
+    pub(in crate::runner::turn) fn move_item(
+        &mut self,
+        to: AgentName,
+        from_finish: Option<u64>,
+        to_finish: u64,
+        why: &str,
+    ) -> Result<Option<StepReport>, StateError> {
+        let Some(item) = self.current() else {
+            return Ok(None);
+        };
+        let (issue, from) = (item.issue, item.agent.clone());
         let session = match new_session_id() {
             Ok(session) => session,
             Err(e) => {
@@ -68,32 +88,31 @@ impl Runner {
                 return Ok(None);
             }
         };
-        let to_finish = (picks.iter().find(|pick| pick.agent == to)).map_or(0, |pick| pick.finish);
         let mut next = self.state.clone();
         let Some(item) = next.item_mut(issue) else {
             return Ok(None);
         };
         // An agent that never ran adds nothing to the note it was handed.
         if item.handoff.is_none() {
-            item.handoff = Some(self.handoff_note(item));
+            item.handoff = Some(self.handoff_note(item, why));
         }
         item.left
             .push(std::mem::replace(&mut item.agent, to.clone()));
         item.session = session;
         item.turn = Turn::Due;
         self.save(next)?;
-        Ok(Some(Begin::Report(StepReport::HandedOff {
+        Ok(Some(StepReport::HandedOff {
             issue,
             from,
             to,
             from_finish,
             to_finish,
-        })))
+        }))
     }
 
     // What the new session is told of `item`, as its agent left it: the
     // branch's commits, that agent's last word, and the prompt it was due.
-    fn handoff_note(&self, item: &WorkItem) -> String {
+    fn handoff_note(&self, item: &WorkItem, why: &str) -> String {
         let from = &item.agent;
         let base = self.item_base(item);
         let branch = &item.branch;
@@ -121,11 +140,18 @@ impl Runner {
                 let (_, prompt) = split_command(prompt);
                 format!("\n\nThis is what kelpie was about to send {from}:\n\n{prompt}")
             }
+            // A turn whose call failed before its agent answered.
+            Turn::Running {
+                prompt: Some(prompt),
+                ..
+            } => {
+                let (_, prompt) = split_command(prompt);
+                format!("\n\nThis is what kelpie was sending {from}:\n\n{prompt}")
+            }
             _ => String::new(),
         };
         format!(
-            "Kelpie handed {} to you from {from}, since another agent would finish it sooner.\
-             \n\n{commits}{said}{due}",
+            "Kelpie handed {} to you from {from}, since {why}.\n\n{commits}{said}{due}",
             item.issue.shown(),
         )
     }
