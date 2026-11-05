@@ -1,9 +1,9 @@
 //! The package managers a project can keep, and the registries they fetch from
 //!
 //! One table for every reader: the sandbox of a call that works an item reaches
-//! the registries of the managers its worktree keeps a file for
-//! (`worker.package_registries`), the dev server's install runs the manager
-//! whose lockfile the checkout keeps, and `doctor` names each manager it finds.
+//! the registries of the managers its worktree keeps a file for (detection is
+//! always on), the dev server's install runs the manager whose lockfile the
+//! checkout keeps, and `doctor` names each manager it finds.
 
 use std::path::{Path, PathBuf};
 

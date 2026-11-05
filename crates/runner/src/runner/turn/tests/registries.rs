@@ -3,22 +3,14 @@
 use super::*;
 
 // The domains of the sandbox policy of the first turn of issue 7, in a project whose
-// worktree keeps `files` and whose `allowed_domains` is empty, with the setting as
-// `package_registries` says, or left out, which is on.
-fn first_turn_hosts(files: &[&str], package_registries: Option<bool>) -> Vec<String> {
+// worktree keeps `files` and whose `allowed_domains` is empty.
+fn first_turn_hosts(files: &[&str]) -> Vec<String> {
     let rig = Rig::new("shep");
     rig.edit_settings(|s| {
-        let s = s.replace(
+        s.replace(
             "allowed_domains = [\"crates.io\", \"index.crates.io\", \"static.crates.io\"]",
             "allowed_domains = []",
-        );
-        match package_registries {
-            Some(on) => s.replace(
-                "package_registries = true",
-                &format!("package_registries = {on}"),
-            ),
-            None => s.replace("package_registries = true\n", ""),
-        }
+        )
     });
     for file in files {
         rig.land(file, "");
@@ -43,14 +35,14 @@ fn first_turn_hosts(files: &[&str], package_registries: Option<bool>) -> Vec<Str
 
 #[test]
 fn a_bun_lock_reaches_the_npm_registry_with_no_allowed_domains() {
-    let hosts = first_turn_hosts(&["bun.lock"], None);
+    let hosts = first_turn_hosts(&["bun.lock"]);
 
     assert_eq!(hosts, ["registry.npmjs.org"]);
 }
 
 #[test]
 fn each_lockfile_adds_the_hosts_of_its_manager() {
-    let hosts = first_turn_hosts(&["bun.lock", "Cargo.lock", "go.mod", "uv.lock"], Some(true));
+    let hosts = first_turn_hosts(&["bun.lock", "Cargo.lock", "go.mod", "uv.lock"]);
 
     assert_eq!(
         hosts,
@@ -69,12 +61,5 @@ fn each_lockfile_adds_the_hosts_of_its_manager() {
 
 #[test]
 fn a_worktree_with_no_lockfile_or_manifest_reaches_no_registry() {
-    assert_eq!(first_turn_hosts(&["README.md"], None), Vec::<String>::new());
-}
-
-#[test]
-fn with_the_setting_off_the_policy_lists_only_allowed_domains() {
-    let hosts = first_turn_hosts(&["bun.lock", "Cargo.lock"], Some(false));
-
-    assert_eq!(hosts, Vec::<String>::new());
+    assert_eq!(first_turn_hosts(&["README.md"]), Vec::<String>::new());
 }

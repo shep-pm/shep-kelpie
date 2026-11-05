@@ -720,7 +720,7 @@ impl Runner {
                 .map_err(|e| format!("cannot write the worker's GitHub login: {e}"))?;
         }
         let login_token = self.maintainers_login(token)?;
-        let registries = self.registries(&item.worktree);
+        let registries = Self::registries(&item.worktree);
         let profile = WorkerProfile {
             worktree: &item.worktree,
             build: &item.build,
@@ -757,12 +757,8 @@ impl Runner {
         Ok(reach)
     }
 
-    /// The registries of the package managers `worktree` keeps files for, none while
-    /// `worker.package_registries` is off
-    fn registries(&self, worktree: &Path) -> Vec<&'static str> {
-        if !self.settings.worker.package_registries {
-            return Vec::new();
-        }
+    /// The registries of the package managers `worktree` keeps files for
+    fn registries(worktree: &Path) -> Vec<&'static str> {
         crate::package_managers::registries(&crate::package_managers::found_in(worktree))
     }
 

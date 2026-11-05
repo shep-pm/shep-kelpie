@@ -258,7 +258,7 @@ pub struct WorkerProfile<'a> {
     /// The domains the project's settings add to GitHub's
     pub allowed_domains: &'a [NonBlank],
     /// The registries of the package managers the worktree keeps files for, which
-    /// `worker.package_registries` adds to the domains; none while it is off
+    /// are always added to the domains
     pub registries: &'a [&'static str],
     /// Variables the project's settings point into the build folder
     pub build_env: &'a BTreeMap<EnvName, BuildDir>,
