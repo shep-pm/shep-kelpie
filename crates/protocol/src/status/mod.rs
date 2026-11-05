@@ -149,6 +149,10 @@ pub struct Status {
     /// the source line that took it; left out until a hold is recorded
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub lock: BTreeMap<String, f64>,
+    /// The passes of the runner's loop completed since this image started;
+    /// left out while 0
+    #[serde(default, skip_serializing_if = "no_passes")]
+    pub passes: u64,
 }
 
 /// An open work item, as `status` shows it
@@ -275,6 +279,10 @@ impl<'de> Deserialize<'de> for RulingStatus {
             ruling: Ruling::deserialize(&shown).map_err(de::Error::custom)?,
         })
     }
+}
+
+fn no_passes(n: &u64) -> bool {
+    *n == 0
 }
 
 fn is_zero(n: &usize) -> bool {

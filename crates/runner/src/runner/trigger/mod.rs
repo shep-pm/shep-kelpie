@@ -185,6 +185,10 @@ pub struct Status<'a> {
     /// the source line that took it; left out until a hold is recorded
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub lock: BTreeMap<String, f64>,
+    /// The passes of the runner's loop completed since this image started;
+    /// left out while 0
+    #[serde(skip_serializing_if = "no_passes")]
+    pub passes: u64,
 }
 
 /// A waiting ruling, as `status` shows it: the ruling as saved, with its
@@ -286,6 +290,10 @@ pub struct WorkItemStatus<'a> {
     pub test_checks: &'a [TestCheck],
     /// Where its wall time went, and the phase it is in now
     pub timings: Split,
+}
+
+fn no_passes(n: &u64) -> bool {
+    *n == 0
 }
 
 fn is_zero(n: &usize) -> bool {

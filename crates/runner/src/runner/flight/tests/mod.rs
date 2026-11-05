@@ -492,6 +492,20 @@ fn a_call_the_pass_started_is_in_the_copy_a_refused_trigger_reads() {
     );
 }
 
+#[test]
+fn status_counts_the_passes_the_loop_completed() {
+    let (rig, runner) = seven_open("passes");
+    let driven = Driven::new(&runner);
+    assert_eq!(rig.ask(&runner, "status", None).get("passes"), None);
+
+    driven.pass();
+    assert_eq!(rig.ask(&runner, "status", None)["passes"], 1);
+
+    driven.pass();
+    driven.pass();
+    assert_eq!(rig.ask(&runner, "status", None)["passes"], 3);
+}
+
 mod builds;
 mod ended;
 mod reads;

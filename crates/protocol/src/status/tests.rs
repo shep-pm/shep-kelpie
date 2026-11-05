@@ -47,6 +47,7 @@ fn empty_optional_fields_are_left_out() {
     status.forge_held_until = None;
     status.settings_refused = None;
     status.lock = BTreeMap::new();
+    status.passes = 0;
 
     let shown = serde_json::to_value(&status).unwrap();
     for key in [
@@ -67,6 +68,7 @@ fn empty_optional_fields_are_left_out() {
         "forge_held_until",
         "settings_refused",
         "lock",
+        "passes",
     ] {
         assert_eq!(shown.get(key), None, "{key}: {shown}");
     }
@@ -86,6 +88,18 @@ fn empty_optional_fields_are_left_out() {
         shown["work_item"].is_object(),
         "the status still names its first item"
     );
+}
+
+#[test]
+fn a_status_with_passes_round_trips() {
+    let mut status: Status = serde_json::from_value(recorded()).expect("the status reads");
+    status.passes = 3;
+
+    let shown = serde_json::to_value(&status).unwrap();
+
+    assert_eq!(shown["passes"], 3, "{shown}");
+    let read: Status = serde_json::from_value(shown).expect("the status reads back");
+    assert_eq!(read.passes, 3);
 }
 
 #[test]

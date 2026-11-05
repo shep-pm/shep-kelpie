@@ -436,6 +436,8 @@ pub struct Runner {
     posted: std::cell::RefCell<Vec<u64>>,
     // How long each hold of the runner's lock lasted, in memory only
     holds: lock_hold::Holds,
+    // The passes of the loop completed since the runner was built, in memory only
+    passes: u64,
 }
 
 impl Runner {
@@ -706,6 +708,7 @@ impl Runner {
             pause_line: None,
             posted: std::cell::RefCell::default(),
             holds: lock_hold::Holds::default(),
+            passes: 0,
         };
         runner.settle_older_bots()?;
         runner.settle_labels();
@@ -820,6 +823,7 @@ impl Runner {
             forge_held_until: self.forge_hold.until(now),
             settings_refused: self.refusal.as_ref(),
             lock: self.holds.longest(),
+            passes: self.passes,
         }
     }
 

@@ -175,10 +175,12 @@ fn a_code_answers_once_across_every_ruling() {
 fn a_reply_to_a_settled_ruling_runs_nothing_and_the_topic_is_told() {
     let (rig, runner, _) = alerted("koji");
     rig.ask(&runner, "rule", Some("71 no rename the flag"));
-    // The longest holds of the lock differ from one answer to the next, so they are left out.
+    // The longest holds of the lock and the count of passes differ from one answer to the
+    // next, so they are left out.
     let status = |rig: &Rig, runner: &Mutex<Runner>| {
         let mut status = rig.ask(runner, "status", None);
         status.as_object_mut().unwrap().remove("lock");
+        status.as_object_mut().unwrap().remove("passes");
         status
     };
     let before = status(&rig, &runner);
