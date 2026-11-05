@@ -35,7 +35,7 @@ This is early. It changes without notice, and there is no release yet.
 2. **Pick.** A `ready-for-agent` issue joins the board. The project manager's agent picks the next one, or, without one, the board takes the first in its order, which starts as priority, then age, and opens a work item for it (see [The board](docs/guide/board.md#the-board)).
 3. **Build.** A worker, one of the project's implementers, builds it inline, opens a draft pull request and ends its turn (see [Building](docs/guide/building.md#building)).
 4. **CI.** A head waits for green before each reviewer reads it, and after the last fix. A red run goes back to the worker. A second red run on a head the worker left alone asks you.
-5. **Review.** A pass runs `reviews.need` reviewers (2 by default), each the agent board's pick from the reviewer files `agents.allow` holds, apart from `contributions.security_reviewer`. Each reads the pull request once. One that finds anything, nits included, sends the worker all its findings for one fix turn, and the next reviewer reads the fix after CI passes. No loop, no judge (see [The review](docs/guide/review.md#the-review)).
+5. **Review.** A pass runs `reviews.need` reviewers (2 by default), each the agent board's pick from the reviewer files `agents.allow` holds, apart from `contributions.security_reviewer`. Each reads the pull request once. One that finds anything, nits included, sends the worker all its findings for one fix turn, and the next reviewer reads the fix after CI passes. A light review, a docs-only change or a small one the project manager tagged light, runs `reviews.light` reviewers instead (`reviews.light_paths`, `reviews.full_paths`, `reviews.pm_lightens` and `reviews.light_max_lines` decide which). No loop, no judge (see [The review](docs/guide/review.md#the-review)).
 6. **Merge.** Under `ask` you get a ruling; under `auto` kelpie merges once every gate passes. Either way it is a merge commit of the head the gates passed (see [CI and the merge](docs/guide/ci-and-merge.md#ci-and-the-merge)).
 
 Pull requests from other people are followed too, when `contributions.pick` allows it. Kelpie reads each head for security, answers the contributor's comments, and, once the contributor has been quiet for `nudge_days`, asks them in one comment whether it may take the pull request from here. A yes, a thumbs up on that comment, or silence until `quiet_days` is a release, recorded as `released`; a no restarts the wait, and a second no followed by quiet is a `waiting` ruling for you: keep waiting, adopt anyway, or close with thanks (see [Contributions](docs/guide/contributions.md)). You rule every merge of such a pull request, `git.merging = "auto"` included, and a `no <note>` goes to the contributor in the representative's words. A release hands the pull request to kelpie: it opens a work item on its branch, files an issue from the pull request's title and body when it closes none, has the project's reviewers read it and a worker finish it. Your merge ruling answers `yes`, `no <note>` or `rework <note>`, and a `rework` takes it over at once without waiting for the contributor.
@@ -214,6 +214,11 @@ shep kelpie get -p '*' agents.allow
 ```toml
 [app.dogs.kelpie.reviews]
 need = 2
+light = 1                      # reviewers of a light review; need when absent
+light_paths = ["**/*.md", "docs/**"]  # a change only here is light; these when absent
+full_paths = []                # always get need; none when absent
+pm_lightens = false            # a small change the project manager tagged light is light too; off when absent
+light_max_lines = 10           # most lines, added plus deleted, of that change; 10 when absent
 ```
 
 ### 8. Start it, and label a first issue
