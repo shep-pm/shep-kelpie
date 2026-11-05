@@ -10,10 +10,10 @@ use crate::ticket::TicketId;
 
 /// What a `pick` entry holds, as a dropped one names it
 pub(super) const PICK: &str = "a ticket id, or an object with an `issue` and any of a `tier`, an \
-                               implementer as `agent` and `slack` in minutes";
+                               implementer as `agent`, `slack` in minutes and `light` as a boolean";
 
 /// The keys a picked object takes
-const KEYS: [&str; 4] = ["issue", "tier", "agent", "slack"];
+const KEYS: [&str; 5] = ["issue", "tier", "agent", "slack", "light"];
 
 /// A ready issue the project manager picked, and what it said its work item needs
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +26,8 @@ pub(in crate::runner) struct Picked {
     pub(in crate::runner) agent: Option<AgentName>,
     /// The minutes past its quickest finish its work item may take
     pub(in crate::runner) slack: Option<u32>,
+    /// Whether it called its issue a small change
+    pub(in crate::runner) light: bool,
 }
 
 impl Picked {
@@ -36,6 +38,7 @@ impl Picked {
             tier: None,
             agent: None,
             slack: None,
+            light: false,
         }
     }
 }
@@ -62,11 +65,16 @@ pub(super) fn picked(value: &Value) -> Option<Picked> {
         Some(slack) => Some(u32::try_from(slack.as_u64()?).ok()?),
         None => None,
     };
+    let light = match given("light") {
+        Some(light) => light.as_bool()?,
+        None => false,
+    };
     Some(Picked {
         issue: ticket(fields.get("issue")?)?,
         tier,
         agent,
         slack,
+        light,
     })
 }
 
@@ -92,6 +100,7 @@ mod tests {
                     tier: Some(Tier::Heavy),
                     agent: Some(AgentName::kelpies("opus-high")),
                     slack: Some(0),
+                    light: false,
                 },
                 Picked::of(ticket(14)),
             ]
@@ -99,6 +108,28 @@ mod tests {
         assert_eq!(answer.unread, Vec::<String>::new());
         let one = read("{\"pick\": {\"issue\": 12, \"slack\": 30}}").unwrap();
         assert_eq!(one.picks[0].slack, Some(30));
+    }
+
+    #[test]
+    fn a_pick_may_carry_a_light_tag_and_a_non_boolean_one_drops_the_entry() {
+        let answer = read(
+            "{\"pick\": [{\"issue\": 12, \"light\": true}, {\"issue\": 14, \"light\": false}, \
+             {\"issue\": 15, \"light\": null}, {\"issue\": 16}, 17]}",
+        )
+        .unwrap();
+        let lights: Vec<_> = answer.picks.iter().map(|p| p.light).collect();
+        assert_eq!(lights, [true, false, false, false, false]);
+        assert_eq!(answer.unread, Vec::<String>::new());
+
+        let bad = ["\"yes\"", "1", "0", "[]"];
+        for light in bad {
+            let one = read(&format!(
+                "{{\"pick\": {{\"issue\": 12, \"light\": {light}}}}}"
+            ))
+            .unwrap();
+            assert_eq!(one.picks, [], "light {light}");
+            assert_eq!(one.unread.len(), 1, "light {light}");
+        }
     }
 
     #[test]
@@ -117,7 +148,7 @@ mod tests {
         assert_eq!(
             answer.unread[0],
             "`pick`: a ticket id, or an object with an `issue` and any of a `tier`, an \
-             implementer as `agent` and `slack` in minutes, not {\"issue\":12,\"model\":\"opus\"}"
+             implementer as `agent`, `slack` in minutes and `light` as a boolean, not {\"issue\":12,\"model\":\"opus\"}"
         );
         let one = read("{\"pick\": {\"issue\": 12, \"tier\": \"huge\"}}").unwrap();
         assert_eq!(
