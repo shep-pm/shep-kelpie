@@ -21,7 +21,7 @@ use crate::pacer::Scope;
 use crate::ports::Timestamp;
 use crate::settings::{AgentName, ListedReviewer, NonBlank};
 use crate::state::StateError;
-use crate::work_item::{BotSkipped, Phase, Review, WorkItem};
+use crate::work_item::{BotSkipped, Phase, Review, ReviewWeight, WorkItem};
 
 mod weight;
 
@@ -38,6 +38,31 @@ pub(super) enum Chosen {
     Instead(Box<Begin>),
     /// The changed files could not be listed, for this reason
     Failed(String),
+}
+
+/// Where a round leaves a work item, with the weight read for deciding it
+pub(in crate::runner) struct RoundNext {
+    phase: Phase,
+    // None leaves the item's weight as it is.
+    weight: Option<Option<ReviewWeight>>,
+}
+
+impl RoundNext {
+    /// `phase`, which read no weight
+    pub(in crate::runner) fn of(phase: Phase) -> Self {
+        Self {
+            phase,
+            weight: None,
+        }
+    }
+
+    /// Saves the phase and the weight it was decided on into `item`
+    pub(in crate::runner) fn apply(self, item: &mut WorkItem) {
+        item.phase = self.phase;
+        if let Some(weight) = self.weight {
+            item.weight = weight;
+        }
+    }
 }
 
 impl Runner {
@@ -266,35 +291,38 @@ impl Runner {
     ///
     /// A pass with a bot it went on without ends in a round step of its own,
     /// which first reads whether that bot reviewed the head since.
-    pub(in crate::runner) fn after_round(&self, review: Review, now: Timestamp) -> Phase {
+    pub(in crate::runner) fn after_round(&self, review: Review, now: Timestamp) -> RoundNext {
         match self.current() {
             Some(item) => self.after_round_in(item, review, now),
-            None => Phase::Review(
+            None => RoundNext::of(Phase::Review(
                 Review {
                     ran: self.ran_of(&review),
                     ..review
                 }
                 .next_round(),
-            ),
+            )),
         }
     }
 
     /// [`Self::after_round`] for `item` as it will be saved, with the
     /// reviewer just done counted as passed over, if it was
     ///
-    /// A pass that ends short of `reviews.need` for want of a reviewer goes
-    /// on to a round step of its own, which marks the work item unreviewed.
+    /// The caller saves the weight it carries, read again from the worktree,
+    /// with the phase. A pass that ends short of `reviews.need` for want of a
+    /// reviewer goes on to a round step of its own, which marks the work item
+    /// unreviewed.
     pub(in crate::runner) fn after_round_in(
         &self,
         item: &WorkItem,
         review: Review,
         now: Timestamp,
-    ) -> Phase {
+    ) -> RoundNext {
         let ran = self.ran_of(&review);
         let next = Review { ran, ..review }.next_round();
         let base = item.review_base(self.item_base(item));
         // The fix turn that just ended may have changed what the diff touches.
-        let item = &self.reweighed(item, &base);
+        let item = self.reweighed(item, &base);
+        let item = &item;
         // A diff git could not take is the next round's step to report, and a
         // pass no reviewer read ends in a step of its own, which says so.
         let enough = self.reads_in(item, &next) >= self.need_of(item);
@@ -305,12 +333,16 @@ impl Runner {
         let short = self.pass_unread(item, &next, &[]).is_some();
         // Only a bot passed over before this round makes one of its own.
         let skipped_before = self.current().is_some_and(|i| !i.bots_skipped.is_empty());
-        match over && !next.unread && !skipped_before && !short {
+        let phase = match over && !next.unread && !skipped_before && !short {
             true => Phase::Ci {
                 head: None,
                 since: now,
             },
             false => Phase::Review(next),
+        };
+        RoundNext {
+            phase,
+            weight: Some(item.weight.clone()),
         }
     }
 

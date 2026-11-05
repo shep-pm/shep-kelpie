@@ -29,6 +29,7 @@ pub(crate) use settle::SETTLE_LEAST;
 use super::Runner;
 use super::gate::settled;
 use super::report::{Begin, StepReport};
+use super::review::RoundNext;
 
 use crate::lease::wire::WindowFact;
 use crate::ports::{Finding, PullRequestState, Timestamp, Visibility};
@@ -671,10 +672,10 @@ impl Runner {
         let (round, reviewer) = (review.round, self.round_reviewer(bot));
         let next = match threads.len() {
             0 => self.after_round(review, self.ports.clock.now()),
-            _ => Phase::Review(Review {
+            _ => RoundNext::of(Phase::Review(Review {
                 stage: ReviewStage::Found { findings, threads },
                 ..review
-            }),
+            })),
         };
         let mut saved = self.state.clone();
         self.bot_back_in(&mut saved, bot);
@@ -686,7 +687,7 @@ impl Runner {
         item.unreviewed = None;
         *item.bot_reads.entry(bot).or_default() += 1;
         item.counts.review_rounds = item.counts.review_rounds.saturating_add(1);
-        item.phase = next;
+        next.apply(item);
         self.save(saved)?;
         Ok(Begin::Report(StepReport::BotReviewed {
             issue: self.item().issue,
@@ -726,7 +727,7 @@ impl Runner {
         item.bots_skipped
             .retain(|s| s.reviewer() != skipped.reviewer());
         item.bots_skipped.push(skipped);
-        item.phase = self.after_round_in(item, review, now);
+        self.after_round_in(item, review, now).apply(item);
         self.save(saved)?;
         Ok(Begin::Report(StepReport::ReviewerSkipped {
             issue: self.item().issue,

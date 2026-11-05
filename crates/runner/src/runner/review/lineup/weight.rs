@@ -108,7 +108,7 @@ mod tests {
     use std::sync::Mutex;
 
     use super::super::super::several::{
-        allow_reviewers, at_review, reviewer_models, reviewers_until_ci, two_local,
+        allow_reviewers, at_review, listing, reviewer_models, reviewers_until_ci, two_local,
     };
     use crate::agents::Tier;
     use crate::ports::{Finding, Severity};
@@ -307,6 +307,25 @@ mod tests {
             2,
             "the fix is read by a second reviewer"
         );
+        let touched = Heavier::Touched("src/lib.rs".into());
+        assert_eq!(weight_of(&runner), Some(ReviewWeight::Full(touched)));
+    }
+
+    #[test]
+    fn a_fix_that_ends_the_pass_at_ci_saves_the_weight_it_reread() {
+        let rig = listing(&["mine"]);
+        rig.reviews_need(Some(2));
+        rig.edit_settings(|text| format!("{text}light = 1\n"));
+        let runner = at_review(&rig, "README.md");
+        let finding = Finding::new(Severity::High, "README.md", 1, "wrong", "it is");
+        rig.reviewer
+            .script([ScriptedRound::Findings(vec![finding])]);
+        rig.claude.script([Scripted::Push("src/lib.rs", "fixed\n")]);
+
+        reviewers_until_ci(&rig, &runner);
+
+        let phase = rig.ask(&runner, "status", None)["work_item"]["phase"]["state"].clone();
+        assert_eq!(phase, "ci", "no reviewer is left to read the fix");
         let touched = Heavier::Touched("src/lib.rs".into());
         assert_eq!(weight_of(&runner), Some(ReviewWeight::Full(touched)));
     }
