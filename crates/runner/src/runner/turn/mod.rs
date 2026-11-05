@@ -470,10 +470,9 @@ impl Runner {
             }
             // The forge answered the turn's opening read with a 5xx, which is
             // the forge failing and not the ask: the step is tried again at the
-            // next look, and nothing parks. The install this pass ran is recorded
-            // as on every other way the step ends, so it runs once.
+            // next look, and nothing parks. No install ran to record, since a
+            // turn whose opening read failed installs nothing (`installing`).
             Err(StartFailure::Hold(reason)) => {
-                self.packages_installed(issue);
                 return Ok(Begin::Report(StepReport::GateFailed { issue, reason }));
             }
             Ok(call) => {
