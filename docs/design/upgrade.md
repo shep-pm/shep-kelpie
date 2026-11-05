@@ -22,7 +22,7 @@ After the canary's restart, `status` is asked every `patience.poll` and `judge(b
 
 - Passes: `passes` is at least 1 (a first full pass of the loop, #1670), `build` is the installed stamp, and `commit` is the installed commit when the installed build names one.
 - Fails at once: `settings_refused` present, a step in `work_items` newly `failing`, a ticket in the "before" `working` list whose `turn.state` is now `failed`, or another `build` or `commit`.
-- A build from before #1670 sends no `passes`: its first `status` after the restart on the installed build (or with no `build` either) passes, since there is no count to wait for.
+- A current build sends no `passes` until its first pass ends, so a body with none waits like one with 0. A build from before #1670 never sends one: a canary on the installed build that still counts none after `patience.start` is taken for it and passes, so a rollback onto such a build is not stuck. Every other check applies the whole time.
 - Fails on silence: no `status` for `patience.start` after the restart, or the runner not running.
 - Otherwise it keeps asking, and Ctrl-C ends it. A step failing before and after the restart is not new.
 

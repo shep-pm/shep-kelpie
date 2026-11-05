@@ -7,6 +7,7 @@ const WORKING: &str = r#"{"build":"{build}","passes":1,"working":["7"],
     "work_items":[{"issue":"7","phase":{"state":"implement"},"turn":{"state":"running","since":1}}]}"#;
 
 // A runner that has not yet finished a full pass of its loop.
+const NO_COUNT: &str = r#"{"build":"{build}","work_items":[]}"#;
 const NO_PASS: &str = r#"{"build":"{build}","passes":0,"work_items":[]}"#;
 
 // Another build than the installed one.
@@ -47,6 +48,25 @@ fn triggers<'a>(writes: &'a [Request], sheep: &str) -> Vec<&'a str> {
             _ => None,
         })
         .collect()
+}
+
+/// How many `status` looks the canary `aria` had between its restart and `koji`'s
+fn looks_before_the_rest(writes: &[Request]) -> usize {
+    let restart = |name: &str| {
+        writes
+            .iter()
+            .position(
+                |w| matches!(w, Request::Restart { selector: SelectorSpec::Name(n) } if n == name),
+            )
+            .unwrap()
+    };
+    writes[restart("aria")..restart("koji")]
+        .iter()
+        .filter(|w| {
+            matches!(w, Request::Trigger { selector: SelectorSpec::Name(n), action, .. }
+                if n == "aria" && action == "status")
+        })
+        .count()
 }
 
 fn told(said: &[String], what: &str) -> Option<usize> {
@@ -416,13 +436,16 @@ async fn a_canary_that_answers_no_status_within_the_start_wait_fails_and_no_othe
     };
     let action = Action::Install(Source::Binary(new));
 
-    let err = rig.upgrade_within(action, patience).await.0.unwrap_err();
+    let (ran, said) = rig.upgrade_within(action, patience).await;
+    let err = ran.unwrap_err();
 
     assert_stopped_at_the_canary(
         &mut rig,
         &err,
         "the canary `aria` did not answer in 0s after its restart",
     );
+    // No other runner goes on first: the line must not say they do.
+    assert!(told(&said, "go on first").is_none(), "{said:?}");
 }
 
 #[tokio::test]
@@ -454,20 +477,48 @@ async fn a_step_that_began_failing_while_the_canary_drained_does_not_fail_it() {
 }
 
 #[tokio::test]
-async fn a_canary_from_before_passes_passes_once_it_answers_on_the_installed_build() {
+async fn a_canary_that_counts_no_passes_yet_waits_for_its_first_instead_of_passing() {
+    // A current runner leaves `passes` out until its first pass ends.
+    let mut rig = Rig::new().await;
+    rig.runs("aria", &rig.installed.clone(), true);
+    let mut looks = vec![IDLE; 4];
+    looks.extend([NO_COUNT; 12]);
+    looks.push(IDLE);
+    rig.shepherd.says("aria", &looks);
+    let new = rig.build("new", "0.3.0", "0.23.0");
+
+    let (ran, _) = rig.install(&new).await;
+
+    ran.unwrap();
+    let writes = rig.shepherd.writes();
+    assert_eq!(restarted(&writes), ["kelpie", "aria", "koji"]);
+    let waited = looks_before_the_rest(&writes);
+    assert!(
+        (12..100).contains(&waited),
+        "`koji` waited for the pass, not for the start wait: {waited} looks"
+    );
+}
+
+#[tokio::test]
+async fn a_canary_from_before_passes_passes_once_the_start_wait_has_gone_by_without_a_count() {
     // A rollback onto such a build must not wait for a count it never sends.
-    for after in [
-        r#"{"build":"{build}","work_items":[]}"#,
-        r#"{"work_items":[]}"#,
-    ] {
+    for after in [NO_COUNT, r#"{"work_items":[]}"#] {
         let mut rig = Rig::new().await;
         canary_says(&rig, IDLE, after);
         let new = rig.build("new", "0.3.0", "0.23.0");
 
-        let (ran, _) = rig.install(&new).await;
+        let (ran, said) = rig.install(&new).await;
 
         ran.unwrap();
-        assert_eq!(rig.restarts(), ["kelpie", "aria", "koji"], "{after}");
+        // The start wait is 10s, a look about every 10ms.
+        let writes = rig.shepherd.writes();
+        let waited = looks_before_the_rest(&writes);
+        assert!(waited >= 500, "{after}: {waited} looks");
+        assert_eq!(restarted(&writes), ["kelpie", "aria", "koji"], "{after}");
+        assert!(
+            told(&said, "counts no passes").is_some(),
+            "{after}: {said:?}"
+        );
     }
 }
 

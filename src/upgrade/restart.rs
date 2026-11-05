@@ -610,7 +610,7 @@ async fn bounce(
                 return Ok(Bounced::Dead);
             }
             say(format!(
-                "`{name}` did not answer in {}s after its restart, so the others go on first",
+                "`{name}` did not answer in {}s after its restart",
                 patience.start.as_secs()
             ));
             return Ok(Bounced::Silent);

@@ -170,6 +170,8 @@ pub(super) enum Verdict {
     Passed,
     /// Not yet: no pass, or a body that names nothing wrong
     Waiting,
+    /// As `Waiting`, from the installed build with no `passes` key at all
+    Uncounted,
     /// A definite signal, as the sentence that follows "the canary `name`"
     Failed(String),
 }
@@ -236,17 +238,18 @@ pub(super) fn judge(before: &str, now: &str, installed: &Installed) -> Verdict {
         .commit
         .as_deref()
         .is_none_or(|commit| now["commit"].as_str() == Some(commit));
-    match now["passes"].as_u64() {
-        Some(passes) if passes >= 1 && built && commit => Verdict::Passed,
-        // A build from before `passes` never counts one, and an answer from it
-        // after its restart is all there is to wait for.
-        None if now.get("passes").is_none_or(Value::is_null)
-            && (built || now["build"].is_null())
-            && commit =>
-        {
+    if now["passes"].as_u64().unwrap_or(0) >= 1 {
+        if built && commit {
             Verdict::Passed
+        } else {
+            Verdict::Waiting
         }
-        _ => Verdict::Waiting,
+    } else if now["passes"].is_null() && (built || now["build"].is_null()) && commit {
+        // A current runner leaves `passes` out until its first pass ends, and a
+        // build from before #1670 never sends it: only time tells them apart.
+        Verdict::Uncounted
+    } else {
+        Verdict::Waiting
     }
 }
 
@@ -267,6 +270,7 @@ pub(super) async fn check(
 ) -> Result<(), Stopped> {
     let waited = Instant::now();
     let mut heard = false;
+    let mut uncounted_since = None;
     loop {
         match trigger(client, name, "status", None).await? {
             Answered::Runner(now) => {
@@ -282,7 +286,18 @@ pub(super) async fn check(
                     Verdict::Failed(why) => {
                         return Err(Stopped::Canary(format!("the canary `{name}` {why}")));
                     }
-                    Verdict::Waiting => {}
+                    Verdict::Uncounted => {
+                        let since: &Instant = uncounted_since.get_or_insert_with(Instant::now);
+                        if since.elapsed() >= patience.start {
+                            say(format!(
+                                "the canary `{name}` shows the installed build and counts no \
+                                 passes, so it is taken for a build from before they were \
+                                 counted and passes"
+                            ));
+                            return Ok(());
+                        }
+                    }
+                    Verdict::Waiting => uncounted_since = None,
                 }
             }
             Answered::Down if !is_running(client, name).await? => {
