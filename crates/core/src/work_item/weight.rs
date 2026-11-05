@@ -44,6 +44,8 @@ pub enum Heavier {
     FullPaths(String),
     /// It changes this file, the first outside `reviews.light_paths`
     Touched(String),
+    /// A reviewer's HIGH finding was sent to the worker
+    High,
 }
 
 impl ReviewWeight {
@@ -80,6 +82,7 @@ impl fmt::Display for Heavier {
             Self::Dependencies => f.write_str("dependency file"),
             Self::AgentFiles => f.write_str("agent files"),
             Self::FullPaths(file) => write!(f, "full_paths: {file}"),
+            Self::High => f.write_str("stepped up: HIGH finding"),
             Self::Touched(file) => match file.split_once('/') {
                 Some((folder, _)) => write!(f, "diff touched {folder}/"),
                 None => write!(f, "diff touched {file}"),
@@ -114,6 +117,12 @@ mod tests {
         assert_eq!(shown(deep), "full (diff touched src/)");
         let root = full(Heavier::Touched("Makefile".into()));
         assert_eq!(shown(root), "full (diff touched Makefile)");
+    }
+
+    #[test]
+    fn a_stepped_up_review_reads_full_with_its_reason() {
+        let stepped = ReviewWeight::Full(Heavier::High);
+        assert_eq!(shown(stepped), "full (stepped up: HIGH finding)");
     }
 
     #[test]

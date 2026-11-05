@@ -5,7 +5,7 @@ use std::fs;
 use crate::state::tests::store_in;
 use crate::state::*;
 use crate::test::a_work_item;
-use crate::work_item::{Lighter, ReviewWeight};
+use crate::work_item::{Heavier, Lighter, ReviewWeight};
 
 #[test]
 fn a_version_95_work_item_loads_with_no_weight_and_keeps_one_once_set() {
@@ -31,6 +31,26 @@ fn a_version_95_work_item_loads_with_no_weight_and_keeps_one_once_set() {
     assert_eq!(
         saved["work_items"][0]["weight"],
         serde_json::json!({"light": "docs"})
+    );
+    assert_eq!(store.load().unwrap(), Some(state));
+}
+
+#[test]
+fn a_stepped_up_weight_saves_as_high_and_loads_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path());
+    let mut state = ProjectState::new();
+    let mut item = a_work_item();
+    item.weight = Some(ReviewWeight::Full(Heavier::High));
+    state.work_items.push(item);
+
+    store.save(&state).unwrap();
+
+    let saved = read_back(dir.path());
+    assert_eq!(saved["version"], 97);
+    assert_eq!(
+        saved["work_items"][0]["weight"],
+        serde_json::json!({"full": "high"})
     );
     assert_eq!(store.load().unwrap(), Some(state));
 }
