@@ -54,6 +54,19 @@ impl Runner {
         }))
     }
 
+    /// `item` with its weight read again from the worktree's head, as a fix
+    /// turn may have changed what the diff touches
+    ///
+    /// A diff git cannot take leaves the weight out, so the full count
+    /// stands, and the next round reports the failure.
+    pub(super) fn reweighed(&self, item: &WorkItem, base: &str) -> WorkItem {
+        let weight = self.weigh(item, &item.worktree, base);
+        WorkItem {
+            weight: weight.unwrap_or(None),
+            ..item.clone()
+        }
+    }
+
     /// How many reviewers must read `item`'s pull request: the light count
     /// for a change weighed light, and `reviews.need` otherwise
     pub(super) fn need_of(&self, item: &WorkItem) -> u32 {
@@ -98,8 +111,9 @@ mod tests {
         allow_reviewers, at_review, reviewer_models, reviewers_until_ci, two_local,
     };
     use crate::agents::Tier;
+    use crate::ports::{Finding, Severity};
     use crate::runner::{Runner, step};
-    use crate::test::Rig;
+    use crate::test::{Rig, Scripted, ScriptedRound};
     use crate::work_item::{Heavier, Lighter, ReviewWeight};
 
     // `two_local`'s project over candidates `mine`, `other` and `claude`,
@@ -274,5 +288,26 @@ mod tests {
             let ask = rig.agent_board.asks().pop().unwrap();
             assert_eq!(ask.tier, Some(tier), "{file}");
         }
+    }
+
+    #[test]
+    fn a_fix_that_touches_src_makes_a_light_item_full_before_the_pass_ends() {
+        let rig = project("light = 1\n");
+        let runner = at_review(&rig, "README.md");
+        rig.agent_board.ranks(&["mine", "other", "claude"]);
+        let finding = Finding::new(Severity::High, "README.md", 1, "wrong", "it is");
+        rig.reviewer
+            .script([ScriptedRound::Findings(vec![finding])]);
+        rig.claude.script([Scripted::Push("src/lib.rs", "fixed\n")]);
+
+        reviewers_until_ci(&rig, &runner);
+
+        assert_eq!(
+            rig.reviewer.seen().len(),
+            2,
+            "the fix is read by a second reviewer"
+        );
+        let touched = Heavier::Touched("src/lib.rs".into());
+        assert_eq!(weight_of(&runner), Some(ReviewWeight::Full(touched)));
     }
 }

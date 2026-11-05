@@ -293,6 +293,8 @@ impl Runner {
         let ran = self.ran_of(&review);
         let next = Review { ran, ..review }.next_round();
         let base = item.review_base(self.item_base(item));
+        // The fix turn that just ended may have changed what the diff touches.
+        let item = &self.reweighed(item, &base);
         // A diff git could not take is the next round's step to report, and a
         // pass no reviewer read ends in a step of its own, which says so.
         let enough = self.reads_in(item, &next) >= self.need_of(item);
