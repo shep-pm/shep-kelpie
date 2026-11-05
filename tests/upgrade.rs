@@ -31,8 +31,11 @@ const KELPIE: &str = env!("CARGO_BIN_EXE_shep-kelpie");
 // Bounds each run of the binary, so a hang fails by name.
 const PATIENCE: Duration = Duration::from_secs(30);
 
-const MERGING: &str = r#"{"work_items":[{"issue":7,"phase":{"state":"merge","head":"abc"}}]}"#;
-const IDLE: &str = r#"{"work_items":[]}"#;
+// `{build}` is the stamp of the installed file when a runner answers, as a
+// runner shows the file it started from.
+const MERGING: &str = r#"{"build":"{build}","passes":1,
+    "work_items":[{"issue":7,"phase":{"state":"merge","head":"abc"}}]}"#;
+const IDLE: &str = r#"{"build":"{build}","passes":1,"work_items":[]}"#;
 
 struct Scene {
     root: TempDir,
@@ -89,10 +92,11 @@ impl Scene {
         koji.dogs.insert("kelpie".into(), DogTable::from(table));
         let flock = [dog, koji];
         let says = Arc::clone(&self.koji_says);
+        let installed = self.installed();
         fake_daemon_answering_with_ack(
             &shep_kelpie::home::shepherd_address(&self.shep_home()),
             ack,
-            move |r| answer(&flock, &says, r),
+            move |r| answer(&flock, &says, &installed, r),
         )
         .await
     }
@@ -154,7 +158,12 @@ fn row(id: u32, config: &AppConfig) -> ProcessInfo {
     .build()
 }
 
-fn answer(flock: &[AppConfig], says: &Mutex<Vec<&'static str>>, request: &Request) -> Response {
+fn answer(
+    flock: &[AppConfig],
+    says: &Mutex<Vec<&'static str>>,
+    installed: &Path,
+    request: &Request,
+) -> Response {
     let named = |selector: &SelectorSpec| {
         let SelectorSpec::Name(name) = selector else {
             panic!("kelpie named no sheep: {selector:?}");
@@ -205,11 +214,12 @@ fn answer(flock: &[AppConfig], says: &Mutex<Vec<&'static str>>, request: &Reques
                 }
                 "koji" => {
                     let mut says = says.lock().unwrap();
-                    match says.len() {
+                    let body = match says.len() {
                         1 => says[0],
                         _ => says.remove(0),
-                    }
-                    .to_owned()
+                    };
+                    let stamp = shep_kelpie::home::stamp_of(installed).unwrap_or_default();
+                    body.replace("{build}", &stamp)
                 }
                 _ => r#"{"leases":[]}"#.to_owned(),
             };

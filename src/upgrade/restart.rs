@@ -1,14 +1,16 @@
 //! Restarting the dog and each runner onto the installed build
 //!
-//! One sheep at a time, the dog first: every runner asks it for leases. A
-//! runner is restarted only when its `status` shows no merge in flight, and the
-//! dog only when no runner has one. A runner that does not answer `status` is
-//! waited on and named if the wait runs out. A stopped sheep stays stopped.
-//! A silent runner after its restart does not hold the others back: it is
-//! asked again after them. Unless asked to restart at once, each runner is
-//! drained first ([`super::drain`]). The dog is never drained. Every sheep
-//! restarted must run the adopted dog's path, or the restart moves nothing.
+//! The dog goes first, since every runner asks it for leases: it waits until no
+//! runner has a merge in flight, and is never drained. Then one canary, the
+//! first runner to show none, is restarted while the others keep working
+//! ([`super::canary`]). Once it shows the new build healthy the rest restart
+//! together, so a runner waiting on a merge holds none behind it. A runner is
+//! restarted only when its `status` shows no merge in flight. A stopped sheep
+//! stays stopped, a silent runner is asked again after the others, and unless
+//! asked to restart at once each runner is drained first ([`super::drain`]).
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -18,12 +20,12 @@ use shep_client::shep_core::status::ProcStatus;
 use shep_kelpie_protocol::status::Failing;
 use tokio::time::Instant;
 
+use super::canary::{self, Installed, Picked, Stopped};
 use super::drain::{self, Purpose};
 use super::handover::{Handed, hand_over};
 use crate::dog;
 use crate::flock::control::{Answered, trigger};
 use crate::flock::{flock, kelpie_sheep, resume, script, tables};
-use crate::home::stamp_of;
 use crate::interrupt::{Caught, Interrupts};
 use crate::shepherd::Connection;
 use crate::ticket::TicketId;
@@ -194,18 +196,21 @@ impl Plan {
 
 /// Restarts the dog and each running runner, saying what it does through `say`
 ///
-/// With `keep_calls`, each runner is handed over to the installed build. One
-/// that refuses, predates the handover or is slow to show the build is drained
-/// before its merge wait, and sent `undrain` if not restarted after all.
+/// The dog first, then the canary, then every other runner together once the
+/// canary passes. With `keep_calls`, each runner is handed over to the
+/// installed build. One that refuses, predates the handover or is slow to show
+/// the build is drained before its merge wait, and sent `undrain` if not
+/// restarted after all.
 ///
 /// # Errors
 ///
-/// A message naming the sheep that could not be restarted, did not come back,
-/// kept a merge in flight past `patience.merge`, or would not say whether it
-/// had one; a drained runner that kept a call past its ceiling and
-/// `patience.margin`; or the interrupt. A runner silent after its restart is
-/// named after the others, the dog at once. Sheep restarted before it are on
-/// the new build, and running the upgrade again finishes the rest.
+/// [`Stopped::Canary`] when the canary fails a check; no other runner was
+/// touched. Otherwise [`Stopped::Other`], a message naming the sheep that could
+/// not be restarted, did not come back, kept a merge in flight past
+/// `patience.merge`, or would not say whether it had one; a drained runner that
+/// kept a call past its ceiling and `patience.margin`; or the interrupt. A
+/// runner silent after its restart is named after the others, the dog at once.
+/// Running the upgrade again finishes what was not restarted.
 pub async fn restart_all(
     client: &dyn Connection,
     plan: &Plan,
@@ -213,7 +218,9 @@ pub async fn restart_all(
     keep_calls: bool,
     interrupt: Interrupt,
     say: &mut dyn FnMut(String),
-) -> Result<(), String> {
+) -> Result<(), Stopped> {
+    let shared = RefCell::new(say);
+    let say = &mut voice(&shared);
     for member in plan
         .runners
         .iter()
@@ -236,7 +243,7 @@ pub async fn restart_all(
             ),
         });
     }
-    let names: Vec<&str> = plan
+    let mut names: Vec<&str> = plan
         .runners
         .iter()
         .filter(|m| m.online())
@@ -245,69 +252,186 @@ pub async fn restart_all(
     // The dog goes down only when no runner is merging.
     if plan.dog.online() {
         wait_out_merges(client, &names, patience, Purpose::Upgrade, say).await?;
-        if let Bounced::Silent = bounce_if_running(client, &plan.dog.name, patience, say).await? {
-            return Err(silent(&plan.dog.name, patience.start));
+        match bounce_if_running(client, &plan.dog.name, patience, say).await? {
+            Bounced::Answered | Bounced::Stopped => {}
+            Bounced::Silent => return Err(silent(&plan.dog.name, patience.start).into()),
+            Bounced::Dead => return Err(not_running(&plan.dog.name).into()),
         }
     }
     let stop = interrupted(interrupt);
     tokio::pin!(stop);
+    let installed = Installed::of(&plan.program)?;
     // What a handed over runner shows in its `status`.
-    let installed = match keep_calls {
-        true => Some(stamp_of(&plan.program)?),
-        false => None,
-    };
-    let mut slow = Vec::new();
-    let restarted = async {
-        for name in names {
-            let Some(installed) = &installed else {
-                wait_out_merges(client, &[name], patience, Purpose::Upgrade, say).await?;
-                if let Bounced::Silent = bounce_if_running(client, name, patience, say).await? {
-                    slow.push(name);
-                }
+    let handover = keep_calls.then_some(installed.stamp.as_str());
+    let stages = RefCell::new(BTreeMap::new());
+    let mut first = None;
+    while first.is_none() {
+        let picked = tokio::select! {
+            picked = canary::choose(client, &mut names, patience, say) => picked?,
+            by = &mut stop => return Err(format!("stopped by {by} while the canary was picked").into()),
+        };
+        let Some(Picked { name, before }) = picked else {
+            break;
+        };
+        let restarted = restart_one(client, name, handover, patience, &stages, say);
+        let restarted = tokio::select! {
+            restarted = restarted => restarted,
+            by = &mut stop => Err(stopped_by(client, by, &stages).await),
+        };
+        match restarted? {
+            Bounced::Answered => {}
+            // It stays stopped, and the next quiet runner is the canary.
+            Bounced::Stopped => {
+                names.retain(|&n| n != name);
                 continue;
-            };
-            let handed = tokio::select! {
-                handed = hand_over(client, name, installed, patience, say) => handed?,
-                by = &mut stop => return Err(format!("stopped by {by} while `{name}` was handing over")),
-            };
-            match handed {
-                Handed::Over => continue,
-                Handed::Stays(why) => say(why),
             }
-            let restarted = async {
-                drain::drain(client, name, patience, Purpose::Upgrade, say).await?;
-                wait_out_merges(client, &[name], patience, Purpose::Upgrade, say).await?;
-                bounce_if_running(client, name, patience, say).await
-            };
-            let restarted = tokio::select! {
-                restarted = restarted => restarted,
-                by = &mut stop => Err(format!("stopped by {by} while `{name}` was draining")),
-            };
-            match restarted {
-                Ok(Bounced::Answered) => {}
-                Ok(Bounced::Silent) => slow.push(name),
-                Err(e) => {
-                    let undrained = drain::undrain(client, name, Purpose::Upgrade).await;
-                    return Err(format!("{e}{undrained}"));
-                }
+            Bounced::Silent => {
+                return Err(Stopped::Canary(canary::silent_canary(name, patience.start)));
             }
+            Bounced::Dead => return Err(Stopped::Canary(canary::not_running(name))),
         }
-        Ok::<(), String>(())
+        let checked = canary::check(client, name, &before, &installed, patience, say);
+        tokio::select! {
+            checked = checked => checked?,
+            by = &mut stop => return Err(format!("stopped by {by} while the canary `{name}` was checked").into()),
+        }
+        first = Some(name);
     }
-    .await;
-    if let Err(e) = restarted {
+    let (shared, stages_ref) = (&shared, &stages);
+    let together = canary::join_all(
+        names
+            .iter()
+            .copied()
+            .filter(|&name| Some(name) != first)
+            .map(|name| async move {
+                let mut say = voice(shared);
+                let restarted =
+                    restart_one(client, name, handover, patience, stages_ref, &mut say).await;
+                (name, restarted)
+            }),
+    );
+    let together = tokio::select! {
+        together = together => together,
+        by = &mut stop => return Err(stopped_by(client, by, &stages).await.into()),
+    };
+    let mut failed = Vec::new();
+    let mut slow = Vec::new();
+    for (name, restarted) in together {
+        match restarted {
+            Ok(Bounced::Answered | Bounced::Stopped) => {}
+            Ok(Bounced::Silent) => slow.push(name),
+            Ok(Bounced::Dead) => failed.push(not_running(name)),
+            Err(e) => failed.push(e),
+        }
+    }
+    if !failed.is_empty() {
         let unasked: Vec<String> = slow
             .iter()
             .map(|name| silent(name, patience.start))
             .collect();
+        let failed = failed.join("; ");
         return Err(match unasked.is_empty() {
-            true => e,
-            false => format!("{e}\nNot asked again: {}", unasked.join("; ")),
-        });
+            true => failed,
+            false => format!("{failed}\nNot asked again: {}", unasked.join("; ")),
+        }
+        .into());
     }
     tokio::select! {
-        asked = ask_again(client, slow, patience, say) => asked,
-        by = &mut stop => Err(format!("stopped by {by} while the runners slow to answer were asked again")),
+        asked = ask_again(client, slow, patience, say) => asked.map_err(Stopped::Other),
+        by = &mut stop => Err(format!("stopped by {by} while the runners slow to answer were asked again").into()),
+    }
+}
+
+// One `say` for every runner restarted at once: each line goes to the same sink.
+fn voice<'a>(shared: &'a RefCell<&mut dyn FnMut(String)>) -> impl FnMut(String) + 'a {
+    move |line| (shared.borrow_mut())(line)
+}
+
+/// Where a runner stands in its restart, which an interrupt names
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    HandingOver,
+    Draining,
+    Restarting,
+}
+
+type Stages<'a> = RefCell<BTreeMap<&'a str, Stage>>;
+
+// Hands `name` over, else drains it, waits out its merges and restarts it. A
+// drained runner that is not restarted after all is sent `undrain`.
+async fn restart_one<'a>(
+    client: &dyn Connection,
+    name: &'a str,
+    handover: Option<&str>,
+    patience: Patience,
+    stages: &Stages<'a>,
+    say: &mut dyn FnMut(String),
+) -> Result<Bounced, String> {
+    let Some(installed) = handover else {
+        stages.borrow_mut().insert(name, Stage::Restarting);
+        let restarted = async {
+            wait_out_merges(client, &[name], patience, Purpose::Upgrade, say).await?;
+            bounce_if_running(client, name, patience, say).await
+        }
+        .await;
+        stages.borrow_mut().remove(name);
+        return restarted;
+    };
+    stages.borrow_mut().insert(name, Stage::HandingOver);
+    let handed = hand_over(client, name, installed, patience, say).await;
+    match handed {
+        Ok(Handed::Over) | Err(_) => {
+            stages.borrow_mut().remove(name);
+        }
+        Ok(Handed::Stays(_)) => {}
+    }
+    match handed? {
+        Handed::Over => {
+            return Ok(match is_running(client, name).await? {
+                true => Bounced::Answered,
+                false => Bounced::Stopped,
+            });
+        }
+        Handed::Stays(why) => say(why),
+    }
+    stages.borrow_mut().insert(name, Stage::Draining);
+    let restarted = async {
+        drain::drain(client, name, patience, Purpose::Upgrade, say).await?;
+        wait_out_merges(client, &[name], patience, Purpose::Upgrade, say).await?;
+        bounce_if_running(client, name, patience, say).await
+    }
+    .await;
+    match restarted {
+        Ok(bounced) => {
+            stages.borrow_mut().remove(name);
+            Ok(bounced)
+        }
+        Err(e) => {
+            let undrained = drain::undrain(client, name, Purpose::Upgrade).await;
+            stages.borrow_mut().remove(name);
+            Err(format!("{e}{undrained}"))
+        }
+    }
+}
+
+// What an interrupt cut short: each runner it found part way, named, and sent
+// `undrain` when it was draining.
+async fn stopped_by(client: &dyn Connection, by: &str, stages: &Stages<'_>) -> String {
+    let part_way: Vec<_> = stages.borrow().iter().map(|(&n, &s)| (n, s)).collect();
+    let mut told = Vec::new();
+    for (name, stage) in part_way {
+        told.push(match stage {
+            Stage::HandingOver => format!("stopped by {by} while `{name}` was handing over"),
+            Stage::Restarting => format!("stopped by {by} while `{name}` was restarting"),
+            Stage::Draining => {
+                let undrained = drain::undrain(client, name, Purpose::Upgrade).await;
+                format!("stopped by {by} while `{name}` was draining{undrained}")
+            }
+        });
+    }
+    match told.is_empty() {
+        true => format!("stopped by {by}"),
+        false => told.join("; "),
     }
 }
 
@@ -354,11 +478,19 @@ pub async fn still_behind(
 /// How a restarted sheep did in `patience.start`
 enum Bounced {
     Answered,
+    /// Stopped meanwhile, so it stays stopped
+    Stopped,
     /// Running, and no `status` answer yet
     Silent,
+    /// Not running after its restart
+    Dead,
 }
 
-fn silent(name: &str, wait: Duration) -> String {
+pub(super) fn not_running(name: &str) -> String {
+    format!("`{name}` is not running after its restart: `shep bleats {name}` says why")
+}
+
+pub(super) fn silent(name: &str, wait: Duration) -> String {
     format!(
         "`{name}` did not answer in {}s after its restart: `shep bleats {name}` says why",
         wait.as_secs()
@@ -432,7 +564,7 @@ async fn settle(
     Ok(())
 }
 
-async fn is_running(client: &dyn Connection, name: &str) -> Result<bool, String> {
+pub(super) async fn is_running(client: &dyn Connection, name: &str) -> Result<bool, String> {
     Ok(flock(client)
         .await?
         .into_iter()
@@ -453,7 +585,7 @@ async fn bounce_if_running(
         say(format!(
             "`{name}` was stopped meanwhile, so it stays stopped"
         ));
-        return Ok(Bounced::Answered);
+        return Ok(Bounced::Stopped);
     }
     bounce(client, name, patience, say).await
 }
@@ -473,9 +605,7 @@ async fn bounce(
         }
         if waited.elapsed() >= patience.start {
             if !is_running(client, name).await? {
-                return Err(format!(
-                    "`{name}` is not running after its restart: `shep bleats {name}` says why"
-                ));
+                return Ok(Bounced::Dead);
             }
             say(format!(
                 "`{name}` did not answer in {}s after its restart, so the others go on first",
@@ -509,24 +639,8 @@ pub(crate) async fn wait_out_merges(
     loop {
         let mut busy = Vec::new();
         for &name in names {
-            match trigger(client, name, "status", None).await? {
-                Answered::Runner(body) => busy.extend(merging(&body).into_iter().map(|item| {
-                    let mut line = format!("`{name}` is merging {}", item.ticket.shown());
-                    if let Some(failing) = item.failing {
-                        let step = if item.merged { "cleanup" } else { "step" };
-                        line.push_str(&format!(
-                            ", whose {step} has failed {} times: {}",
-                            failing.failures, failing.reason
-                        ));
-                    }
-                    line
-                })),
-                // Not taking its actions yet: it may be mid-merge from before.
-                Answered::Starting => busy.push(format!("`{name}` is starting")),
-                // Delivered and unanswered: whether it merges is unknown.
-                Answered::TimedOut => busy.push(format!("`{name}` did not answer `status`")),
-                Answered::Down => {}
-            }
+            let answered = trigger(client, name, "status", None).await?;
+            busy.extend(self::busy(name, &answered));
         }
         if busy.is_empty() {
             return Ok(());
@@ -544,6 +658,31 @@ pub(crate) async fn wait_out_merges(
             told = busy;
         }
         tokio::time::sleep(patience.poll).await;
+    }
+}
+
+// What keeps `name` from being restarted, going by its answer to `status`.
+pub(super) fn busy(name: &str, answered: &Answered) -> Vec<String> {
+    match answered {
+        Answered::Runner(body) => merging(body)
+            .into_iter()
+            .map(|item| {
+                let mut line = format!("`{name}` is merging {}", item.ticket.shown());
+                if let Some(failing) = item.failing {
+                    let step = if item.merged { "cleanup" } else { "step" };
+                    line.push_str(&format!(
+                        ", whose {step} has failed {} times: {}",
+                        failing.failures, failing.reason
+                    ));
+                }
+                line
+            })
+            .collect(),
+        // Not taking its actions yet: it may be mid-merge from before.
+        Answered::Starting => vec![format!("`{name}` is starting")],
+        // Delivered and unanswered: whether it merges is unknown.
+        Answered::TimedOut => vec![format!("`{name}` did not answer `status`")],
+        Answered::Down => Vec::new(),
     }
 }
 

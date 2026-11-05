@@ -5,11 +5,11 @@ use crate::upgrade::drain::{Drained, drained};
 
 // A runner draining with #7's worker turn still running, whose calls are
 // ended within the ceiling it gives
-const RUNNING_7: &str = r#"{"work_items":[{"issue":"7","phase":{"state":"implement"}}],
+const RUNNING_7: &str = r#"{"build":"{build}","passes":1,"work_items":[{"issue":"7","phase":{"state":"implement"}}],
     "draining":{"calls":[{"issue":"7","role":"worker"}],"ceiling":0}}"#;
 
 // A runner draining with no call left
-const DRAINED: &str = r#"{"work_items":[{"issue":"7","phase":{"state":"implement"}}],
+const DRAINED: &str = r#"{"build":"{build}","passes":1,"work_items":[{"issue":"7","phase":{"state":"implement"}}],
     "draining":{"calls":[],"ceiling":3600}}"#;
 
 // The triggers sent to `sheep` since the last look, by action
@@ -40,9 +40,10 @@ fn restarted(writes: &[Request]) -> Vec<&str> {
 #[tokio::test]
 async fn a_runner_is_drained_and_restarted_once_no_call_runs() {
     let mut rig = Rig::new().await;
-    // The dog's look, then two drains with the turn running, then none.
+    // The dog's look and the canary's pick, then two drains with the turn
+    // running, then none.
     rig.shepherd
-        .says("koji", &[IDLE, RUNNING_7, RUNNING_7, DRAINED]);
+        .says("koji", &[IDLE, IDLE, RUNNING_7, RUNNING_7, DRAINED]);
     let new = rig.build("new", "0.3.0", "0.23.0");
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();
@@ -57,7 +58,9 @@ async fn a_runner_is_drained_and_restarted_once_no_call_runs() {
         .unwrap();
     assert_eq!(
         triggers(&writes[..koji], "koji"),
-        ["status", "handover", "drain", "drain", "drain", "status"],
+        [
+            "status", "status", "handover", "drain", "drain", "drain", "status"
+        ],
         "drained until no call ran, then the merge wait: {writes:?}"
     );
     assert!(
@@ -78,7 +81,7 @@ async fn a_runner_is_drained_and_restarted_once_no_call_runs() {
 #[tokio::test]
 async fn a_ctrl_c_while_a_runner_drains_undrains_it() {
     let mut rig = Rig::new().await;
-    rig.shepherd.says("koji", &[IDLE, RUNNING_7]);
+    rig.shepherd.says("koji", &[IDLE, IDLE, RUNNING_7]);
     let new = rig.build("new", "0.3.0", "0.23.0");
     let scene = Scene {
         interrupt: Interrupt::After(Duration::from_millis(100)),
@@ -106,6 +109,7 @@ async fn a_runner_that_answers_drain_on_its_second_ask_is_drained() {
         "koji",
         &[
             Some(IDLE),
+            Some(IDLE),
             Some("unknown action: drain"),
             Some(IDLE),
             Some(DRAINED),
@@ -124,7 +128,9 @@ async fn a_runner_that_answers_drain_on_its_second_ask_is_drained() {
         .unwrap();
     assert_eq!(
         triggers(&writes[..koji], "koji"),
-        ["status", "handover", "drain", "status", "drain", "status"]
+        [
+            "status", "status", "handover", "drain", "status", "drain", "status"
+        ]
     );
     assert!(
         !said.iter().any(|l| l.contains("from before `drain`")),
@@ -139,7 +145,7 @@ async fn a_runner_that_answers_drain_on_its_second_ask_is_drained() {
 #[tokio::test]
 async fn a_call_that_outlasts_its_ceiling_leaves_the_runner_undrained_on_the_old_build() {
     let mut rig = Rig::new().await;
-    rig.shepherd.says("koji", &[IDLE, RUNNING_7]);
+    rig.shepherd.says("koji", &[IDLE, IDLE, RUNNING_7]);
     let new = rig.build("new", "0.3.0", "0.23.0");
     let patience = Patience {
         margin: Duration::from_millis(100),
@@ -170,7 +176,7 @@ async fn a_call_that_outlasts_its_ceiling_leaves_the_runner_undrained_on_the_old
 #[tokio::test]
 async fn a_merge_that_outlasts_its_wait_after_the_drain_undrains_the_runner() {
     let mut rig = Rig::new().await;
-    rig.shepherd.says("koji", &[IDLE, DRAINED, MERGING]);
+    rig.shepherd.says("koji", &[IDLE, IDLE, DRAINED, MERGING]);
     let new = rig.build("new", "0.3.0", "0.23.0");
     let patience = Patience {
         merge: Duration::from_millis(100),
@@ -215,8 +221,10 @@ async fn a_runner_from_before_drain_is_restarted_as_before() {
     let mut rig = Rig::new().await;
     // An old runner answers `drain` as an action nobody took, twice, and `status` as ever.
     let old = Some("unknown action: drain");
-    rig.shepherd
-        .replies("koji", &[Some(IDLE), old, Some(IDLE), old, Some(IDLE)]);
+    rig.shepherd.replies(
+        "koji",
+        &[Some(IDLE), Some(IDLE), old, Some(IDLE), old, Some(IDLE)],
+    );
     let new = rig.build("new", "0.3.0", "0.23.0");
     let (ran, said) = rig.install(&new).await;
     ran.unwrap();

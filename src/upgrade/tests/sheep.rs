@@ -196,11 +196,12 @@ async fn a_runner_that_never_answers_status_is_named_and_nothing_restarts() {
     assert_eq!(rig.restarts(), Vec::<String>::new());
 }
 
-// `aria` sorts before `koji`, so it is restarted first and `koji` follows it.
-// Its scripted looks: before the dog, the drain, the merge wait, then the restart's.
+// `aria` sorts before `koji` but is merging when the canary is picked, so `koji`
+// goes first and `aria` restarts with the rest. Its scripted looks: before the
+// dog, the pick, the drain, the merge wait, then the restart's.
 fn slow_aria(rig: &Rig, after_restart: &[Option<&str>]) {
     rig.runs("aria", &rig.installed.clone(), true);
-    let mut looks = vec![Some(IDLE); 3];
+    let mut looks = vec![Some(IDLE), Some(MERGING), Some(IDLE), Some(IDLE)];
     looks.extend_from_slice(after_restart);
     rig.shepherd.replies("aria", &looks);
 }
@@ -215,15 +216,16 @@ const TWO_LOOKS: Patience = Patience {
 async fn a_runner_slow_to_answer_after_its_restart_does_not_hold_back_the_runners_after_it() {
     let mut rig = Rig::new().await;
     slow_aria(&rig, &[None, Some(IDLE)]);
+    rig.runs("zed", &rig.installed.clone(), true);
     let new = rig.build("new", "0.3.0", "0.23.0");
     let action = Action::Install(Source::Binary(new));
     let (ran, said) = rig.upgrade_within(action, TWO_LOOKS).await;
     ran.unwrap();
 
-    assert_eq!(rig.restarts(), ["kelpie", "aria", "koji"]);
+    assert_eq!(rig.restarts(), ["kelpie", "koji", "aria", "zed"]);
     let told = |what: &str| said.iter().position(|l| l.contains(what));
     assert!(
-        told("restarted `koji`") < told("restarted `aria`"),
+        told("restarted `zed`") < told("restarted `aria`"),
         "{said:?}"
     );
     assert!(told("restarted `aria`").is_some(), "{said:?}");
@@ -243,15 +245,16 @@ async fn a_runner_that_never_answers_after_its_restart_is_named_once_the_others_
     );
     assert!(err.contains("shep bleats aria"), "{err}");
     assert!(!err.contains("koji"), "{err}");
-    assert_eq!(rig.restarts(), ["kelpie", "aria", "koji"]);
+    assert_eq!(rig.restarts(), ["kelpie", "koji", "aria"]);
 }
 
 #[tokio::test]
 async fn a_failure_after_a_slow_runner_still_names_the_slow_runner() {
     let mut rig = Rig::new().await;
     slow_aria(&rig, &[None]);
-    // `koji` is idle at the dog's look and its drain, then merges for good.
-    rig.shepherd.says("koji", &[IDLE, IDLE, MERGING]);
+    // `zed` is idle at the dog's look, the pick and its drain, then merges for good.
+    rig.runs("zed", &rig.installed.clone(), true);
+    rig.shepherd.says("zed", &[IDLE, IDLE, IDLE, MERGING]);
     let new = rig.build("new", "0.3.0", "0.23.0");
     let patience = Patience {
         merge: Duration::from_millis(100),
@@ -260,26 +263,27 @@ async fn a_failure_after_a_slow_runner_still_names_the_slow_runner() {
     let action = Action::Install(Source::Binary(new));
     let err = rig.upgrade_within(action, patience).await.0.unwrap_err();
 
-    assert!(err.contains("`koji` is merging #7"), "{err}");
+    assert!(err.contains("`zed` is merging #7"), "{err}");
     assert!(
         err.contains("Not asked again: `aria` did not answer"),
         "{err}"
     );
     assert!(err.contains("shep bleats aria"), "{err}");
-    assert_eq!(rig.restarts(), ["kelpie", "aria"]);
+    assert_eq!(rig.restarts(), ["kelpie", "koji", "aria"]);
 }
 
 #[tokio::test]
 async fn a_slow_runner_that_stopped_before_it_was_asked_again_is_named() {
     let mut rig = Rig::new().await;
     slow_aria(&rig, &[None, Some(IDLE)]);
+    rig.runs("zed", &rig.installed.clone(), true);
     let new = rig.build("new", "0.3.0", "0.23.0");
     let scene = rig.scene(TWO_LOOKS);
     let action = Action::Install(Source::Binary(new));
     let mut said = Vec::new();
     let ran = run(&scene, &action, &mut |line| {
         // The slow runner goes down once the one after it is up.
-        if line.contains("restarted `koji`") {
+        if line.contains("restarted `zed`") {
             rig.shepherd.stops("aria");
         }
         said.push(line);
@@ -292,7 +296,7 @@ async fn a_slow_runner_that_stopped_before_it_was_asked_again_is_named() {
         "{err}"
     );
     assert!(err.contains("shep bleats aria"), "{err}");
-    assert_eq!(rig.restarts(), ["kelpie", "aria", "koji"]);
+    assert_eq!(rig.restarts(), ["kelpie", "koji", "aria", "zed"]);
 }
 
 #[tokio::test]
