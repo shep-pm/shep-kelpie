@@ -2,14 +2,15 @@
 //!
 //! With `reviews.light` below `reviews.need`, a change that touches only
 //! `reviews.light_paths` runs the light count. Whatever else a change touches
-//! runs the full one, and so does an adopted pull request or a diff that
-//! names no file.
+//! runs the full one, and so does an adopted pull request, a diff that
+//! names no file and an item that was sent a HIGH finding.
 
 use std::path::Path;
 
 use super::{changed_files, matches};
 use crate::fence;
 use crate::package_managers::MANAGERS;
+use crate::ports::Severity;
 use crate::runner::Runner;
 use crate::settings::NonBlank;
 use crate::work_item::{Heavier, Lighter, ReviewWeight, WorkItem};
@@ -40,6 +41,9 @@ impl Runner {
         if item.adopted {
             return full(Heavier::Adopted);
         }
+        if item.held.iter().any(|f| f.severity == Severity::High) {
+            return full(Heavier::High);
+        }
         let changed = changed_files(&self.settings.git.checkout, worktree, base)?;
         if changed.is_empty() {
             return full(Heavier::Empty);
@@ -57,12 +61,12 @@ impl Runner {
     /// `item` with its weight read again from the worktree's head, as a fix
     /// turn may have changed what the diff touches
     ///
-    /// A diff git cannot take leaves the weight out, so the full count
-    /// stands, and the next round reports the failure.
+    /// A diff git cannot take leaves the stored weight, and the next round
+    /// reports the failure.
     pub(super) fn reweighed(&self, item: &WorkItem, base: &str) -> WorkItem {
         let weight = self.weigh(item, &item.worktree, base);
         WorkItem {
-            weight: weight.unwrap_or(None),
+            weight: weight.unwrap_or_else(|_| item.weight.clone()),
             ..item.clone()
         }
     }
@@ -290,17 +294,26 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_fix_that_touches_src_makes_a_light_item_full_before_the_pass_ends() {
+    // A light item whose first reviewer finds `severity` in the README and
+    // whose fix pushes `fix`, run until the pass is over.
+    fn found_then_fixed(
+        severity: Severity,
+        fix: (&'static str, &'static str),
+    ) -> (Rig, Mutex<Runner>) {
         let rig = project("light = 1\n");
         let runner = at_review(&rig, "README.md");
         rig.agent_board.ranks(&["mine", "other", "claude"]);
-        let finding = Finding::new(Severity::High, "README.md", 1, "wrong", "it is");
+        let finding = Finding::new(severity, "README.md", 1, "wrong", "it is");
         rig.reviewer
             .script([ScriptedRound::Findings(vec![finding])]);
-        rig.claude.script([Scripted::Push("src/lib.rs", "fixed\n")]);
-
+        rig.claude.script([Scripted::Push(fix.0, fix.1)]);
         reviewers_until_ci(&rig, &runner);
+        (rig, runner)
+    }
+
+    #[test]
+    fn a_fix_that_touches_src_sends_a_light_pass_on_to_the_full_count() {
+        let (rig, runner) = found_then_fixed(Severity::Medium, ("src/lib.rs", "fixed\n"));
 
         assert_eq!(
             rig.reviewer.seen().len(),
@@ -309,5 +322,46 @@ mod tests {
         );
         let touched = Heavier::Touched("src/lib.rs".into());
         assert_eq!(weight_of(&runner), Some(ReviewWeight::Full(touched)));
+    }
+
+    #[test]
+    fn a_high_finding_from_the_light_reviewer_sends_the_pass_on_to_the_full_count() {
+        let (rig, runner) = found_then_fixed(Severity::High, ("README.md", "fixed\n"));
+
+        assert_eq!(
+            rig.reviewer.seen().len(),
+            2,
+            "a docs-only fix is still read twice after a HIGH"
+        );
+        assert_eq!(weight_of(&runner), Some(ReviewWeight::Full(Heavier::High)));
+    }
+
+    #[test]
+    fn a_medium_finding_and_a_docs_only_fix_keep_the_pass_light() {
+        let (rig, runner) = found_then_fixed(Severity::Medium, ("README.md", "fixed\n"));
+
+        assert_eq!(rig.reviewer.seen().len(), 1);
+        assert_eq!(weight_of(&runner), Some(ReviewWeight::Light(Lighter::Docs)));
+    }
+
+    #[test]
+    fn a_pass_stepped_up_asks_its_next_reviewer_at_the_items_own_tier() {
+        let rig = project("light = 1\n");
+        let runner = at_review(&rig, "README.md");
+        runner.lock().unwrap().state.work_items[0].tier = Some(Tier::Heavy);
+        rig.agent_board.ranks(&["mine", "other", "claude"]);
+        let finding = Finding::new(Severity::High, "README.md", 1, "wrong", "it is");
+        rig.reviewer
+            .script([ScriptedRound::Findings(vec![finding])]);
+        rig.claude.script([Scripted::Push("README.md", "fixed\n")]);
+
+        reviewers_until_ci(&rig, &runner);
+
+        let tiers: Vec<_> = rig.agent_board.asks().iter().map(|a| a.tier).collect();
+        let first = tiers.iter().position(|t| *t == Some(Tier::Light));
+        let after = first.map(|at| tiers[at + 1..].to_vec());
+        assert!(first.is_some(), "{tiers:?}");
+        let heavy = Some(Tier::Heavy);
+        assert!(after.unwrap().iter().all(|t| *t == heavy), "{tiers:?}");
     }
 }
