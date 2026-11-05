@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use crate::ports::{CLEAN, Checks, Standing};
 use crate::runner::review_bot::LATE_READ;
-use crate::runner::{Runner, step};
+use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, ShownCheck};
 
 fn names(checks: &[ShownCheck]) -> Vec<(&str, &str, Option<&str>)> {
@@ -198,4 +198,79 @@ fn a_head_the_worker_moves_on_from_leaves_no_check_running() {
         names(&old)
     );
     assert!(on(&rig, &pushed).iter().any(|c| c.name == "kelpie"));
+}
+
+// A rebase posts on the new head and closes the old head's in one pass, and
+// the last post is the old head's. The merge lands before kelpie posts on the
+// new head again, so only the ended item's checks can close it.
+#[test]
+fn a_merge_right_after_a_rebase_closes_the_new_heads_check() {
+    let (rig, runner, head) = Rig::with_pull_request_set("rotom", |rig| {
+        rig.with_app();
+        rig.merge_auto();
+    });
+
+    rig.forge.set_checks(&head, Checks::Passed);
+    rig.verdict(&runner);
+    rig.land_on_origin("landed.txt");
+    rig.clock.advance(CHECKS_SETTLE);
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::MergeWithdrawn { .. })
+    ));
+    let Some(StepReport::Rebased { head: rebased, .. }) = step(&runner).unwrap() else {
+        panic!("the branch was not rebased");
+    };
+    rig.forge.set_checks(&rebased, Checks::Passed);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::Finished { merged: true, .. })
+    ));
+
+    let new = on(&rig, &rebased);
+    assert!(
+        new.iter()
+            .any(|c| c.name == "kelpie" && c.status == "completed"),
+        "the new head's kelpie check is still running: {:?}",
+        names(&new)
+    );
+    assert!(
+        new.iter().all(|c| c.status == "completed"),
+        "{:?}",
+        names(&new)
+    );
+    assert!(
+        on(&rig, &head).iter().all(|c| c.status == "completed"),
+        "the old head: {:?}",
+        names(&on(&rig, &head))
+    );
+}
+
+// A dropped item ends on the head it was rebased onto, where its check is
+// still running, and its old head was closed in the pass that rebased it.
+#[test]
+fn a_work_item_that_ended_closes_every_running_check() {
+    let (rig, runner, head) = Rig::with_pull_request_set("unown", Rig::with_app);
+    rig.land_on_origin("landed.txt");
+    let Some(StepReport::Rebased { head: rebased, .. }) = step(&runner).unwrap() else {
+        panic!("the branch was not rebased");
+    };
+    assert!(
+        on(&rig, &rebased).iter().any(|c| c.status == "in_progress"),
+        "the new head: {:?}",
+        names(&on(&rig, &rebased))
+    );
+
+    rig.ask(&runner, "drop", None);
+    step(&runner).unwrap();
+
+    for shown in [&head, &rebased] {
+        let checks = on(&rig, shown);
+        assert!(!checks.is_empty(), "no check was posted on {shown}");
+        assert!(
+            checks.iter().all(|c| c.status == "completed"),
+            "{shown}: {:?}",
+            names(&checks)
+        );
+    }
 }
