@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use serde_json::{Map, Value, json};
+use shep_client::shep_core::protocol::request::Request;
 
 use super::*;
 use crate::adapters::host::WindowsInstall;
@@ -14,6 +15,7 @@ use crate::test::{
 };
 use crate::tools::Tools;
 
+mod dog_waiting;
 mod lineup;
 mod tickets;
 
@@ -339,7 +341,10 @@ async fn a_machine_with_everything_in_place_passes_and_changes_nothing() {
             "koji: rulings",
         ]
     );
-    assert_eq!(scene.shepherd.writes(), []);
+    // Asking the dog its `status` reads and changes nothing.
+    let writes = scene.shepherd.writes();
+    let ask = |r: &Request| matches!(r, Request::Trigger { action, .. } if action == "status");
+    assert_eq!(writes.iter().filter(|r| !ask(r)).count(), 0, "{writes:?}");
     assert_eq!(scene.forge.repo_labels_now(), labels);
     assert_eq!(scene.alerts.posts(), []);
     assert_eq!(

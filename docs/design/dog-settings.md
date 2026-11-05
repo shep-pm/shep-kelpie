@@ -36,3 +36,5 @@ The dog rereads its `[kelpie]` section of `dogs.toml` and applies a change with 
 ## `status`
 
 `waiting_for_restart` is always there, a list of bare key names, empty when none. `settings_refused` is there only while a refusal stands.
+
+`shep kelpie doctor` asks the dog `status` through `flock::control::trigger` (`doctor/dog_waiting.rs`) and prints one unsure line, `dog settings: waiting for restart: <keys>`, in the order `status` gives them, with `shep restart kelpie` as the next step. No line when the list is empty, the dog is down or silent, or the answer is not JSON or lacks the field (a dog from before it). An unsure line never fails the run. Doctor leaves `settings_refused` to the alert and `status`, and posts nothing.
