@@ -185,6 +185,25 @@ fn cargo_test_reads_its_holders_and_waiters_and_their_wait() {
 }
 
 #[test]
+fn a_raised_cargo_test_capacity_counts_the_grants_it_makes() {
+    let mut w = world();
+    w.desk.set_test_capacity(NonZeroU32::new(1).unwrap());
+    for n in 1..=3 {
+        w.desk.take_test(taker(n));
+    }
+    assert_eq!(w.kind("cargo-test", GRANTS), Some(1.0));
+    w.clock.advance(30);
+
+    let granted = w.desk.set_test_capacity(NonZeroU32::new(3).unwrap());
+
+    assert_eq!(granted, [Ticket(2), Ticket(3)]);
+    assert_eq!(w.kind("cargo-test", HELD), Some(3.0));
+    assert_eq!(w.kind("cargo-test", WAITING), Some(0.0));
+    assert_eq!(w.kind("cargo-test", GRANTS), Some(3.0));
+    assert_eq!(w.kind("cargo-test", WAITED), Some(60.0));
+}
+
+#[test]
 fn a_command_seated_after_a_restart_holds_the_lease_without_a_grant() {
     let mut w = world();
 

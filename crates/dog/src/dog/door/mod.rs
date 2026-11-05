@@ -35,7 +35,7 @@ const ACCEPT_REST: Duration = Duration::from_millis(500);
 pub const REJOIN_GRACE: Duration = Duration::from_secs(3);
 
 // Waiters to wake when the lease grants them, by ticket.
-type Waiters = Arc<Mutex<HashMap<Ticket, oneshot::Sender<()>>>>;
+pub(super) type Waiters = Arc<Mutex<HashMap<Ticket, oneshot::Sender<()>>>>;
 
 /// Opens the door at `socket`, only the maintainer's user may connect
 ///
@@ -53,14 +53,10 @@ pub fn open(socket: &Path) -> Result<Listener, String> {
     crate::ipc::open_owner_only(socket, "dog", Listener::bind)
 }
 
-/// Answers every command that knocks at `listener`, for as long as it runs,
-/// granting nothing new for `grace` from now
-///
-/// An `e2e` ask is placed by the worktree it names under `kelpie_home`, and
-/// run through `remote`. A `pick` ask reads `board` and what is `shown`, and a
-/// `fit` ask reads `board` and writes its marks under `kelpie_home`.
+// `serve_with` over waiters nobody else wakes.
+#[cfg(test)]
 pub(super) async fn serve(
-    mut listener: Listener,
+    listener: Listener,
     desk: Arc<Mutex<Kept>>,
     grace: Duration,
     kelpie_home: PathBuf,
@@ -68,10 +64,44 @@ pub(super) async fn serve(
     shown: Arc<Mutex<Availability>>,
     board: Arc<Mutex<Board>>,
 ) {
+    let waiters = Waiters::default();
+    serve_with(
+        listener,
+        desk,
+        grace,
+        kelpie_home,
+        remote,
+        shown,
+        board,
+        waiters,
+    )
+    .await;
+}
+
+/// Answers every command that knocks at `listener`, for as long as it runs,
+/// granting nothing new for `grace` from now
+///
+/// An `e2e` ask is placed by the worktree it names under `kelpie_home`, and
+/// run through `remote`. A `pick` ask reads `board` and what is `shown`, and a
+/// `fit` ask reads `board` and writes its marks under `kelpie_home`. A waiter
+/// is listed in `waiters`, which the dog keeps to wake those a raise grants.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the dog's own state, passed once"
+)]
+pub(super) async fn serve_with(
+    mut listener: Listener,
+    desk: Arc<Mutex<Kept>>,
+    grace: Duration,
+    kelpie_home: PathBuf,
+    remote: Remote,
+    shown: Arc<Mutex<Availability>>,
+    board: Arc<Mutex<Board>>,
+    waiters: Waiters,
+) {
     let kelpie_home = Arc::new(kelpie_home);
     let remote = Arc::new(remote);
     let fresh_from = tokio::time::Instant::now() + grace;
-    let waiters = Waiters::default();
     let mut next = 0;
     loop {
         let stream = match listener.accept().await {
@@ -125,16 +155,23 @@ impl Drop for Place {
     fn drop(&mut self) {
         let mut waiters = self.waiters.lock().unwrap_or_else(PoisonError::into_inner);
         waiters.remove(&self.ticket);
+        drop(waiters);
         let mut kept = lock_desk(&self.desk);
         let granted = match &self.e2e_host {
             Some(host) => kept.desk.leave_e2e(host, self.ticket),
             None => kept.desk.leave_test(self.ticket),
         };
         drop(kept);
-        for ticket in granted {
-            if let Some(wake) = waiters.remove(&ticket) {
-                let _ = wake.send(());
-            }
+        wake(&self.waiters, granted);
+    }
+}
+
+/// Wakes each waiter in `waiters` whose ticket the lease granted
+pub(super) fn wake(waiters: &Waiters, granted: Vec<Ticket>) {
+    let mut waiters = waiters.lock().unwrap_or_else(PoisonError::into_inner);
+    for ticket in granted {
+        if let Some(wake) = waiters.remove(&ticket) {
+            let _ = wake.send(());
         }
     }
 }

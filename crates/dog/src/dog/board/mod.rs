@@ -85,8 +85,15 @@ impl Board {
     /// The board with `prefer` as the maintainer's ranking of agents, first most wanted
     #[must_use]
     pub(super) fn preferring(mut self, prefer: Vec<AgentName>) -> Self {
-        self.prefer = prefer.into();
+        self.set_prefer(prefer);
         self
+    }
+
+    /// Ranks agents by `prefer` from the next `view` on, first most wanted
+    ///
+    /// A `View` already copied out keeps the list it was copied with.
+    pub(super) fn set_prefer(&mut self, prefer: Vec<AgentName>) {
+        self.prefer = prefer.into();
     }
 
     /// What it holds now, for a pick, a `fit` ask or `status` to read without the lock

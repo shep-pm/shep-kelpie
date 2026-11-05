@@ -130,15 +130,7 @@ impl CountedLease {
     pub fn leave(&mut self, ticket: Ticket, now: Timestamp) -> Vec<Ticket> {
         self.queue.retain(|t| t.ticket != ticket);
         self.holders.retain(|h| h.taker.ticket != ticket);
-        let mut granted = Vec::new();
-        while self.has_room() {
-            let Some(taker) = self.queue.pop_front() else {
-                break;
-            };
-            granted.push(taker.ticket);
-            self.holders.push(Held { taker, since: now });
-        }
-        granted
+        self.grant_waiters(now)
     }
 
     /// Who holds and waits for it
@@ -152,14 +144,31 @@ impl CountedLease {
         }
     }
 
-    /// Lets up to `capacity` hold it, keeping who holds and waits
-    pub fn set_capacity(&mut self, capacity: NonZeroU32) {
+    /// Lets up to `capacity` hold it, keeping who holds and waits, and
+    /// returns the waiters granted the room a raise made, oldest first
+    ///
+    /// A lower capacity revokes nothing: it only holds off new grants.
+    pub fn set_capacity(&mut self, capacity: NonZeroU32, now: Timestamp) -> Vec<Ticket> {
         self.capacity = capacity;
+        self.grant_waiters(now)
     }
 
     /// Marks it as out of reach, for `status`, when the door cannot open
     pub fn close(&mut self) {
         self.closed = true;
+    }
+
+    // Seats waiters, oldest first, while there is room.
+    fn grant_waiters(&mut self, now: Timestamp) -> Vec<Ticket> {
+        let mut granted = Vec::new();
+        while self.has_room() {
+            let Some(taker) = self.queue.pop_front() else {
+                break;
+            };
+            granted.push(taker.ticket);
+            self.holders.push(Held { taker, since: now });
+        }
+        granted
     }
 
     fn has_room(&self) -> bool {
@@ -189,6 +198,11 @@ mod tests {
 
         fn leave(&mut self, n: u64) -> Vec<Ticket> {
             self.lease.leave(Ticket(n), self.clock.now())
+        }
+
+        fn resize(&mut self, capacity: u32) -> Vec<Ticket> {
+            let capacity = NonZeroU32::new(capacity).unwrap();
+            self.lease.set_capacity(capacity, self.clock.now())
         }
     }
 
@@ -285,5 +299,43 @@ mod tests {
             status(&lease),
             json!({ "kind": "cargo-test", "capacity": 3, "holders": [], "queue": [] })
         );
+    }
+
+    #[test]
+    fn a_raised_capacity_grants_the_queued_waiters_in_order_and_no_more() {
+        let mut lease = lease(1);
+        for n in 1..=5 {
+            lease.ask(n);
+        }
+        lease.clock.advance(40);
+        assert_eq!(lease.resize(3), [Ticket(2), Ticket(3)]);
+        let line = status(&lease);
+        assert_eq!(line["capacity"], 3);
+        assert_eq!(line["holders"][1]["since"], EPOCH + 40);
+        assert_eq!(line["holders"][2]["since"], EPOCH + 40);
+        assert_eq!(
+            line["queue"],
+            json!([
+                { "pid": 1004, "what": "cargo test 4" },
+                { "pid": 1005, "what": "cargo test 5" },
+            ])
+        );
+        assert_eq!(lease.resize(3), [], "the same capacity grants nobody");
+    }
+
+    #[test]
+    fn a_lowered_capacity_keeps_every_holder_and_grants_nothing_until_fewer_hold_it() {
+        let mut lease = lease(3);
+        for n in 1..=4 {
+            lease.ask(n);
+        }
+        assert_eq!(lease.resize(1), []);
+        let line = status(&lease);
+        assert_eq!(line["holders"].as_array().unwrap().len(), 3);
+        assert_eq!(line["queue"].as_array().unwrap().len(), 1);
+        assert_eq!(lease.ask(5), Taken::Queued { ahead: 1 });
+        assert_eq!(lease.leave(1), []);
+        assert_eq!(lease.leave(2), []);
+        assert_eq!(lease.leave(3), [Ticket(4)]);
     }
 }

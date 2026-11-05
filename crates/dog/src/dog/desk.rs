@@ -157,12 +157,12 @@ impl Desk {
         desk
     }
 
-    /// Lets up to `capacity` commands hold the `cargo-test` lease at once
-    ///
-    /// Those holding it keep it: a lower capacity only slows new grants.
-    pub fn set_test_capacity(&mut self, capacity: std::num::NonZeroU32) {
-        self.tests.set_capacity(capacity);
+    /// Lets up to `capacity` hold the `cargo-test` lease at once, and returns
+    /// the waiters a raise granted. A lower capacity only slows new grants.
+    pub fn set_test_capacity(&mut self, capacity: std::num::NonZeroU32) -> Vec<Ticket> {
+        let granted = self.tests.set_capacity(capacity, self.book.now());
         self.look(true);
+        granted
     }
 
     /// Asks for the `cargo-test` lease on behalf of `taker`

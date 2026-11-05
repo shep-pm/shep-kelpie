@@ -60,10 +60,21 @@ fn door_in(
     shown: Availability,
     board: Arc<Mutex<Board>>,
 ) -> (PathBuf, Arc<Mutex<Kept>>) {
+    door_waking(dir, capacity, shown, board, Waiters::default())
+}
+
+// A dog's door as `door_in` makes it, waking its waiters through `waiters`.
+fn door_waking(
+    dir: &Path,
+    capacity: u32,
+    shown: Availability,
+    board: Arc<Mutex<Board>>,
+    waiters: Waiters,
+) -> (PathBuf, Arc<Mutex<Kept>>) {
     let desk = kept(dir, capacity);
     let socket = dir.join("lease.sock");
     let listener = open(&socket).unwrap();
-    tokio::spawn(serve(
+    tokio::spawn(serve_with(
         listener,
         Arc::clone(&desk),
         Duration::ZERO,
@@ -71,6 +82,7 @@ fn door_in(
         Remote::default(),
         Arc::new(Mutex::new(shown)),
         board,
+        waiters,
     ));
     (socket, desk)
 }
@@ -222,6 +234,31 @@ async fn a_fourth_command_waits_until_one_of_three_gives_back() {
     drop(held.remove(1));
     assert_eq!(answer(&mut fourth).await, Some(Answer::Granted));
     assert_eq!(holders(&desk), ["suite 1", "suite 3", "suite 4"]);
+}
+
+#[tokio::test]
+async fn a_command_waiting_at_the_door_is_granted_when_the_capacity_is_raised() {
+    let dir = tempfile::tempdir().unwrap();
+    let waiters = Waiters::default();
+    let (socket, desk) = door_waking(
+        dir.path(),
+        1,
+        Availability::default(),
+        no_board(),
+        Arc::clone(&waiters),
+    );
+    let mut first = Visit::knock(&socket, &ask("suite 1")).await.unwrap();
+    assert_eq!(answer(&mut first).await, Some(Answer::Granted));
+    let mut second = Visit::knock(&socket, &ask("suite 2")).await.unwrap();
+    assert_eq!(answer(&mut second).await, Some(Answer::Queued(0)));
+
+    let granted = lock_desk(&desk)
+        .desk
+        .set_test_capacity(NonZeroU32::new(2).unwrap());
+    wake(&waiters, granted);
+
+    assert_eq!(answer(&mut second).await, Some(Answer::Granted));
+    assert_eq!(holders(&desk), ["suite 1", "suite 2"]);
 }
 
 // The holder is a real process killed outright, so nothing of it says goodbye.
