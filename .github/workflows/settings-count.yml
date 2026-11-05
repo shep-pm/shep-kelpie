@@ -1,5 +1,6 @@
 name: settings count
-# Fewer settings: the count of keys in settings.example.toml may not pass
+# Fewer settings: the count of keys in settings.example.toml and
+# kelpie-settings.example.toml may not pass their lines in
 # .github/settings-baseline.txt. A pull request that adds a key runs
 # `python3 scripts/settings-count.py --update` and says why the project
 # manager cannot decide it.

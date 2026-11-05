@@ -32,7 +32,7 @@ Kelpie is a shep dog that runs Claude Code workers from a planned work item to a
 - One cargo command shape per session, one cargo command at a time.
 - No `.rs` file over 1000 lines (IR-48, `.github/workflows/file-size.yml`). Run `scripts/file-size.sh` before pushing and after merging `main`.
 - No comment block over IR-47's line limits: `///` 6 lines after the summary (12 with `# Errors`), `//!` 10, `//` 4 in a row (`.github/workflows/doc-length.yml`). Blocks over today are listed in `.github/doc-length-baseline.txt`: one may shrink, none may be added, and one that now fits comes off the list (`python3 scripts/doc-length.py --update` rewrites it). Run `python3 scripts/doc-length.py` before pushing and after merging `main`.
-- No new settings key without a reason the project manager cannot decide it (`CODING_STANDARDS.md`, Fewer settings; `.github/workflows/settings-count.yml`). `python3 scripts/settings-count.py` fails when the keys in `settings.example.toml` pass `.github/settings-baseline.txt`; `--update` rewrites it, and the pull request says why. The count may shrink with no edit.
+- No new settings key without a reason the project manager cannot decide it (`CODING_STANDARDS.md`, Fewer settings; `.github/workflows/settings-count.yml`). `python3 scripts/settings-count.py` fails when the keys in `settings.example.toml` or `kelpie-settings.example.toml` pass their line in `.github/settings-baseline.txt`; `--update` rewrites it, and the pull request says why. The count may shrink with no edit.
 - A ticket is read and written through `ports.tickets`, never `ports.forge` (ADR 0014). Run `scripts/ticket-port.sh` before pushing.
 
 ## Working an issue
