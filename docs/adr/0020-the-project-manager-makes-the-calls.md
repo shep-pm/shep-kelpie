@@ -1,6 +1,6 @@
 # The project manager makes the calls, and settings hold only what it cannot
 
-Amends two lines of ADR 0018: the agent board's ranking at dispatch, and the ruling kinds `rulings.pm_decides` refuses to the project manager. It records a direction and moves no code: kelpie's settings have grown into rules that do the project manager's job, and the deciding moves back to it (the maintainer, 2026-11-05).
+Amends three lines of ADR 0018: the agent board's ranking at dispatch, the ruling kinds `rulings.pm_decides` refuses to the project manager, and the review count keys with the light review's HIGH step-up. It records a direction and moves no code: kelpie's settings have grown into rules that do the project manager's job, and the deciding moves back to it (the maintainer, 2026-11-05).
 
 ## Why
 
@@ -23,7 +23,7 @@ The maintainer's path is already the project manager: a ruling's thread, a comme
 ### Each item's plan is the project manager's, set at the pick
 
 - At the pick it names the item's agent and its review plan, how many reads it wants and what it wants them for, beside the tier and the hold it already sets. `runner/pm/picked.rs`
-- `reviews.need`, `reviews.light`, `reviews.light_paths`, `reviews.full_paths`, `reviews.pm_lightens` and `reviews.light_max_lines` stop deciding that plan. What stays is the code that weighs a diff and reports it, so the project manager sees what the change touches.
+- `reviews.need`, `reviews.light`, `reviews.light_paths`, `reviews.full_paths`, `reviews.pm_lightens` and `reviews.light_max_lines` stop deciding that plan, and ADR 0018's rule that a HIGH finding makes a light review full for the rest of an item goes with them: a finding above a nit now asks the project manager instead. What stays is the code that weighs a diff and reports it, so the project manager sees what the change touches.
 - After a round, kelpie asks for one more read only when that round sent a finding above a nit, medium or high, and the project manager rules on it. A round of nits, or of nothing, ends the pass as it does today. `runner/review/lineup/`
 
 ### No ruling reaches the maintainer when the map says so
