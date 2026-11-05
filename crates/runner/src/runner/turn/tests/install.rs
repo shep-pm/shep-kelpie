@@ -300,3 +300,47 @@ fn an_install_that_did_not_start_or_ran_too_long_fails_with_its_reason() {
         assert!(seen.call.prompt.contains(said), "{}", seen.call.prompt);
     }
 }
+
+// The install failure of issue 7 as `status` shows it, or null
+fn shown_failure(rig: &Rig, runner: &Mutex<Runner>) -> serde_json::Value {
+    let status = rig.ask(runner, "status", None);
+    status["work_items"][0]["install_failed"].clone()
+}
+
+#[test]
+fn a_failed_install_shows_on_its_work_items_status() {
+    let failed = TestOutcome::Failed {
+        output: "Resolving packages\nerror: lockfile had changes, but lockfile is frozen\n\
+                 exited with code 1"
+            .to_owned(),
+    };
+    let (rig, runner) = first_turn(&["bun.lock"], vec![failed]);
+
+    assert_eq!(
+        shown_failure(&rig, &runner),
+        json!("error: lockfile had changes, but lockfile is frozen")
+    );
+}
+
+#[test]
+fn a_good_install_clears_the_failure_status_shows() {
+    let failed = TestOutcome::Failed {
+        output: "error: lockfile had changes, but lockfile is frozen".to_owned(),
+    };
+    let (rig, runner) = first_turn(&["bun.lock"], vec![failed, TestOutcome::Passed]);
+    assert_ne!(
+        shown_failure(&rig, &runner),
+        json!(null),
+        "no failure shown"
+    );
+
+    // The item leaves and comes back on a fresh worktree, which is installed again.
+    rig.ask(&runner, "drop", Some("7"));
+    rig.ask(&runner, "add", Some("7"));
+    rig.claude
+        .script([Scripted::Reply(usage(1), Cost(20_085_300))]);
+    step(&runner).unwrap();
+
+    assert_eq!(rig.tests.ran().len(), 2, "no second install ran");
+    assert_eq!(shown_failure(&rig, &runner), json!(null));
+}

@@ -140,3 +140,25 @@ fn a_work_item_status_keeps_its_review_text_and_leaves_it_out_when_none() {
     let read: WorkItemStatus = serde_json::from_value(shown).expect("it reads back");
     assert_eq!(read.review.as_deref(), Some("light (docs only)"));
 }
+
+#[test]
+fn a_work_item_record_without_an_install_failure_reads_and_is_written_without_one() {
+    let mut shown = recorded();
+    for item in shown["work_items"].as_array_mut().unwrap() {
+        assert!(
+            item.as_object_mut()
+                .unwrap()
+                .remove("install_failed")
+                .is_some()
+        );
+    }
+    shown["work_item"]
+        .as_object_mut()
+        .unwrap()
+        .remove("install_failed");
+
+    let status: Status = serde_json::from_value(shown.clone()).expect("the status reads");
+
+    assert_eq!(status.work_items[0].install_failed, None);
+    assert_eq!(serde_json::to_value(&status).unwrap(), shown);
+}

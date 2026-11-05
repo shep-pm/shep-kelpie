@@ -486,3 +486,28 @@ fn a_work_item_with_a_review_weight_shows_it_on_its_own_line() {
         ]
     );
 }
+
+#[test]
+fn a_work_item_whose_package_install_failed_says_so_under_it() {
+    let body = r#"{"project":"koji","work_items":[
+        {"issue":"7","title":"Add a thing","phase":{"state":"implement"},
+         "turn":{"state":"running"},"pull_request":null,
+         "install_failed":"error: lockfile had changes, but lockfile is frozen"},
+        {"issue":"9","title":"Fix the other","phase":{"state":"implement"},
+         "turn":{"state":"running"},"pull_request":null}],"rulings":[]}"#;
+
+    assert_eq!(
+        plain_status("koji", body, None),
+        [
+            "koji",
+            "  run: running",
+            "  build: not recorded",
+            "  work items:",
+            "    #7 Add a thing: phase implement, turn running, no PR",
+            "      package install failed: error: lockfile had changes, but lockfile is frozen",
+            "    #9 Fix the other: phase implement, turn running, no PR",
+            "  rulings waiting: none",
+            "  pacer: on",
+        ]
+    );
+}

@@ -220,6 +220,9 @@ fn items(status: &Value, lines: &mut Vec<String>) {
                 failing["failures"].as_u64().unwrap_or(0),
             ));
         }
+        if let Some(why) = item["install_failed"].as_str() {
+            lines.push(format!("      package install failed: {why}"));
+        }
         if let Some(review) = item["review"].as_str() {
             lines.push(format!("      review: {review}"));
         }
