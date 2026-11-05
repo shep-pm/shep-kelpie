@@ -554,6 +554,45 @@ fn a_finding_after_two_passed_over_rounds_is_not_late() {
 }
 
 #[test]
+fn findings_count_reads_in_journal_order_across_review_passes() {
+    let mut journal = Vec::new();
+    for (at, number, reviewer, what) in [
+        (1100, 1, "claude", "first read"),
+        (1200, 2, "claude", "second read"),
+        (1300, 1, "codex", "third read"),
+        (1400, 1, "claude", "fourth read"),
+    ] {
+        journal.push(stamped(
+            at,
+            Entry::Round {
+                issue: ticket(11),
+                round: number,
+                reviewer: reviewer.into(),
+                findings: 1,
+            },
+        ));
+        journal.push(stamped(
+            at,
+            Entry::Findings {
+                issue: ticket(11),
+                round: number,
+                findings: vec![held(Severity::High, "src/gate.rs", 88, what)],
+            },
+        ));
+    }
+
+    let digest = across(&journal, &[]);
+
+    let item = section(&digest, "## #11:");
+    let expected = "- Findings sent to the worker:\n  \
+        - round 1 by claude, high, src/gate.rs:88: first read\n  \
+        - round 2 by claude, high, src/gate.rs:88: second read\n  \
+        - round 3 (late) by codex, high, src/gate.rs:88: third read\n  \
+        - round 4 (late) by claude, high, src/gate.rs:88: fourth read\n";
+    assert!(item.contains(expected), "{item}");
+}
+
+#[test]
 fn a_clean_round_and_a_passed_over_reviewer_each_show_numbered() {
     let journal = [
         stamped(
