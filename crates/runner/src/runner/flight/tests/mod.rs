@@ -291,7 +291,7 @@ fn the_pacer_reads_usage_at_each_calls_start() {
     assert!(seven.entered(CALL_PATIENCE));
 
     // The 5-hour window passes half while #7's turn runs.
-    rig.meter.set(Rig::utilization(0, 60));
+    rig.meter.set(Rig::utilization(0, 100));
     assert!(
         matches!(driven.pass(), Pass::Report(StepReport::Held { .. })),
         "#8's turn started past the pacer"

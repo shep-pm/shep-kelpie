@@ -65,7 +65,7 @@ koji (finishing)
     ruling 1: merge, #7, PR #71
   pacer: on
     claude: session 3%, week 15%, 15% of the week spent today of 14.3% allowed
-    claude holding (allowance): today's allowance is spent
+    claude holding (window): the 5-hour window is at 100%, so no turn starts until it resets
 ```
 
 The `build:` line is the commit that runner's own build was made from, which is not the build on disk: a runner an upgrade left behind keeps naming the one it runs, and the line then reads `build: 1f2e3a4, not the installed 9c8b7a6`. A build made from a tree with uncommitted changes names `1f2e3a4-dirty`, and is marked against the clean commit it was made on top of, being a different binary from it. A runner on a build from before a build named its own says `build: not recorded`.
