@@ -224,7 +224,7 @@ pub struct PickAsk {
     /// The agent it is pinned to, the only one tried
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pin: Option<AgentName>,
-    /// Minutes past the soonest finish it allows, or None for the board's default
+    /// Minutes the item may wait for an agent to start, or None for the board's default
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slack: Option<u32>,
     /// The agents its project allows: the board ranks only these
