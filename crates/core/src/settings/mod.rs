@@ -593,6 +593,28 @@ pub enum HookEvent {
     PostToolUse,
 }
 
+impl Worker {
+    /// The variables the worker's commands point into the build folder for `worktree`: the
+    /// caches every worker needs, those of the package managers it keeps files for, and the
+    /// project's own `build_env` over them
+    ///
+    /// The table only adds what it lists, so a `build_env` entry of the same name wins.
+    pub fn build_env_in(&self, worktree: &Path) -> BTreeMap<EnvName, BuildDir> {
+        let found = crate::package_managers::found_in(worktree);
+        let table = crate::package_managers::always_caches()
+            .into_iter()
+            .chain(crate::package_managers::caches(&found));
+        let mut env: BTreeMap<EnvName, BuildDir> = table
+            .filter_map(|(name, folder)| {
+                let name = EnvName::try_from(name.to_owned()).ok()?;
+                Some((name, BuildDir::try_from(folder.to_owned()).ok()?))
+            })
+            .collect();
+        env.extend(self.build_env.clone());
+        env
+    }
+}
+
 /// An environment variable's name: capitals, digits and `_`, not starting with a digit
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, JsonSchema)]
 #[serde(try_from = "String")]

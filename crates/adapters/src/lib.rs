@@ -17,7 +17,7 @@ use shep_kelpie_core::{
 
 // What only the adapters' tests use of core
 #[cfg(test)]
-use shep_kelpie_core::{coderabbit, codex, cubic, local_paths, work_item};
+use shep_kelpie_core::{coderabbit, codex, cubic, local_paths, package_managers, work_item};
 
 // The leaf crates, each module kept under the name it had here
 use shep_kelpie_facts::tool_error;
