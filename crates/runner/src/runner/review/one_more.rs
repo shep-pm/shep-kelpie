@@ -50,8 +50,9 @@ mod tests {
 
     use super::super::several::{at_review, reviewer_models, reviewers_until_ci, two_local};
     use crate::agents::Tier;
-    use crate::ports::{Finding, Role, Severity};
+    use crate::ports::{AgentError, Finding, Role, Severity};
     use crate::runner::{Runner, StepReport, step};
+    use crate::settings::Harness;
     use crate::test::{CALL_PATIENCE, Rig, Scripted, ScriptedRound};
     use crate::work_item::{Heavier, Lighter, ReviewPlan, ReviewWeight};
 
@@ -257,5 +258,112 @@ mod tests {
 
         let [prompt] = asked(&rig).try_into().unwrap();
         assert!(prompt.contains("HIGH work.txt:1 wrong"), "{prompt}");
+    }
+
+    // The pass is over: CI went on, and the merge ruling after it is asked,
+    // as nothing is left to hold the item.
+    fn past_review(rig: &Rig, runner: &Mutex<Runner>) {
+        let state = phase(rig, runner);
+        assert!(state == "ci" || state == "ruling", "{state}");
+    }
+
+    fn answer(read: &'static str) -> Scripted {
+        Scripted::Say(read)
+    }
+
+    const YES: &str =
+        "{\"read\": [{\"item\": 7, \"more\": true, \"why\": \"the lock is still racy\"}]}";
+    const NO: &str = "{\"read\": [{\"item\": 7, \"more\": false, \"why\": \"small and fixed\"}]}";
+
+    // Item 7's pass has one reader, who found a Medium the worker fixed, and
+    // the project manager answers `said`, which is read before this returns.
+    fn asked_and_told(said: &'static str) -> (Rig, Mutex<Runner>, StepReport) {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+        rig.claude.script_for(Role::Pm, [answer(said)]);
+        read_and_fixed(&rig, &runner, found(Severity::Medium));
+        let report = until_answered(&runner);
+        (rig, runner, report)
+    }
+
+    #[test]
+    fn a_yes_runs_one_more_reviewer_and_saves_the_plan() {
+        let (rig, runner, _) = asked_and_told(YES);
+        plan_is(&runner, Some((2, None)));
+
+        reviewers_until_ci(&rig, &runner);
+
+        assert_eq!(rig.reviewer.seen().len(), 2, "mine and other read");
+        assert_eq!(phase(&rig, &runner), "ci");
+    }
+
+    // The plan the work item holds, as reads and what they are about.
+    fn plan_is(runner: &Mutex<Runner>, want: Option<(u32, Option<&str>)>) {
+        let runner = runner.lock().unwrap();
+        let plan = runner.state.work_items[0].review_plan.as_ref();
+        let held = plan.map(|p| (p.reads.get(), p.about.as_deref()));
+        assert_eq!(held, want);
+    }
+
+    #[test]
+    fn a_yes_keeps_what_the_plan_says_the_reads_are_about() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+        plan(&runner, 1, Some("the lock"));
+        rig.claude.script_for(Role::Pm, [answer(YES)]);
+        read_and_fixed(&rig, &runner, found(Severity::High));
+
+        until_answered(&runner);
+
+        plan_is(&runner, Some((2, Some("the lock"))));
+    }
+
+    #[test]
+    fn a_no_ends_the_pass_at_ci() {
+        let (rig, runner, _) = asked_and_told(NO);
+        plan_is(&runner, None);
+
+        reviewers_until_ci(&rig, &runner);
+
+        assert_eq!(rig.reviewer.seen().len(), 1, "no one read again");
+        past_review(&rig, &runner);
+    }
+
+    #[test]
+    fn an_answer_that_names_no_read_ends_the_pass_at_ci() {
+        let (rig, runner, _) = asked_and_told("{\"pick\": null}");
+
+        reviewers_until_ci(&rig, &runner);
+
+        assert_eq!(rig.reviewer.seen().len(), 1, "no one read again");
+        past_review(&rig, &runner);
+    }
+
+    #[test]
+    fn a_failed_wake_ends_the_pass_at_ci() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+        let down = AgentError::Failed(Harness::ClaudeCode, "the model is down".into());
+        rig.claude.script_for(Role::Pm, [Scripted::Fail(down)]);
+        read_and_fixed(&rig, &runner, found(Severity::Medium));
+
+        reviewers_until_ci(&rig, &runner);
+
+        assert_eq!(rig.reviewer.seen().len(), 1, "no one read again");
+        past_review(&rig, &runner);
+    }
+
+    #[test]
+    fn the_calls_why_reaches_the_journal() {
+        let (_, _, report) = asked_and_told(YES);
+
+        let StepReport::PmAnswered { acted, .. } = report else {
+            unreachable!("until_answered returns an answer")
+        };
+        let [line] = acted.try_into().unwrap();
+        assert_eq!(
+            line,
+            "let one more reviewer read #7, which makes 2 reads: the lock is still racy"
+        );
     }
 }
