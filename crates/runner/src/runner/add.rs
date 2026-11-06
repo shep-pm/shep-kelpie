@@ -580,8 +580,8 @@ impl Runner {
 }
 
 // The agent `picked` names to try first, while it is one of `files`, the
-// implementers `agents.allow` holds, and the note for an agent it names that
-// is no implementer now.
+// implementers `agents.allow` holds, and the note for a pick that names none
+// or names an agent that is no implementer now.
 fn first_choice(
     ticket: TicketId,
     picked: Option<&Picked>,
@@ -594,13 +594,19 @@ fn first_choice(
         .filter(|agent| files.contains(agent))
         .cloned();
     let lapsed = picked.agent.as_ref().filter(|_| named.is_none());
-    let note = lapsed.map(|agent| {
-        format!(
-            "{}: the project manager picked it for {agent}, which is no longer an \
-             implementer `agents.allow` holds, so the agent board picks",
+    let note = match (&picked.agent, lapsed) {
+        (None, _) => Some(format!(
+            "{}: the project manager named no agent, so the agent board picks",
             ticket.shown()
-        )
-    });
+        )),
+        (Some(_), lapsed) => lapsed.map(|agent| {
+            format!(
+                "{}: the project manager picked it for {agent}, which is no longer an \
+                 implementer `agents.allow` holds, so the agent board picks",
+                ticket.shown()
+            )
+        }),
+    };
     (named, note)
 }
 
