@@ -209,7 +209,7 @@ impl Runner {
         self.current().map_or(0, |item| self.reads_in(item, review))
     }
 
-    pub(super) fn reads_in(&self, item: &WorkItem, review: &Review) -> u32 {
+    pub(in crate::runner) fn reads_in(&self, item: &WorkItem, review: &Review) -> u32 {
         u32::try_from(self.readers(item, review).len()).unwrap_or(u32::MAX)
     }
 

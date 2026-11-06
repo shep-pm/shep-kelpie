@@ -8,7 +8,7 @@ use crate::board::briefing::ticket_ref;
 use crate::runner::Runner;
 use crate::state::StateError;
 use crate::ticket::TicketId;
-use crate::work_item::ReviewPlan;
+use crate::work_item::{Phase, ReviewPlan};
 
 /// What a `read` entry holds, as a dropped one names it
 pub(super) const MORE: &str = "an `item`, `more` as true or false, and a `why`";
@@ -58,7 +58,13 @@ impl Runner {
         let Some(item) = self.state.item(call.item) else {
             return Ok(Err(format!("read {named}: it is no open work item")));
         };
-        let reads = self.need_of(item).saturating_add(1);
+        // A bot's late round can leave the pass with more reads than the
+        // plan called for, so one more is counted from the reads it has.
+        let in_pass = match &item.phase {
+            Phase::Review(review) => self.reads_in(item, review),
+            _ => 0,
+        };
+        let reads = self.need_of(item).max(in_pass).saturating_add(1);
         let about = item.review_plan.as_ref().and_then(|p| p.about.clone());
         let mut next = self.state.clone();
         if let (Some(item), Some(reads)) =

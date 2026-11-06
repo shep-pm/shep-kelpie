@@ -82,7 +82,7 @@ mod tests {
     use crate::settings::{AgentName, Harness};
     use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, ScriptedRound};
     use crate::work_item::BotSkipped;
-    use crate::work_item::{Heavier, Lighter, ReviewPlan, ReviewWeight};
+    use crate::work_item::{Heavier, Lighter, Phase, ReviewPlan, ReviewWeight};
 
     // `two_local`'s candidates `mine`, `other` and `claude` on a project that names `agents.pm`,
     // with `reviews.need` left out.
@@ -338,6 +338,27 @@ mod tests {
         let plan = runner.state.work_items[0].review_plan.as_ref();
         let held = plan.map(|p| (p.reads.get(), p.about.as_deref()));
         assert_eq!(held, want);
+    }
+
+    // A bot's late round joins the pass while the ask is out, so the pass has
+    // read more than the plan called for.
+    #[test]
+    fn a_yes_raises_the_plan_one_above_the_reads_the_pass_has_in() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+        let held = asked_and_held(&rig, &runner);
+        {
+            let mut runner = runner.lock().unwrap();
+            let Phase::Review(review) = &mut runner.state.work_items[0].phase else {
+                panic!("the item is in review")
+            };
+            review.ran.push(AgentName::kelpies("other"));
+        }
+        held.release();
+
+        until_answered(&runner);
+
+        plan_is(&runner, Some((3, None)));
     }
 
     #[test]
