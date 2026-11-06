@@ -718,8 +718,9 @@ impl Wait {
 /// Clones share the one call. The adapter running it ends its process
 /// group once asked, however soon after the call began that is. A call that
 /// waits for a lease says so, and says when it has it, so its ceiling
-/// counts from then. A call still waiting when its ceiling passes is not
-/// asked to end, having spent none of it; a drain asks it all the same.
+/// counts from then. A call still queued for its lease when its ceiling
+/// passes is not asked to end, having spent none of it; a drain asks it all
+/// the same, and a gateway that answered busy is no lease wait.
 #[derive(Clone, Default)]
 pub struct Ending {
     asked: Arc<AtomicBool>,
