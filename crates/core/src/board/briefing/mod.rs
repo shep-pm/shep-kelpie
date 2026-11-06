@@ -533,10 +533,11 @@ fn reading(agent: &AgentLine, now: Timestamp) -> String {
         0 => "now".to_owned(),
         wait => format!("{} UTC", date_time(Timestamp(now.0.saturating_add(wait)))),
     };
-    let cost = read.cost_usd.map_or_else(
-        || "cost unknown".to_owned(),
-        |usd| format!("about ${usd:.2}"),
-    );
+    let cost = match (read.cost_usd, read.local) {
+        (Some(usd), _) => format!("about ${usd:.2}"),
+        (None, true) => "costs nothing (local model)".to_owned(),
+        (None, false) => "cost unknown".to_owned(),
+    };
     let typical = elapsed(read.finish.saturating_sub(read.wait));
     format!("; starts {starts}, typically {typical}, {cost}")
 }

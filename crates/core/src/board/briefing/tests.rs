@@ -476,6 +476,20 @@ fn an_agent_line_shows_when_it_can_start_and_what_it_typically_takes_and_costs()
             line("now", reads(0, 2700, Some(1.5))),
             line("later", reads(1800, 3600, Some(0.1))),
             line("unpriced", reads(0, 600, None)),
+            line(
+                "local",
+                Pick {
+                    local: true,
+                    ..reads(0, 600, None)
+                },
+            ),
+            line(
+                "local-priced",
+                Pick {
+                    local: true,
+                    ..reads(0, 600, Some(0.5))
+                },
+            ),
         ],
         ..briefing(Vec::new())
     };
@@ -486,6 +500,10 @@ fn an_agent_line_shows_when_it_can_start_and_what_it_typically_takes_and_costs()
          typically 1h00m, about $0.10\n",
         "- unpriced (implementer): standard tier, every kind; Work.; starts now, typically 10m, \
          cost unknown\n",
+        "- local (implementer): standard tier, every kind; Work.; starts now, typically 10m, \
+         costs nothing (local model)\n",
+        "- local-priced (implementer): standard tier, every kind; Work.; starts now, typically \
+         10m, about $0.50\n",
     ] {
         assert!(text.contains(line), "{line}\n{text}");
     }
