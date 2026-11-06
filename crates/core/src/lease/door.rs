@@ -112,8 +112,8 @@ pub const E2E: &str = "e2e";
 /// connection holds: the dog answers one line and closes
 pub const FORGE: &str = "forge";
 
-/// What an ask names to have the agent board rank the agents for a work
-/// item: the dog answers one line and closes
+/// What an ask names to have the agent board read the agents for a work
+/// item, or the agents it names: the dog answers one line and closes
 pub const PICK: &str = "pick";
 
 /// What an ask names to have the agent board say whether an agent still fits
@@ -166,11 +166,15 @@ pub struct Ask {
     /// Why the API refused the key, in a `refused` ask
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refused: Option<Refusal>,
+    /// The agents a `pick` ask with no work item wants read: the dog answers
+    /// [`Answer::Picks`] with each it has a window for, whatever its kinds
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reading: Vec<AgentName>,
 }
 
 impl Ask {
     /// An ask for the counted lease `take` from process `pid`, running
-    /// `what`, with no folder, forge ask, pick, fit or refusal, from a command not yet
+    /// `what`, with no folder, forge ask, pick, fit, refusal or reading, from a command not yet
     /// under a grant
     pub fn new(take: impl Into<String>, pid: u32, what: impl Into<String>) -> Self {
         Self {
@@ -183,6 +187,7 @@ impl Ask {
             pick: None,
             fit: None,
             refused: None,
+            reading: Vec::new(),
         }
     }
 }
@@ -229,7 +234,10 @@ pub struct PickAsk {
     pub leave_out: Vec<AgentName>,
 }
 
-/// An agent the board would pick, in a [`Answer::Picks`]
+/// An agent the dog read as able to start an item, in a [`Answer::Picks`]
+///
+/// The dog orders none: `rank` puts them in the order to try them, from the
+/// flags beside the finish.
 // wire format: changing this is a breaking change to the door
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Pick {
@@ -242,6 +250,35 @@ pub struct Pick {
     /// What it typically costs in US dollars, or None when unknown
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    /// Its file's tier, or None from a dog that does not say
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<Tier>,
+    /// Whether it runs on a local model, which costs nothing when its history names no cost
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub local: bool,
+    /// Whether its wait is a hold on its API key
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub held: bool,
+    /// Its place in `[kelpie.agent_board] prefer`, 0 the most wanted, or None when unlisted
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listed: Option<usize>,
+}
+
+impl Pick {
+    /// `agent`, finishing in `finish` seconds and starting in `wait`, with no
+    /// cost, tier, place in the list, and neither local nor held
+    pub fn new(agent: AgentName, finish: u64, wait: u64) -> Self {
+        Self {
+            agent,
+            finish,
+            wait,
+            cost_usd: None,
+            tier: None,
+            local: false,
+            held: false,
+            listed: None,
+        }
+    }
 }
 
 /// What a runner asks the agent board about one agent and one kind, in a [`FIT`] ask
@@ -287,7 +324,7 @@ pub enum Answer {
     /// An e2e run is over, with the exit code of its command, and the dog
     /// closes the connection
     Done(i32),
-    /// The agents a pick ask may start, in the order to try them; none fits when empty
+    /// The agents a pick ask may start, in no order; none fits when empty
     Picks(Vec<Pick>),
     /// What a fit ask answered about the agent and kind it named
     Fits(Fits),
@@ -561,12 +598,7 @@ mod tests {
             serde_json::to_value(&pick).unwrap()["pick"],
             json!({ "kind": "fix", "tier": "light", "slack": 0, "agents": ["sonnet-high"] })
         );
-        let picks = Answer::Picks(vec![Pick {
-            agent: AgentName::kelpies("sonnet-high"),
-            finish: 600,
-            wait: 0,
-            cost_usd: None,
-        }]);
+        let picks = Answer::Picks(vec![Pick::new(AgentName::kelpies("sonnet-high"), 600, 0)]);
         assert_eq!(
             serde_json::to_value(&picks).unwrap(),
             json!({ "picks": [{ "agent": "sonnet-high", "finish": 600, "wait": 0 }] })
@@ -622,13 +654,64 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_pick_with_no_flags_writes_the_line_an_older_dog_wrote() {
+        let plain = Pick::new(AgentName::kelpies("sonnet-high"), 600, 0);
+        assert_eq!(
+            serde_json::to_value(&plain).unwrap(),
+            json!({ "agent": "sonnet-high", "finish": 600, "wait": 0 })
+        );
+        let read: Pick =
+            serde_json::from_str(r#"{"agent":"sonnet-high","finish":600,"wait":0}"#).unwrap();
+        assert_eq!(read, plain);
+    }
+
+    #[test]
+    fn a_pick_writes_each_flag_it_sets() {
+        let read = Pick {
+            cost_usd: Some(1.5),
+            tier: Some(Tier::Heavy),
+            local: true,
+            held: true,
+            listed: Some(0),
+            ..Pick::new(AgentName::kelpies("opus-high"), 900, 300)
+        };
+        assert_eq!(
+            serde_json::to_value(&read).unwrap(),
+            json!({
+                "agent": "opus-high", "finish": 900, "wait": 300, "cost_usd": 1.5,
+                "tier": "heavy", "local": true, "held": true, "listed": 0
+            })
+        );
+    }
+
+    #[test]
+    fn a_reading_ask_names_the_agents_and_an_ask_with_none_writes_no_line_for_it() {
+        let plain = Ask::new(PICK, 42, "pick");
+        assert!(
+            serde_json::to_value(&plain)
+                .unwrap()
+                .get("reading")
+                .is_none()
+        );
+        let reading = Ask {
+            reading: vec![AgentName::kelpies("sonnet-high")],
+            ..plain
+        };
+        assert_eq!(
+            serde_json::to_value(&reading).unwrap()["reading"],
+            json!(["sonnet-high"])
+        );
+    }
+
     // Each line was written by a build of its time, so a change that stops one reading breaks a runner.
     #[test]
     fn every_recorded_ask_and_answer_still_reads_as_written() {
         let asks = include_str!("../../../../fixtures/door-asks.jsonl");
         for line in asks.lines() {
             let ask: Ask = serde_json::from_str(line).unwrap();
-            assert_eq!(ask.pick.is_some(), ask.take == PICK, "{line}");
+            let reads = !ask.reading.is_empty();
+            assert_eq!(ask.pick.is_some() || reads, ask.take == PICK, "{line}");
             let written: serde_json::Value = serde_json::from_str(line).unwrap();
             assert_eq!(serde_json::to_value(&ask).unwrap(), written, "{line}");
         }

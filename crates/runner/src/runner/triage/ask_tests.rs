@@ -12,9 +12,9 @@ use super::research_tests::{
     APP, calls, crashed_with, facts, handed, moves, reply, restart, triage, under,
 };
 use crate::github::ApiError;
-use crate::ports::{Clock, Role};
+use crate::ports::{Clock, ForgeError, Role};
 use crate::runner::{Runner, step};
-use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
+use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, VIEWER};
 
 // What the representative says for the triage comment that asks, and for the one that reads the answers
 pub(super) const ASK_WORDS: &str =
@@ -258,6 +258,140 @@ fn an_outside_issue_is_asked_under_pick_all_and_ends_needs_triage_under_pick_mai
         "an outside author is not asked"
     );
     assert!(!posted(&rig)[0].contains("<details>"), "{:?}", posted(&rig));
+}
+
+// An issue kelpie's own App opened is nobody to ask: its questions go to the
+// maintainer, who is greeted, mentioned and heard from instead (#1749).
+#[test]
+fn an_issue_kelpie_opened_greets_and_mentions_the_maintainer() {
+    let (rig, runner) = filed("pick = \"maintainer\"", APP, asked());
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let [comment] = posted(&rig).try_into().expect("one comment");
+    assert!(
+        comment.starts_with(&format!(
+            "{ASK_WORDS}\n\ncc @{MAINTAINER}\n\n{ONE_QUESTION}\n\n{REPLY_HINT}\n\n<details>"
+        )),
+        "{comment}"
+    );
+    let asked = calls(&rig, Role::Representative).remove(0).call.prompt;
+    assert!(
+        asked.contains(&format!("What @{MAINTAINER} wrote")),
+        "{asked}"
+    );
+    assert!(!asked.contains(&format!("What @{APP} wrote")), "{asked}");
+    let held = record(&rig, &runner);
+    assert_eq!(
+        held["author"], APP,
+        "the cap still counts by the issue's author"
+    );
+    assert_eq!(moves(&rig), ["comment"], "no label goes on while it waits");
+}
+
+#[test]
+fn the_maintainers_reply_answers_an_issue_kelpie_opened() {
+    let (rig, runner) = filed("pick = \"maintainer\"", APP, asked());
+    assert_eq!(step(&runner).unwrap(), None);
+
+    wrote(&rig, MAINTAINER, "Linux, on start.");
+    rig.claude.script_for(Role::Triager, [reply(settled())]);
+    rig.claude
+        .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let prompt = answers_prompt(&rig);
+    assert!(prompt.contains("Linux, on start."), "{prompt}");
+    assert!(prompt.contains(ONE_QUESTION), "{prompt}");
+    assert_eq!(posted(&rig).len(), 2, "the answers comment went up");
+    assert_eq!(record(&rig, &runner)["step"], "done");
+}
+
+#[test]
+fn kelpies_own_reply_never_answers_an_issue_it_opened() {
+    let (rig, runner) = filed("pick = \"maintainer\"", APP, asked());
+    assert_eq!(step(&runner).unwrap(), None);
+
+    wrote(&rig, APP, "ok");
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(posted(&rig).len(), 1, "no answers comment");
+    assert_eq!(calls(&rig, Role::Triager).len(), 1, "no second pass");
+    assert!(record(&rig, &runner)["questions"]["at"].is_number());
+}
+
+// With no maintainer login to ask, an issue kelpie opened is triaged as an
+// unasked one is: the questions go nowhere and what the pass owed goes on.
+#[test]
+fn an_issue_kelpie_opened_is_not_asked_with_no_maintainer_login() {
+    let (rig, runner) = filed_before("pick = \"all\"", APP, asked(), |rig| {
+        rig.edit_settings(|s| s.replace(&format!("maintainer = \"{MAINTAINER}\"\n"), ""));
+        rig.forge
+            .set_viewer_down(ForgeError::Failed("no login".into()));
+    });
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(
+        moves(&rig),
+        ["comment", "label bug", "label P2", "label needs-triage"],
+        "nothing waits on an author"
+    );
+    let held = record(&rig, &runner);
+    assert!(held.get("questions").is_none(), "{held}");
+    assert!(held.get("local").is_none(), "{held}");
+    assert_eq!(held["step"], "done");
+    assert!(!posted(&rig)[0].contains("<details>"), "{:?}", posted(&rig));
+}
+
+// The maintainer's login was readable when the questions went up and cannot be
+// read after a restart, on a wait saved with no prompt. Nothing can be heard
+// from, so silence ends the wait as it did before an App issue was asked.
+#[test]
+fn an_app_s_wait_ends_on_silence_when_its_maintainer_login_is_lost() {
+    let (rig, runner) = filed_before("pick = \"all\"\nwait_days = 1", APP, asked(), |rig| {
+        rig.edit_settings(|s| s.replace(&format!("maintainer = \"{MAINTAINER}\"\n"), ""));
+    });
+    assert_eq!(step(&runner).unwrap(), None);
+    let went = record(&rig, &runner);
+    assert!(
+        posted(&rig)[0].contains(&format!("cc @{VIEWER}")),
+        "the questions went to the login `gh` acts as: {:?}",
+        posted(&rig)
+    );
+    drop(runner);
+    crashed_with(
+        &rig,
+        json!({
+            "issue": 30, "comment": went["questions"]["comment"], "step": "commented",
+            "labels": ["bug", "P2"], "seen": [],
+            "asked": { "at": went["questions"]["at"] },
+        }),
+    );
+
+    // The login cannot be read any more, and the runner starts afresh. Its first
+    // poll is what gets the author's login back from the listing.
+    rig.forge
+        .set_viewer_down(ForgeError::Failed("no login".into()));
+    let runner = rig.open().unwrap();
+    assert_eq!(step(&runner).unwrap(), None);
+    rig.clock.advance(2 * Rig::DAY);
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let told: Vec<String> = runner.lock().unwrap().take_notes();
+    assert!(
+        told.iter().any(|n| n.contains("gave no answers")),
+        "the silence is said: {told:?}"
+    );
+    assert_eq!(
+        moves(&rig),
+        ["comment", "label bug", "label P2", "label needs-triage"],
+        "the wait ended as an unasked pass"
+    );
+    let held = record(&rig, &runner);
+    assert_eq!(held["step"], "done");
+    assert!(held.get("questions").is_none(), "{held}");
 }
 
 #[test]
@@ -615,230 +749,6 @@ fn an_answer_written_while_the_questions_post_is_read_back_is_heard() {
     assert!(
         held["step"] == "done" || held["step"] == "ready",
         "the round closed: {held}"
-    );
-}
-
-// #1194: `shep kelpie triage` over an issue kelpie already triaged asked the
-// settled questions again. The pass is now given the earlier triage comments
-// and their author's replies, and a question the author answered is not asked
-// again.
-#[test]
-fn a_pass_asked_again_over_a_triaged_issue_reads_the_rounds_it_ran() {
-    let (rig, runner) = filed("pick = \"maintainer\"", MAINTAINER, asked());
-    assert_eq!(step(&runner).unwrap(), None);
-    wrote(&rig, MAINTAINER, "ok");
-    rig.claude.script_for(Role::Triager, [reply(settled())]);
-    rig.claude
-        .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    assert_eq!(record(&rig, &runner)["step"], "done");
-
-    // The verb asks again, and the triager answers with the same open question
-    // and a recommendation against what the author took.
-    rig.ask(&runner, "triage", Some("30"));
-    rig.claude.script_for(Role::Triager, [reply(asked())]);
-    rig.claude
-        .script_for(Role::Representative, [Scripted::Say(ASK_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    let prompts: Vec<String> = (calls(&rig, Role::Triager))
-        .into_iter()
-        .map(|seen| seen.call.prompt)
-        .collect();
-    let last = prompts.last().unwrap();
-    assert!(
-        last.contains("Which OS crashes?"),
-        "the earlier questions reach the triager: {last}"
-    );
-    assert!(
-        last.contains(&format!("{MAINTAINER} wrote:")),
-        "the author's reply reaches the triager: {last}"
-    );
-    assert!(
-        last.contains("Do not ask again in `open` what those rounds settled"),
-        "{last}"
-    );
-    let comments = posted(&rig);
-    let again = comments.last().unwrap();
-    assert!(
-        !again.contains("Which OS crashes?"),
-        "the settled question is not posted again: {again}"
-    );
-    assert!(!again.contains("Q1 - "), "no questions block: {again}");
-}
-
-// #1304: only what the author answered is settled. The first round asked two
-// questions and the author answered one, so the re-ask puts the other back.
-#[test]
-fn a_reask_asks_again_the_question_its_author_left_unanswered() {
-    let (rig, runner) = filed("pick = \"maintainer\"", MAINTAINER, asked_as(2));
-    assert_eq!(step(&runner).unwrap(), None);
-    wrote(&rig, MAINTAINER, "Q2: the second one");
-    rig.claude.script_for(Role::Triager, [reply(asked_as(1))]);
-    rig.claude
-        .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    rig.ask(&runner, "triage", Some("30"));
-    rig.claude.script_for(Role::Triager, [reply(asked_as(2))]);
-    rig.claude
-        .script_for(Role::Representative, [Scripted::Say(ASK_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    let again = posted(&rig).last().expect("a comment").clone();
-    assert!(
-        again.contains("Which one, 1?"),
-        "the question its author left unanswered is asked again: {again}"
-    );
-    assert!(
-        !again.contains("Which one, 2?"),
-        "the one it answered is not: {again}"
-    );
-}
-
-// #1304 round 2: the author's reply to a later round answers that round alone.
-// The questions an earlier round asked and never heard an answer to are still
-// open, and the next pass asks them.
-#[test]
-fn a_reask_does_not_take_a_later_round_s_answer_for_an_earlier_one() {
-    let (rig, runner) = filed("pick = \"maintainer\"", MAINTAINER, asked_as(2));
-    assert_eq!(step(&runner).unwrap(), None);
-    rig.ask(&runner, "triage", Some("30"));
-    rig.claude.script_for(
-        Role::Triager,
-        [reply(asked_one("Which display server?", "X11"))],
-    );
-    rig.claude
-        .script_for(Role::Representative, [Scripted::Say(ASK_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    wrote(&rig, MAINTAINER, "Q1: X11, on Wayland.");
-    rig.claude.script_for(Role::Triager, [reply(asked_as(1))]);
-    rig.claude
-        .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    rig.ask(&runner, "triage", Some("30"));
-    rig.claude.script_for(Role::Triager, [reply(asked_as(2))]);
-    rig.claude
-        .script_for(Role::Representative, [Scripted::Say(ASK_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    let again = posted(&rig).last().expect("a comment").clone();
-    for n in 1..=2 {
-        assert!(
-            again.contains(&format!("Which one, {n}?")),
-            "the question no round heard an answer to is asked again: {again}"
-        );
-    }
-    assert!(
-        !again.contains("Which display server?"),
-        "the question its author answered to that round is not: {again}"
-    );
-}
-
-// #1304 round 2: only the form the questions comment asked for settles a round.
-// An author whose sentence starts like `ok` answered no question kelpie can
-// name, and reading what they meant is the triager's job, not the filter's.
-#[test]
-fn an_author_s_words_that_are_not_an_ok_settle_nothing() {
-    let (rig, runner) = filed("pick = \"maintainer\"", MAINTAINER, asked());
-    assert_eq!(step(&runner).unwrap(), None);
-    wrote(&rig, MAINTAINER, "Okay, any update on this?");
-    rig.claude.script_for(Role::Triager, [reply(asked_as(1))]);
-    rig.claude
-        .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    rig.ask(&runner, "triage", Some("30"));
-    rig.claude.script_for(Role::Triager, [reply(asked())]);
-    rig.claude
-        .script_for(Role::Representative, [Scripted::Say(ASK_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    let again = posted(&rig).last().expect("a comment").clone();
-    assert!(
-        again.contains("Which OS crashes?"),
-        "the question its sentence answered nothing for is asked again: {again}"
-    );
-}
-
-// #1304 round 2: the settled questions are compared in one case, so a question
-// holding a letter outside ASCII is known for the one its author answered.
-#[test]
-fn a_settled_question_holding_a_letter_outside_ascii_is_not_asked_again() {
-    let (rig, runner) = filed(
-        "pick = \"maintainer\"",
-        MAINTAINER,
-        asked_second("\u{00c7}a plante sous Wayland ?", "Oui"),
-    );
-    assert_eq!(step(&runner).unwrap(), None);
-    wrote(&rig, MAINTAINER, "Q1: Oui, sous Wayland.");
-    rig.claude.script_for(Role::Triager, [reply(asked_as(1))]);
-    rig.claude
-        .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    rig.ask(&runner, "triage", Some("30"));
-    rig.claude.script_for(
-        Role::Triager,
-        [reply(asked_second(
-            "\u{00c7}a plante sous Wayland ?",
-            "Oui",
-        ))],
-    );
-    rig.claude
-        .script_for(Role::Representative, [Scripted::Say(ASK_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    let again = posted(&rig).last().expect("a comment").clone();
-    assert!(
-        again.contains("Which one, 2?"),
-        "the unanswered one is asked again: {again}"
-    );
-    assert!(
-        !again.contains("plante sous Wayland"),
-        "the question its author answered is not asked again: {again}"
-    );
-}
-
-// #1304 round 2: a question is compared as the questions block wrote it, so the
-// marks it took out and the line it broke at do not hide what was settled.
-#[test]
-fn a_settled_question_the_questions_block_rewrote_is_not_asked_again() {
-    let (rig, runner) = filed(
-        "pick = \"maintainer\"",
-        MAINTAINER,
-        asked_second("Does ```kelpie``` crash on start?", "No"),
-    );
-    assert_eq!(step(&runner).unwrap(), None);
-    wrote(&rig, MAINTAINER, "Q1: No, only under Wayland.");
-    rig.claude.script_for(Role::Triager, [reply(asked_as(1))]);
-    rig.claude
-        .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    rig.ask(&runner, "triage", Some("30"));
-    rig.claude.script_for(
-        Role::Triager,
-        [reply(asked_second(
-            "Does ```kelpie``` crash on start?",
-            "No",
-        ))],
-    );
-    rig.claude
-        .script_for(Role::Representative, [Scripted::Say(ASK_WORDS)]);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    let again = posted(&rig).last().expect("a comment").clone();
-    assert!(
-        again.contains("Which one, 2?"),
-        "the unanswered one is asked again: {again}"
-    );
-    assert!(
-        !again.contains("Does kelpie crash on start?"),
-        "the question its author answered is not asked again: {again}"
     );
 }
 

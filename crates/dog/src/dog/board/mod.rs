@@ -2,7 +2,8 @@
 //!
 //! Every [`LOAD_TICK`] the dog rereads each project's usage ledger in
 //! kelpie's home that changed, keeping its finished items. A `pick` ask
-//! ranks the agents it names with `agent_board::pick`, each one's wait read
+//! reads the agents it names with `agent_board::pick` and orders none, each
+//! one's wait read
 //! from the [`availability`](super::availability): the dog knows no project's
 //! day start or kickoff hours, so a plan waits only on its 5-hour window. A
 //! `fit` ask reads every project's records at once, and the dog keeps what

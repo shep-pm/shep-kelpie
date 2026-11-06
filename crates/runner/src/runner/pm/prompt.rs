@@ -188,14 +188,17 @@ const ANSWER: &str = concat!(
 
 A `pick` entry may be `{\"issue\": <a ready issue>, \"tier\": \"light\" | \"standard\" | \"heavy\", \
 \"agent\": \"<an implementer from the Agents section>\", \"slack\": <minutes>, \
-\"light\": <true | false>}`, each key but `issue` \
-optional: `tier` is the least the work needs, `slack` the minutes past its quickest finish it \
+\"light\": <true | false>, \"review\": {\"reads\": <1 or more>, \"about\": \"<what the reads are for>\"}}`, \
+each key but `issue` optional: `tier` is the least the work needs, `slack` the minutes past its quickest finish it \
 may take, and `agent` is the implementer tried first, over its `agent:` label. It runs the item \
 only when it can start within the slack, and an agent the Agents section marks out will not; \
 the agent board picks then, and the maintainer's `agent:<name>!` label still pins. `light: true` \
 is for a change small and low-risk enough to skim, such as a typo, a comment or a one-line \
 config value. Kelpie checks the diff itself and ignores the tag when the change is larger or the \
-project does not allow it. An entry with any other key, or naming no implementer, is dropped.
+project does not allow it. `review` plans the item's review: `reads` is how many reviewers read \
+its pull request, a whole number of at least 1, and `about`, which may be left out, says what \
+those reads are for, such as \"the migration's rollback path\". An entry with any other key, \
+a `review` with a key but `reads` and `about`, or naming no implementer, is dropped.
 
 `hold` names, for each ready issue, the open work item it waits on as `until`. The \
 hold ends when that work item closes or the issue's text changes, and no other \
@@ -647,6 +650,32 @@ mod tests {
             text.contains(
                 "Kelpie checks the diff itself and ignores the tag when the change is \
                  larger or the project does not allow it"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_pm_prompt_says_how_to_set_a_review_plan() {
+        let text = wake(
+            "koji",
+            &[Wake::Told],
+            &[],
+            &[],
+            true,
+            &Notes::default(),
+            BOARD,
+        );
+        assert!(
+            text.contains(
+                "\"review\": {\"reads\": <1 or more>, \"about\": \"<what the reads are for>\"}"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "`reads` is how many reviewers read its pull request, a whole number of at \
+                 least 1, and `about`, which may be left out, says what those reads are for"
             ),
             "{text}"
         );

@@ -2,12 +2,12 @@
 //!
 //! [`Runner::hear_triage`] runs on the comments a thread read found. It looks
 //! only at issues whose triage record says the wait is open, and only at what the
-//! issue's own author wrote there after the triage comment, by login ignoring case.
-//! Whatever the author wrote is their answers, with no word to read in it: it
-//! starts the second pass, which asks again only what it left unsettled.
-//! Silence `triage.wait_days` ends the wait as `none` does, unless the comment
-//! holds a prompt: [`Runner::watch_local_waits`] ends that one. A wait on a prompt
-//! with no questions is not heard from, nor is an issue given up on after failures.
+//! login it asked wrote there after the triage comment, by login ignoring case.
+//! Whatever that login wrote is the answers, with no word to read in it: it starts
+//! the second pass, which asks again only what it left unsettled. With no login to
+//! ask, nothing is heard, and silence `triage.wait_days` ends the wait as `none`
+//! does, unless the comment holds a prompt: [`Runner::watch_local_waits`] ends that
+//! one. A prompt with no questions is not heard from, nor a given-up issue.
 
 use super::super::Runner;
 use super::super::thread_replies::plain_login;
@@ -37,28 +37,36 @@ impl Runner {
             else {
                 continue;
             };
+            // The answers come from the login the questions went to, which on an
+            // issue kelpie's own App opened is the maintainer and not the App.
+            // With no login to ask, nothing can be heard, yet the wait still ends
+            // on silence as it did before anyone was asked.
+            let asked = self.asked_login(&author);
             // A wait on the author's own session alone is answered by the body
             // their session rewrote, not by a comment, so it is not heard from.
             let Some((_, wait_at)) = answers_wait(&record) else {
                 continue;
             };
-            let replies = self.their_replies(&record, &author, wait_at, comments);
+            let replies = match &asked {
+                Some(asked) => self.their_replies(&record, asked, wait_at, comments),
+                None => Vec::new(),
+            };
             self.hear_answers(&record, wait_at, &replies)?;
         }
         Ok(())
     }
 
-    // What `author` wrote on `issue` after `wait_at`, oldest first: their own
-    // words, and no one else's
+    // What `asked` wrote on `issue` after `wait_at`, oldest first: their own
+    // words, and no one else's, the App's own included
     fn their_replies<'a>(
         &self,
         record: &Triaged,
-        author: &str,
+        asked: &str,
         wait_at: Timestamp,
         comments: &'a [ThreadComment],
     ) -> Vec<&'a ThreadComment> {
         let app = self.app_login().map(|app| plain_login(&app));
-        let mine = plain_login(author);
+        let mine = plain_login(asked);
         let mut replies: Vec<&ThreadComment> = comments
             .iter()
             .filter(|c| {
