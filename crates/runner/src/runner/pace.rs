@@ -7,7 +7,7 @@
 //! finds a hold is trusted for [`RECHECK_SECS`] or until the hold ends. One
 //! that finds no hold is never reused past its step, which reads it with the
 //! lock let go. Only a spent window or week holds anything, and the reading
-//! runs for `status` whatever `pacing.enabled` says.
+//! runs for `status` too.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -27,8 +27,6 @@ use crate::state::StateError;
 /// What `status` shows of the pacer
 #[derive(Debug, Serialize)]
 pub struct PacerStatus<'a> {
-    /// What `pacing.enabled` says, which holds nothing by itself
-    pub enabled: bool,
     /// Each account the worker spends or a reading was taken of
     #[serde(flatten)]
     pub accounts: BTreeMap<Account, AccountStatus<'a>>,
@@ -157,21 +155,14 @@ impl Runner {
             },
         };
         let prior = self.state.day_start(account);
-        // Only a spent window or week holds a turn or a dispatch, whatever
-        // `pacing.enabled` says. The agent board's waits read the 50% mark
-        // themselves, from `pacer::window`.
+        // Only a spent window or week holds a turn or a dispatch. The agent
+        // board's waits read the 50% mark themselves, from `pacer::window`.
         let limit = match &read {
             Ok(usage) => spent(account, usage),
             Err(_) => None,
         };
         let mut assessment = match read {
-            Ok(usage) => assess(
-                account,
-                now,
-                &usage,
-                prior,
-                self.settings.pacing.kickoff_hours,
-            ),
+            Ok(usage) => assess(account, now, &usage, prior),
             Err(e) => {
                 let whose = named(account, "", "Codex ");
                 Assessment::unreadable(now, format!("cannot read {whose}usage: {e}"))
@@ -403,7 +394,6 @@ impl Runner {
             (account, status)
         });
         PacerStatus {
-            enabled: self.settings.pacing.enabled,
             accounts: accounts.collect(),
         }
     }
@@ -493,15 +483,11 @@ mod tests {
         assert_eq!(
             status["pacer"],
             json!({
-                "enabled": true,
                 "claude": {
                     "reading": {
                         "at": Rig::EPOCH,
                         "session": { "used_pct": 3, "resets_at": Rig::EPOCH + 5 * 3600 },
                         "week": { "used_pct": 100, "resets_at": Rig::EPOCH + 7 * DAY },
-                        "allowance_pct": 14.3,
-                        "spent_today_pct": 100,
-                        "per_hour_pct": 1.8,
                     },
                     "holding": {
                         "kind": "window",
@@ -512,6 +498,22 @@ mod tests {
             })
         );
         assert_eq!(rig.claude.calls(), []);
+    }
+
+    #[test]
+    fn the_reading_in_status_holds_the_two_windows_alone() {
+        let (rig, runner) = running_since("koji", 0);
+        rig.forge.list_ready(7, false);
+        rig.meter.set(Rig::utilization(15, 3));
+        assert!(dispatched(&step(&runner).unwrap()));
+        assert_eq!(
+            rig.ask(&runner, "status", None)["pacer"]["claude"]["reading"],
+            json!({
+                "at": Rig::EPOCH,
+                "session": { "used_pct": 3, "resets_at": Rig::EPOCH + 5 * 3600 },
+                "week": { "used_pct": 15, "resets_at": Rig::EPOCH + 7 * DAY },
+            })
+        );
     }
 
     #[test]
@@ -581,8 +583,14 @@ mod tests {
         let runner = rig.open().unwrap();
         rig.claude.script([reply()]);
         step(&runner).unwrap();
+        let state = StateStore::new(rig.paths().state).load().unwrap().unwrap();
+        assert_eq!(
+            state.pacing.map(|day| day.week_used_pct),
+            Some(0),
+            "the day still began where the first reading found it"
+        );
         let reading = &rig.ask(&runner, "status", None)["pacer"]["claude"]["reading"];
-        assert_eq!(reading["spent_today_pct"], 40);
+        assert_eq!(reading["week"]["used_pct"], 40);
     }
 
     #[test]
@@ -698,7 +706,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dispatch_goes_ahead_past_a_days_share_of_the_week() {
+    fn a_dispatch_goes_ahead_past_most_of_the_week_used() {
         let (rig, runner) = running_since("shep", 0);
         rig.forge.list_ready(7, false);
         rig.meter.set(Rig::utilization(60, 0));
@@ -706,10 +714,9 @@ mod tests {
         assert!(dispatched(&step(&runner).unwrap()));
         let status = rig.ask(&runner, "status", None);
         assert_eq!(status["pacer"]["claude"]["holding"], json!(null));
-        let reading = &status["pacer"]["claude"]["reading"];
         assert_eq!(
-            (&reading["spent_today_pct"], &reading["allowance_pct"]),
-            (&json!(60), &json!(14.3))
+            status["pacer"]["claude"]["reading"]["week"]["used_pct"],
+            json!(60)
         );
     }
 
@@ -730,24 +737,22 @@ mod tests {
     }
 
     #[test]
-    fn a_table_holding_pacing_enabled_true_is_held_by_nothing_but_a_spent_limit() {
+    fn a_used_window_holds_nothing_until_it_is_spent() {
         let (rig, runner) = running_since("shep", 0);
         rig.forge.list_ready(7, false);
-        // 60% of the week since the day began, past its share of 100 / 7, and 80% of the window
+        // 60% of the week used, and 80% of the 5-hour window, past the mark the agent board waits on
         rig.meter.set(Rig::utilization(60, 80));
 
         assert!(dispatched(&step(&runner).unwrap()));
         let status = rig.ask(&runner, "status", None);
-        assert_eq!(
-            status["pacer"]["enabled"],
-            json!(true),
-            "the table still says on"
-        );
         assert_eq!(status["pacer"]["claude"]["holding"], json!(null));
         let reading = &status["pacer"]["claude"]["reading"];
         assert_eq!(
-            (&reading["spent_today_pct"], &reading["allowance_pct"]),
-            (&json!(60), &json!(14.3))
+            (
+                &reading["week"]["used_pct"],
+                &reading["session"]["used_pct"]
+            ),
+            (&json!(60), &json!(80))
         );
 
         rig.ask(&runner, "drop", Some("7"));

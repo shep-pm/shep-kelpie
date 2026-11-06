@@ -311,7 +311,8 @@ impl From<&r::looks::Failing> for wire::Failing {
 impl From<&r::PacerStatus<'_>> for wire::PacerStatus {
     fn from(pacer: &r::PacerStatus<'_>) -> Self {
         Self {
-            enabled: pacer.enabled,
+            // Read from an older runner alone, so never sent.
+            enabled: None,
             accounts: pacer
                 .accounts
                 .iter()

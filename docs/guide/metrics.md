@@ -43,7 +43,6 @@ Every runner series carries `sheep`, the project's name, as well as `id` and `fo
 | `kelpie_call_seconds_total` | `role`, `kind` | Seconds the calls ran; over `kelpie_calls_total` for a mean |
 | `kelpie_plan_used_ratio` | `account`, `window` | How much of a plan window is used, 0 to 1, as the pacer last read it. `account` is `claude` or `codex`, `window` is `session` (5 hours) or `week` |
 | `kelpie_plan_resets_at_seconds` | `account`, `window` | When that window resets, in Unix seconds |
-| `kelpie_plan_allowance_ratio`, `kelpie_plan_spent_today_ratio` | `account` | The share of the week today may spend, and the share spent since the day began by anyone on the account, 0 to 1 |
 | `kelpie_work_items` | `phase` | Open work items: `implement`, `review`, `ci`, `ruling`, `merge`, `done` |
 | `kelpie_work_items_finished_total` | `outcome`, `agent`, `kind` | Work items finished: `merged`, `closed` (no change), `dropped`. `agent` is the one that built it and `kind` the kind of work its issue's `kind:` label named |
 | `kelpie_work_item_seconds_total` | `outcome`, `agent`, `kind` | Wall seconds of the finished work items; over `kelpie_work_items_finished_total` for a mean |

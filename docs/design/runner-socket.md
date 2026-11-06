@@ -23,6 +23,7 @@ A runner answers the typed protocol on `run/<project>.sock` under kelpie's home,
 - Merge rule: a watcher writes an event only when its line differs from the last it wrote. Whole snapshots are compared and nothing is stripped, so `timings` and `lock`, which move with the clock, make fewer merges on a real clock than on the rig's stand-in. A field the wire leaves out (a skill's plugin path) cannot tell two snapshots apart.
 - Each watcher is two threads. One waits on the condvar and writes the newest snapshot, so a slow client skips the ones it missed and nothing queues. The other reads the peer's half, so a client that closes ends both. A failed write and `Serving::end` end them too. Neither holds the runner's lock while it writes.
 - The watch has no idle bound: a connection that watches is silent by design.
+- A status read takes what an older runner sent. `status::standing::PacerStatus` keeps `enabled` as an `Option<bool>` that is read and never sent, since its accounts are flattened and an `enabled` key read as an account would fail the whole reply, and `pacer::Reading` denies no unknown fields, so a reading's extra figures read as unknown (#1787). `PROTOCOL` stays 1 (ADR 0017 bumps for a change an older peer cannot read): the older peer here is an older `shep kelpie` facing a new runner, which happens only inside a `--rollback` before the restarts, while a bump would send every verb through `shep trigger` on every upgrade until each runner restarts.
 
 ## Opening it
 

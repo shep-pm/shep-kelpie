@@ -15,10 +15,9 @@ const RECORDED: &str = r#"{"project":"koji","merging":"ask","run":"finishing",
     "rulings":[{"id":"1","issue":"7","pull_request":71,
         "question":"Merge pull request #71 at abc1234 into main?",
         "kind":{"kind":"merge","head":"abc1234def"},"alerted":false}],
-    "pacer":{"enabled":true,"claude":{
+    "pacer":{"claude":{
         "reading":{"at":300,"session":{"used_pct":3,"resets_at":400},
-            "week":{"used_pct":15,"resets_at":500},"allowance_pct":14.3,
-            "spent_today_pct":15,"per_hour_pct":1.8},
+            "week":{"used_pct":15,"resets_at":500}},
         "holding":{"kind":"window",
             "reason":"the 5-hour window is at 100%, so no turn starts until it resets",
             "until":600}}}}"#;
@@ -36,10 +35,40 @@ fn a_plain_status_names_what_the_maintainer_looks_for() {
             "    #9 Fix the other: phase implement, turn running, no PR",
             "  rulings waiting: 1",
             "    ruling 1: merge, #7, PR #71",
-            "  pacer: on",
-            "    claude: session 3%, week 15%, 15% of the week spent today of 14.3% allowed",
+            "    claude: session 3%, week 15%",
             "    claude holding (window): the 5-hour window is at 100%, \
              so no turn starts until it resets",
+        ]
+    );
+}
+
+// The pacer's account line, and what a runner not yet restarted sends beside it
+#[test]
+fn a_reading_shows_each_windows_share() {
+    let body = r#"{"project":"koji","work_items":[],"rulings":[],
+        "pacer":{"claude":{"reading":{"at":300,
+            "session":{"used_pct":3,"resets_at":400},
+            "week":{"used_pct":15,"resets_at":500}},"holding":null},
+        "codex":{"reading":null,"holding":null}}}"#;
+    assert_eq!(
+        plain_status("koji", body, None)[5..7],
+        ["    claude: session 3%, week 15%", "    codex: not read"]
+    );
+}
+
+#[test]
+fn an_older_runners_enabled_key_prints_no_account() {
+    let body = r#"{"project":"koji","work_items":[],"rulings":[],
+        "pacer":{"enabled":true,"claude":{"reading":null,"holding":null}}}"#;
+    assert_eq!(
+        plain_status("koji", body, None),
+        [
+            "koji",
+            "  run: running",
+            "  build: not recorded",
+            "  work items: none",
+            "  rulings waiting: none",
+            "    claude: not read",
         ]
     );
 }
@@ -66,7 +95,6 @@ fn a_work_item_whose_step_keeps_failing_says_how_often_since_when_and_why() {
              cannot delete branch kelpie/7: checked out in another worktree",
             "    #9 Fix the other: phase implement, turn running, no PR",
             "  rulings waiting: none",
-            "  pacer: on",
         ]
     );
 }
@@ -391,7 +419,7 @@ fn a_plain_rework_and_adopt_say_the_pull_request_is_queued() {
 #[test]
 fn a_plain_status_of_an_idle_runner_says_so() {
     let idle = r#"{"project":"koji","work_items":[],"rulings":[],
-        "pacer":{"enabled":false,"claude":{"reading":null,"holding":null}}}"#;
+        "pacer":{"claude":{"reading":null,"holding":null}}}"#;
     assert_eq!(
         plain_status("koji", idle, None),
         [
@@ -400,7 +428,6 @@ fn a_plain_status_of_an_idle_runner_says_so() {
             "  build: not recorded",
             "  work items: none",
             "  rulings waiting: none",
-            "  pacer: off",
             "    claude: not read",
         ]
     );
@@ -411,7 +438,7 @@ fn a_plain_status_shows_a_refused_settings_change_and_when() {
     let refused = r#"{"project":"koji","work_items":[],"rulings":[],
         "settings_refused":{"reason":"agents.allow: coderabbit: free plan reviews public repos only",
         "at":1790000000},
-        "pacer":{"enabled":false,"claude":{"reading":null,"holding":null}}}"#;
+        "pacer":{"claude":{"reading":null,"holding":null}}}"#;
     assert_eq!(
         plain_status("koji", refused, None)[..4],
         [
@@ -429,7 +456,7 @@ fn a_plain_status_shows_an_adopted_pull_request_that_keeps_failing_and_since_whe
     let failing = r#"{"project":"koji","work_items":[],"rulings":[],
         "skipped":[{"reason":"adopt","pull_request":80,"error":"cannot prepare its worktree: busy",
         "since":1790000000}],
-        "pacer":{"enabled":false,"claude":{"reading":null,"holding":null}}}"#;
+        "pacer":{"claude":{"reading":null,"holding":null}}}"#;
     assert_eq!(
         plain_status("koji", failing, None)[3..5],
         [
@@ -485,7 +512,6 @@ fn a_work_item_with_a_review_weight_shows_it_on_its_own_line() {
             "      review: full (diff touched src/)",
             "    #9 Fix the other: phase implement, turn running, no PR",
             "  rulings waiting: none",
-            "  pacer: on",
         ]
     );
 }
@@ -510,7 +536,6 @@ fn a_work_item_whose_package_install_failed_says_so_under_it() {
             "      package install failed: error: lockfile had changes, but lockfile is frozen",
             "    #9 Fix the other: phase implement, turn running, no PR",
             "  rulings waiting: none",
-            "  pacer: on",
         ]
     );
 }

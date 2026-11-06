@@ -471,20 +471,18 @@ fn rulings(status: &Value, lines: &mut Vec<String>) {
     }
 }
 
+// Each account the pacer read, and what holds it. A runner not yet restarted
+// sends `enabled` beside the accounts, which names no account and prints
+// nothing.
 fn pacer(status: &Value, lines: &mut Vec<String>) {
     let pacer = &status["pacer"];
-    let on = pacer["enabled"].as_bool().unwrap_or(true);
-    lines.push(format!("  pacer: {}", if on { "on" } else { "off" }));
     let accounts = pacer.as_object().into_iter().flatten();
     for (account, state) in accounts.filter(|(key, _)| key.as_str() != "enabled") {
         let reading = &state["reading"];
         lines.push(match reading.is_object() {
             true => format!(
-                "    {account}: session {}%, week {}%, {}% of the week spent today of {}% allowed",
-                reading["session"]["used_pct"],
-                reading["week"]["used_pct"],
-                reading["spent_today_pct"],
-                reading["allowance_pct"],
+                "    {account}: session {}%, week {}%",
+                reading["session"]["used_pct"], reading["week"]["used_pct"],
             ),
             false => format!("    {account}: not read"),
         });

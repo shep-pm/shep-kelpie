@@ -67,8 +67,7 @@
     "claude": {
       "holding": null,
       "reading": null
-    },
-    "enabled": true
+    }
   },
   "parked": [
     "7"
