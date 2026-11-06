@@ -219,7 +219,10 @@ every `pick` entry, an implementer from the Agents section that can start now; w
 none, or the agent cannot start within the slack, kelpie takes the cheapest available agent \
 that fits. An agent the Agents section marks out will not start the item, and the \
 maintainer's `agent:<name>!` label still pins. An issue that should wait for an agent goes on \
-`hold`, as any issue that should wait does, rather than on a pick. `light: true` \
+`hold`, as any issue that should wait does, rather than on a pick, with the open work item \
+running on that agent as its `until`: the hold ends when that item closes, not when the \
+agent's window reopens. An agent that is out until a time, with no open work item to wait \
+on, is not worth a hold, which kelpie clears when no work item is open; name another agent. `light: true` \
 is for a change small and low-risk enough to skim, such as a typo, a comment or a one-line \
 config value. Kelpie checks the diff itself and ignores the tag when the change is larger or the \
 project does not allow it. `review` plans the item's review: `reads` is how many reviewers read \

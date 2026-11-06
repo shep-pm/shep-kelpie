@@ -416,8 +416,13 @@ fn the_prompt_asks_for_an_agent_on_every_pick_and_a_hold_for_one_that_should_wai
     assert!(
         text.contains(
             "An issue that should wait for an agent goes on `hold`, as any issue that should \
-             wait does"
+             wait does, rather than on a pick, with the open work item running on that agent as \
+             its `until`"
         ),
+        "{text}"
+    );
+    assert!(
+        text.contains("the hold ends when that item closes, not when the agent's window reopens"),
         "{text}"
     );
 }
