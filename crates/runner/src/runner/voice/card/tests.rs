@@ -202,13 +202,51 @@ fn a_project_managers_pick_on_a_yes_or_no_card_reads_by_name() {
     );
 }
 
+// A merge comment carrying boxes to tick
+const POSTED_WITH_BOXES: &str = "### Merge this pull request at 6b0606e into main?\n\n\
+     | | Option | If you pick it |\n\
+     |---|---|---|\n\
+     | **A** | Merge | Merges it into main |\n\
+     | **B** | Send back | Sends the worker back for a fix that goes to CI and back to you |\n\
+     | **C** | Rework | Sends the worker back for a change the whole review reads again |\n\n\
+     @octocat\n\
+     - 👍 or 👎 answers, or tick one:\n\
+     - [ ] A\n\
+     - [ ] B\n\
+     - [ ] C\n\
+     - Or reply `71 no <note>` or `71 rework <note>`";
+
 #[test]
-fn a_merge_ruling_offers_merge_send_back_and_rework() {
-    assert_eq!(rendered(&ruling(ticket(1), merge())), expected!("merge.md"));
+fn a_merge_ruling_names_each_option_once_by_its_answer() {
+    let comment = rendered(&ruling(ticket(1), merge()));
+
+    assert_eq!(comment, expected!("merge.md"));
+    assert!(!comment.contains("- [ ]"), "{comment}");
+    assert!(!comment.contains("tick one"), "{comment}");
 }
 
 #[test]
-fn a_merge_ruling_that_warns_says_what_it_warns_of_and_offers_no_separate_rework() {
+fn a_merge_comment_posted_with_boxes_can_still_be_ticked() {
+    let kind = merge();
+    let ticked = |key: char| {
+        ticked_answer(
+            &kind,
+            &POSTED_WITH_BOXES.replace(&format!("- [ ] {key}"), &format!("- [x] {key}")),
+        )
+    };
+
+    assert_eq!(ticked('A'), Some(Answer::Yes));
+    assert_eq!(ticked('B'), Some(Answer::No(NO_NOTE.into())));
+    assert_eq!(ticked('C'), Some(Answer::Rework(NO_NOTE.into())));
+    assert_eq!(
+        ticked_answer(&kind, &POSTED_WITH_BOXES.replace("- [ ] ", "- [x] ")),
+        None,
+        "two ticked"
+    );
+}
+
+#[test]
+fn a_merge_ruling_that_needs_a_pass_offers_no_rework() {
     let kind = RulingKind::Merge {
         head: "6b0606e9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6".into(),
         unreviewed: Some("the reviewer was down".into()),
@@ -223,10 +261,10 @@ fn a_merge_ruling_that_warns_says_what_it_warns_of_and_offers_no_separate_rework
         rivals: Vec::new(),
     };
 
-    assert_eq!(
-        rendered(&ruling(ticket(1), kind)),
-        expected!("merge-open-threads.md")
-    );
+    let comment = rendered(&ruling(ticket(1), kind));
+
+    assert_eq!(comment, expected!("merge-open-threads.md"));
+    assert!(!comment.contains("rework"), "{comment}");
 }
 
 #[test]
@@ -258,7 +296,15 @@ fn an_unmentioned_ruling_names_only_the_terminal_answers_its_options_allow() {
     });
     let only_yes = ruling_comment(None, &ruling(ticket(1), stuck));
 
-    assert!(no_rework.ends_with("`shep kelpie rule 71 yes` or `shep kelpie rule 71 no <note>`."));
+    assert!(
+        no_rework.contains("| `shep kelpie rule 71 no <note>` |"),
+        "{no_rework}"
+    );
+    assert!(!no_rework.contains("rework"), "{no_rework}");
+    assert!(
+        no_rework.ends_with("Answer it at the terminal."),
+        "{no_rework}"
+    );
     assert!(
         only_yes
             .contains("| `shep kelpie rule 71 yes` | Kelpie tries again, as it does every poll |"),
@@ -547,20 +593,21 @@ fn a_ruling_kelpie_wrote_effects_for_shows_them_in_place_of_the_fixed_phrases() 
 
     assert!(
         comment.contains(
-            "| **A** | Merge | Merges it into main. CI passed and 2 reviewers read it. \
+            "| 👍 or `71 yes` | Merges it into main. CI passed and 2 reviewers read it. \
              3 work items wait for a slot. |"
         ),
         "{comment}"
     );
     assert!(
         comment.contains(
-            "| **B** | Send back | Sends the worker back. Another round costs about $0.40. |"
+            "| 👎 or `71 no <note>` | Sends the worker back. Another round costs about $0.40. |"
         ),
         "{comment}"
     );
     assert!(
         comment.contains(
-            "| **C** | Rework | Sends the worker back for a change the whole review reads again |"
+            "| `71 rework <note>` | Sends the worker back for a change the whole review \
+             reads again |"
         ),
         "{comment}"
     );
@@ -648,10 +695,14 @@ fn a_contribution_merge_card_offers_no_rework_when_the_fork_cannot_be_pushed_to(
         rendered(&ruling(ticket(72), kind))
     };
 
-    assert!(merge(false).contains("Rework"), "{}", merge(false));
+    assert!(
+        merge(false).contains("`71 rework <note>`"),
+        "{}",
+        merge(false)
+    );
     let card = merge(true);
-    assert!(!card.contains("Rework"), "{card}");
-    assert!(card.contains("Merge"), "{card}");
+    assert!(!card.contains("rework"), "{card}");
+    assert!(card.contains("👍 or `71 yes`"), "{card}");
     assert!(card.contains("👎 or `71 no <note>`"), "{card}");
 }
 
@@ -712,7 +763,7 @@ fn a_merge_ruling_with_only_open_nits_keeps_its_wording_with_the_count() {
 }
 
 #[test]
-fn an_open_high_thread_makes_the_merge_ruling_lead_with_it_and_recommend_b() {
+fn an_open_high_thread_makes_the_merge_ruling_lead_with_it_and_recommend_send_back() {
     let found = vec![
         cubic(
             "P2",
@@ -733,7 +784,7 @@ fn an_open_high_thread_makes_the_merge_ruling_lead_with_it_and_recommend_b() {
 
     let lead = comment.find("high").expect("a high thread leads");
     assert!(lead < comment.find("cubic left").unwrap(), "{comment}");
-    assert!(comment.contains("recommends B"), "{comment}");
+    assert!(comment.contains("Kelpie recommends Send back"), "{comment}");
 
     let calm = vec![cubic(
         "P2",

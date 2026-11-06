@@ -17,6 +17,25 @@ fn with_ticked(rig: &Rig, key: char) -> String {
     ticked
 }
 
+// A merge comment carrying boxes to tick, which kelpie still reads for a tick
+const MERGE_WITH_BOXES: &str = "### Merge this pull request at 6b0606e into main?\n\n\
+     | | Option | If you pick it |\n\
+     |---|---|---|\n\
+     | **A** | Merge | Merges it into main |\n\
+     | **B** | Send back | Sends the worker back for a fix that goes to CI and back to you |\n\
+     | **C** | Rework | Sends the worker back for a change the whole review reads again |\n\n\
+     @octocat\n\
+     - 👍 or 👎 answers, or tick one:\n\
+     - [ ] A\n\
+     - [ ] B\n\
+     - [ ] C\n\
+     - Or reply `71 no <note>` or `71 rework <note>`";
+
+// `MERGE_WITH_BOXES` with the box for `key` ticked
+fn with_merge_box_ticked(key: char) -> String {
+    MERGE_WITH_BOXES.replace(&format!("- [ ] {key}"), &format!("- [x] {key}"))
+}
+
 // Whether the board's events, which the project manager reads at its next
 // wake, say ruling 1 on issue 7 was answered
 fn pm_is_told_of_the_answer(runner: &Mutex<Runner>) -> bool {
@@ -100,7 +119,7 @@ fn a_box_ticked_by_the_maintainer_gives_that_options_answer() {
     let comment = ruling_comment(&rig);
     rig.forge
         .threads
-        .edits(comment, "octocat", &with_ticked(&rig, 'A'));
+        .edits(comment, "octocat", &with_merge_box_ticked('A'));
 
     read_and_merge(&rig, &runner);
 
@@ -116,7 +135,7 @@ fn a_box_ticked_by_someone_else_is_ignored_even_with_write_access() {
     let comment = ruling_comment(&rig);
     rig.forge
         .threads
-        .edits(comment, "stranger", &with_ticked(&rig, 'A'));
+        .edits(comment, "stranger", &with_merge_box_ticked('A'));
 
     read_and_merge(&rig, &runner);
 
@@ -128,7 +147,7 @@ fn a_box_ticked_by_someone_else_is_ignored_even_with_write_access() {
 fn a_box_the_maintainer_ticked_after_someone_else_edited_is_ignored() {
     let (rig, runner, _) = a_merge_ruling_on_71();
     let comment = ruling_comment(&rig);
-    let ticked = with_ticked(&rig, 'A');
+    let ticked = with_merge_box_ticked('A');
     rig.forge.threads.edits(comment, "stranger", &ticked);
     rig.forge.threads.edits(comment, "octocat", &ticked);
 
@@ -142,7 +161,7 @@ fn a_box_the_maintainer_ticked_after_someone_else_edited_is_ignored() {
 fn two_boxes_ticked_answer_nothing() {
     let (rig, runner, _) = a_merge_ruling_on_71();
     let comment = ruling_comment(&rig);
-    let both = with_ticked(&rig, 'A').replace("- [ ] B", "- [x] B");
+    let both = with_merge_box_ticked('A').replace("- [ ] B", "- [x] B");
     rig.forge.threads.edits(comment, "octocat", &both);
 
     read_and_merge(&rig, &runner);

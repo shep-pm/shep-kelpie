@@ -1,12 +1,13 @@
 //! A ruling's comment in one short format
 //!
 //! Every kind renders the same way: a title, what happened, what each option
-//! does, the project manager's words, and the ways to answer. A yes-or-no
-//! ruling names each option once, under how it is answered; every other kind
-//! lists lettered options, which is how the project manager votes and how a
-//! merge ruling's boxes are ticked. The same options are what a reaction or a
-//! ticked box on the comment is read against ([`thumbs`] and [`ticked`]), so
-//! what the comment offers and what kelpie accepts cannot drift apart.
+//! does, the project manager's words, and the ways to answer. A ruling you
+//! answer with a yes or a no names each option once, under how it is answered;
+//! a worker's question and a contributor's ruling list lettered options, which
+//! is how the project manager votes and how their boxes are ticked. The same
+//! options are what a reaction or a ticked box on the comment is read against
+//! ([`thumbs`] and [`ticked`]), so what the comment offers and what kelpie
+//! accepts cannot drift apart.
 
 use super::super::contributions::{
     ADOPT_ANYWAY, CLOSE_WITH_THANKS, KEEP_WAITING, LEAVE_OPEN, flagged_lines,
@@ -78,8 +79,8 @@ pub(super) fn ruling_comment(mention: Option<&str>, ruling: &Ruling) -> String {
     let (number, kind) = (ruling.number(), &ruling.kind);
     let mut blocks = card.opening();
     blocks.push(match Wants::of(kind) {
-        Wants::YesOrNo => answer_table(&card.choices, number, mention.is_some()),
-        _ => table(&card.choices, kind),
+        Wants::Answer => table(&card.choices, kind),
+        Wants::Merge | Wants::YesOrNo => answer_table(&card.choices, number, mention.is_some()),
     });
     blocks.extend(card.on_the_board());
     blocks.extend(pm_words(ruling, &card.choices));
@@ -203,8 +204,8 @@ pub(in crate::runner) fn ticked(kind: &RulingKind, body: &str) -> Option<Answer>
         .map(|c| c.answer)
 }
 
-// Whether the comment lists boxes to tick: a merge ruling's and a question's
-// options, where a yes or a no is a reaction
+// Whether a ticked box answers a ruling of `kind`: a question's options, and a
+// merge comment already on the forge, which was posted with boxes to tick
 fn boxes(kind: &RulingKind) -> bool {
     match Wants::of(kind) {
         Wants::Merge => true,
@@ -250,7 +251,7 @@ impl Card {
                     facts.push_str(&listed.join("\n"));
                 }
                 if has_high(kind) {
-                    facts.push_str("\n\nKelpie recommends B: send it back.");
+                    facts.push_str("\n\nKelpie recommends Send back.");
                 }
                 let mut choices = vec![
                     choice("Merge", "Merges it into main", Answer::Yes),
@@ -751,16 +752,16 @@ pub(in crate::runner) const RECOMMENDS: &str = "PM recommends:";
 pub(in crate::runner) const SAYS: &str = "PM says:";
 
 // The project manager's pick and why, where it gave any:
-// `**Project manager: A**. Its why.`, or by name on a card that names no
-// letter, as `**Project manager: Yes**`.
+// `**Project manager: A**. Its why.`, or by name on a card whose table names
+// its options instead of lettering them, as `**Project manager: Merge**`.
 fn pm_words(ruling: &Ruling, choices: &[Choice]) -> Option<String> {
     let says = after_last(&ruling.question, SAYS).map(super::inert);
     let picked = after_last(&ruling.question, RECOMMENDS).and_then(|pick| {
         let plain = |text: &str| text.trim().trim_matches('`').to_lowercase();
         let at = choices.iter().position(|c| plain(&c.name) == plain(pick))?;
         Some(match Wants::of(&ruling.kind) {
-            Wants::YesOrNo => choices[at].name.clone(),
-            _ => String::from(('A'..='Z').nth(at)?),
+            Wants::Answer => String::from(('A'..='Z').nth(at)?),
+            _ => choices[at].name.clone(),
         })
     });
     Some(match (picked, says) {
@@ -802,9 +803,9 @@ fn cell(text: &str) -> String {
     line.replace('|', "\\|")
 }
 
-// A yes-or-no ruling's table: each option once, under how it is answered. A
-// yes takes a 👍 and a no a 👎; an option naming an action has no reaction
-// that gives it, so its row is its reply alone.
+// A ruling answered with a yes or a no: each option once, under how it is
+// answered. A yes takes a 👍 and a no a 👎; a rework and an option naming an
+// action have no reaction that gives them, so their row is its reply alone.
 fn answer_table(choices: &[Choice], number: TicketId, mentioned: bool) -> String {
     let mut rows = vec![
         "| Answer | What it does |".to_owned(),
@@ -813,6 +814,7 @@ fn answer_table(choices: &[Choice], number: TicketId, mentioned: bool) -> String
     for choice in choices {
         let (thumb, words) = match choice.answer {
             Answer::No(_) => (Some("👎"), "no <note>"),
+            Answer::Rework(_) => (None, "rework <note>"),
             Answer::Do(action) => (None, action.word()),
             _ => (Some("👍"), "yes"),
         };
@@ -825,8 +827,9 @@ fn answer_table(choices: &[Choice], number: TicketId, mentioned: bool) -> String
     rows.join("\n")
 }
 
-// How one option of a yes-or-no ruling is answered: the reaction and the reply
-// that give it, or the terminal reply alone where no one is mentioned.
+// How one option of a ruling answered with a yes or a no is answered: the
+// reaction and the reply that give it, or the terminal reply alone where no one
+// is mentioned.
 fn answer_of(thumb: Option<&str>, words: &str, number: TicketId, mentioned: bool) -> String {
     let reply = match mentioned {
         true => format!("`{number} {words}`"),
@@ -848,14 +851,6 @@ fn answering(login: &str, number: TicketId, kind: &RulingKind, choices: &[Choice
         );
     };
     match Wants::of(kind) {
-        Wants::Merge => {
-            lines.push("- 👍 or 👎 answers, or tick one:".to_owned());
-            tick(&mut lines);
-            lines.push(match needs_pass(kind) {
-                true => format!("- Or reply `{number} no <note>`"),
-                false => format!("- Or reply `{number} no <note>` or `{number} rework <note>`"),
-            });
-        }
         Wants::Answer => {
             let reply = format!(
                 "with your answer, and start it with `{number}` if other rulings wait on this thread"
@@ -869,22 +864,18 @@ fn answering(login: &str, number: TicketId, kind: &RulingKind, choices: &[Choice
             }
         }
         // The table names each answer already, so the mention is all this adds.
-        Wants::YesOrNo => {}
+        Wants::Merge | Wants::YesOrNo => {}
     }
     lines.join("\n")
 }
 
-// A ruling that mentions no one is answered at the terminal only. A
-// yes-or-no ruling's table already names the terminal replies.
+// A ruling that mentions no one is answered at the terminal only. A ruling
+// whose table names its answers already names the terminal replies there.
 fn unmentioned(number: TicketId, kind: &RulingKind) -> String {
     let rule = format!("shep kelpie rule {number}");
     let forms = match Wants::of(kind) {
         Wants::Answer => Some(format!("`{rule} <your answer>`")),
-        Wants::Merge if needs_pass(kind) => Some(format!("`{rule} yes` or `{rule} no <note>`")),
-        Wants::Merge => Some(format!(
-            "`{rule} yes`, `{rule} no <note>` or `{rule} rework <note>`"
-        )),
-        Wants::YesOrNo => None,
+        Wants::Merge | Wants::YesOrNo => None,
     };
     let lead = "This ruling mentions no one, so a reaction, a tick or a reply here answers \
                 nothing.";
