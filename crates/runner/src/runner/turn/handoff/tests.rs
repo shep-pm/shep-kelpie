@@ -306,6 +306,27 @@ fn an_agent_back_before_the_pick_runs_the_turn_on_its_own_session() {
 }
 
 #[test]
+fn a_board_lost_while_the_turn_waits_ends_the_wait_and_a_late_pick_moves_nothing() {
+    let (rig, runner) = picked_by_the_project_manager();
+    falls_behind(&rig, "coder", SLACK + 1);
+    assert_eq!(step(&runner).unwrap(), None, "the turn waits for its pick");
+
+    // The dog cannot be reached on the next step, so the turn goes on its own agent.
+    rig.agent_board.unreachable();
+    let (model, session) = next_turn(&rig, &runner);
+    assert_eq!(model, "claude-sonnet-5-5");
+    assert!(resumed(&session), "{session:?}");
+
+    // A pick that comes in now finds no item waiting.
+    rig.claude.script([Scripted::Say(
+        "```json\n{\"pick\": {\"issue\": 7, \"agent\": \"coder\"}, \"why\": \"w\"}\n```",
+    )]);
+    rig.ask(&runner, "tell", Some("anything"));
+    until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    assert_eq!(item(&rig, &runner)["agent"], "sonnet-high");
+}
+
+#[test]
 fn a_board_out_of_reach_leaves_the_turn_on_its_own_agent() {
     let (rig, runner) = later_turn_due(&[]);
     rig.agent_board.unreachable();

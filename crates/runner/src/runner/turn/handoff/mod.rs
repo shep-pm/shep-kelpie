@@ -27,6 +27,16 @@ const NOTED_COMMITS: usize = 20;
 impl Runner {
     // The step that hands the current work item off, or None when its turn goes on.
     pub(in crate::runner::turn) fn hand_off(&mut self) -> Result<Option<Begin>, StateError> {
+        let issue = self.current().map(|item| item.issue);
+        let step = self.hand_off_step()?;
+        // A turn that goes on, whatever the reason, ends an agent's wait for a pick.
+        if let (None, Some(issue)) = (&step, issue) {
+            self.pm_agent_back(issue);
+        }
+        Ok(step)
+    }
+
+    fn hand_off_step(&mut self) -> Result<Option<Begin>, StateError> {
         let Some(item) = self.current().filter(|item| !item.pinned) else {
             return Ok(None);
         };

@@ -167,8 +167,11 @@ impl Runner {
     /// Ends `ticket`'s wait for a pick, since its agent can start again or a
     /// pick, or the board's order, moved it. Says whether there was one
     pub(in crate::runner) fn pm_agent_back(&mut self, ticket: TicketId) -> bool {
-        self.pm.left_alone.remove(&ticket);
-        self.pm.agent_out.remove(&ticket).is_some()
+        let was_out = self.pm.agent_out.remove(&ticket).is_some();
+        if was_out {
+            self.pm.left_alone.remove(&ticket);
+        }
+        was_out
     }
 
     /// Leaves alone each waiting item `wakes` carried that the answer named no

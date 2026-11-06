@@ -531,6 +531,10 @@ const OUT_FOR: u64 = 60 * 60 + 1;
 /// The soonest finish the board gives, in seconds
 const SOON: u64 = 600;
 
+/// A pi implementer on the gateway `paddock`, which kelpie's settings do not name
+const ON_PADDOCK: &str = "---\nrole: implementer\nharness: pi\nmodel: m\neffort: low\n\
+                          gateway: paddock\ncontext: 65536\n---\n";
+
 /// What the project manager says to move #7 to `coder`
 const PICK_7_FOR_CODER: &str =
     "{\"pick\": {\"issue\": 7, \"agent\": \"coder\"}, \"why\": \"coder is free\"}";
@@ -659,6 +663,12 @@ fn a_pick_for_a_waiting_item_naming_no_usable_agent_is_dropped_saying_why() {
             "pick #7: `nobody` is no implementer agent file `agents.allow` holds",
         ),
         (
+            "out-refused",
+            "{\"pick\": {\"issue\": 7, \"agent\": \"local\"}}",
+            None,
+            "pick #7: no turn can run on `local`: the worker's fence or a gateway key rules it out",
+        ),
+        (
             "out-left",
             PICK_7_FOR_CODER,
             Some("coder"),
@@ -666,7 +676,10 @@ fn a_pick_for_a_waiting_item_naming_no_usable_agent_is_dropped_saying_why() {
         ),
     ];
     for (project, reply, left, why) in cases {
-        let (rig, runner) = waiting(project);
+        let rig = Rig::new(project);
+        // A pi implementer on a gateway kelpie's settings do not name: no turn can run on it.
+        rig.write_agent("local", ON_PADDOCK);
+        let (rig, runner) = waiting_in(rig);
         if let Some(left) = left {
             let mut held = runner.lock().unwrap();
             let item = held.state.item_mut(ticket(7)).expect("the item");

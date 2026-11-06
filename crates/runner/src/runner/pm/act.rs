@@ -242,6 +242,8 @@ impl Runner {
         let from = item.agent.clone();
         let why = if !implementers.contains(&to) {
             format!("`{to}` is no implementer agent file `agents.allow` holds")
+        } else if !self.board_agents().contains(&to) {
+            format!("no turn can run on `{to}`: the worker's fence or a gateway key rules it out")
         } else if item.left.contains(&to) {
             format!("{named} already left `{to}`")
         } else if to == from {
