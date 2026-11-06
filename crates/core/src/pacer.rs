@@ -2,9 +2,8 @@
 //!
 //! The pacer reads an account's usage and holds a spent limit: a turn waits
 //! while the 5-hour window or the week is spent, until the longer of the two
-//! ends, as a spent window fails every turn at once, as a spent week does.
-//! Nothing else holds a turn or a dispatch, and usage that cannot be read
-//! holds nothing. A running turn is never interrupted: the pacer is asked
+//! ends. Nothing else holds a turn or a dispatch, and usage that cannot be
+//! read holds nothing. A running turn is never interrupted: the pacer is asked
 //! only between turns.
 //!
 //! [`window`]'s 50% mark is what the agent board's waits read, and the

@@ -490,9 +490,8 @@ _Avoid_: bot account, kelpie's account
 
 **Pacing**:
 How kelpie spends each **account** (`claude`, `codex`, or `none` for a local
-model) against its usage windows: a daily **allowance** of the weekly
-window, which holds new work items, and a stop at 50% of the 5-hour
-window, which holds every turn.
+model) against its usage windows: a spent week or 5-hour window holds every
+turn, new work items included, until it resets.
 
 **Ruling**:
 A decision kelpie cannot make on its own, one of seven kinds: `merge`,
