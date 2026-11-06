@@ -448,6 +448,9 @@ impl Runner {
                 Ok(format!("parked on ruling {}: {why}", ruling.id))
             }
             (None, SaidHow::Settle) => Err("no ruling waits on the thread to settle".to_owned()),
+            (None, SaidHow::SendBack) if note.is_empty() => {
+                Err("it gave no note for the worker".to_owned())
+            }
             (None, how) => {
                 let released = Released {
                     call: how,

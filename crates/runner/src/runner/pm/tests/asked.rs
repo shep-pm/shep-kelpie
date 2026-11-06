@@ -749,6 +749,21 @@ fn send_back_with_no_ruling_reaches_the_worker_at_the_next_comment_read() {
 }
 
 #[test]
+fn send_back_with_no_ruling_and_no_note_is_named_and_the_comment_stays_held() {
+    let (rig, runner, _head) = bare_put("said-bare-no-note");
+    let call = calling("send-back", "", "The words ask for it");
+    rig.claude.script_for(Role::Pm, [Scripted::Say(call)]);
+
+    let (acted, dropped) = said_bare(&rig, &runner, "Why is the cache a vector?");
+
+    assert_eq!(acted, Vec::<String>::new());
+    assert!(dropped[0].contains("no note for the worker"), "{dropped:?}");
+    assert!(runner.lock().unwrap().pm_released().is_empty());
+    let said = posted(&rig, &runner, |c| c.contains("was not carried out"));
+    assert!(said.contains("no note for the worker"), "{said}");
+}
+
+#[test]
 fn park_with_no_ruling_raises_a_question_at_the_next_comment_read() {
     let (rig, runner, head) = bare_put("said-bare-park");
     let call = calling("park", "", "It asks for a design choice");

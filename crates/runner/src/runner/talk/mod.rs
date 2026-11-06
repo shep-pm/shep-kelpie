@@ -109,7 +109,18 @@ impl Runner {
             .as_ref()
             .is_some_and(|b| !matches!(b, Begin::Reads(_)))
         {
-            self.pm_carried_out(&sorted.comments);
+            // A send the gate stopped saved nothing: its calls are carried out next read
+            let heard: Vec<u64> = (self.current().map(|item| &item.talked.comments))
+                .map(|saved| {
+                    sorted
+                        .comments
+                        .iter()
+                        .filter(|c| saved.contains(c))
+                        .copied()
+                        .collect()
+                })
+                .unwrap_or_default();
+            self.pm_carried_out(&heard);
             self.notes.extend(sorted.ignored);
         }
         Ok(begin)
