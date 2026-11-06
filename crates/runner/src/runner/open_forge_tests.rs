@@ -141,3 +141,26 @@ fn a_stop_ends_the_start_forge_calls() {
     );
     assert_eq!(template_of(&runner), serde_json::json!({ "owner": OWNERS }));
 }
+
+// The label helpers are batches, not single calls: each label the repo lacks is a
+// write of its own, so the stop is asked before every one of them.
+#[test]
+fn a_stop_ends_a_label_batch_halfway_through() {
+    let rig = Rig::new("shep");
+    let runner = rig.opened().unwrap();
+    let stopping = Arc::new(AtomicBool::new(false));
+    runner.lock().unwrap().stop_with(Arc::clone(&stopping));
+    let held = rig.forge.hold_next_call();
+
+    rig.during_read(
+        held,
+        || runner.lock().unwrap().make_agent_labels(),
+        || stopping.store(true, Ordering::SeqCst),
+    );
+
+    assert_eq!(
+        rig.forge.repo_labels_now(),
+        Vec::<String>::new(),
+        "the batch wrote its labels after the stop"
+    );
+}

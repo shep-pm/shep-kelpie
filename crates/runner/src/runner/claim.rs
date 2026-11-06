@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use super::Runner;
+use super::open_forge::stop_has_come;
 use super::triage::rewrite::new_kind_label;
 use crate::board::{IN_PROGRESS, check};
 use crate::settings::TicketSource;
@@ -59,13 +60,13 @@ impl Runner {
             .copied()
             .collect();
         for issue in held {
-            if self.loop_stopped() {
+            if stop_has_come(&self.loop_stop) {
                 return;
             }
             self.mark_held(issue, true);
         }
         for issue in finished {
-            if self.loop_stopped() {
+            if stop_has_come(&self.loop_stop) {
                 return;
             }
             self.mark_held(issue, false);

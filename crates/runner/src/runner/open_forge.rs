@@ -36,18 +36,11 @@ impl Runner {
             Runner::make_priority_labels,
             Runner::make_kind_labels,
         ] {
-            if self.loop_stopped() {
+            if stop_has_come(&self.loop_stop) {
                 return;
             }
             call(self);
         }
-    }
-
-    // Whether the loop this runner works in has been asked to end
-    pub(super) fn loop_stopped(&self) -> bool {
-        self.loop_stop
-            .as_ref()
-            .is_some_and(|stopping| stopping.load(Ordering::SeqCst))
     }
 
     // The owner's `.github` template as of now, keeping the last read when this one fails
@@ -70,4 +63,13 @@ impl Runner {
         self.notes
             .extend(coderabbit_left_out(&self.remote, &named, &self.ports));
     }
+}
+
+/// Whether the loop `loop_stop` belongs to has been asked to end
+///
+/// `None` is a runner with no loop, which gives up nothing.
+pub(in crate::runner) fn stop_has_come(loop_stop: &Option<Arc<AtomicBool>>) -> bool {
+    loop_stop
+        .as_ref()
+        .is_some_and(|stopping| stopping.load(Ordering::SeqCst))
 }
