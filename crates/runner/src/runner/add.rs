@@ -433,8 +433,8 @@ impl Runner {
             ..ask
         };
         let picks = self.board_picks(&ask);
-        // The dog reads no day allowance, so the pick may be one the pacer
-        // holds. The ranking is walked behind it, and takes the item then.
+        // The runner's own reading has the last word, so the pick may be one
+        // the pacer holds. The ranking is walked behind it, and takes the item then.
         if let Some(first) = picked {
             let behind = (picks.unwrap_or_default().into_iter())
                 .map(|pick| pick.agent)

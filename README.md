@@ -1,6 +1,6 @@
 # shep-kelpie
 
-A [shep](https://github.com/shep-pm/shep) dog that runs coding agents (Claude Code, pi or Codex) on your projects, from a planned work item to a merged pull request. It holds the merge gate, the review budgets and the pacing in code, and calls a model only for the work and for judgement.
+A [shep](https://github.com/shep-pm/shep) dog that runs coding agents (Claude Code, pi or Codex) on your projects, from a planned work item to a merged pull request. It holds the merge gate and the review budgets in code, and calls a model only for the work and for judgement.
 
 This is early. It changes without notice, and there is no release yet.
 
