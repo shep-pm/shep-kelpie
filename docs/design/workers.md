@@ -14,7 +14,7 @@ Runner loop, worker turns, agents, harnesses. The fence is in fence.md, skills i
 - Compaction is in compaction.md: `WORKER_COMPACT_PAST` (150k), `worker.compact_window` and the `COMPACT` call, on each harness. #760, #761, #770, #792
 - Agents never see budget numbers (it makes models stop after each task). `runner/turn/budget.rs`
 - Implementers default `sonnet-high`, `opus-high` for work hard to undo. #313
-- `worker.turn_timeout` (60 min) counts from turn start, so restart buys no hour; past it parks `turn-timeout`, unless the worktree shows a commit the base lacks or a file written in the last 10 min: then the turn resumes with no ruling, up to 3 times per work item (`ceiling_resumes`; #1040); lease wait refunded. #16, `runner/turn/unfinished.rs`
+- `worker.turn_timeout` (60 min) counts from turn start, so restart buys no hour; past it parks `turn-timeout`, unless the worktree shows a commit the base lacks or a file written in the last 10 min: then the turn resumes with no ruling, up to 3 times per work item (`ceiling_resumes`; #1040). A call still queued for its lease waits past its ceiling, which counts from the grant; a drain ends it there. #16, #1718, `runner/{turn/unfinished,flight}/`
 - Failed turn parks `stuck` `turn-failed`. #57
 - First prompt: title, body, the maintainer's issue comments (16 KiB). #996
 - Pause ends a Claude Code or pi worker turn at its next tool result, not its end: runner writes `kelpie-pause` in the item's build folder (the one folder the guard can read); `kelpie guard --pause=<build>` as `PostToolUse` answers `{"continue":false}`, pi's guard extension calls `ctx.abort()`, each leaving `kelpie-paused` to mark the turn. No unpushed check, review or ruling, same stage, no slot or lease; next start resumes with a fresh ceiling, 10 min after `undrain keep` (work.md); a Codex or goose call keeps the old pause. #821, `crates/core/src/guard/pause.rs`, `runner/turn/paused.rs`; log lines: log-lines.md
@@ -31,6 +31,6 @@ Runner loop, worker turns, agents, harnesses. The fence is in fence.md, skills i
 
 ## Not built
 
-- Claude Code through a gateway: needs per-harness forwarding + a pacing decision. Gateways go through a port (`crates/core/src/ports/gateway.rs`) with paddock and `openai` adapters; `openai` holds no lease and may evict a turn's model. #352
+- Claude Code through a gateway: needs per-harness forwarding + a pacing decision, on the gateway port (agents.md). #352
 - Usage calculator handing workers decisions, never cost figures. `docs/design-log.md` Decided, not built
 - Shots on the pull request: in git history. ADR 0006, #54, #131. The preview's other half, a live look at the UI, is built as the browser (browser.md). ADR 0011
