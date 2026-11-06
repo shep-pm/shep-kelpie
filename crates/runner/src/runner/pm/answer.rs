@@ -6,6 +6,7 @@
 
 use serde_json::{Map, Value};
 
+use super::more::{MORE, ReadCall, read_call};
 use super::picked::{PICK, Picked, picked};
 use super::said::{SAID, SaidCall, said};
 use crate::board::{READY, TRIAGE};
@@ -13,7 +14,7 @@ use crate::ticket::TicketId;
 
 /// The keys an answer takes, an object with none of them being none: `why`
 /// is left out, since an unstick inside an answer has one of its own
-const KEYS: [&str; 10] = [
+const KEYS: [&str; 11] = [
     "pick",
     "hold",
     "unstick",
@@ -21,6 +22,7 @@ const KEYS: [&str; 10] = [
     "follow_up",
     "red",
     "votes",
+    "read",
     "said",
     "standing",
     "reply",
@@ -57,6 +59,9 @@ pub(super) struct Answer {
     /// answered with. The key keeps its old name for the project manager's
     /// session.
     pub(super) votes: Vec<(TicketId, Map<String, Value>)>,
+    /// Whether each work item whose round sent a finding above a nit gets one
+    /// more read
+    pub(super) read: Vec<ReadCall>,
     /// What to do about the maintainer's held words, thread by thread
     pub(super) said: Vec<SaidCall>,
     /// The whole of its standing notes, which replaces the file kelpie holds.
@@ -300,6 +305,22 @@ pub(super) fn read(text: &str) -> Option<Answer> {
                     }
                 }
                 _ => answer.unread.push(unread("a list of votes")),
+            },
+            "read" => match &value {
+                Value::Null => {}
+                // One work item is one object; several are a list of them.
+                Value::Array(items) => {
+                    for item in items {
+                        match read_call(item) {
+                            Some(r) => answer.read.push(r),
+                            None => answer.unread.push(format!("`read`: {MORE}, not {item}")),
+                        }
+                    }
+                }
+                value => match read_call(value) {
+                    Some(r) => answer.read.push(r),
+                    None => answer.unread.push(unread(MORE)),
+                },
             },
             "said" => match &value {
                 Value::Null => {}
@@ -555,6 +576,7 @@ mod tests {
                 red: Vec::new(),
                 votes: Vec::new(),
                 said: Vec::new(),
+                read: Vec::new(),
                 standing: None,
                 reply: None,
                 why: Some("#12 touches nothing open.".into()),
@@ -591,6 +613,35 @@ mod tests {
         );
         let one = read("{\"said\": {\"thread\": 5, \"call\": \"settle\"}}").unwrap();
         assert_eq!(one.said[0].call, SaidHow::Settle);
+    }
+
+    #[test]
+    fn a_read_entry_with_no_item_or_no_more_is_named_and_dropped() {
+        let answer = read(
+            "{\"read\": [{\"item\": 12, \"more\": true, \"why\": \" the race is real \"}, \
+             {\"item\": \"#13\", \"more\": false}, {\"more\": true}, {\"item\": 14}, \
+             {\"item\": 15, \"more\": \"yes\"}]}",
+        )
+        .unwrap();
+
+        let calls: Vec<_> = (answer.read.iter())
+            .map(|r| (r.item, r.more, r.why.as_str()))
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                (ticket(12), true, "the race is real"),
+                (ticket(13), false, "")
+            ]
+        );
+        assert_eq!(answer.unread.len(), 3, "{:?}", answer.unread);
+        assert!(
+            answer.unread[0].contains("{\"more\":true}"),
+            "{:?}",
+            answer.unread
+        );
+        let one = read("{\"read\": {\"item\": 5, \"more\": true}}").unwrap();
+        assert_eq!(one.read.len(), 1);
     }
 
     #[test]

@@ -26,7 +26,7 @@ use crate::settings::PmAgent;
 use crate::state::StateError;
 use crate::ticket::TicketId;
 use crate::usage::CallKind;
-use crate::work_item::new_session_id;
+use crate::work_item::{ReviewWeight, new_session_id};
 
 mod act;
 mod answer;
@@ -35,6 +35,7 @@ mod call;
 mod ci_logs;
 mod diffs;
 mod maintainer;
+mod more;
 mod notes;
 mod picked;
 mod prompt;
@@ -168,6 +169,22 @@ pub(super) enum Wake {
         /// The head that stayed red
         head: String,
     },
+    /// A round sent a finding above a nit and the plan's reads are all in, so
+    /// the project manager rules on one more read
+    Findings {
+        /// The work item's ticket
+        ticket: TicketId,
+        /// Its pull request
+        pull_request: u64,
+        /// The reads the pass has had
+        reads: u32,
+        /// The round's findings above a nit
+        findings: Vec<Finding>,
+        /// What the change touches, as weighed
+        weight: Option<ReviewWeight>,
+        /// The lines it changes, none when git cannot count them
+        lines: Option<u32>,
+    },
     /// A ruling waits on the project manager's answer
     Answer {
         /// The ruling
@@ -192,6 +209,7 @@ impl Wake {
             (Self::FollowUp { id: a, .. }, Self::FollowUp { id: b, .. }) => a == b,
             (Self::Answer { id: a, .. }, Self::Answer { id: b, .. }) => a == b,
             (Self::Red { workflow: a, .. }, Self::Red { workflow: b, .. }) => a == b,
+            (Self::Findings { ticket: a, .. }, Self::Findings { ticket: b, .. }) => a == b,
             _ => false,
         }
     }
@@ -299,6 +317,8 @@ pub(super) struct Desk {
     // Each comment of the maintainer's it called on with no ruling waiting, for the
     // next comment read to carry out, which a restart returns to it unread
     released: BTreeMap<u64, Released>,
+    // Each work item whose pass waits on its answer to a round's findings
+    reading: BTreeSet<TicketId>,
     // The question being raised is one it parked the work item on, the maintainer's alone
     parking: bool,
     flying: Option<Flying>,
@@ -361,6 +381,30 @@ impl Runner {
             self.pm.holding_since = Some(self.ports.clock.now());
         }
         self.pm.due.push(wake);
+    }
+
+    /// Asks the project manager whether the pass over `wake`'s item reads
+    /// once more, and says whether it did
+    ///
+    /// None is asked when no call can run or the runner drains, and the pass
+    /// then ends as it stands.
+    pub(super) fn pm_ask_read(&mut self, wake: Wake) -> bool {
+        let Wake::Findings { ticket, .. } = &wake else {
+            return false;
+        };
+        let ticket = *ticket;
+        if self.draining() || !self.pm_available() {
+            return false;
+        }
+        self.pm.reading.insert(ticket);
+        self.pm_due(wake);
+        true
+    }
+
+    /// Whether the pass over `ticket` waits on the project manager's answer
+    /// to a round's findings
+    pub(super) fn pm_reading(&self, ticket: TicketId) -> bool {
+        self.pm.reading.contains(&ticket)
     }
 
     /// Forgets a pick wake still due, since the board picks nothing while
@@ -614,6 +658,10 @@ impl Runner {
                 Wake::Told => self.pm_due(Wake::Told),
                 Wake::Conflict(..) | Wake::Stuck { .. } => self.pm.lapsed = true,
                 Wake::LeaseWait { .. } | Wake::Red { .. } => self.pm.lapsed = true,
+                // The pass goes on to CI as it stands.
+                Wake::Findings { ticket, .. } => {
+                    self.pm.reading.remove(&ticket);
+                }
                 // The ruling goes to the maintainer, who need not wait on it again.
                 Wake::Question { id, .. } | Wake::FollowUp { id, .. } => {
                     self.pm.asking.remove(&id);
@@ -899,6 +947,12 @@ impl Runner {
         for wake in &flying.wakes {
             if let Wake::Question { id, .. } | Wake::FollowUp { id, .. } = wake {
                 self.pm.asking.remove(id);
+            }
+        }
+        // An item it gave no `read` on goes on to CI as it stands.
+        for wake in &flying.wakes {
+            if let Wake::Findings { ticket, .. } = wake {
+                self.pm.reading.remove(ticket);
             }
         }
         // Its pick or hold is taken on the board's next read.

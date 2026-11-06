@@ -324,7 +324,10 @@ SEVERITY|file:line|what is wrong, and its trigger|what goes wrong, and who sees 
     fn the_plan_note_says_what_the_reads_are_for() {
         let note = plan_note(Some(&planned(Some("the migration's rollback path"))));
 
-        assert!(note.starts_with("\n\nThe project manager planned"), "{note}");
+        assert!(
+            note.starts_with("\n\nThe project manager planned"),
+            "{note}"
+        );
         assert!(
             note.contains("for this: the migration's rollback path\n"),
             "{note}"
