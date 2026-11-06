@@ -121,9 +121,10 @@ _Avoid_: size, level
 The dog's reading of every agent across projects, for choosing an
 implementer: how soon each could start a turn, from its model's load or its
 plan's hold, and its typical time and cost for a kind of work, from the
-usage ledger. It orders the agents that fit a work item by when each would
-finish and what it costs. ADR 0020 leaves that ordering to the project
-manager and keeps the dog to the reading.
+usage ledger. The dog only reads. Kelpie's rule orders the agents that fit a
+work item, the cheapest that can start within the slack first, for an item
+the project manager names no agent for. ADR 0020 leaves the choice to the
+project manager.
 _Avoid_: board (one project's work items), queue
 
 **Track record**:
@@ -134,10 +135,11 @@ through the typical time. `status` shows it as `records`.
 _Avoid_: score, rating
 
 **Slack**:
-How far past the soonest finish a work item may finish, so the agent board
-can take a cheaper agent: `agents.slack` minutes (60 when absent), unless
-the project manager's pick names its own, such as 0 for a hotfix. A started
-item keeps its agent while that agent can start within the slack.
+How long a work item may wait for an agent to start, so kelpie's rule can
+take a cheaper one: `agents.slack` minutes (60 when absent), unless the
+project manager's pick names its own, such as 0 for a hotfix. An agent that
+can start within it is available, and a started item keeps its agent while
+it is.
 _Avoid_: max wait
 
 **Baseline**:

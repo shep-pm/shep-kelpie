@@ -192,6 +192,29 @@ async fn a_local_agent_with_no_history_is_ranked_as_free_within_the_slack() {
 }
 
 #[tokio::test]
+async fn with_no_agent_named_the_cheapest_agent_that_can_start_takes_the_item() {
+    let files = [
+        ("fast.md", on_paddock("fast-coder", "")),
+        ("thrifty.md", on_paddock("thrifty-coder", "")),
+        ("busy.md", on_paddock("busy-coder", "tier: heavy\n")),
+    ];
+    let loads = [
+        ("fast-coder", FREE),
+        ("thrifty-coder", FREE),
+        ("busy-coder", BUSY),
+    ];
+    let dog = dog(&files, &loads).await;
+    finished(&dog.home, "koji", ("fast", "fix"), 5, (600, 0.25));
+    finished(&dog.home, "koji", ("thrifty", "fix"), 5, (7200, 0.05));
+    refresh(&dog.board, &dog.home);
+
+    let picks = picked(&dog.socket, item(Some("fix"), &["busy", "fast", "thrifty"])).await;
+
+    // thrifty finishes two hours out, past the hour of slack from fast's finish, yet starts now.
+    assert_eq!(agents_of(&picks), ["thrifty", "fast", "busy"]);
+}
+
+#[tokio::test]
 async fn an_agent_whose_load_is_unknown_is_not_picked() {
     let files = [
         ("fast.md", on_paddock("fast-coder", "")),
@@ -246,28 +269,24 @@ async fn a_new_finished_line_changes_the_next_pick_after_a_refresh() {
     ];
     let loads = [("able-coder", FREE), ("baker-coder", FREE)];
     let dog = dog(&files, &loads).await;
-    finished(&dog.home, "koji", ("baker", "fix"), 4, (600, 0.5));
+    finished(&dog.home, "koji", ("able", "fix"), 4, (600, 0.5));
     refresh(&dog.board, &dog.home);
-    // With no slack, the cost of a local agent with no history cannot reorder them.
-    let ask = || PickAsk {
-        slack: Some(0),
-        ..item(Some("fix"), &["able", "baker"])
-    };
+    let ask = || item(Some("fix"), &["able", "baker"]);
     let before = picked(&dog.socket, ask()).await;
     assert_eq!(
         agents_of(&before),
         ["able", "baker"],
-        "four items say nothing"
+        "four items say nothing, so both rank as free and go by name"
     );
 
-    finished(&dog.home, "koji", ("baker", "fix"), 1, (600, 0.5));
+    finished(&dog.home, "koji", ("able", "fix"), 1, (600, 0.5));
     let unread = picked(&dog.socket, ask()).await;
     refresh(&dog.board, &dog.home);
     let after = picked(&dog.socket, ask()).await;
 
     assert_eq!(unread, before, "the ledger is read on the tick");
     assert_eq!(agents_of(&after), ["baker", "able"]);
-    assert_eq!(after[0].cost_usd, Some(0.5));
+    assert_eq!(after[1].cost_usd, Some(0.5));
 }
 
 #[tokio::test]
