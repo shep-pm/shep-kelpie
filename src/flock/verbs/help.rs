@@ -109,6 +109,11 @@ pub const TABLE: &[Row] = &[
         "-p '<glob>' <key> <value>",
         "write a setting of every match, all or none",
     ),
+    row(
+        "notifications",
+        "clear",
+        "mark a repo's GitHub notifications done",
+    ),
     row("ticket", "", "file and read a local project's tickets"),
     row(
         "ticket",

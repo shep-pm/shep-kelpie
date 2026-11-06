@@ -9,6 +9,7 @@ mod conditional;
 mod contents;
 mod failed;
 mod issues;
+mod notifications;
 mod pulls;
 mod queue;
 mod rate_limit;
@@ -32,8 +33,9 @@ use serde::Deserialize;
 use crate::board::OpenPullRequest;
 use crate::ports::{
     BranchRun, Checks, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, InstallationToken,
-    Issue, NewLabel, OpenPull, PullRequest, PullRequestState, QueueStanding, Queued, RateLimits,
-    Rerun, Reviewed, Talk, ThreadComment, Timestamp, Visibility, Workflow, is_gate_check,
+    Issue, NewLabel, Notification, Notifications, OpenPull, PullRequest, PullRequestState,
+    QueueStanding, Queued, RateLimits, Rerun, Reviewed, Talk, ThreadComment, Timestamp, Visibility,
+    Workflow, is_gate_check,
 };
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
@@ -322,6 +324,16 @@ impl Forge for Gh {
 
     fn rate_limit(&self) -> Result<RateLimits, ForgeError> {
         rate_limit::rate_limit()
+    }
+}
+
+impl Notifications for Gh {
+    fn list(&self, repo: &ForgeSlug) -> Result<Vec<Notification>, ForgeError> {
+        notifications::list(repo)
+    }
+
+    fn mark_done(&self, notification: &Notification) -> Result<(), ForgeError> {
+        notifications::mark_done(notification)
     }
 }
 
