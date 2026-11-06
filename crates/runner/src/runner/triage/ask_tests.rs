@@ -14,7 +14,7 @@ use super::research_tests::{
 use crate::github::ApiError;
 use crate::ports::{Clock, ForgeError, Role};
 use crate::runner::{Runner, step};
-use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
+use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, VIEWER};
 
 // What the representative says for the triage comment that asks, and for the one that reads the answers
 pub(super) const ASK_WORDS: &str =
@@ -342,6 +342,56 @@ fn an_issue_kelpie_opened_is_not_asked_with_no_maintainer_login() {
     assert!(held.get("local").is_none(), "{held}");
     assert_eq!(held["step"], "done");
     assert!(!posted(&rig)[0].contains("<details>"), "{:?}", posted(&rig));
+}
+
+// The maintainer's login was readable when the questions went up and cannot be
+// read after a restart, on a wait saved with no prompt. Nothing can be heard
+// from, so silence ends the wait as it did before an App issue was asked.
+#[test]
+fn an_app_s_wait_ends_on_silence_when_its_maintainer_login_is_lost() {
+    let (rig, runner) = filed_before("pick = \"all\"\nwait_days = 1", APP, asked(), |rig| {
+        rig.edit_settings(|s| s.replace(&format!("maintainer = \"{MAINTAINER}\"\n"), ""));
+    });
+    assert_eq!(step(&runner).unwrap(), None);
+    let went = record(&rig, &runner);
+    assert!(
+        posted(&rig)[0].contains(&format!("cc @{VIEWER}")),
+        "the questions went to the login `gh` acts as: {:?}",
+        posted(&rig)
+    );
+    drop(runner);
+    crashed_with(
+        &rig,
+        json!({
+            "issue": 30, "comment": went["questions"]["comment"], "step": "commented",
+            "labels": ["bug", "P2"], "seen": [],
+            "asked": { "at": went["questions"]["at"] },
+        }),
+    );
+
+    // The login cannot be read any more, and the runner starts afresh. Its first
+    // poll is what gets the author's login back from the listing.
+    rig.forge
+        .set_viewer_down(ForgeError::Failed("no login".into()));
+    let runner = rig.open().unwrap();
+    assert_eq!(step(&runner).unwrap(), None);
+    rig.clock.advance(2 * Rig::DAY);
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let told: Vec<String> = runner.lock().unwrap().take_notes();
+    assert!(
+        told.iter().any(|n| n.contains("gave no answers")),
+        "the silence is said: {told:?}"
+    );
+    assert_eq!(
+        moves(&rig),
+        ["comment", "label bug", "label P2", "label needs-triage"],
+        "the wait ended as an unasked pass"
+    );
+    let held = record(&rig, &runner);
+    assert_eq!(held["step"], "done");
+    assert!(held.get("questions").is_none(), "{held}");
 }
 
 #[test]
