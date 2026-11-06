@@ -579,6 +579,32 @@ fn a_tell_is_appended_to_the_standing_notes_once_on_the_wake_that_answers_it() {
 }
 
 #[test]
+fn held_words_stay_out_of_the_standing_notes() {
+    let (rig, runner) = super::asked::merge_put("notes-held", true);
+    rig.claude.script([Scripted::Say("{\"pick\": null}")]);
+    rig.writes_on(71, "octocat", "Why is this one so large?");
+    rig.next_look();
+    let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    let (woke_for, _, _) = answered(Some(report));
+    assert_eq!(woke_for, ["the maintainer told you something"]);
+    assert!(!read(&rig, PM_STANDING).contains("Why is this one so large?"));
+    rig.ask(&runner, "tell", Some("Hold #12 until the release"));
+    rig.claude.script([Scripted::Say("{\"pick\": null}")]);
+    answered(step(&runner).unwrap());
+
+    let standing = read(&rig, PM_STANDING);
+
+    assert!(
+        standing.contains("Hold #12 until the release"),
+        "{standing}"
+    );
+    assert!(
+        !standing.contains("Why is this one so large?"),
+        "{standing}"
+    );
+}
+
+#[test]
 fn standing_notes_past_their_limit_are_condensed_on_the_next_wake() {
     let (rig, runner) = with_pm("koji");
     std::fs::create_dir_all(rig.paths().pm).unwrap();

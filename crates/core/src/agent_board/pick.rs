@@ -77,27 +77,25 @@ pub fn pick<'a>(item: &Item<'_>, candidates: &[Candidate<'a>]) -> Vec<Choice<'a>
 
 /// `picks` in the order the board tries them
 ///
-/// Those within the slack of the soonest finish come first, an agent held on
-/// its API key after every one that is not. A listed agent comes first, in the
-/// list's order. The rest go by cost: an agent with a cost comes first,
-/// cheapest first, a local agent with no priced history counting as free.
-/// Agents with none follow, lowest tier first as a stand-in for price. Ties go
-/// soonest first, then by name. The agents past the slack follow, soonest first.
-pub fn rank(mut picks: Vec<Pick>, slack: Option<u32>) -> Vec<Pick> {
-    let Some(soonest) = picks.iter().map(|p| p.finish).min() else {
-        return picks;
-    };
-    picks.sort_by(|a, b| (a.finish, &a.agent).cmp(&(b.finish, &b.agent)));
-    let (mut eligible, rest): (Vec<_>, Vec<_>) =
-        (picks.into_iter()).partition(|p| within_slack(p.finish, soonest, slack));
-    eligible.sort_by(|a, b| {
+/// An agent that can start within `slack` minutes (see [`starts_within_slack`])
+/// is available, and the available come first: one held on its API key after
+/// every one that is not, then a listed agent first, in the list's order, then
+/// cost, a local agent with no priced history counting as free. An agent with
+/// no cost follows, lowest tier first as a stand-in for price. Ties go soonest
+/// finish first, then by name. The rest follow, soonest start first, then by name.
+pub fn rank(picks: Vec<Pick>, slack: Option<u32>) -> Vec<Pick> {
+    let (mut available, mut rest): (Vec<_>, Vec<_>) =
+        (picks.into_iter()).partition(|p| starts_within_slack(p.wait, slack));
+    available.sort_by(|a, b| {
         a.held
             .cmp(&b.held)
             .then_with(|| preferred(a.listed, b.listed))
             .then_with(|| cheaper(priced(a), priced(b), a.tier, b.tier))
+            .then_with(|| (a.finish, &a.agent).cmp(&(b.finish, &b.agent)))
     });
-    eligible.extend(rest);
-    eligible
+    rest.sort_by(|a, b| (a.wait, &a.agent).cmp(&(b.wait, &b.agent)));
+    available.extend(rest);
+    available
 }
 
 // What an agent is ranked on: its cost, or $0 for a local agent with none
@@ -105,18 +103,13 @@ fn priced(pick: &Pick) -> Option<f64> {
     pick.cost_usd.or(pick.local.then_some(0.0))
 }
 
-/// Whether `finish` is within `slack` minutes of `soonest`, both seconds
-/// from now, with [`DEFAULT_SLACK_MINUTES`] when `slack` is None
-pub fn within_slack(finish: u64, soonest: u64, slack: Option<u32>) -> bool {
-    let slack = u64::from(slack.unwrap_or(DEFAULT_SLACK_MINUTES)) * 60;
-    finish <= soonest.saturating_add(slack)
-}
-
 /// Whether an agent `wait` seconds from starting can start within `slack`
-/// minutes, which keeps a named agent on a new item and an item's own agent on
-/// its turn however long either takes
+/// minutes, with [`DEFAULT_SLACK_MINUTES`] when `slack` is None
+///
+/// This keeps a named agent on a new item and an item's own agent on its turn
+/// however long either takes, and marks an agent available to [`rank`].
 pub fn starts_within_slack(wait: u64, slack: Option<u32>) -> bool {
-    within_slack(wait, 0, slack)
+    wait <= u64::from(slack.unwrap_or(DEFAULT_SLACK_MINUTES)) * 60
 }
 
 // An item with no kind goes only to an agent whose file names no kinds
@@ -333,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn the_cheapest_within_the_slack_comes_first_then_the_rest_soonest_first() {
+    fn the_cheapest_agent_that_can_start_in_time_comes_first_however_late_it_finishes() {
         let (local, sonnet, opus, slow) =
             (name("local"), name("sonnet"), name("opus"), name("slow"));
         let picks = vec![
@@ -346,11 +339,10 @@ mod tests {
             read(&sonnet, 2400, Some(1.2)),
         ];
         let ranked = rank(picks, None);
-        // soonest is opus at 1800; local at 6000 is past it by more than an hour
         let order: Vec<_> = ranked.iter().map(|p| p.agent.as_str()).collect();
-        assert_eq!(order, ["sonnet", "opus", "local", "slow"]);
+        assert_eq!(order, ["slow", "local", "sonnet", "opus"]);
         assert_eq!(
-            ranked[2],
+            ranked[1],
             Pick {
                 wait: 2400,
                 ..read(&local, 6000, Some(0.2))
@@ -360,10 +352,53 @@ mod tests {
     }
 
     #[test]
-    fn a_slack_of_zero_keeps_only_the_soonest_in_front() {
-        let (fast, cheap) = (name("fast"), name("cheap"));
-        let picks = vec![read(&cheap, 1801, Some(0.1)), read(&fast, 1800, Some(5.0))];
-        assert_eq!(ranked(picks, Some(0)), ["fast", "cheap"]);
+    fn a_slack_of_zero_keeps_only_the_agents_free_now_in_front() {
+        let (free, queued) = (name("free"), name("queued"));
+        let picks = vec![
+            Pick {
+                wait: 1,
+                ..read(&queued, 600, Some(0.1))
+            },
+            read(&free, 1800, Some(5.0)),
+        ];
+        assert_eq!(ranked(picks, Some(0)), ["free", "queued"]);
+    }
+
+    #[test]
+    fn an_agent_past_the_slack_follows_soonest_start_first() {
+        let (now, near, far, nearer_by_name) =
+            (name("now"), name("near"), name("far"), name("a-near"));
+        let waiting = |agent, wait, finish, cost_usd| Pick {
+            wait,
+            ..read(agent, finish, cost_usd)
+        };
+        let picks = vec![
+            waiting(&far, 1200, 1300, Some(0.01)),
+            waiting(&near, 700, 5000, Some(0.01)),
+            waiting(&nearer_by_name, 700, 9000, Some(9.0)),
+            read(&now, 3000, Some(9.0)),
+        ];
+        assert_eq!(
+            ranked(picks, Some(10)),
+            ["now", "a-near", "near", "far"],
+            "past ten minutes they go by start, whatever they cost or finish"
+        );
+    }
+
+    #[test]
+    fn with_none_available_the_soonest_to_start_still_comes_first() {
+        let (busy, queued) = (name("busy"), name("queued"));
+        let picks = vec![
+            Pick {
+                wait: 900,
+                ..read(&busy, 1000, Some(0.1))
+            },
+            Pick {
+                wait: 300,
+                ..read(&queued, 5000, Some(9.0))
+            },
+        ];
+        assert_eq!(ranked(picks, Some(0)), ["queued", "busy"]);
     }
 
     #[test]
@@ -539,19 +574,20 @@ mod tests {
     #[test]
     fn a_listed_agent_past_the_slack_stays_behind_the_agents_within_it() {
         let (soon, late, later) = (name("soon"), name("late"), name("later"));
-        let listed = |agent, place, finish, cost_usd| Pick {
+        let listed = |agent, place, wait| Pick {
             listed: Some(place),
-            ..read(agent, finish, cost_usd)
+            wait,
+            ..read(agent, wait + 600, Some(0.1))
         };
         let picks = vec![
-            listed(&later, 0, 9000, Some(0.1)),
-            listed(&late, 1, 5400, Some(0.1)),
+            listed(&later, 0, 5400),
+            listed(&late, 1, 4200),
             read(&soon, 600, Some(9.0)),
         ];
         assert_eq!(
             ranked(picks, Some(60)),
             ["soon", "late", "later"],
-            "past the slack they stay soonest first, whatever the list says"
+            "past the slack they go soonest start first, whatever the list says"
         );
     }
 

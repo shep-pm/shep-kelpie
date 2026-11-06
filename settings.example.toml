@@ -108,9 +108,12 @@ per_item_usd = 10
 # The agent board picks each work item's implementer from kelpie's agent
 # files, `$SHEP_HOME/kelpie/agents/<name>.md`, whose role is `implementer`,
 # a local model (`usage: none`) as well as any. `shep kelpie add` writes
-# kelpie's own out. Of those that would finish within the slack (below) of
-# the soonest, it takes the cheapest by the ledgers' typical cost, a local
-# agent with none counting as free, and then the first by name. An issue
+# kelpie's own out. Of those that can start within the slack (below), it
+# takes the cheapest by the ledgers' typical cost, a local agent with none
+# counting as free, however late it finishes, then the soonest to finish and
+# the first by name. With none able to start in time, the soonest to start
+# takes it. That is kelpie's rule for every item the project manager names
+# no agent for, with or without an `agents.pm` file. An issue
 # labelled `agent:<name>!` runs on that one, as does the project manager's
 # pick that names an agent.
 [app.dogs.kelpie.agents]
@@ -165,11 +168,11 @@ per_item_usd = 10
 # Only a project whose `contributions.pick` or `triage.pick` is not `off`
 # needs it, and an unset one, or a missing or mis-roled file, stops the runner.
 # representative = "representative"
-# Minutes past the soonest finish that the agent board lets a work item's
-# agent take: a new item opens on the cheapest ranked agent finishing within
-# it, and a later turn moves to the next pick when its own agent cannot start
-# within it. 0 keeps only the soonest. A pick of the project manager's own
-# `slack` wins for its item. 60 when absent.
+# Minutes a work item may wait for its agent to start: a new item opens on
+# the cheapest ranked agent that can start within it, and a later turn moves
+# to the next pick when its own agent cannot start within it. 0 keeps only the
+# agents free now. A pick of the project manager's own `slack` wins for its
+# item. 60 when absent.
 # slack = 60
 # Read by nothing: the agent board picks each work item's implementer, and
 # `shep kelpie upgrade` deletes it, as `shep kelpie settings migrate` does.
