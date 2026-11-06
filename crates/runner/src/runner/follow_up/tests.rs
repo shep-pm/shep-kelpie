@@ -9,8 +9,7 @@ use crate::ports::{CLEAN, Checks, Finding, Severity};
 use crate::runner::coderabbit::tests::{fixed, hold_a_finding, summoned};
 use crate::runner::thread_replies::Settler;
 use crate::runner::{Answer, CHECKS_SETTLE, Runner, StepReport, step};
-use crate::test::ticket;
-use crate::test::{Rig, Scripted, ScriptedRound};
+use crate::test::{Rig, Scripted, ScriptedRound, ticket};
 use crate::ticket::TicketId;
 
 fn finding(file: &str, what: &str) -> Finding {
