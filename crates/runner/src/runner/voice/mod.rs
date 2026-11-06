@@ -187,6 +187,7 @@ impl Runner {
             remote: self.remote.clone(),
             source: self.settings.tickets.source,
             app: self.app_covers(),
+            loop_stop: self.loop_stop.clone(),
         }
     }
 

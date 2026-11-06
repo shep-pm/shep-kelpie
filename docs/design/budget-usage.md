@@ -1,6 +1,6 @@
 # Budget, time and usage
 
-Where an item's time and a call's usage are kept. Pacing, leases and settings are in `budget.md`.
+Where an item's time and a call's usage are kept. Pacing and settings are in `budget.md`, the dog and its leases in `budget-forge.md`.
 
 ## Where the time goes
 

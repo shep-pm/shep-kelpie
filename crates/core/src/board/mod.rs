@@ -642,6 +642,9 @@ pub fn agent_labels(names: &[AgentName]) -> Vec<AgentLabel> {
 /// Makes each of `wanted` that `repo` lacks, in any case, with `create`, such as through
 /// the App, and leaves every label it has as it is
 ///
+/// Each write is a call of its own, so `give_up` is asked before every one and the
+/// rest are left unwritten once it says yes, with no error for what was not made.
+///
 /// # Errors
 ///
 /// A message naming the label the forge would not read or make.
@@ -649,6 +652,7 @@ pub fn make_missing_with<'a>(
     forge: &dyn Forge,
     repo: &ForgeSlug,
     wanted: impl IntoIterator<Item = NewLabel<'a>>,
+    give_up: &dyn Fn() -> bool,
     create: impl Fn(&NewLabel<'a>) -> Result<(), ForgeError>,
 ) -> Result<(), String> {
     let slug = repo.as_str();
@@ -657,6 +661,9 @@ pub fn make_missing_with<'a>(
         .map_err(|e| format!("cannot read {slug}'s labels: {e}"))?;
     let wanted = wanted.into_iter();
     for label in wanted.filter(|l| !have.iter().any(|h| h.eq_ignore_ascii_case(l.name))) {
+        if give_up() {
+            return Ok(());
+        }
         create(&label)
             .map_err(|e| format!("cannot make the label `{}` on {slug}: {e}", label.name))?;
     }
