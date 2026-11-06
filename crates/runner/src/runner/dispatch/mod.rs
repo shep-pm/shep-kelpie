@@ -278,7 +278,7 @@ impl Runner {
                     continue;
                 }
             };
-            // The dog reads no day allowance, so the runner's own pacer has the last word.
+            // The runner's own reading of usage has the last word over the dog's ranking.
             let agent = match self.first_unpaced(ranked.agents(), Scope::Dispatch)? {
                 Walked::Opens(agent) => agent,
                 // Its usage is read first, and the step made again.

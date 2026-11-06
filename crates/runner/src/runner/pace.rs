@@ -185,7 +185,6 @@ impl Runner {
             *next.day_start_mut(account) = assessment.day_start;
             self.save(next)?;
         }
-        assessment.allowance = None;
         assessment.window = limit;
         let hold = assessment.hold(scope).cloned();
         self.pacing.insert(account, (now, assessment));
@@ -511,6 +510,21 @@ mod tests {
                     },
                 },
             })
+        );
+        assert_eq!(rig.claude.calls(), []);
+    }
+
+    #[test]
+    fn a_spent_window_holds_a_new_work_item_too() {
+        let (rig, runner) = running_since("golbat", 0);
+        rig.forge.list_ready(7, false);
+        rig.meter.set(Rig::utilization(0, 100));
+
+        let (kind, reason, until) = held(step(&runner).unwrap());
+        assert_eq!((kind, until), (HoldKind::Window, Rig::EPOCH + 5 * 3600));
+        assert_eq!(
+            reason,
+            "the 5-hour window is at 100%, so no turn starts until it resets"
         );
         assert_eq!(rig.claude.calls(), []);
     }
