@@ -20,6 +20,7 @@ use crate::board::briefing::{
     RulingLine, Session, age, elapsed, quiet_for,
 };
 use crate::board::{ReadyIssue, Skip, priority, rule_order};
+use crate::lease::door::Pick;
 use crate::local_paths::Surface;
 use crate::ports::{AgentCall, PaddockHolder, Timestamp, Wait};
 use crate::settings::{AgentName, GatewayName, ModelHost};
@@ -41,6 +42,9 @@ const RECENT: usize = 20;
 
 /// How often the board is written again with nothing changed, in seconds
 const REFRESH: u64 = 60;
+
+/// How long the agent board's reading of the agents is kept, in seconds
+const READING_KEPT: u64 = 30;
 
 /// How long a call in flight waits for its model before the project manager
 /// is woken for it, in seconds
@@ -64,9 +68,20 @@ pub(super) struct BoardCache {
     files: BTreeMap<TicketId, Vec<String>>,
     // Each open branch's diff as git last gave it, or why not, for the PM
     patches: BTreeMap<TicketId, Result<Vec<u8>, String>>,
+    // What the agent board last read of the implementers, with the agents it
+    // was asked about and when. None inside is a board out of reach.
+    reading: Option<Reading>,
     git: Git,
     due: bool,
     written: Option<Timestamp>,
+}
+
+// A reading of the agents `asked`, taken at `at`
+#[derive(Debug)]
+struct Reading {
+    at: Timestamp,
+    asked: Vec<AgentName>,
+    picks: Option<Vec<Pick>>,
 }
 
 /// A call in flight, as the board watches it
@@ -391,6 +406,7 @@ impl Runner {
             })
             .collect();
         self.pm_conflicts(conflicts);
+        self.read_agents(now);
         let text = briefing::render(&self.briefing(now, answers));
         let path = &self.paths.board;
         let made = path.parent().map_or(Ok(()), std::fs::create_dir_all);
@@ -546,6 +562,30 @@ impl Runner {
         ready
     }
 
+    // Asks the agent board about the implementers it may pick, unless it was
+    // asked about the same ones less than `READING_KEPT` seconds ago. A write
+    // happens on every change, so most reuse the last reading.
+    fn read_agents(&mut self, now: Timestamp) {
+        let asked = self.board_agents();
+        let kept = self.brief.reading.as_ref().is_some_and(|last| {
+            last.asked == asked && now.0.saturating_sub(last.at.0) < READING_KEPT
+        });
+        if !kept {
+            let picks = self.ports.agent_board.reading(&asked);
+            self.brief.reading = Some(Reading {
+                at: now,
+                asked,
+                picks,
+            });
+        }
+    }
+
+    // What the agent board last read of `name`, when it read it
+    fn reading_of(&self, name: &AgentName) -> Option<Pick> {
+        let picks = self.brief.reading.as_ref()?.picks.as_ref()?;
+        picks.iter().find(|pick| pick.agent == *name).cloned()
+    }
+
     // The implementers the agent board may pick, by name, then the project's
     // reviewers, each with the keys its file holds now and, while it is out,
     // until when and why.
@@ -563,6 +603,9 @@ impl Runner {
                 description: fit
                     .and_then(|fit| fit.description.as_ref())
                     .map(|text| self.shown(one_line(text.as_str()))),
+                reading: (role == Role::Implementer)
+                    .then(|| self.reading_of(name))
+                    .flatten(),
                 out: self.agent_out(name, now),
             }
         };

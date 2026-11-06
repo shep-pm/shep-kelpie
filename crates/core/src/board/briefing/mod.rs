@@ -14,6 +14,7 @@ use std::fmt::Write as _;
 use serde::{Deserialize, Serialize};
 
 use crate::agents::{Role, Tier};
+use crate::lease::door::Pick;
 use crate::ports::{CallActivity, Cost, Timestamp, Wait};
 use crate::state::BoardEvent;
 use crate::ticket::TicketId;
@@ -41,7 +42,7 @@ pub enum Run {
 }
 
 /// Everything one board shows
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Briefing<'a> {
     /// The project
     pub project: &'a str,
@@ -232,7 +233,7 @@ pub struct ReadyLine {
 }
 
 /// An agent the project lists, as the agents section shows it
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AgentLine {
     /// Its name
     pub name: String,
@@ -244,6 +245,10 @@ pub struct AgentLine {
     pub kinds: Option<Vec<String>>,
     /// What its file says it is for
     pub description: Option<String>,
+    /// What the dog read of an implementer: when it can start, and what it
+    /// typically takes and costs. `None` when the dog gave none, or the board
+    /// was out of reach; a reviewer is never read.
+    pub reading: Option<Pick>,
     /// Until when it starts nothing, and why, while it is out
     pub out: Option<Out>,
 }
@@ -290,7 +295,7 @@ pub fn render(board: &Briefing<'_>) -> String {
     rulings(&mut out, &board.rulings);
     red_on_main(&mut out, board);
     ready_queue(&mut out, board.ready.as_ref(), now);
-    agents(&mut out, &board.agents);
+    agents(&mut out, &board.agents, now);
     events(&mut out, board);
     overlap(&mut out, board);
     files(&mut out, &board.items);
@@ -482,17 +487,18 @@ fn ready_queue(out: &mut String, ready: Option<&Ready>, now: Timestamp) {
     out.push('\n');
 }
 
-fn agents(out: &mut String, agents: &[AgentLine]) {
+fn agents(out: &mut String, agents: &[AgentLine], now: Timestamp) {
     out.push_str("## Agents\n\n");
     if agents.is_empty() {
         out.push_str("(none)\n\n");
         return;
     }
     out.push_str(
-        "Implementers by name, then reviewers in their order. The agent board picks a work \
-         item's implementer by its kind, tier and slack. An agent marked out cannot start \
-         a work item before the time shown. A pick's agent is tried first, not pinned, and an `agent:<name>!` \
-         label pins.\n\n",
+        "Implementers by name, then reviewers in their order. You name each work item's \
+         agent from this list. Kelpie takes the cheapest available agent that fits when you \
+         name none, and an `agent:<name>!` label pins. An implementer's line shows when it can \
+         start and what it typically takes and costs, and an agent marked out cannot start a \
+         work item before the time shown. To have a work item wait for an agent, hold it.\n\n",
     );
     for agent in agents {
         let kinds = match &agent.kinds {
@@ -504,14 +510,35 @@ fn agents(out: &mut String, agents: &[AgentLine]) {
         });
         let _ = writeln!(
             out,
-            "- {} ({}): {} tier, {kinds}; {}{gone}",
+            "- {} ({}): {} tier, {kinds}; {}{}{gone}",
             agent.name,
             agent.role.as_str(),
             agent.tier.as_str(),
-            agent.description.as_deref().unwrap_or("no description")
+            agent.description.as_deref().unwrap_or("no description"),
+            reading(agent, now),
         );
     }
     out.push('\n');
+}
+
+// What the dog read of an implementer, as the rest of its line, or nothing for a reviewer
+fn reading(agent: &AgentLine, now: Timestamp) -> String {
+    if agent.role != Role::Implementer {
+        return String::new();
+    }
+    let Some(read) = &agent.reading else {
+        return "; no reading from the board".to_owned();
+    };
+    let starts = match read.wait {
+        0 => "now".to_owned(),
+        wait => format!("{} UTC", date_time(Timestamp(now.0.saturating_add(wait)))),
+    };
+    let cost = read.cost_usd.map_or_else(
+        || "cost unknown".to_owned(),
+        |usd| format!("about ${usd:.2}"),
+    );
+    let typical = elapsed(read.finish.saturating_sub(read.wait));
+    format!("; starts {starts}, typically {typical}, {cost}")
 }
 
 fn events(out: &mut String, board: &Briefing<'_>) {

@@ -1,5 +1,7 @@
 use super::*;
 use crate::agents::{Role, Tier};
+use crate::lease::door::Pick;
+use crate::settings::AgentName;
 use crate::test::{EPOCH, ticket};
 
 fn files(names: &[&str]) -> Vec<String> {
@@ -393,7 +395,17 @@ fn agent(name: &str, role: Role, fit: (Tier, Option<&[&str]>, Option<&str>)) -> 
         tier,
         kinds: kinds.map(|k| k.iter().map(|&k| k.to_owned()).collect()),
         description: description.map(str::to_owned),
+        reading: None,
         out: None,
+    }
+}
+
+// The dog's reading of an implementer: it starts in `wait` seconds and typically
+// takes `typical` more, for `cost` dollars when its history says.
+fn reads(wait: u64, typical: u64, cost: Option<f64>) -> Pick {
+    Pick {
+        cost_usd: cost,
+        ..Pick::new(AgentName::kelpies("sonnet-high"), wait + typical, wait)
     }
 }
 
@@ -404,15 +416,18 @@ fn the_agents_section_lists_the_implementers_then_the_reviewers_with_tier_kinds_
         Role::Implementer,
         (Tier::Standard, None, Some("Ordinary feature and fix work.")),
     );
-    let opus = agent(
-        "opus-high",
-        Role::Implementer,
-        (
-            Tier::Heavy,
-            Some(&["design", "migration"]),
-            Some("Work that needs the strongest agent."),
-        ),
-    );
+    let opus = AgentLine {
+        reading: Some(reads(0, 5400, Some(4.25))),
+        ..agent(
+            "opus-high",
+            Role::Implementer,
+            (
+                Tier::Heavy,
+                Some(&["design", "migration"]),
+                Some("Work that needs the strongest agent."),
+            ),
+        )
+    };
     let lite = agent(
         "defect-hunter-lite",
         Role::Reviewer,
@@ -428,21 +443,80 @@ fn the_agents_section_lists_the_implementers_then_the_reviewers_with_tier_kinds_
     assert_eq!(
         section,
         "\n\
-         Implementers by name, then reviewers in their order. The agent board picks a work \
-         item's implementer by its kind, tier and slack. An agent marked out cannot start \
-         a work item before the time shown. A pick's agent is tried first, not pinned, and an `agent:<name>!` \
-         label pins.\n\
+         Implementers by name, then reviewers in their order. You name each work item's \
+         agent from this list. Kelpie takes the cheapest available agent that fits when you \
+         name none, and an `agent:<name>!` label pins. An implementer's line shows when it can \
+         start and what it typically takes and costs, and an agent marked out cannot start a \
+         work item before the time shown. To have a work item wait for an agent, hold it.\n\
          \n\
          - opus-high (implementer): heavy tier, kinds design, migration; \
-         Work that needs the strongest agent.\n\
+         Work that needs the strongest agent.; starts now, typically 1h30m, about $4.25\n\
          - sonnet-high (implementer): standard tier, every kind; \
-         Ordinary feature and fix work.\n\
+         Ordinary feature and fix work.; no reading from the board\n\
          - defect-hunter-lite (reviewer): light tier, every kind; A quick read for defects.\n"
     );
     let ready = text.find("## Ready queue").unwrap();
     let agents = text.find("## Agents").unwrap();
     let events = text.find("## Recent events").unwrap();
     assert!(ready < agents && agents < events, "{text}");
+}
+
+#[test]
+fn an_agent_line_shows_when_it_can_start_and_what_it_typically_takes_and_costs() {
+    let line = |name: &str, reading| AgentLine {
+        reading: Some(reading),
+        ..agent(
+            name,
+            Role::Implementer,
+            (Tier::Standard, None, Some("Work.")),
+        )
+    };
+    let board = Briefing {
+        agents: vec![
+            line("now", reads(0, 2700, Some(1.5))),
+            line("later", reads(1800, 3600, Some(0.1))),
+            line("unpriced", reads(0, 600, None)),
+        ],
+        ..briefing(Vec::new())
+    };
+    let text = render(&board);
+    for line in [
+        "- now (implementer): standard tier, every kind; Work.; starts now, typically 45m, about $1.50\n",
+        "- later (implementer): standard tier, every kind; Work.; starts 2026-09-21 14:43 UTC, \
+         typically 1h00m, about $0.10\n",
+        "- unpriced (implementer): standard tier, every kind; Work.; starts now, typically 10m, \
+         cost unknown\n",
+    ] {
+        assert!(text.contains(line), "{line}\n{text}");
+    }
+}
+
+#[test]
+fn an_agent_with_no_reading_says_so() {
+    let board = Briefing {
+        agents: vec![
+            agent(
+                "sonnet-high",
+                Role::Implementer,
+                (Tier::Standard, None, Some("Work.")),
+            ),
+            agent(
+                "claude",
+                Role::Reviewer,
+                (Tier::Standard, None, Some("Reads.")),
+            ),
+        ],
+        ..briefing(Vec::new())
+    };
+    let text = render(&board);
+    assert!(
+        text.contains("- sonnet-high (implementer): standard tier, every kind; Work.; no reading from the board\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("- claude (reviewer): standard tier, every kind; Reads.\n"),
+        "a reviewer is never read: {text}"
+    );
 }
 
 #[test]
@@ -461,6 +535,7 @@ fn an_agent_with_no_description_reads_no_description() {
 #[test]
 fn an_agent_that_is_out_shows_until_when_and_why() {
     let spent = AgentLine {
+        reading: Some(reads(1_800_000_000 - EPOCH, 3600, Some(2.0))),
         out: Some(Out {
             until: Timestamp(1_800_000_000),
             why: "its week is spent".to_owned(),
@@ -479,7 +554,7 @@ fn an_agent_that_is_out_shows_until_when_and_why() {
     assert!(
         text.contains(
             "- codex (implementer): standard tier, every kind; Codex on the plan; \
-             out until 2027-01-15 08:00 UTC: its week is spent\n"
+             starts 2027-01-15 08:00 UTC, typically 1h00m, about $2.00; out until 2027-01-15 08:00 UTC: its week is spent\n"
         ),
         "{text}"
     );
