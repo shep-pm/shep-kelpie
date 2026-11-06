@@ -8,6 +8,7 @@ use std::fmt;
 use crate::api_refusal::Refusal;
 use crate::lease::door::{FitAsk, Fits, Pick, PickAsk};
 use crate::ports::Timestamp;
+use crate::settings::AgentName;
 
 /// The board a runner asks, at dispatch, which agents may start a work item
 pub trait AgentBoard: Send + Sync + fmt::Debug {
@@ -15,6 +16,12 @@ pub trait AgentBoard: Send + Sync + fmt::Debug {
     ///
     /// An empty list is the board's answer that no allowed agent fits.
     fn pick(&self, item: &PickAsk) -> Option<Vec<Pick>>;
+
+    /// What the board reads of each of `agents` it has a window for, for an
+    /// item of no kind, in no order, or None when it cannot be asked
+    ///
+    /// An agent it has no window for is left out of the list.
+    fn reading(&self, agents: &[AgentName]) -> Option<Vec<Pick>>;
 
     /// What the board says about the agent and kind `item` names, or None
     /// when it cannot be asked

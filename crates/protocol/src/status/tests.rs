@@ -128,9 +128,12 @@ fn a_status_from_a_build_with_the_panel_still_reads() {
 
 #[test]
 fn a_work_item_status_keeps_its_review_text_and_leaves_it_out_when_none() {
-    let mut status: Status = serde_json::from_value(recorded()).expect("the status reads");
+    let mut older = recorded();
+    let item = older["work_items"][0].as_object_mut().expect("an item");
+    item.remove("review");
+    let mut status: Status = serde_json::from_value(older).expect("the status reads");
     let item = &mut status.work_items[0];
-    assert_eq!(item.review, None, "the recorded status has no review");
+    assert_eq!(item.review, None, "an older status has no review");
     let shown = serde_json::to_value(&*item).unwrap();
     assert_eq!(shown.get("review"), None, "{shown}");
 

@@ -21,9 +21,9 @@ use crate::workflows::is_workflow_file;
 const WORKFLOWS: &str = ".github/workflows/";
 
 impl Runner {
-    /// How much review `item`'s pull request gets, from what `worktree`
-    /// changes since `base`, or None when `reviews.light` is not below
-    /// `reviews.need` and nothing is weighed
+    /// What `item`'s pull request touches, from what `worktree` changes since
+    /// `base`, or None when the project names no `agents.pm` and
+    /// `reviews.light` is not below `reviews.need`, and nothing is weighed
     ///
     /// # Errors
     ///
@@ -35,7 +35,7 @@ impl Runner {
         base: &str,
     ) -> Result<Option<ReviewWeight>, String> {
         let reviews = &self.settings.reviews;
-        if reviews.light_count() >= reviews.need {
+        if self.agents.pm.is_none() && reviews.light_count() >= reviews.need {
             return Ok(None);
         }
         let full = |why| Ok(Some(ReviewWeight::Full(why)));
@@ -76,10 +76,21 @@ impl Runner {
         })
     }
 
-    /// How many reviewers must read `item`'s pull request: the light count
-    /// for a change weighed light, and `reviews.need` otherwise
-    pub(super) fn need_of(&self, item: &WorkItem) -> u32 {
+    /// How many reviewers must read `item`'s pull request: the plan's reads,
+    /// else `reviews.need` for an adopted item, else one where the project
+    /// names `agents.pm`, else the light count for a change weighed light and
+    /// `reviews.need` otherwise
+    pub(in crate::runner) fn need_of(&self, item: &WorkItem) -> u32 {
         let reviews = &self.settings.reviews;
+        if let Some(plan) = &item.review_plan {
+            return plan.reads.get();
+        }
+        if item.adopted {
+            return reviews.need.get();
+        }
+        if self.agents.pm.is_some() {
+            return 1;
+        }
         match item.weight.as_ref().is_some_and(ReviewWeight::is_light) {
             true => reviews.light_count().get(),
             false => reviews.need.get(),

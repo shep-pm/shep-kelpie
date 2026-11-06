@@ -9,8 +9,7 @@ use crate::ports::{CLEAN, Checks, Finding, Severity};
 use crate::runner::coderabbit::tests::{fixed, hold_a_finding, summoned};
 use crate::runner::thread_replies::Settler;
 use crate::runner::{Answer, CHECKS_SETTLE, Runner, StepReport, step};
-use crate::test::ticket;
-use crate::test::{Rig, Scripted, ScriptedRound};
+use crate::test::{Rig, Scripted, ScriptedRound, ticket};
 use crate::ticket::TicketId;
 
 fn finding(file: &str, what: &str) -> Finding {
@@ -57,6 +56,7 @@ fn reviewed_pushing(
     }
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
+    runner.lock().unwrap().plan_two_reads_for_the_rig();
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.reviewer
         .script([ScriptedRound::Findings(found.to_vec())]);

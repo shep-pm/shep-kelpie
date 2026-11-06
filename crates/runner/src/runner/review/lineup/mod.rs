@@ -18,7 +18,7 @@ use super::super::report::Begin;
 use crate::board::briefing::date_time;
 use crate::lease::door::PickAsk;
 use crate::pacer::Scope;
-use crate::ports::Timestamp;
+use crate::ports::{Finding, Timestamp};
 use crate::settings::{AgentName, ListedReviewer, NonBlank};
 use crate::state::StateError;
 use crate::work_item::{BotSkipped, Phase, Review, ReviewWeight, WorkItem};
@@ -77,6 +77,10 @@ impl Runner {
         worktree: &Path,
         base: &str,
     ) -> Result<Chosen, StateError> {
+        // The project manager rules on one more read before anyone reads.
+        if self.current().is_some_and(|i| self.pm_reading(i.issue)) {
+            return Ok(Chosen::Instead(Box::new(Begin::Idle)));
+        }
         if let Some(reviewer) = review.reviewer.as_ref().and_then(|n| self.listed(n)) {
             return Ok(Chosen::Reviewer(reviewer));
         }
@@ -102,10 +106,11 @@ impl Runner {
         let left_out = self.left_out_of(review);
         let ask = PickAsk {
             kind: item.kind.clone(),
-            tier: item
-                .weight
-                .as_ref()
-                .map_or(item.tier, |w| w.tier(item.tier)),
+            tier: match self.agents.pm {
+                // The project manager's tier stands, whatever the change weighs.
+                Some(_) => item.tier,
+                None => (item.weight.as_ref()).map_or(item.tier, |w| w.tier(item.tier)),
+            },
             pin: None,
             slack: Some(self.slack(item.slack)),
             agents: due.iter().map(|r| r.name.clone()).collect(),
@@ -158,7 +163,7 @@ impl Runner {
     }
 
     // The candidates `review`'s pass has not run that can run now.
-    fn due(
+    pub(super) fn due(
         &self,
         review: &Review,
         worktree: &Path,
@@ -204,7 +209,7 @@ impl Runner {
         self.current().map_or(0, |item| self.reads_in(item, review))
     }
 
-    fn reads_in(&self, item: &WorkItem, review: &Review) -> u32 {
+    pub(in crate::runner) fn reads_in(&self, item: &WorkItem, review: &Review) -> u32 {
         u32::try_from(self.readers(item, review).len()).unwrap_or(u32::MAX)
     }
 
@@ -261,7 +266,7 @@ impl Runner {
 
     // The reviewers `review`'s pass has run. A state file saved before `ran`
     // names only the last, and its pass ran the list in order up to it.
-    fn ran_of(&self, review: &Review) -> Vec<AgentName> {
+    pub(super) fn ran_of(&self, review: &Review) -> Vec<AgentName> {
         let Some(last) = review.last.as_ref().filter(|_| review.ran.is_empty()) else {
             return review.ran.clone();
         };
@@ -302,6 +307,26 @@ impl Runner {
                 .next_round(),
             )),
         }
+    }
+
+    /// [`Self::after_round`] for a round whose fix turn just ended, which
+    /// sent `sent`: where the review goes, unless a finding above a nit asks
+    /// the project manager for one more read, when the next round waits for
+    /// its answer
+    pub(in crate::runner) fn after_fix(
+        &mut self,
+        review: Review,
+        sent: &[Finding],
+        now: Timestamp,
+    ) -> RoundNext {
+        let mut next = self.after_round(review.clone(), now);
+        if let Some(wake) = self.findings_wake(&review, sent)
+            && self.pm_ask_read(wake)
+        {
+            let ran = self.ran_of(&review);
+            next.phase = Phase::Review(Review { ran, ..review }.next_round());
+        }
+        next
     }
 
     /// [`Self::after_round`] for `item` as it will be saved, with the

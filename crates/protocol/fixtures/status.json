@@ -201,6 +201,7 @@
       "rounds": 1,
       "seconds": 0
     },
+    "review": "full (diff touched work.txt)",
     "session": "<session>",
     "timings": {
       "phase": "ruling",
@@ -265,6 +266,7 @@
         "rounds": 1,
         "seconds": 0
       },
+      "review": "full (diff touched work.txt)",
       "session": "<session>",
       "timings": {
         "phase": "ruling",
