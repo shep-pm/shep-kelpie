@@ -30,6 +30,9 @@ pub(super) struct Sorted {
     pub comments: Vec<u64>,
     /// Each review thread handled, and the latest comment of it
     pub threads: Vec<(String, u64)>,
+    /// The conversation comments the maintainer wrote that are the project
+    /// manager's to read, each with its id and what it says
+    pub held: Vec<(u64, String)>,
 }
 
 /// A login a pending ruling asks to reply
@@ -50,6 +53,9 @@ pub(super) struct Sieve<'a> {
     /// The logins a pending ruling asks to reply in its thread, whose replies
     /// that thread reads
     pub left: &'a [Left],
+    /// The maintainer's login, where a project manager is named to read what
+    /// they write in the conversation, and none where it is not
+    pub maintainer: Option<&'a str>,
     /// Whether what is already written is only noted: a pull request kelpie
     /// did not open has comments the worker has seen
     pub quiet: bool,
@@ -78,7 +84,14 @@ pub(super) fn sort(talk: &Talk, sieve: &Sieve<'_>) -> Sorted {
             continue;
         }
         sorted.comments.push(comment.id);
-        if !sieve.quiet {
+        if sieve.quiet {
+            continue;
+        }
+        let theirs =
+            (sieve.maintainer).is_some_and(|login| login.eq_ignore_ascii_case(&comment.author));
+        if theirs && !is_reply_words(&comment.body) {
+            sorted.held.push((comment.id, comment.body.clone()));
+        } else {
             sorted.requests.push(Request {
                 id: format!("{COMMENT_REQUEST}{}", comment.id),
                 place: None,

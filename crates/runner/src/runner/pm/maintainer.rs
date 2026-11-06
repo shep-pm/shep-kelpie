@@ -128,6 +128,32 @@ impl fmt::Display for PmError {
 
 impl core::error::Error for PmError {}
 
+/// What a held comment's entry in `pm_told` begins with
+const HELD: &str = "The maintainer's comment ";
+
+/// The `pm_told` entry for `text`, which the maintainer wrote as comment
+/// `comment` on `thread`, under `ruling` when one waited there
+///
+/// Its first line names where the words were written and the rest is the
+/// words, so the project manager reads them with their place.
+pub(in crate::runner) fn held_line(
+    thread: u64,
+    comment: u64,
+    ruling: Option<TicketId>,
+    text: &str,
+) -> String {
+    let under = ruling.map_or_else(String::new, |id| format!(", under ruling {id}"));
+    format!("{HELD}{comment} on #{thread}{under}:\n{}", text.trim())
+}
+
+/// The thread and the comment a [`held_line`] names, when `line` is one
+pub(in crate::runner) fn held_on(line: &str) -> Option<(u64, u64)> {
+    let head = line.lines().next()?.strip_suffix(':')?;
+    let (comment, rest) = head.strip_prefix(HELD)?.split_once(" on #")?;
+    let thread = rest.split_once(", under ruling ").map_or(rest, |(t, _)| t);
+    Some((thread.parse().ok()?, comment.parse().ok()?))
+}
+
 impl Runner {
     /// Queues a note from the maintainer for the next wake, and wakes it
     ///

@@ -14,9 +14,9 @@ use std::sync::{Arc, Mutex};
 
 use self::settled::Ended;
 pub(super) use self::settled::{Outcome, Settler};
-use super::pm::{PmReply, pm_reply};
+use super::pm::{PmReply, held_line, pm_reply};
 use super::trigger::lock;
-use super::words::{Wants, read_answer};
+use super::words::{Wants, is_free_text, read_answer};
 use super::{Answer, RuleError, Runner, voice};
 use crate::ports::{CommentMarks, Forge, ThreadComment, Timestamp};
 use crate::settings::ForgeSlug;
@@ -466,8 +466,12 @@ impl Runner {
     // Whether `comment` is the worker's to read: it is neither a number-led
     // reply nor a yes, a no or a rework, and every ruling `aimed` names that
     // still waits is a merge ruling on a pull request, where the maintainer's
-    // plain comment is a `no <note>`. On an issue no worker reads it.
+    // plain comment is a `no <note>`. On an issue no worker reads it. With a
+    // project manager named none is, since free text is its to read.
     fn is_plain(&self, comment: &ThreadComment, aimed: &[TicketId]) -> bool {
+        if self.agents.pm.is_some() {
+            return false;
+        }
         let waiting: Vec<_> = (self.state.rulings.iter())
             .filter(|r| aimed.contains(&r.id))
             .collect();
@@ -582,6 +586,8 @@ impl Runner {
             Err(format!(
                 "the ruling changed since that comment was written, and it asks now: {asks}"
             ))
+        } else if self.agents.pm.is_some() && wants != Wants::Answer && is_free_text(words) {
+            return self.hold_for_pm(comment, id, words);
         } else if naming != Naming::Not || wants == Wants::Answer {
             // A question's answer may open with the word `pm`.
             let pm = pm_reply(words, ruling.number());
@@ -618,6 +624,27 @@ impl Runner {
             }
         };
         self.say(thread, &said);
+    }
+
+    // Holds `words`, free text written under ruling `id`, for the project
+    // manager's next wake, which carries them with the other things the
+    // maintainer told it, and reacts if that took. The ruling waits.
+    fn hold_for_pm(&mut self, comment: &ThreadComment, id: TicketId, words: &str) {
+        let (who, thread) = (&comment.author, comment.thread);
+        let mut next = self.state.clone();
+        next.pm_told
+            .push(held_line(thread, comment.id, Some(id), words));
+        match self.save(next) {
+            Ok(()) => {
+                if let Err(e) = self.ports.voice.thumbs_up(&self.remote, comment.id) {
+                    self.notes
+                        .push(format!("cannot react to {who}'s comment on #{thread}: {e}"));
+                }
+            }
+            Err(e) => self.notes.push(format!(
+                "cannot hold {who}'s comment on #{thread} for the project manager: {e}"
+            )),
+        }
     }
 
     /// What became of ruling `id` as a reply in its thread is told, if it ended

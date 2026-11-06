@@ -49,6 +49,7 @@ mod wakes;
 
 pub(super) use asked::{PmReply, pm_reply};
 pub(super) use ci_logs::wake_off_lock;
+pub(super) use maintainer::held_line;
 pub use maintainer::{PmAttaching, PmError, PmHeld, PmStatus, Settled};
 pub(super) use picked::Picked;
 
