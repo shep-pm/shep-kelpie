@@ -21,26 +21,21 @@ A ruling shows in the runner's log, in `shep kelpie status` and in `shep kelpie 
 
 A ruling is named by its pull request's number, or by its ticket's id while it has no pull request: `rule 427 yes` answers the ruling on 427, and `rule k12 yes` one on the local ticket `k12`, which kelpie files none of yet (see [Commands](commands.md)). A work item waits on one ruling at a time, and GitHub numbers issues and pull requests from one sequence, so within a project a number names one ruling. `rule #427 yes` and `rule shep-kelpie#427 yes` read the same number, and a local id takes the `#` the same way: `rule shep-kelpie#k12 yes`. From a clone, the clone's project is looked at first. Elsewhere a number that one project has a ruling on works, and one that two projects have is refused with their names: `rule shep-kelpie#427 yes` picks one. Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` or an apostrophe. `-p` goes before the answer: after its first word, and after a `--`, a `-p` is part of the answer. `shep kelpie rule` alone lists the rulings waiting and asks which to answer and how. Each ruling's question says what `yes` and `no`, and on a merge ruling `rework`, do. A `no` or `rework` with a note is the worker's next turn.
 
-Where an App covers the repo, a ruling's comment is one short format, whatever its kind: the problem where there is one, a title, a table of what picking each option leads to, the project manager's pick and why where it gave them (`**Project manager: A**. CI is green and every reviewer read it.`, see [Rulings the project manager answers](#rulings-the-project-manager-answers)), and the ways to answer. A merge ruling and a worker's question letter their options and say the ways to answer under the table. A ruling that takes a yes or a no names each option once, under how you answer it, so the table is also its list of answers, and its pick reads by name (`**Project manager: Yes**`). Here is a merge ruling. Kelpie writes the effect of each option from what it knows: the items held behind the pull request, CI, the reviewers that read it, and roughly what another review round costs from the ledger:
+Where an App covers the repo, a ruling's comment is one short format, whatever its kind: the problem where there is one, a title, a table of what picking each option leads to, the project manager's pick and why where it gave them (`**Project manager: A**. CI is green and every reviewer read it.`, see [Rulings the project manager answers](#rulings-the-project-manager-answers)), and the ways to answer. A worker's question, and a contributor's ruling that lists options, letter their options and say the ways to answer under the table. Every other ruling, the merge ruling included, names each option once, under how you answer it, so the table is also its list of answers, and its pick reads by name (`**Project manager: Merge**`). Here is a merge ruling. Kelpie writes the effect of each option from what it knows: the items held behind the pull request, CI, the reviewers that read it, and roughly what another review round costs from the ledger:
 
 ```markdown
 ### Merge this pull request at 6b0606e into main?
 
-| | Option | If you pick it |
-|---|---|---|
-| **A** | Merge | Merges it into main and closes #567: the worker retro is off unless a project names it. CI passed. 2 review rounds read it. |
-| **B** | Send back | Sends the worker back for a fix that goes to CI and back to you, with no new review round. |
-| **C** | Rework | Sends the worker back for a change the whole review reads again. Another review round costs about $0.80. |
+| Answer | What it does |
+|---|---|
+| 👍 or `14 yes` | Merges it into main and closes #567: the worker retro is off unless a project names it. CI passed. 2 review rounds read it. |
+| 👎 or `14 no <note>` | Sends the worker back for a fix that goes to CI and back to you, with no new review round. |
+| `14 rework <note>` | Sends the worker back for a change the whole review reads again. Another review round costs about $0.80. |
 
 @octocat
-- 👍 or 👎 answers, or tick one:
-- [ ] A
-- [ ] B
-- [ ] C
-- Or reply `14 no <note>` or `14 rework <note>`
 ```
 
-A ruling that takes a yes or a no puts the answer in the table's first column instead, and says nothing more under it:
+A ruling that takes a yes or a no uses the same table, and says nothing more under it:
 
 ```markdown
 ### CI is still red. Look again?
@@ -77,15 +72,15 @@ Nine ready issues are held behind #495.
 
 You answer it in the thread, from the comment itself or a reply:
 
-- A ruling that takes a yes or a no (`stuck`, `agent-files`, `foreign-change`, `follow-up`, `agent-fit`) takes your 👍 or 👎 on its comment, which names each of them beside the option it answers. A merge ruling takes them too, as A and B.
-- A merge ruling, and a worker's question that lists options, list them as task-list boxes. Tick one. A worker's question becomes the table from the options it lists, plus an `Other` row for a reply. A yes-or-no ruling lists no boxes, and a reply is the only way to an option naming an action, such as `14 rerun`.
-- A 👎, or a ticked `Send back` or `Rework`, carries no note, so the worker is told you gave none. Reply `14 no <note>` to send one.
+- A ruling that takes a yes or a no (`merge`, `stuck`, `agent-files`, `foreign-change`, `follow-up`, `agent-fit`) takes your 👍 or 👎 on its comment, which names each of them beside the option it answers.
+- A worker's question that lists options lists them as task-list boxes, and so does a merge comment kelpie posted before its answers were named. Tick one. A worker's question becomes the table from the options it lists, plus an `Other` row for a reply. A ruling whose table names its answers lists no boxes, and a reply is the only way to an option naming an action, such as `14 rerun`.
+- A 👎 answers `no` with no note, so the worker is told you gave none. Reply `14 no <note>` to send one, or `14 rework <note>` for a change the whole review reads again.
 - A tick counts only when every edit of the comment was by you or by the App that wrote it, which GraphQL's `userContentEdits` says. Anyone with write access can edit a comment, so one edit by someone else leaves the boxes dead and your 👍 or 👎 or a reply answers instead. A 👍 with a 👎 from you, or two ticked boxes, answers nothing.
 - A reply works as it did. Only the login the comment mentions (`git.maintainer`, else the login `gh` acts as) answers, and it needs write access to the repo. Start the reply with the ruling's id, as `shep kelpie rule` does: `14 yes`, `14 no <note>`, `14 rework <note>` for a merge ruling. The number of the ruling's pull request or issue works in place of its id, such as `427 yes`. A bare `yes` answers nothing, so a conversational one never merges. A worker's question takes free text, with its id (not a pull request or issue number, which is part of the text) first only when several rulings wait on the thread.
 
 Every answer, however given, is applied the same way, and the project manager reads that the ruling was answered in the board's events at its next wake.
 
-A ruling that mentions no one, because `git.maintainer` is unset and `gh` cannot say who it acts as, is answered at the terminal only, and its comment says so; on a yes-or-no ruling its table names each terminal reply in place of the thumbs. Anyone else's reply, reaction or tick, a bot's and a comment kelpie posted itself are left alone. Kelpie reacts with a thumbs up to the reply it took as the answer, and replies once to one it could not read, saying what to type. It reads the thread and each waiting ruling's comment about once a minute. The first answer wins, whether it comes from the thread, the terminal or ntfy, and the other is told the ruling is already answered. A worker's own `gh` may not comment: `gh pr comment`, `gh issue comment`, and any `gh pr` or `gh issue` verb but `create` and `edit` that carries a body or `--comment` (a `close` with a comment, a `review` with a body) are refused, as is any flag but `-R` before the verb and any `gh` word a shell expands (`$`, a backtick, `{`, `~`, a glob character) outside a `--body` or `--title`, since its `gh` is your login.
+A ruling that mentions no one, because `git.maintainer` is unset and `gh` cannot say who it acts as, is answered at the terminal only, and its comment says so; on a ruling whose table names its answers, that table names each terminal reply in place of the thumbs. Anyone else's reply, reaction or tick, a bot's and a comment kelpie posted itself are left alone. Kelpie reacts with a thumbs up to the reply it took as the answer, and replies once to one it could not read, saying what to type. It reads the thread and each waiting ruling's comment about once a minute. The first answer wins, whether it comes from the thread, the terminal or ntfy, and the other is told the ruling is already answered. A worker's own `gh` may not comment: `gh pr comment`, `gh issue comment`, and any `gh pr` or `gh issue` verb but `create` and `edit` that carries a body or `--comment` (a `close` with a comment, a `review` with a body) are refused, as is any flag but `-R` before the verb and any `gh` word a shell expands (`$`, a backtick, `{`, `~`, a glob character) outside a `--body` or `--title`, since its `gh` is your login.
 
 On an ntfy webhook, a ruling can also be answered in the topic (see [Answering in the topic](#answering-in-the-topic)).
 

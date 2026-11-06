@@ -116,7 +116,10 @@ fn a_kind_left_to_it_is_answered_by_the_project_manager_and_not_asked() {
         said.contains("Reply `71 no <note>` to reopen it."),
         "{said}"
     );
-    assert!(said.contains("**Project manager: A**. PM-WHY"), "{said}");
+    assert!(
+        said.contains("**Project manager: Merge**. PM-WHY"),
+        "{said}"
+    );
     assert_eq!(asking(&rig), None, "the maintainer was never asked");
     assert_eq!(asked(&rig), 1);
     let status = rig.ask(&runner, "status", None);
@@ -135,7 +138,7 @@ fn a_design_flag_goes_to_the_maintainer_with_the_project_managers_pick() {
     assert_eq!(answered(&rig), None);
     let card = asking(&rig).expect("the ruling is posted for the maintainer");
     assert!(
-        card.contains("\n\n**Project manager: B**. PM-WHY\n\n"),
+        card.contains("\n\n**Project manager: Send back**. PM-WHY\n\n"),
         "{card}"
     );
 }
@@ -162,7 +165,10 @@ fn a_merge_under_ask_goes_to_the_maintainer_whatever_the_project_manager_answers
 
     assert!(pending(&rig));
     let card = asking(&rig).expect("the ruling is posted for the maintainer");
-    assert!(card.contains("**Project manager: A**. PM-WHY"), "{card}");
+    assert!(
+        card.contains("**Project manager: Merge**. PM-WHY"),
+        "{card}"
+    );
 }
 
 #[test]
