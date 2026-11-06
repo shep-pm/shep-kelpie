@@ -34,7 +34,7 @@ Of the sites that used `tempdir_in("/tmp")`:
 
 ## Tests Windows cannot run yet
 
-The Windows CI job runs every crate's lib tests in the non-gating `lib` step, after `door`, `totp` and the gating `save` step. Not a sandbox list: `kelpie_ci_failures_total` and `SANDBOX_RED` do not read it.
+The Windows CI job runs every crate's lib tests in the non-gating `lib` step, after `door`, `totp` and the gating `save` step. The `lib` step runs nightly and by hand and never on a push to `main` (#1742), so a merge runs the other three alone. Not a sandbox list: `kelpie_ci_failures_total` and `SANDBOX_RED` do not read it.
 
 Measured on [run 41044428502](https://github.com/shep-pm/shep-kelpie/actions/runs/41044428502/job/124024950902) (#1575), the first in which every crate reached `test result`. The runner took 7383 seconds of the step's 180 minutes (it started at 11:12 and ended at 13:15 UTC). Only the root package's `sheep::handover` tests and the runner's slow ones ran past 60 seconds:
 

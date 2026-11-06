@@ -5,18 +5,28 @@ name: windows
 # waits only for the runs of `test`, and a run of this one only for the runs of
 # this one.
 #
+# A merge runs the checks and the gating tests, and nothing else. In that run
+# the lib step took 64 of the 71 minutes and reported 529 failing tests as a
+# warning line, so it gates nothing and a merge cannot wait on it. It runs
+# nightly and by hand instead, where its result is read as its own (#1742).
+#
 # Ported crates and saved state gate Windows. The workspace check, door, ACL
 # and lib steps report gaps without gating. `--keep-going` reports every crate
 # that fails to compile.
 on:
   push:
     branches: [main]
+  # GitHub runs a schedule on the default branch alone. 07:00 UTC daily.
+  schedule:
+    - cron: '0 7 * * *'
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
   # A newer merge replaces a run still waiting its turn here, and never ends
-  # one already running.
+  # one already running. A nightly run carries `refs/heads/main`, so it waits
+  # behind a merge's run in this group, and a merge landing while it waits
+  # replaces it.
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 env:
@@ -96,7 +106,11 @@ jobs:
       # Measure every crate's lib tests before fixing each Windows failure group.
       # Skip the tests that hung in runs 40990662373 and 41020519313. The
       # runner's 3035 tests take about two hours here (#1578).
+      # Nightly and by hand only (#1742): a push to main is a merge, and this
+      # step reports 529 failures, so it gates nothing and is 64 of the job's
+      # 71 minutes.
       - id: lib
+        if: github.event_name != 'push'
         continue-on-error: true
         timeout-minutes: 180
         run: >-
@@ -108,6 +122,6 @@ jobs:
           --skip runner::claude_files::tests::a_trigger_is_answered_while_the_changed_files_are_read
           --skip runner::closed::tests::a_trigger_is_answered_while_the_worktree_is_checked_for_work
           --skip runner::contributions::pass_tests::a_pass_past_its_ceiling_ends_unread_and_counts_what_it_spent
-      - if: steps.lib.outcome == 'failure'
+      - if: github.event_name != 'push' && steps.lib.outcome == 'failure'
         run: |
           echo "::warning title=windows::the workspace's lib test run failed or timed out. See the lib step's log for build errors, test failures or unfinished tests."
