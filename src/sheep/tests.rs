@@ -256,6 +256,28 @@ fn status_and_drain_answer_while_a_pass_waits_in_the_forge() {
     assert!(rig.ask(&runner, "status", None)["draining"].is_object());
 }
 
+// The start's forge calls wait for the loop, which makes them before its first
+// pass and with its lock held, so a trigger answers meanwhile from the post.
+#[test]
+fn the_loop_settles_on_the_forge_before_its_first_pass() {
+    let rig = Rig::new("shep");
+    let runner = Arc::new(rig.opened().unwrap());
+    assert_eq!(rig.forge.asked(), 0, "the start asked the forge");
+
+    let held = rig.forge.hold_next_call();
+    let worker = spawn(&runner);
+    assert!(held.waiting(REACH_FORGE), "the loop never asked the forge");
+    assert_eq!(rig.forge.board_reads(), 0, "a pass ran before the settle");
+
+    drop(held);
+    eventually("the labels the start makes", || {
+        rig.forge
+            .repo_labels_now()
+            .contains(&"agent:sonnet-high".to_owned())
+    });
+    assert!(worker.stop(JOIN_BOUND, || {}));
+}
+
 // A minute on from its last board read, a runner whose one slot is held
 // by a drained work item has nothing the board may do.
 #[test]

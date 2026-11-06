@@ -228,6 +228,28 @@ fn a_picks_agent_that_can_start_runs_the_item_unpinned_over_the_issues_label() {
     );
 }
 
+#[test]
+fn a_pick_naming_no_agent_opens_on_the_boards_first_and_says_why() {
+    let (rig, runner) = picked_12();
+    rig.agent_board.ranks_first(&["opus-high"]);
+
+    let report = step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+
+    assert!(
+        matches!(&report, StepReport::Dispatched { issue, agent, .. }
+            if *issue == ticket(12) && agent.as_str() == "opus-high"),
+        "{report:?}"
+    );
+    let mut held = runner.lock().unwrap();
+    let notes = held.take_notes();
+    assert!(
+        notes
+            .iter()
+            .any(|n| n == "#12: the project manager named no agent, so the agent board picks"),
+        "{notes:?}"
+    );
+}
+
 const BEHIND: &str = "#12: the project manager picked opus-high, which cannot start within its \
                       slack, so the agent board picks";
 

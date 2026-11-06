@@ -487,3 +487,39 @@ fn the_pm_prompt_says_one_reviewer_reads_an_item_with_no_review() {
         "{text}"
     );
 }
+
+#[test]
+fn the_prompt_asks_for_an_agent_on_every_pick_and_a_hold_for_one_that_should_wait() {
+    let text = wake(
+        "koji",
+        &[Wake::Told],
+        &[],
+        &[],
+        true,
+        &Notes::default(),
+        BOARD,
+    );
+    assert!(
+        text.contains(
+            "Name an `agent` on every `pick` entry, an implementer from the Agents section \
+             that can start now"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("kelpie takes the cheapest available agent that fits"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "An issue that should wait for an agent goes on `hold`, as any issue that should \
+             wait does, rather than on a pick, with the open work item running on that agent as \
+             its `until`"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("the hold ends when that item closes, not when the agent's window reopens"),
+        "{text}"
+    );
+}

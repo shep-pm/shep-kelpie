@@ -465,6 +465,30 @@ impl Rig {
         review_bots: Vec<Arc<dyn Profile>>,
         agents: Arc<dyn Agents>,
     ) -> Result<Mutex<Runner>, OpenError> {
+        self.opened_configured(settings, review_bots, agents)
+            .map(|mut runner| {
+                runner.settle_on_forge();
+                Mutex::new(runner)
+            })
+    }
+
+    /// Starts a runner that has read its settings and state, posted its status,
+    /// and asked the forge nothing yet
+    pub fn opened(&self) -> Result<Mutex<Runner>, OpenError> {
+        self.opened_configured(
+            self.try_settings()?,
+            vec![Arc::new(CodeRabbit), Arc::new(Cubic), Arc::new(Codex)],
+            Arc::new(self.claude.clone()),
+        )
+        .map(Mutex::new)
+    }
+
+    fn opened_configured(
+        &self,
+        settings: Settings,
+        review_bots: Vec<Arc<dyn Profile>>,
+        agents: Arc<dyn Agents>,
+    ) -> Result<Runner, OpenError> {
         let tokens = Arc::new(self.github.tokens(&self.paths().kelpie_home));
         let forge = Arc::new(self.forge.clone());
         let paths = self.paths();
@@ -498,7 +522,7 @@ impl Rig {
             agent_board: Arc::new(self.agent_board.clone()),
             flock: Vec::new(),
         };
-        Runner::open(
+        Runner::opened(
             self.project.clone(),
             settings,
             self.try_kelpie_settings()?,
@@ -507,7 +531,6 @@ impl Rig {
             Path::new(Self::KELPIE),
             ports,
         )
-        .map(Mutex::new)
     }
 
     /// Sends a trigger the way `shep trigger <project> <action>` does

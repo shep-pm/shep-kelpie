@@ -27,6 +27,8 @@ pub struct FakeForge {
     visibility: Arc<Mutex<Visibility>>,
     // What the repos a test named are, in place of `visibility`; keyed by lowercase slug
     visibilities: Arc<Mutex<HashMap<String, Visibility>>>,
+    // How reading any repo's visibility fails, as the forge answers it
+    visibility_down: Arc<Mutex<Option<ForgeError>>>,
     missing: Arc<Mutex<HashSet<u64>>>,
     unread: Arc<Mutex<BTreeMap<u64, usize>>>,
     // How reading one issue fails, as the forge answers it
@@ -231,6 +233,7 @@ impl FakeForge {
             bot_reviewed: Arc::new(Mutex::new(Some(Timestamp(LAST_REVIEWED)))),
             bot_review_reads: Arc::default(),
             viewer_down: Arc::default(),
+            visibility_down: Arc::default(),
             login_token_down: Arc::default(),
             asked: Arc::default(),
             board_reads: Arc::default(),
@@ -425,6 +428,9 @@ impl Forge for FakeForge {
     fn visibility(&self, repo: &ForgeSlug) -> Result<Visibility, ForgeError> {
         self.ask()?;
         self.calls.fetch_add(1, Ordering::SeqCst);
+        if let Some(error) = self.visibility_down.lock().unwrap().clone() {
+            return Err(error);
+        }
         let key = repo.as_str().to_lowercase();
         let own = self.visibilities.lock().unwrap().get(&key).copied();
         Ok(own.unwrap_or_else(|| *self.visibility.lock().unwrap()))

@@ -67,15 +67,19 @@ fn a_new_project_gets_its_board_at_start_with_nothing_on_it() {
              \n\
              ## Agents\n\
              \n\
-             Implementers by name, then reviewers in their order. The agent board picks a work \
-             item's implementer by its kind, tier and slack. An agent marked out cannot start \
-             a work item before the time shown. A pick's agent is tried first, not pinned, and an \
-             `agent:<name>!` label pins.\n\
+             Implementers by name, then reviewers in their order. You name each work item's \
+             agent from this list. Kelpie takes the cheapest available agent that fits when you \
+             name none, and an `agent:<name>!` label pins. An implementer's line shows when it \
+             can start and what it typically takes and costs, and an agent marked out cannot \
+             start a work item before the time shown. To have a work item wait for an agent, \
+             hold it.\n\
              \n\
              - opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, \
-             such as a data migration, a release step or a change to a public interface.\n\
+             such as a data migration, a release step or a change to a public interface.; \
+             starts now, typically 1h00m, cost unknown\n\
              - sonnet-high (implementer): standard tier, every kind; Builds everyday \
-             features and anything with state, such as a store, a queue or a migration.\n\
+             features and anything with state, such as a store, a queue or a migration.; \
+             starts now, typically 1h00m, cost unknown\n\
              - claude (reviewer): standard tier, every kind; no description\n\
              - qwen (reviewer): light tier, every kind; Reads a diff for defects with the \
              maintainer's local qwen-review script, as a first pass.\n\
@@ -136,10 +140,10 @@ const TWO_BRANCHES: &str = r#"# Board: acme, 2026-09-21 14:18 UTC
 
 ## Agents
 
-Implementers by name, then reviewers in their order. The agent board picks a work item's implementer by its kind, tier and slack. An agent marked out cannot start a work item before the time shown. A pick's agent is tried first, not pinned, and an `agent:<name>!` label pins.
+Implementers by name, then reviewers in their order. You name each work item's agent from this list. Kelpie takes the cheapest available agent that fits when you name none, and an `agent:<name>!` label pins. An implementer's line shows when it can start and what it typically takes and costs, and an agent marked out cannot start a work item before the time shown. To have a work item wait for an agent, hold it.
 
-- opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, such as a data migration, a release step or a change to a public interface.
-- sonnet-high (implementer): standard tier, every kind; Builds everyday features and anything with state, such as a store, a queue or a migration.
+- opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, such as a data migration, a release step or a change to a public interface.; starts now, typically 1h00m, cost unknown
+- sonnet-high (implementer): standard tier, every kind; Builds everyday features and anything with state, such as a store, a queue or a migration.; starts now, typically 1h00m, cost unknown
 - claude (reviewer): standard tier, every kind; no description
 - qwen (reviewer): light tier, every kind; Reads a diff for defects with the maintainer's local qwen-review script, as a first pass.
 
@@ -464,11 +468,13 @@ fn the_board_lists_the_projects_agents_from_their_files() {
         lines,
         [
             "- heavy (implementer): heavy tier, kinds design, migration; \
-             Design work that needs the strongest agent.",
+             Design work that needs the strongest agent.; starts now, typically 1h00m, cost unknown",
             "- opus-high (implementer): heavy tier, every kind; Builds work that is hard to \
-             undo, such as a data migration, a release step or a change to a public interface.",
+             undo, such as a data migration, a release step or a change to a public interface.; \
+             starts now, typically 1h00m, cost unknown",
             "- sonnet-high (implementer): standard tier, every kind; Builds everyday features \
-             and anything with state, such as a store, a queue or a migration.",
+             and anything with state, such as a store, a queue or a migration.; starts now, \
+             typically 1h00m, cost unknown",
             "- claude (reviewer): standard tier, every kind; no description",
             "- qwen (reviewer): light tier, every kind; Reads a diff for defects with the \
              maintainer's local qwen-review script, as a first pass.",
@@ -479,6 +485,46 @@ fn the_board_lists_the_projects_agents_from_their_files() {
         !text.contains("claude-opus-5-5"),
         "no model reaches the board"
     );
+    drop(runner);
+}
+
+#[test]
+fn the_board_asks_for_a_reading_once_however_often_it_is_written() {
+    let rig = Rig::new("acme");
+    rig.allow(&["opus-high", "sonnet-high", "qwen", "claude"]);
+    let runner = rig.open().unwrap();
+    assert_eq!(rig.agent_board.readings().len(), 1, "the start's board");
+
+    for _ in 0..3 {
+        rig.clock.advance(9);
+        runner.lock().unwrap().board_changed();
+        super::brief(&runner);
+    }
+    assert_eq!(rig.agent_board.readings().len(), 1, "{}", board(&rig));
+    assert_eq!(rig.agent_board.asks().len(), 0, "a reading is no pick");
+
+    rig.clock.advance(30);
+    runner.lock().unwrap().board_changed();
+    super::brief(&runner);
+    assert_eq!(rig.agent_board.readings().len(), 2);
+}
+
+#[test]
+fn a_board_out_of_reach_writes_every_agent_with_no_reading() {
+    let rig = Rig::new("acme");
+    rig.allow(&["opus-high", "sonnet-high", "qwen", "claude"]);
+    rig.agent_board.unreachable();
+    let runner = rig.open().unwrap();
+
+    let bullets = agent_bullets(&rig);
+    let implementers: Vec<&String> = bullets
+        .iter()
+        .filter(|b| b.contains("(implementer)"))
+        .collect();
+    assert_eq!(implementers.len(), 2, "{bullets:#?}");
+    for line in implementers {
+        assert!(line.ends_with("; no reading from the board"), "{line}");
+    }
     drop(runner);
 }
 

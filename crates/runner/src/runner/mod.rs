@@ -10,6 +10,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use crate::agents::{Agents, AgentsError};
 use crate::board::Skip;
@@ -104,6 +105,9 @@ mod merge;
 mod off_lock;
 mod older_bots;
 mod open_checks;
+mod open_forge;
+#[cfg(test)]
+mod open_forge_tests;
 #[cfg(test)]
 mod overlap_tests;
 mod owner_template;
@@ -447,19 +451,50 @@ pub struct Runner {
     holds: lock_hold::Holds,
     // The passes of the loop completed since the runner was built, in memory only
     passes: u64,
+    // The stop the loop this runner works in answers, in memory only
+    loop_stop: Option<Arc<AtomicBool>>,
 }
 
 impl Runner {
-    /// Checks the project's settings hold, and reads its state
-    ///
-    /// `settings` and `kelpie_settings` are as [`crate::settings::source::load`]
-    /// read them. `kelpie` is the kelpie binary, which each worker's file-tool
-    /// hook runs. No forge post may name `home`, kelpie's home or the checkout.
+    /// [`Self::opened`], then [`Self::settle_on_forge`]
     ///
     /// # Errors
     ///
     /// [`OpenError`] naming the setting, forge call or file that failed.
     pub fn open(
+        project: ProjectName,
+        settings: Settings,
+        kelpie_settings: KelpieSettings,
+        paths: &ProjectPaths,
+        home: &Path,
+        kelpie: &Path,
+        ports: Ports,
+    ) -> Result<Self, OpenError> {
+        let mut runner = Self::opened(
+            project,
+            settings,
+            kelpie_settings,
+            paths,
+            home,
+            kelpie,
+            ports,
+        )?;
+        runner.settle_on_forge();
+        Ok(runner)
+    }
+
+    /// Checks the project's settings hold, and reads its state, asking the forge nothing
+    ///
+    /// `settings` and `kelpie_settings` are as [`crate::settings::source::load`]
+    /// read them. `kelpie` is the kelpie binary, which each worker's file-tool
+    /// hook runs. No forge post may name `home`, kelpie's home or the checkout.
+    /// The runner's status is posted here, so a trigger is answered while
+    /// [`Self::settle_on_forge`] runs its paced calls.
+    ///
+    /// # Errors
+    ///
+    /// [`OpenError`] naming the setting, forge call or file that failed.
+    pub fn opened(
         project: ProjectName,
         settings: Settings,
         kelpie_settings: KelpieSettings,
@@ -574,9 +609,6 @@ impl Runner {
         let voice = Arc::clone(&ports.voice);
         ports.agents = Arc::new(KeychainBlocked::new(ports.agents, voice, remote.clone()));
         let extra_instructions = instructions::read_extra(&settings)?;
-        let (owner_template, note) =
-            owner_template::refreshed(ports.forge.as_ref(), remote.owner(), None);
-        told.extend(note);
         guard_hooks::check_here(&settings)?;
         check_bots(&lineup, &ports)?;
         crate::skills::check(&settings.skills, &paths.skills)?;
@@ -590,12 +622,10 @@ impl Runner {
             &settings.repo_setup,
         );
         let plugins_head = crate::skills::default_head(checkout, settings.git.base());
-        // Only a reviewer the project named in `agents.allow` is held to these: a
-        // candidate it never named is passed over at its round, by the repo's
-        // visibility or as down. A CodeRabbit named for a repo that is not public
-        // is left out and logged, not refused.
+        // Only a reviewer the project named in `agents.allow` is held to what a
+        // round cannot work around: a candidate it never named is passed over at
+        // its round, as down or by the repo's visibility.
         if !named.is_empty() {
-            told.extend(coderabbit_left_out(&remote, &named, &ports)?);
             check_local(&named, &ports)?;
         }
         let mut state = store.load()?.unwrap_or_default();
@@ -636,7 +666,7 @@ impl Runner {
             settings,
             remote,
             extra_instructions,
-            owner_template,
+            owner_template: None,
             skills,
             repo_plugins,
             plugins_head,
@@ -721,12 +751,9 @@ impl Runner {
             posted: std::cell::RefCell::default(),
             holds: lock_hold::Holds::default(),
             passes: 0,
+            loop_stop: None,
         };
         runner.settle_older_bots()?;
-        runner.settle_labels();
-        runner.make_agent_labels();
-        runner.make_priority_labels();
-        runner.make_kind_labels();
         runner.notes.extend(runner.left_out_notes(&[]));
         runner.brief_now();
         // A trigger asked before the loop's first pass is answered from this.

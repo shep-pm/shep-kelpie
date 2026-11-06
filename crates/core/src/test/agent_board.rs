@@ -5,6 +5,8 @@
 //! them, with no wait, and by saying every agent fits every kind. A test puts
 //! some of them first, ranks its own order, with its own finishes, makes one wait,
 //! ranks nobody, says one agent does not fit a kind, notes the API's refusals, or makes the board unreachable.
+//! Its readings of the agents a board write asks about answer from the same
+//! ranking, and are counted apart from the picks.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -40,6 +42,7 @@ struct Book {
     // Each agent and kind a test has set an answer for
     fits: BTreeMap<(AgentName, String), Fits>,
     fit_asks: Vec<FitAsk>,
+    readings: Vec<Vec<AgentName>>,
     // The seconds each agent a test has set one for waits before it can start
     waits: BTreeMap<AgentName, u64>,
     refusals: Vec<Refusal>,
@@ -118,6 +121,11 @@ impl FakeAgentBoard {
         self.book.lock().unwrap().asks.clone()
     }
 
+    /// The agents each reading was asked for, in order, which `asks` does not count
+    pub fn readings(&self) -> Vec<Vec<AgentName>> {
+        self.book.lock().unwrap().readings.clone()
+    }
+
     /// What each fit ask was asked, in order
     pub fn fit_asks(&self) -> Vec<FitAsk> {
         self.book.lock().unwrap().fit_asks.clone()
@@ -153,6 +161,26 @@ impl AgentBoard for FakeAgentBoard {
             let wait = book.waits.get(&agent).copied().unwrap_or(0);
             Pick::new(agent, finish, wait)
         });
+        Some(picks.collect())
+    }
+
+    fn reading(&self, agents: &[AgentName]) -> Option<Vec<Pick>> {
+        let mut book = self.book.lock().unwrap();
+        book.readings.push(agents.to_vec());
+        let order = match &book.answers {
+            Answers::Listed(first) => (first.iter())
+                .chain(agents.iter().filter(|agent| !first.contains(agent)))
+                .map(|agent| (agent.clone(), TYPICAL_SECS))
+                .collect(),
+            Answers::Ranks(ranked) => ranked.clone(),
+            Answers::Unreachable => return None,
+        };
+        let picks = (order.into_iter())
+            .filter(|(agent, _)| agents.contains(agent))
+            .map(|(agent, finish)| {
+                let wait = book.waits.get(&agent).copied().unwrap_or(0);
+                Pick::new(agent, finish, wait)
+            });
         Some(picks.collect())
     }
 

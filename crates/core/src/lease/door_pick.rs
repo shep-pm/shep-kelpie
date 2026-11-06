@@ -13,6 +13,7 @@ use super::door_pace::answered;
 use crate::agent_board::rank;
 use crate::api_refusal::Refusal;
 use crate::ports::{AgentBoard, Timestamp};
+use crate::settings::AgentName;
 
 /// The agent board as the dog at a door keeps it
 #[derive(Debug)]
@@ -30,6 +31,10 @@ impl DoorBoard {
 impl AgentBoard for DoorBoard {
     fn pick(&self, item: &PickAsk) -> Option<Vec<Pick>> {
         pick(&self.socket, item)
+    }
+
+    fn reading(&self, agents: &[AgentName]) -> Option<Vec<Pick>> {
+        reading(&self.socket, agents)
     }
 
     fn fit(&self, item: &FitAsk) -> Option<Fits> {
@@ -52,6 +57,18 @@ pub fn pick(door: &Path, item: &PickAsk) -> Option<Vec<Pick>> {
     };
     match answered(door, &ask)? {
         Answer::Picks(picks) => Some(rank(picks, item.slack)),
+        _ => None,
+    }
+}
+
+/// What the dog at `door` reads of each of `agents` it has a window for, in no order, or None when it cannot say
+pub fn reading(door: &Path, agents: &[AgentName]) -> Option<Vec<Pick>> {
+    let ask = Ask {
+        reading: agents.to_vec(),
+        ..Ask::new(PICK, std::process::id(), "reading")
+    };
+    match answered(door, &ask)? {
+        Answer::Picks(picks) => Some(picks),
         _ => None,
     }
 }
@@ -84,7 +101,14 @@ pub fn refused(door: &Path, refusal: &Refusal) -> Option<Timestamp> {
 mod tests {
     use super::*;
     use crate::api_refusal::Refusal;
-    use crate::settings::AgentName;
+
+    #[test]
+    fn a_runner_that_cannot_reach_the_dog_gets_no_reading() {
+        let agents = [AgentName::kelpies("sonnet-high")];
+        let nobody = Path::new("/nonexistent/kelpie/lease.sock");
+
+        assert_eq!(reading(nobody, &agents), None);
+    }
 
     #[test]
     fn a_runner_that_cannot_reach_the_dog_gets_no_pick() {

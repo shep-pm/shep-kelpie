@@ -1,6 +1,6 @@
 # Budget
 
-Pacing, leases, forge limits, time, usage, settings.
+Pacing, time, usage, settings. The dog, its leases and the forge limits are in `budget-forge.md`.
 
 ## Pacing
 
@@ -13,24 +13,6 @@ Pacing, leases, forge limits, time, usage, settings.
 - An API agent is held when the API refuses its key: spent credit ("credit balance is too low", no time, checked again after `CREDIT_RECHECK_SECS`, 6 hours) or a spent spend limit (held until the time its message gives when that is after now, else one `RECHECK_SECS`, and `CREDIT_RECHECK_SECS` when its message gives no readable time). The dog holds the API as a whole, since every `login: api` agent shares one key, and the board waits each such agent until the hold ends. The hold is in the dog's memory, so `shep restart kelpie` clears it. A refused worker turn tells the board, and its unpinned item moves to the next pick, `turn/refused/mod.rs`. agent-board-api.md, `api_refusal.rs`, `dog/availability/`
 - `budget.per_item_usd` ($10) parks item `over-budget` before a turn or round, never mid-call; yes doubles it. #492, `core/work_item/spend/`
 - A contribution's calls take a slot while they run, count against `budget.per_item_usd` through its `spend`, and go ahead of new issues; a yes or a no with a note to its `over-budget` ruling doubles the cap. Like the PM's and the issue-label calls, they are tied to no work item. #621, `runner/contributions/budget.rs`
-
-## Dog, leases, forge limits
-
-- Runners talk to kelpie through shep: triggers down, notes (`channel.note`) up as running totals (notes drop under backpressure). ADR 0013
-- Runner asks dog's book for lease via `lease.<kind>.want.<epoch>`, epoch = its pid (dog reclaims a dead run's leases without racing the new one); bot window = `reviews` in `hours` from its file. `dog/mod.rs`
-- Dog saves book to `<kelpie home>/dog/book.json` on every change (a restart grants no second summon); unreadable book starts CodeRabbit closed 1h. #19
-- `cargo-test`: the one worker lease, 3 holders default, held while a connection to dog's `lease.sock` is open. #218, `dog/mod.rs`
-- Workers build outside the lease, run `shep kelpie lease run cargo-test -- <command>` (exit 75 no lease, 127 no command, 124 past `RUN_LIMIT`), kelpie named by path. #218
-- No GPU lease: paddock queues the GPU, so the `gpu` lock, `lease` in agent files (refused, pointing at `gateway`) and the `/api/ps` spill check are gone; `lease take|run gpu` are refused, pointing at `shep paddock run --model <m>`. `status.local_leases` shows a gateway model's paddock lease holder by model name. #390, #501, #502
-- Triggers that only ask (`status`, `timings`, `drain`) never wake loop; board poll starts at `BOARD_POLL` (60s), doubles to `IDLE_POLL_MAX` (5 min) while no item is open and the board repeats; a moved board, an item opening or ending, `add`/`tell`/`rule`/`start` and a write of kelpie's own reset it; rate-limit read stays at 60s; `status.board_poll_secs`. #394, #1329
-- Failing step backs off 15s-10 min; rate-limit answer holds every forge call until reset (10 min for secondary limit, longer if hit again). #394
-- One forge hold and pace per login, kept by the dog (`forge` ask on `lease.sock`, `dog/forge.rs`): any runner's used-up answer holds all; a runner that cannot reach the dog uses its own (`DoorPace`, `core/lease/door_pace.rs`). Dog's copy is in memory, a restart clears it. #580
-- `pick` and `fit` asks on `lease.sock`: the agent board's reading, which the runner ranks, and its fit reading, agent-board.md and agent-board-fit.md. `dog/board/`
-- Pace: 60 calls/minute and 5/second per login (`PER_MINUTE`, `AT_ONCE`, `core/ports/pace.rs`), under GitHub's secondary limits; each project gets cap / projects in the minute, held to it only while free places are no more than that count. Queued calls wait (`Clock::wait`), never fail. #580, #1741
-- Hold ends at the answer's `retry-after`, else its `x-ratelimit-reset`, else the 10-min fallback; same for `gh` and App calls (App limits are `ForgeError::Limited`; `PacedVoice` holds and paces them; worker-token mint waits the hold). #580
-- REST reads that repeat (ruling-thread comments and the comment's node id, the review bot's comments, reviews and statuses) keep each answer's `ETag` per login and path, in memory, and send it as `If-None-Match`; a 304 is the kept answer, which GitHub does not count against the limit. Lists are read a page at a time, each its own conditional read. GraphQL (board, `gh pr view`, `gh issue view`, threads) has no conditional requests. A forge-ledger line carries `not_modified` when a call had 304s; `shep kelpie usage --forge` lists them by kind. `gh api`'s 304 is unmeasured: a tagged read that fails naming a 304, when the same read untagged works, sends no tag again; a list past 50 pages of 100 is an error. #592, `crates/adapters/src/adapters/gh/conditional/mod.rs`
-- A write of kelpie's own (forge ledger counts the ones that went through) makes the next look due in `DUE_FLOOR`, not at the next poll; a push is not counted. #592, `runner/looks/`
-- A step that retries gets one attempt per step (close of merged issue; ruling-comment edit backs off like a failing step). #580
 
 ## Settings
 
