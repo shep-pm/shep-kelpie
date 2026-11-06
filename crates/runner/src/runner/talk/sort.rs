@@ -1,9 +1,10 @@
 //! Which of the comments on a pull request are requests of the worker
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::COMMENT_REQUEST;
 use crate::ports::{Remark, Standing, Talk};
+use crate::runner::pm::{Released, SaidHow};
 use crate::runner::review_bot::is_reply;
 use crate::runner::thread_replies::is_reply_words;
 use crate::runner::words::is_free_text;
@@ -34,6 +35,17 @@ pub(super) struct Sorted {
     /// The conversation comments the maintainer wrote that are the project
     /// manager's to read, each with its id and what it says
     pub held: Vec<(u64, String)>,
+    /// The maintainer's comments the project manager parked the work item on
+    pub parks: Vec<Park>,
+}
+
+/// A comment of the maintainer's the project manager parked the work item on
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Park {
+    pub who: String,
+    pub text: String,
+    /// The project manager's reason
+    pub why: String,
 }
 
 /// A login a pending ruling asks to reply
@@ -64,6 +76,8 @@ pub(super) struct Sieve<'a> {
     /// Whether what is already written is only noted: a pull request kelpie
     /// did not open has comments the worker has seen
     pub quiet: bool,
+    /// The comments the project manager called on, each carried out here
+    pub released: &'a BTreeMap<u64, Released>,
 }
 
 pub(super) fn sort(talk: &Talk, sieve: &Sieve<'_>) -> Sorted {
@@ -79,6 +93,26 @@ pub(super) fn sort(talk: &Talk, sieve: &Sieve<'_>) -> Sorted {
         if comment.standing != Standing::Writer {
             sorted.ignored.push(ignored(comment, "the conversation"));
             sorted.comments.push(comment.id);
+            continue;
+        }
+        // The project manager's call on it, made with no ruling waiting
+        if let Some(released) = sieve.released.get(&comment.id) {
+            sorted.comments.push(comment.id);
+            match released.call {
+                SaidHow::Park => sorted.parks.push(Park {
+                    who: comment.author.clone(),
+                    text: comment.body.clone(),
+                    why: released.why.clone(),
+                }),
+                _ => sorted.requests.push(Request {
+                    id: format!("{COMMENT_REQUEST}{}", comment.id),
+                    place: None,
+                    said: vec![
+                        (comment.author.clone(), comment.body.clone()),
+                        ("the project manager".into(), released.note.clone()),
+                    ],
+                }),
+            }
             continue;
         }
         let aimed_at_a_ruling = sieve.left.iter().any(|left| {
@@ -188,6 +222,7 @@ mod tests {
             left: &left,
             maintainer: Some("octocat"),
             quiet: false,
+            released: &BTreeMap::new(),
         };
         sort(&talk, &sieve)
     }
@@ -225,6 +260,7 @@ mod tests {
             left: &[],
             maintainer,
             quiet: false,
+            released: &BTreeMap::new(),
         };
         sort(&talk, &sieve)
     }

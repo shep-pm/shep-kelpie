@@ -1,13 +1,13 @@
 //! Usage pacing
 //!
-//! A turn waits while the account's 5-hour window or its week is spent, until
-//! the longer of the two holds ends: a spent window fails every turn at once,
-//! as a spent week does. Nothing else holds a turn or a dispatch, and usage
-//! that cannot be read holds nothing. A running turn is never interrupted:
-//! the pacer is asked only between turns.
+//! The pacer reads an account's usage and holds a spent limit: a turn waits
+//! while the 5-hour window or the week is spent, until the longer of the two
+//! ends. Nothing else holds a turn or a dispatch, and usage that cannot be
+//! read holds nothing. A running turn is never interrupted: the pacer is asked
+//! only between turns.
 //!
-//! [`window`]'s 50% mark and the day's allowance are what the agent board's
-//! waits read, and what `status` and the plan gauges still show.
+//! [`window`]'s 50% mark is what the agent board's waits read, and the
+//! figures of the day are what `status` and the plan gauges still show.
 
 use serde::{Deserialize, Serialize};
 
@@ -51,8 +51,6 @@ pub struct DayStart {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HoldKind {
-    /// Today's allowance is spent: nothing new is dispatched
-    Allowance,
     /// The 5-hour window is past its mark or the week is spent: no turn starts
     Window,
     /// Usage could not be read, so neither limit can be checked
@@ -95,8 +93,6 @@ pub struct Assessment {
     pub day_start: Option<DayStart>,
     /// The reading, when usage was read
     pub reading: Option<Reading>,
-    /// Holds a new work item, and lets the current one continue
-    pub allowance: Option<Hold>,
     /// Holds every turn, new work item or not
     pub window: Option<Hold>,
 }
@@ -111,16 +107,9 @@ pub enum Scope {
 }
 
 impl Assessment {
-    /// The hold that applies to `scope`, the one lasting longer when two do
-    pub fn hold(&self, scope: Scope) -> Option<&Hold> {
-        let allowance = match scope {
-            Scope::Dispatch => self.allowance.as_ref(),
-            Scope::Turn => None,
-        };
-        [allowance, self.window.as_ref()]
-            .into_iter()
-            .flatten()
-            .max_by_key(|hold| hold.until)
+    /// The hold that applies to `scope`, which is `window` for either
+    pub fn hold(&self, _scope: Scope) -> Option<&Hold> {
+        self.window.as_ref()
     }
 
     /// Holding every decision, because usage could not be read
@@ -133,7 +122,6 @@ impl Assessment {
         Self {
             day_start: None,
             reading: None,
-            allowance: Some(hold.clone()),
             window: Some(hold),
         }
     }
@@ -178,20 +166,9 @@ pub fn assess(
         per_hour_pct: tenth(allowance_pct / f64::from(kickoff.get())),
     };
 
-    let allowance = (f64::from(spent_today_pct) >= allowance_pct).then(|| Hold {
-        kind: HoldKind::Allowance,
-        reason: format!(
-            "today's {}allowance of {:.1}% of the week is spent ({spent_today_pct}% since the day began), \
-             so no new work item is dispatched until the next day; the current one continues",
-            named(account, "", "Codex "),
-            reading.allowance_pct
-        ),
-        until: Timestamp(week_start + (u64::from(day) + 1) * DAY_SECS),
-    });
     Assessment {
         day_start: Some(day_start),
         reading: Some(reading),
-        allowance,
         window: window(account, usage),
     }
 }
@@ -305,7 +282,7 @@ mod tests {
                 week_used_pct: 0
             }
         );
-        assert_eq!((a.allowance, a.window), (None, None));
+        assert_eq!(a.window, None);
     }
 
     #[test]
@@ -330,36 +307,6 @@ mod tests {
     }
 
     #[test]
-    fn the_allowance_holds_dispatch_once_spent_and_not_before() {
-        let start = DayStart {
-            week_resets_at: Timestamp(RESETS),
-            day: 0,
-            week_used_pct: 0,
-        };
-        // 100 / 7 is 14.29%
-        let under = assess(
-            Account::Claude,
-            at(0, 5),
-            &usage(14, 0),
-            Some(start),
-            eight(),
-        );
-        assert_eq!(under.hold(Scope::Dispatch), None);
-
-        let over = assess(
-            Account::Claude,
-            at(0, 5),
-            &usage(15, 0),
-            Some(start),
-            eight(),
-        );
-        let hold = over.hold(Scope::Dispatch).unwrap();
-        assert_eq!(hold.kind, HoldKind::Allowance);
-        assert_eq!(hold.until, at(1, 0));
-        assert_eq!(over.hold(Scope::Turn), None, "the current item continues");
-    }
-
-    #[test]
     fn a_new_day_starts_over_from_what_the_week_has_used() {
         let start = DayStart {
             week_resets_at: Timestamp(RESETS),
@@ -378,7 +325,6 @@ mod tests {
         let reading = a.reading.unwrap();
         // 85% over the 6 days left
         assert_eq!((reading.allowance_pct, reading.spent_today_pct), (14.2, 0));
-        assert_eq!(a.allowance, None);
     }
 
     #[test]
@@ -432,7 +378,7 @@ mod tests {
         let a = assess(Account::Claude, at(6, 3), &usage(88, 0), None, eight());
         let reading = a.reading.unwrap();
         assert_eq!(reading.allowance_pct, 12.0);
-        assert_eq!(a.allowance, None);
+        assert_eq!(a.window, None);
 
         let start = a.day_start.unwrap();
         let spent = assess(
@@ -448,7 +394,6 @@ mod tests {
             (HoldKind::Window, Timestamp(RESETS)),
             "the week is spent too, which holds every turn"
         );
-        assert_eq!(spent.allowance.unwrap().kind, HoldKind::Allowance);
     }
 
     #[test]
@@ -460,7 +405,6 @@ mod tests {
             (hold.kind, hold.until),
             (HoldKind::Window, Timestamp(RESETS))
         );
-        assert_eq!(a.allowance.unwrap().until, at(4, 0), "the day ends sooner");
     }
 
     #[test]
@@ -555,21 +499,35 @@ mod tests {
     }
 
     #[test]
-    fn two_holds_report_the_one_that_lasts_longer() {
+    fn a_hold_is_the_same_for_a_new_item_and_a_turn() {
+        // 20% of the week gone on day 0 is past a seventh, which holds nothing
         let start = DayStart {
             week_resets_at: Timestamp(RESETS),
             day: 0,
             week_used_pct: 0,
         };
-        let a = assess(
+        let over = assess(
             Account::Claude,
             at(0, 1),
-            &usage(20, 60),
+            &usage(20, 0),
             Some(start),
             eight(),
         );
-        assert_eq!(a.hold(Scope::Dispatch).unwrap().kind, HoldKind::Allowance);
-        assert_eq!(a.hold(Scope::Turn).unwrap().kind, HoldKind::Window);
+        assert_eq!(
+            (over.hold(Scope::Dispatch), over.hold(Scope::Turn)),
+            (None, None)
+        );
+
+        let spent = assess(
+            Account::Claude,
+            at(0, 1),
+            &usage(20, 100),
+            Some(start),
+            eight(),
+        );
+        let hold = spent.hold(Scope::Turn).unwrap();
+        assert_eq!((hold.kind, hold.until), (HoldKind::Window, at(0, 3)));
+        assert_eq!(spent.hold(Scope::Dispatch), Some(hold));
     }
 
     #[test]
