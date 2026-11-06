@@ -1,4 +1,7 @@
 use super::*;
+use crate::ports::{ForgeError, Notification};
+use crate::settings::ForgeSlug;
+use crate::test::FakeClock;
 
 fn words(line: &str) -> Vec<String> {
     line.split(' ').map(str::to_owned).collect()
@@ -505,4 +508,91 @@ async fn set_with_a_glob_writes_the_matching_projects_and_a_plain_name_still_wri
         .await
         .unwrap_err();
     assert!(refused.contains("z*"), "{refused}");
+}
+
+// Counts the dials it refuses.
+#[derive(Debug, Default)]
+struct Unreachable(std::sync::atomic::AtomicUsize);
+
+impl Dial for Unreachable {
+    fn open<'a>(&'a self, _: &'a Path) -> crate::shepherd::Opened<'a> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Box::pin(async { Err(crate::shepherd::ConnectRefused::Unreachable("no".into())) })
+    }
+}
+
+// An inbox of one notification, which records what is marked done.
+#[derive(Default)]
+struct OneInbox(std::sync::Mutex<Vec<String>>);
+
+impl Notifications for OneInbox {
+    fn list(&self, repo: &ForgeSlug) -> Result<Vec<Notification>, ForgeError> {
+        assert_eq!(repo.as_str(), "shep-pm/koji");
+        Ok(vec![Notification { id: "7".into() }])
+    }
+
+    fn mark_done(&self, notification: &Notification) -> Result<(), ForgeError> {
+        self.0.lock().unwrap().push(notification.id.clone());
+        Ok(())
+    }
+}
+
+// `notifications <args>` in `folder`, with no shepherd to dial.
+fn notifications_in(
+    folder: &Path,
+    inbox: &OneInbox,
+    dial: &Unreachable,
+    args: &[&str],
+) -> Result<Vec<String>, String> {
+    let at = Notify {
+        dial,
+        shep_home: Path::new("/nowhere/shep"),
+        home: Path::new("/nowhere/home"),
+        kelpie_home: Path::new("/nowhere/kelpie"),
+        here: folder,
+        ports: inbox,
+        clock: &FakeClock::at(1_000),
+    };
+    shepherd::block_on(notify(at, None, args))
+}
+
+// A git checkout whose `origin` is `shep-pm/koji`, a project or not.
+fn koji_checkout() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    for args in [
+        &["init", "-q"][..],
+        &["remote", "add", "origin", "git@github.com:shep-pm/koji.git"],
+    ] {
+        let ran = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir.path())
+            .args(args)
+            .output();
+        assert!(ran.unwrap().status.success(), "git {args:?}");
+    }
+    dir
+}
+
+#[test]
+fn notifications_with_no_project_never_dials_the_shepherd() {
+    let checkout = koji_checkout();
+    let (inbox, dial) = (OneInbox::default(), Unreachable::default());
+    let said = notifications_in(checkout.path(), &inbox, &dial, &["clear"]);
+    assert_eq!(
+        said,
+        Ok(vec!["cleared 1 notifications on shep-pm/koji".into()])
+    );
+    assert_eq!(*inbox.0.lock().unwrap(), ["7"]);
+    assert_eq!(dial.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
+#[test]
+fn notifications_with_a_word_other_than_clear_is_refused() {
+    let checkout = koji_checkout();
+    for args in [&[][..], &["list"], &["clear", "all"], &["--all"]] {
+        let (inbox, dial) = (OneInbox::default(), Unreachable::default());
+        let refused = notifications_in(checkout.path(), &inbox, &dial, args);
+        assert_eq!(refused, Err(USAGE.to_owned()), "{args:?}");
+        assert!(inbox.0.lock().unwrap().is_empty(), "{args:?}");
+    }
 }

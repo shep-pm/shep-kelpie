@@ -46,3 +46,8 @@ Per-user App: tokens, posting, answering rulings on GitHub. Who answers a ruling
 - Reading starts from GitHub's timestamp on the ruling comment, never local clock. #398
 - First answer from any channel wins; ruling watched 1h more to say it's answered. #398
 - Thumbs up/down from mentioned login answers yes/no ruling; tick counts only if that login or the App made every edit (GitHub doesn't say who ticked). #464
+
+## Notifications
+
+- `shep kelpie notifications clear` marks a repo's notifications done as the maintainer's login, never the App: notifications belong to a user, and an App token has none. Its own port, `Notifications`, so `Forge` and its wrappers stay as they are. `adapters/gh/notifications.rs`, `flock/notifications.rs`. #1747
+- List with `all=true` (read ones stay in the inbox until done), then one `DELETE notifications/threads/<id>` each, in order. A call GitHub rate-limits, in the listing or a mark done, waits `cooldown.until(clock.now())` (`FALLBACK` when the answer names no time) and is asked again, saying each wait as it starts. Five limits in a row with no call succeeding between them stop the loop like any other failed call: a count of what was cleared of how many, and a non-zero exit. Running it again picks up what is left. `docs/facts/github-notifications.md`

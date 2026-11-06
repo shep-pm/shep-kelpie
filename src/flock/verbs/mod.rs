@@ -10,9 +10,12 @@ use std::process::ExitCode;
 
 use super::control::{Format, Reach};
 use super::glob::Named;
-use super::{Checkout, Launch, add, attach, control, pm, rule, set, ticket, usage, watch};
+use super::{
+    Checkout, Launch, add, attach, control, notifications, pm, rule, set, ticket, usage, watch,
+};
 use crate::adapters::Gh;
 use crate::home::{ProjectName, ProjectPaths};
+use crate::ports::{Clock, Notifications, SystemClock};
 use crate::settings::source::{self, Loaded};
 use crate::shepherd::{self, Connection, Dial, Socket};
 use crate::state::Projects;
@@ -20,16 +23,37 @@ use crate::ticket::TicketId;
 use crate::upgrade::restart::{Interrupt, Patience};
 
 /// The verbs [`main`] runs: every trigger a runner takes, `add`, which also
-/// registers a checkout, `issue`, which runs the issue check itself, and
-/// `attach` and `pm`, which run a worker's or the project manager's session
-/// here, `usage`, which reads the usage ledger here, `watch`, which
-/// follows the runner's log and the sessions' transcripts here, `ticket`, which
-/// files and reads a local project's tickets here, and `set` and `get`, which
-/// change and read one setting of the project's table here, or of every project a glob matches
-pub const VERBS: [&str; 24] = [
-    "add", "start", "pause", "finish", "status", "rule", "rework", "adopt", "gate", "drop",
-    "timings", "issue", "attach", "tell", "pm", "drain", "undrain", "usage", "watch", "board",
-    "set", "get", "triage", "ticket",
+/// registers a checkout, `issue`, which runs the issue check itself, `attach`
+/// and `pm`, which run a session here, `usage`, `watch` and `ticket`, which read
+/// the ledger, the logs and the local tickets here, `set` and `get`, which
+/// change and read the project's table, or every project's a glob matches, and
+/// `notifications`, which clears a repo's GitHub notifications as your login
+pub const VERBS: [&str; 25] = [
+    "add",
+    "start",
+    "pause",
+    "finish",
+    "status",
+    "rule",
+    "rework",
+    "adopt",
+    "gate",
+    "drop",
+    "timings",
+    "issue",
+    "attach",
+    "tell",
+    "pm",
+    "drain",
+    "undrain",
+    "usage",
+    "watch",
+    "board",
+    "set",
+    "get",
+    "triage",
+    "ticket",
+    "notifications",
 ];
 
 /// The verbs that print the runner's JSON instead of plain text with `--json`
@@ -155,6 +179,18 @@ async fn run(
         return Ok(Vec::new());
     }
     let here = std::env::current_dir().map_err(|e| format!("cannot read this folder: {e}"))?;
+    if command == "notifications" {
+        let at = Notify {
+            dial,
+            shep_home,
+            home: &home,
+            kelpie_home: &kelpie_home,
+            here: &here,
+            ports: &Gh::default(),
+            clock: &SystemClock,
+        };
+        return notify(at, named, &args).await;
+    }
     let client = shepherd::connect(dial, shep_home)
         .await
         .map_err(|e| e.describe(shep_home))?;
@@ -364,6 +400,48 @@ async fn load(here: &Here<'_>, name: &ProjectName) -> Result<(ProjectPaths, Load
     let loaded = source::load(&tables, name.as_str(), here.home, &paths.folder)
         .map_err(|e| e.to_string())?;
     Ok((paths, loaded))
+}
+
+// What `notifications` needs: where the shepherd is, for a project, the
+// folder to read a checkout from without one, and the inbox to clear.
+struct Notify<'a> {
+    dial: &'a dyn Dial,
+    shep_home: &'a Path,
+    home: &'a Path,
+    kelpie_home: &'a Path,
+    here: &'a Path,
+    ports: &'a dyn Notifications,
+    clock: &'a dyn Clock,
+}
+
+// `notifications clear`, which runs as the maintainer's login. The repo is
+// the named project's, read as its runner would, or the checkout `here` is
+// in, for which the shepherd is not dialled.
+async fn notify(
+    at: Notify<'_>,
+    named: Option<ProjectName>,
+    args: &[&str],
+) -> Result<Vec<String>, String> {
+    if args != ["clear"] {
+        return Err(USAGE.to_owned());
+    }
+    let repo = match named {
+        Some(name) => {
+            let client = shepherd::connect(at.dial, at.shep_home)
+                .await
+                .map_err(|e| e.describe(at.shep_home))?;
+            let here = Here {
+                client: &client,
+                shep_home: at.shep_home,
+                kelpie_home: at.kelpie_home,
+                home: at.home,
+            };
+            let (_, loaded) = load(&here, &name).await?;
+            crate::runner::check_checkout(&loaded.settings).map_err(|e| e.to_string())?
+        }
+        None => Checkout::of(at.here)?.forge,
+    };
+    notifications::clear(at.ports, at.clock, &|line| println!("{line}"), &repo)
 }
 
 // `rule`: the ruling and its answer read first, asking in a terminal, so

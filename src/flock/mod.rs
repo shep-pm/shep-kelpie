@@ -12,6 +12,7 @@ mod attach;
 pub mod control;
 mod glob;
 mod help;
+mod notifications;
 mod pm;
 pub mod rule;
 pub(crate) mod set;
