@@ -124,7 +124,14 @@ fn a_withdrawn_merge_rulings_posted_comment_is_edited_to_say_why() {
                  maintainer.";
     assert_eq!(body.lines().next(), Some(first));
     assert!(body.contains("### Merge this pull request at"), "{body}");
-    for gone in ["@octocat", "- [ ]", "👍", "Reply", "| Option |"] {
+    for gone in [
+        "@octocat",
+        "- [ ]",
+        "👍",
+        "Reply",
+        "| Option |",
+        "| Answer |",
+    ] {
         assert!(!body.contains(gone), "{gone} is still in:\n{body}");
     }
 }

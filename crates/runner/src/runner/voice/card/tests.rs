@@ -90,6 +90,118 @@ fn rendered(ruling: &Ruling) -> String {
     ruling_comment(Some("octocat"), ruling)
 }
 
+// A `still_red` ruling, with the rerun option when it was raised with one
+fn still_red(rerun: bool) -> RulingKind {
+    RulingKind::Stuck(Stuck::StillRed {
+        head: "6b0606e9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6".into(),
+        checks: vec!["test".into()],
+        fix_turns: None,
+        review: None,
+        rerun,
+    })
+}
+
+// A `foreign-change` ruling: the plainest card that takes a yes and a no
+fn changed_outside() -> RulingKind {
+    RulingKind::ForeignChange {
+        description: "labels added: `ready-for-human`".into(),
+        known: Known::default(),
+    }
+}
+
+#[test]
+fn a_yes_or_no_ruling_names_each_option_once_by_its_answer() {
+    let comment = rendered(&ruling(ticket(1), changed_outside()));
+
+    assert_eq!(
+        comment,
+        "### Accept a change made outside kelpie?\n\n\
+         This pull request was changed: labels added: `ready-for-human`.\n\n\
+         | Answer | What it does |\n\
+         |---|---|\n\
+         | 👍 or `71 yes` | Accepts the change and kelpie carries on |\n\
+         | 👎 or `71 no <note>` | Sends the worker back with a note, and the review reads its change again |\n\n\
+         @octocat"
+    );
+}
+
+#[test]
+fn a_yes_or_no_ruling_with_one_choice_offers_only_the_thumbs_up() {
+    let kind = RulingKind::Stuck(Stuck::AdoptFailed {
+        why: "its branch is held by a worktree".into(),
+    });
+    let comment = rendered(&ruling(ticket(1), kind));
+
+    assert!(
+        comment.contains("| 👍 or `71 yes` | Kelpie tries again, as it does every poll |"),
+        "{comment}"
+    );
+    assert!(!comment.contains("👎"), "{comment}");
+    assert!(!comment.contains("no <note>"), "{comment}");
+}
+
+#[test]
+fn an_option_that_names_an_action_shows_its_reply_alone() {
+    let comment = rendered(&ruling(ticket(1), still_red(true)));
+
+    assert!(
+        comment.contains(
+            "| `71 rerun` | Reruns the failed jobs of 6b0606e once more, and kelpie looks at \
+             CI again |"
+        ),
+        "{comment}"
+    );
+}
+
+#[test]
+fn an_unmentioned_yes_or_no_ruling_shows_the_terminal_replies() {
+    let comment = ruling_comment(None, &ruling(ticket(1), still_red(true)));
+
+    assert!(
+        comment.contains("| `shep kelpie rule 71 yes` | Kelpie looks at CI again |"),
+        "{comment}"
+    );
+    assert!(
+        comment.contains("| `shep kelpie rule 71 no <note>` | Sends the worker back with a note"),
+        "{comment}"
+    );
+    assert!(
+        comment.contains("| `shep kelpie rule 71 rerun` |"),
+        "{comment}"
+    );
+    assert!(!comment.contains("👍"), "{comment}");
+    assert!(comment.ends_with("Answer it at the terminal."), "{comment}");
+}
+
+#[test]
+fn the_project_manager_still_reads_lettered_options() {
+    let (shown, count) = brief(&ruling(ticket(1), changed_outside()));
+
+    assert_eq!(count, 2);
+    assert!(shown.contains("| | Option | If you pick it |"), "{shown}");
+    assert!(
+        shown.contains("| **A** | Yes | Accepts the change and kelpie carries on |"),
+        "{shown}"
+    );
+    assert!(shown.contains("| **B** | No |"), "{shown}");
+    assert!(!shown.contains("👍"), "{shown}");
+}
+
+#[test]
+fn a_project_managers_pick_on_a_yes_or_no_card_reads_by_name() {
+    let mut ruling = ruling(ticket(1), changed_outside());
+    ruling.question = format!(
+        "{}\n\nPM recommends: No\nPM says: the label is yours.",
+        ruling.question
+    );
+    let comment = rendered(&ruling);
+
+    assert!(
+        comment.contains("**Project manager: No**. the label is yours."),
+        "{comment}"
+    );
+}
+
 #[test]
 fn a_merge_ruling_offers_merge_send_back_and_rework() {
     assert_eq!(rendered(&ruling(ticket(1), merge())), expected!("merge.md"));
@@ -147,7 +259,15 @@ fn an_unmentioned_ruling_names_only_the_terminal_answers_its_options_allow() {
     let only_yes = ruling_comment(None, &ruling(ticket(1), stuck));
 
     assert!(no_rework.ends_with("`shep kelpie rule 71 yes` or `shep kelpie rule 71 no <note>`."));
-    assert!(only_yes.ends_with("the terminal: `shep kelpie rule 71 yes`."));
+    assert!(
+        only_yes
+            .contains("| `shep kelpie rule 71 yes` | Kelpie tries again, as it does every poll |"),
+        "{only_yes}"
+    );
+    assert!(
+        only_yes.ends_with("Answer it at the terminal."),
+        "{only_yes}"
+    );
 }
 
 #[test]
@@ -248,16 +368,6 @@ fn a_stuck_ruling_takes_a_yes_or_a_no_and_carries_the_project_managers_words() {
 
 #[test]
 fn a_still_red_ruling_offers_a_rerun_only_when_it_was_raised_with_one() {
-    let still_red = |rerun| {
-        RulingKind::Stuck(Stuck::StillRed {
-            head: "6b0606e9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6".into(),
-            checks: vec!["test".into()],
-            fix_turns: None,
-            review: None,
-            rerun,
-        })
-    };
-
     let offered = rendered(&ruling(ticket(1), still_red(true)));
     let withheld = rendered(&ruling(ticket(1), still_red(false)));
 
@@ -333,13 +443,8 @@ fn an_agent_fit_ruling_shows_both_records_and_the_suggested_kinds() {
 
 #[test]
 fn a_foreign_change_ruling_says_what_changed() {
-    let kind = RulingKind::ForeignChange {
-        description: "labels added: `ready-for-human`".into(),
-        known: Known::default(),
-    };
-
     assert_eq!(
-        rendered(&ruling(ticket(1), kind)),
+        rendered(&ruling(ticket(1), changed_outside())),
         expected!("foreign-change.md")
     );
 }
@@ -547,7 +652,7 @@ fn a_contribution_merge_card_offers_no_rework_when_the_fork_cannot_be_pushed_to(
     let card = merge(true);
     assert!(!card.contains("Rework"), "{card}");
     assert!(card.contains("Merge"), "{card}");
-    assert!(card.contains("| No |"), "{card}");
+    assert!(card.contains("👎 or `71 no <note>`"), "{card}");
 }
 
 #[test]

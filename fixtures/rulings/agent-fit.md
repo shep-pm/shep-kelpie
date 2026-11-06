@@ -9,11 +9,9 @@
 
 Suggested `kinds` for `agents/sonnet-high.md`: `kinds = ["docs", "mechanical"]`
 
-| | Option | If you pick it |
-|---|---|---|
-| **A** | Yes | Changes no file: the `kinds` line above is yours to write into the agent file |
-| **B** | No | Changes no file and sends no note: the work item has finished |
+| Answer | What it does |
+|---|---|
+| 👍 or `71 yes` | Changes no file: the `kinds` line above is yours to write into the agent file |
+| 👎 or `71 no <note>` | Changes no file and sends no note: the work item has finished |
 
 @octocat
-- 👍 answers yes, 👎 answers no
-- Or reply `71 yes` or `71 no <note>`
