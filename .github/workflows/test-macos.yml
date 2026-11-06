@@ -1,0 +1,45 @@
+name: test-macos
+# macOS runs on main, not on a pull request: a run of it held every pull
+# request's merge, and a break shows as red on main. It has a workflow of its
+# own so its 26 minutes (run 42123777127) hold up nothing else: a job in `test`
+# waits only for the runs of `test`, and a run of this one only for the runs of
+# this one.
+#
+# Code written for macOS (the APFS case folding in the fence, the Seatbelt
+# policy the adapters write) runs here, and only here.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  # A newer merge replaces a run still waiting its turn here, and never ends
+  # one already running.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  test-macos:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Git starts `git maintenance run --auto` after each fetch and commit,
+      # a process start in 11% of the git calls the tests make (#1588). System
+      # config, since `trust_git_of` sets `GIT_CONFIG_COUNT` itself.
+      - name: Turn off git's automatic maintenance
+        run: |
+          sudo git config --system maintenance.auto false
+          git config --system --get maintenance.auto
+      - run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      # A short scratch path keeps the tests' Unix sockets under macOS's 104-byte limit.
+      - run: cargo test --locked
+        env:
+          TMPDIR: ${{ runner.temp }}
