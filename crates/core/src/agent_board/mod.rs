@@ -28,7 +28,7 @@ pub use wait::{Availability, wait};
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AgentBoardSettings {
-    /// Agents in the order the board prefers them among those that finish
+    /// Agents in the order the board prefers them among those that can start
     /// within the slack, first most wanted. Empty ranks none.
     #[serde(default)]
     pub prefer: Vec<AgentName>,
