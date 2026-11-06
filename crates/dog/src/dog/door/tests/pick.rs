@@ -160,19 +160,19 @@ async fn a_free_agent_with_history_is_ranked_above_a_busy_one() {
 
     let picks = picked(&dog.socket, item(Some("fix"), &["busy", "fast"])).await;
 
-    let fast = Pick {
-        cost_usd: Some(0.25),
-        tier: Some(Tier::Standard),
-        local: true,
-        ..Pick::new(name("fast"), 600, 0)
-    };
+    // The four things the test has always read: the order, the finishes, the
+    // waits and the cost. The ask's other flags are read in `dog::board`.
+    let seen: Vec<_> = (picks.iter())
+        .map(|p| (p.agent.as_str(), p.finish, p.wait, p.cost_usd))
+        .collect();
     // Three turns ahead on one slot, each the hour a turn takes with no history.
-    let busy = Pick {
-        tier: Some(Tier::Heavy),
-        local: true,
-        ..Pick::new(name("busy"), 4 * 3600, 3 * 3600)
-    };
-    assert_eq!(picks, [fast, busy]);
+    assert_eq!(
+        seen,
+        [
+            ("fast", 600, 0, Some(0.25)),
+            ("busy", 4 * 3600, 3 * 3600, None)
+        ]
+    );
 }
 
 #[tokio::test]
