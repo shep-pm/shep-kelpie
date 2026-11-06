@@ -7,14 +7,15 @@ use crate::github::ApiError;
 use crate::ports::Timestamp;
 use crate::runner::flight::{Pass, advance};
 
-// Three slots, the pacer off, and issues 7 and 8 open
+// Three slots and issues 7 and 8 open
 fn seven_and_eight(project: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
     rig.edit_settings(|s| {
-        let on = "[app.dogs.kelpie.pacing]\nenabled = true";
-        assert!(s.contains(on), "the example's pacing moved");
+        assert!(
+            s.contains("active_items = 1"),
+            "the example's `active_items` moved"
+        );
         s.replace("active_items = 1", "active_items = 3")
-            .replace(on, "[app.dogs.kelpie.pacing]\nenabled = false")
     });
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
@@ -50,12 +51,13 @@ fn idle(runner: &Mutex<Runner>) {
 }
 
 #[test]
-fn a_second_item_starts_its_turn_beside_the_first_with_the_pacer_off() {
+fn a_second_item_starts_its_turn_beside_the_first_short_of_a_spent_window() {
     let (rig, runner) = seven_and_eight("acme");
     let (seven, eight) = (Hold::default(), Hold::default());
     rig.claude
         .script([Scripted::Hold(seven.clone()), Scripted::Hold(eight.clone())]);
     assert!(matches!(advance(&runner).unwrap(), Pass::Started));
+    // 90% of the window and of the week: neither is spent, so #8 starts too.
     rig.meter.set(Rig::utilization(90, 90));
     let pass = advance(&runner).unwrap();
     assert!(matches!(pass, Pass::Started), "{pass:?}");
@@ -191,7 +193,7 @@ fn a_turn_for_a_work_item_with_no_slot_says_so_in_status() {
 #[test]
 fn a_turn_the_pacer_still_holds_says_what_held_it_in_status() {
     let (rig, runner) = with_issue_7("acme");
-    rig.meter.set(Rig::utilization(0, 90));
+    rig.meter.set(Rig::utilization(0, 100));
     let pass = advance(&runner).unwrap();
     let Pass::Report(StepReport::Held { reason, .. }) = pass else {
         panic!("the pacer held nothing: {pass:?}");
@@ -247,7 +249,7 @@ fn told(runner: &Mutex<Runner>) -> Vec<String> {
 #[test]
 fn a_turn_held_up_five_minutes_is_logged_once_for_each_reason() {
     let (rig, runner) = with_issue_7("acme");
-    rig.meter.set(Rig::utilization(0, 90));
+    rig.meter.set(Rig::utilization(0, 100));
     advance(&runner).unwrap();
     idle(&runner);
     rig.clock.advance(299);
@@ -288,7 +290,7 @@ fn a_turn_held_up_five_minutes_is_logged_once_for_each_reason() {
 #[test]
 fn a_turn_that_starts_clears_what_held_it_up() {
     let (rig, runner) = with_issue_7("acme");
-    rig.meter.set(Rig::utilization(0, 90));
+    rig.meter.set(Rig::utilization(0, 100));
     advance(&runner).unwrap();
     idle(&runner);
     assert!(held_up(&rig, &runner).is_some());

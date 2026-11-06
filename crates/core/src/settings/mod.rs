@@ -507,13 +507,13 @@ impl Effort {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Pacing {
-    /// Whether the daily allowance and the 5-hour window hold anything
+    /// Whether pacing is on, which only `status` reports
     ///
-    /// Off, usage is still read for `status`, but nothing is held. On when
-    /// absent.
+    /// A spent 5-hour window or week holds a turn or a new work item whatever
+    /// this says. On when absent.
     #[serde(default = "default_pacing_enabled")]
     pub enabled: bool,
-    /// Hours a day the daily allowance is spread over
+    /// Hours a day the day's share of the week is spread over
     pub kickoff_hours: KickoffHours,
 }
 

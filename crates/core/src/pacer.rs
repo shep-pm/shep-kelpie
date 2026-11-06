@@ -1,13 +1,13 @@
 //! Usage pacing
 //!
-//! Two limits, both read from the account's usage. Today's allowance is what
-//! was left of the weekly window when the day began, divided by the days
-//! until it resets; once today's spend reaches it, no new work item is
-//! dispatched and the current one continues. Near half of the 5-hour window,
-//! or with the week spent, no turn starts until the window resets. A running
-//! turn is never interrupted: the pacer is asked only between turns.
+//! A turn waits while the account's 5-hour window or its week is spent, until
+//! the longer of the two holds ends: a spent window fails every turn at once,
+//! as a spent week does. Nothing else holds a turn or a dispatch, and usage
+//! that cannot be read holds nothing. A running turn is never interrupted:
+//! the pacer is asked only between turns.
 //!
-//! Days are 24 hours from the weekly reset, so the allowance is 100 / 7 on a fresh week.
+//! [`window`]'s 50% mark and the day's allowance are what the agent board's
+//! waits read, and what `status` and the plan gauges still show.
 
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +16,9 @@ use crate::settings::{Account, KickoffHours};
 
 /// Percent of the 5-hour window at which no further turn starts
 pub const PARK_AT_PCT: u32 = 50;
+
+/// Percent of a window at which it is spent, where a turn fails at once
+pub const SPENT_PCT: u32 = 100;
 
 /// How long a hold is trusted before usage is read again, in seconds
 ///
@@ -195,6 +198,8 @@ pub fn assess(
 
 /// The hold on every turn while `account`'s 5-hour window is past [`PARK_AT_PCT`] or its
 /// week is spent, until the window or the week resets, the longer of the two when both apply
+///
+/// The agent board's waits read this mark; a runner holds a turn only at [`SPENT_PCT`].
 pub fn window(account: Account, usage: &Utilization) -> Option<Hold> {
     let session = (usage.session.used_pct >= PARK_AT_PCT).then(|| Hold {
         kind: HoldKind::Window,
@@ -212,11 +217,31 @@ pub fn window(account: Account, usage: &Utilization) -> Option<Hold> {
         .max_by_key(|hold| hold.until)
 }
 
-/// The hold on every turn while `account`'s `week` is at 100%, until it resets
+/// The hold on every turn while `account`'s 5-hour window or `week` is at [`SPENT_PCT`],
+/// until it resets, the longer of the two when both apply
 ///
-/// A spent week fails each turn at once, so it holds whatever `pacing.enabled` says.
+/// A spent window fails each turn at once, as a spent week does.
+pub fn spent(account: Account, usage: &Utilization) -> Option<Hold> {
+    let session = (usage.session.used_pct >= SPENT_PCT).then(|| Hold {
+        kind: HoldKind::Window,
+        reason: format!(
+            "{} 5-hour window is at {}%, so no turn starts until it resets",
+            named(account, "the", "Codex's"),
+            usage.session.used_pct
+        ),
+        until: usage.session.resets_at,
+    });
+    [session, spent_week(account, &usage.week)]
+        .into_iter()
+        .flatten()
+        .max_by_key(|hold| hold.until)
+}
+
+/// The hold on every turn while `account`'s `week` is at [`SPENT_PCT`], until it resets
+///
+/// A spent week fails each turn at once.
 pub fn spent_week(account: Account, week: &Window) -> Option<Hold> {
-    (week.used_pct >= 100).then(|| Hold {
+    (week.used_pct >= SPENT_PCT).then(|| Hold {
         kind: HoldKind::Window,
         reason: format!(
             "{} week is at {}%, so no turn starts until it resets",
@@ -469,6 +494,54 @@ mod tests {
 
         let almost = assess(Account::Codex, at(3, 1), &usage(99, 0), None, eight());
         assert_eq!(almost.hold(Scope::Turn), None);
+    }
+
+    #[test]
+    fn a_spent_window_holds_every_turn_until_it_resets() {
+        assert_eq!(
+            spent(Account::Claude, &usage(0, 99)),
+            None,
+            "99% holds nothing"
+        );
+
+        let hold = spent(Account::Claude, &usage(0, 100)).unwrap();
+        assert_eq!((hold.kind, hold.until), (HoldKind::Window, at(0, 3)));
+        assert_eq!(
+            hold.reason,
+            "the 5-hour window is at 100%, so no turn starts until it resets"
+        );
+
+        let codex = spent(Account::Codex, &usage(0, 100)).unwrap();
+        assert_eq!(
+            codex.reason,
+            "Codex's 5-hour window is at 100%, so no turn starts until it resets"
+        );
+    }
+
+    #[test]
+    fn a_spent_week_and_a_spent_window_report_the_longer_hold() {
+        let both = spent(Account::Codex, &usage(100, 100)).unwrap();
+        assert_eq!(
+            (both.kind, both.until),
+            (HoldKind::Window, Timestamp(RESETS)),
+            "the week outlasts the window"
+        );
+        assert_eq!(
+            both.reason,
+            "Codex's week is at 100%, so no turn starts until it resets"
+        );
+
+        let mut later = usage(100, 100);
+        later.session.resets_at = Timestamp(RESETS + 3600);
+        let later = spent(Account::Codex, &later).unwrap();
+        assert_eq!(
+            (later.kind, later.until),
+            (HoldKind::Window, Timestamp(RESETS + 3600))
+        );
+        assert_eq!(
+            later.reason, "Codex's 5-hour window is at 100%, so no turn starts until it resets",
+            "the window outlasts the week"
+        );
     }
 
     #[test]

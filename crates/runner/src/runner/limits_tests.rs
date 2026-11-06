@@ -87,13 +87,13 @@ fn dispatched(report: &Option<StepReport>) -> bool {
 fn a_claude_worker_waits_on_claudes_window_and_never_reads_codexs() {
     let (rig, runner) = named("shep", AS_IS);
     rig.forge.list_ready(7, false);
-    rig.meter.set(Rig::utilization(0, 55));
+    rig.meter.set(Rig::utilization(0, 100));
     rig.codex_meter.set(Rig::utilization(0, 0));
 
     let (kind, reason) = held(step(&runner).unwrap());
     assert_eq!(kind, HoldKind::Window);
     assert!(
-        reason.starts_with("the 5-hour window is at 55%"),
+        reason.starts_with("the 5-hour window is at 100%"),
         "{reason}"
     );
     assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (1, 0));
@@ -105,13 +105,13 @@ fn an_item_on_an_unlisted_implementer_paces_on_its_account_too() {
     rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 2"));
     rig.forge.label(7, "agent:codex!");
     rig.ask(&runner, "add", Some("7"));
-    rig.codex_meter.set(Rig::utilization(0, 55));
+    rig.codex_meter.set(Rig::utilization(0, 100));
     rig.forge.list_ready(8, false);
 
     let (kind, reason) = held(step(&runner).unwrap());
     assert_eq!(kind, HoldKind::Window);
     assert!(
-        reason.starts_with("Codex's 5-hour window is at 55%"),
+        reason.starts_with("Codex's 5-hour window is at 100%"),
         "{reason}"
     );
     assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (0, 1));
@@ -139,7 +139,7 @@ fn a_first_pick_the_pacer_holds_gives_the_boards_second() {
     let runner = reopened(&rig, runner, || rig.codex_day_began(0));
     rig.forge.list_ready(7, false);
     rig.agent_board.ranks(&["codex", "sonnet-high"]);
-    rig.codex_meter.set(Rig::utilization(15, 0));
+    rig.codex_meter.set(Rig::utilization(100, 0));
 
     let report = step(&runner).unwrap();
 
@@ -167,7 +167,7 @@ fn a_later_pick_whose_account_is_unread_is_read_before_the_walk_gives_up() {
     let runner = reopened(&rig, runner, || rig.codex_day_began(0));
     rig.forge.list_ready(7, false);
     rig.agent_board.ranks(&["codex", "sonnet-high"]);
-    rig.codex_meter.set(Rig::utilization(15, 0));
+    rig.codex_meter.set(Rig::utilization(100, 0));
     rig.meter.set(Rig::utilization(0, 0));
 
     let report = step(&runner).unwrap();
@@ -184,11 +184,11 @@ fn a_later_pick_whose_account_is_unread_is_read_before_the_walk_gives_up() {
 fn a_paced_pin_waits_and_opens_on_no_other_agent() {
     let (rig, runner) = codex_day_began(0);
     rig.agent_board.ranks(&["codex", "sonnet-high"]);
-    rig.codex_meter.set(Rig::utilization(15, 0));
+    rig.codex_meter.set(Rig::utilization(100, 0));
 
     let (kind, _) = held(step(&runner).unwrap());
 
-    assert_eq!(kind, HoldKind::Allowance);
+    assert_eq!(kind, HoldKind::Window);
     let names: Vec<_> = rig
         .agent_board
         .asks()
@@ -203,15 +203,11 @@ fn a_paced_pin_waits_and_opens_on_no_other_agent() {
 #[test]
 fn a_ready_issue_on_an_unlisted_labelled_implementer_is_held_by_its_account() {
     let (rig, runner) = codex_day_began(0);
-    // 15% of Codex's week since the day began, past its allowance of 100 / 7.
-    rig.codex_meter.set(Rig::utilization(15, 0));
+    rig.codex_meter.set(Rig::utilization(100, 0));
 
     let (kind, reason) = held(step(&runner).unwrap());
-    assert_eq!(kind, HoldKind::Allowance);
-    assert!(
-        reason.starts_with("today's Codex allowance of 14.3% of the week is spent (15%"),
-        "{reason}"
-    );
+    assert_eq!(kind, HoldKind::Window);
+    assert!(reason.starts_with("Codex's week is at 100%"), "{reason}");
     // The listed implementer's account is read as ever, and the labelled one's once.
     assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (1, 1));
     let status = rig.ask(&runner, "status", None);
@@ -226,7 +222,7 @@ fn a_pick_the_pacer_holds_gives_the_item_to_the_boards_next_agent() {
     let runner = reopened(&rig, runner, || rig.codex_day_began(0));
     rig.forge.list_ready(7, false);
     rig.forge.list_ready(9, false);
-    rig.codex_meter.set(Rig::utilization(15, 0));
+    rig.codex_meter.set(Rig::utilization(100, 0));
     rig.claude.script([Scripted::Say(
         "{\"pick\": {\"issue\": 7, \"agent\": \"codex\"}, \"why\": \"w\"}",
     )]);
@@ -272,7 +268,7 @@ fn a_ready_issue_on_an_unlisted_labelled_implementer_dispatches_when_its_account
 #[test]
 fn an_issue_held_by_its_labelled_account_never_holds_a_ready_issue_behind_it() {
     let (rig, runner) = codex_day_began(0);
-    rig.codex_meter.set(Rig::utilization(15, 0));
+    rig.codex_meter.set(Rig::utilization(100, 0));
     rig.forge.list_ready(8, false);
 
     let report = step(&runner).unwrap();
@@ -289,22 +285,22 @@ fn an_issue_held_by_its_labelled_account_never_holds_a_ready_issue_behind_it() {
 fn a_project_all_on_codex_paces_on_codexs_own_windows() {
     let (rig, runner) = named("koji", ALL_CODEX);
     rig.forge.list_ready(7, false);
-    // Claude's account is past half its window: no role of this project spends it.
-    rig.meter.set(Rig::utilization(30, 90));
+    // Claude's account is spent: no role of this project spends it.
+    rig.meter.set(Rig::utilization(30, 100));
     assert!(dispatched(&step(&runner).unwrap()));
     assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (0, 1));
 
-    rig.codex_meter.set(Rig::utilization(0, 55));
+    rig.codex_meter.set(Rig::utilization(0, 100));
     let (kind, reason) = held(step(&runner).unwrap());
     assert_eq!(kind, HoldKind::Window);
     assert_eq!(
         reason,
-        "Codex's 5-hour window is at 55%, past the 50% mark, so no turn starts until it resets"
+        "Codex's 5-hour window is at 100%, so no turn starts until it resets"
     );
     assert_eq!(rig.claude.calls(), []);
     let pacer = &rig.ask(&runner, "status", None)["pacer"];
     assert_eq!(pacer["codex"]["holding"]["kind"], "window");
-    assert_eq!(pacer["codex"]["reading"]["session"]["used_pct"], 55);
+    assert_eq!(pacer["codex"]["reading"]["session"]["used_pct"], 100);
     assert_eq!(
         pacer.get("claude"),
         None,
@@ -361,16 +357,9 @@ fn a_codex_week_at_100_holds_the_turn_until_the_week_resets() {
 }
 
 #[test]
-fn a_spent_week_holds_with_pacing_off() {
-    for (week, session, starts) in [(100, 0, false), (30, 60, true)] {
+fn a_spent_week_holds() {
+    for (week, session, starts) in [(100, 0, false), (30, 99, true)] {
         let (rig, runner) = named("koji", AS_IS);
-        let runner = reopened(&rig, runner, || {
-            rig.edit_settings(|s| {
-                let on = "[app.dogs.kelpie.pacing]\nenabled = true";
-                assert!(s.contains(on), "the example's pacing moved");
-                s.replace(on, "[app.dogs.kelpie.pacing]\nenabled = false")
-            });
-        });
         rig.ask(&runner, "add", Some("7"));
         rig.meter.set(Rig::utilization(week, session));
         rig.claude.script([Scripted::Say("done")]);
@@ -396,8 +385,8 @@ fn each_account_keeps_its_own_day() {
     assert_eq!(state.pacing, None);
     assert_eq!(state.codex_pacing.map(|d| d.week_used_pct), Some(20));
 
-    // 15% more of Codex's week, past its allowance of 80 / 7.
-    rig.codex_meter.set(Rig::utilization(35, 0));
+    // Codex's week is spent by the time the next item is picked.
+    rig.codex_meter.set(Rig::utilization(100, 0));
     let reading = rig.ask(&runner, "status", None)["pacer"]["codex"]["reading"].clone();
     assert_eq!(
         reading["spent_today_pct"],
@@ -407,11 +396,8 @@ fn each_account_keeps_its_own_day() {
     rig.ask(&runner, "drop", Some("7"));
     rig.forge.list_ready(8, false);
     let (kind, reason) = held(step(&runner).unwrap());
-    assert_eq!(kind, HoldKind::Allowance);
-    assert!(
-        reason.starts_with("today's Codex allowance of 11.4% of the week is spent (15%"),
-        "{reason}"
-    );
+    assert_eq!(kind, HoldKind::Window);
+    assert!(reason.starts_with("Codex's week is at 100%"), "{reason}");
 }
 
 #[test]
@@ -423,46 +409,42 @@ fn a_new_work_item_waits_on_any_account_its_roles_spend() {
     assert!(dispatched(&step(&runner).unwrap()));
     assert_eq!(rig.meter.reads(), 1);
 
-    // 20% of Claude's week since the day began, past its allowance of 100 / 7.
-    rig.meter.set(Rig::utilization(20, 0));
+    // Claude's week is spent, though no Claude agent works the item.
+    rig.meter.set(Rig::utilization(100, 0));
     rig.ask(&runner, "drop", Some("7"));
     rig.forge.list_ready(8, false);
     rig.forge.label(8, "agent:coder!");
     let (kind, reason) = held(step(&runner).unwrap());
-    assert_eq!(kind, HoldKind::Allowance);
-    assert!(
-        reason.starts_with("today's allowance of 14.3% of the week is spent (20%"),
-        "{reason}"
-    );
+    assert_eq!(kind, HoldKind::Window);
+    assert!(reason.starts_with("the week is at 100%"), "{reason}");
     let pacer = &rig.ask(&runner, "status", None)["pacer"];
-    assert_eq!(pacer["claude"]["holding"]["kind"], "allowance");
+    assert_eq!(pacer["claude"]["holding"]["kind"], "window");
 }
 
 #[test]
-fn codex_usage_that_cannot_be_read_holds_until_it_can() {
+fn codex_usage_that_cannot_be_read_holds_nothing() {
     let (rig, runner) = named("rotom", ALL_CODEX);
     rig.forge.list_ready(7, false);
     rig.codex_meter.fail(MeterError::Codex(
         "codex refused: 402 Payment Required".into(),
     ));
-    let (kind, reason) = held(step(&runner).unwrap());
-    assert_eq!(kind, HoldKind::Unreadable);
-    assert_eq!(
-        reason,
-        "cannot read Codex usage: codex refused: 402 Payment Required"
-    );
-    assert_eq!(rig.meter.reads(), 0);
 
-    rig.clock.advance(RECHECK_SECS);
-    rig.codex_meter.set(Rig::utilization(0, 0));
     assert!(dispatched(&step(&runner).unwrap()));
+    assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (0, 1));
+    let pacer = &rig.ask(&runner, "status", None)["pacer"];
+    assert_eq!(pacer["codex"]["reading"], json!(null));
+    assert_eq!(
+        pacer["codex"]["holding"],
+        json!(null),
+        "a reading that failed holds nothing"
+    );
 }
 
 #[test]
 fn a_review_round_waits_on_its_reviewers_account_while_the_worker_works_on() {
     let names: Agents = (&["codex"], "allow = [\"codex\", \"claude\"]\n");
     let (rig, runner) = named("chelone", names);
-    rig.meter.set(Rig::utilization(0, 60));
+    rig.meter.set(Rig::utilization(0, 100));
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
     rig.claude.script([Scripted::Push("work.txt", "work\n")]);
@@ -476,7 +458,7 @@ fn a_review_round_waits_on_its_reviewers_account_while_the_worker_works_on() {
     let (kind, reason) = hold.expect("the Claude round was held");
     assert_eq!(kind, HoldKind::Window);
     assert!(
-        reason.starts_with("the 5-hour window is at 60%"),
+        reason.starts_with("the 5-hour window is at 100%"),
         "{reason}"
     );
     let roles: Vec<Role> = rig.claude.all_calls().iter().map(|c| c.role).collect();
@@ -682,7 +664,7 @@ fn beside_a_local_implementer_listed_first_an_issue_labelled_for_sonnet_is_paced
     assert!(dispatched(&step(&runner).unwrap()));
 
     rig.clock.advance(RECHECK_SECS);
-    rig.meter.set(Rig::utilization(0, 55));
+    rig.meter.set(Rig::utilization(0, 100));
     let (kind, _) = held(step(&runner).unwrap());
     assert_eq!(kind, HoldKind::Window);
 
