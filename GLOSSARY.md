@@ -192,7 +192,8 @@ _Avoid_: worker model, local worker
 A worker's turn that has not yet heard from its model: asking for a lease on
 it, told its gateway is busy, or silent past ten minutes. `status` and the
 board show since when, and why.
-Its first output clears it.
+Its first output clears it. A turn waiting for a lease waits past its turn
+ceiling, which counts from the grant (workers.md).
 _Avoid_: stalled, hung
 
 **Issue check**:

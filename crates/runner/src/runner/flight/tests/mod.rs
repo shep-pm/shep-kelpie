@@ -77,9 +77,13 @@ impl<'a> Driven<'a> {
 pub(super) const CODER: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-coder\n\
                      effort: low\nusage: none\n---\n";
 
-// A running project with issue 7 open on `coder`, whose call queues at its
-// model's lease until the returned hold is released, then does `then`
-fn seven_queued(project: &str, then: Scripted) -> (Rig, Mutex<Runner>, Hold) {
+// A running project with issue 7 open on `coder`, whose call waits on the hold
+// the test gets back before it goes on as `then`
+fn seven_waiting(
+    project: &str,
+    wait: impl Fn(Hold, Scripted) -> Scripted,
+    then: Scripted,
+) -> (Rig, Mutex<Runner>, Hold) {
     let rig = Rig::new(project);
     rig.write_agent("coder", CODER);
     rig.agent_board.ranks(&["sonnet-high", "coder"]);
@@ -91,9 +95,26 @@ fn seven_queued(project: &str, then: Scripted) -> (Rig, Mutex<Runner>, Hold) {
         (rig, runner)
     };
     let queue = Hold::default();
-    rig.claude
-        .script([Scripted::Queued(queue.clone(), Box::new(then))]);
+    rig.claude.script([wait(queue.clone(), then)]);
     (rig, runner, queue)
+}
+
+// Its call queues at its model's lease until the returned hold is released
+pub(crate) fn seven_queued(project: &str, then: Scripted) -> (Rig, Mutex<Runner>, Hold) {
+    seven_waiting(
+        project,
+        |hold, then| Scripted::Queued(hold, Box::new(then)),
+        then,
+    )
+}
+
+// Its gateway answers busy until the returned hold is released
+fn seven_busy(project: &str, then: Scripted) -> (Rig, Mutex<Runner>, Hold) {
+    seven_waiting(
+        project,
+        |hold, then| Scripted::Busy(hold, Box::new(then)),
+        then,
+    )
 }
 
 fn usage() -> Usage {
@@ -503,18 +524,85 @@ fn a_turn_queued_for_its_lease_gets_its_whole_ceiling_from_the_grant() {
     ));
 }
 
+// A queued call has spent none of its ceiling, which counts from the grant, so
+// its launch deadline ends nothing. A drain ends it all the same (drain/tests.rs).
 #[test]
-fn a_turn_still_queued_at_its_ceiling_leaves_the_queue_without_running() {
-    let (rig, runner, _queue) = seven_queued("shep", Scripted::Say("done"));
+fn a_turn_still_queued_at_its_ceiling_stays_in_the_queue() {
+    let hold = Hold::default();
+    let (rig, runner, queue) = seven_queued("shep", Scripted::Hold(hold.clone()));
     let driven = Driven::new(&runner);
     driven.started();
+    assert_eq!(driven.heard(), None, "the queue is not a report");
+
     rig.clock.advance(CEILING);
+    assert!(
+        matches!(driven.pass(), Pass::Idle),
+        "the queued turn was ended at its ceiling"
+    );
+    assert_eq!(rig.claude.calls(), [], "it spawned only to be ended");
+    assert_eq!(turns(&rig, &runner), [(7, "running".to_owned())]);
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["waiting"]["why"],
+        "lease",
+        "the turn stopped being a call waiting for its model"
+    );
+    // Nothing is due, so the loop does not wake at a deadline it will not act on
+    assert_eq!(runner.lock().unwrap().next_ceiling(), None);
+
+    // The grant counts the whole ceiling from itself, past the ceiling it waited through
+    queue.release();
+    assert_eq!(driven.heard(), None, "the grant is not a report");
+    assert!(hold.entered(CALL_PATIENCE), "the turn never began");
+    rig.clock.advance(CEILING - 1);
+    driven.pass();
+    assert!(
+        !hold.returned(),
+        "the grant gave back less than a whole ceiling"
+    );
+    rig.clock.advance(1);
     driven.pass();
     assert!(matches!(
        driven.landed(),
        Some(StepReport::TimedOut { issue, .. }) if issue == ticket(7)
     ));
-    assert_eq!(rig.claude.calls(), [], "it spawned only to be ended");
+}
+
+// A gateway that answered busy is no lease wait: the call has its model in hand
+// to be told, so its ceiling ends it as it did before, and the loop still wakes
+// for it.
+#[test]
+fn a_turn_behind_a_busy_gateway_is_ended_at_its_ceiling() {
+    let (rig, runner, busy) = seven_busy("acme", Scripted::Say("done"));
+    let driven = Driven::new(&runner);
+    driven.started();
+    assert_eq!(driven.heard(), None, "the busy wait is not a report");
+    assert_eq!(
+        rig.ask(&runner, "status", None)["work_item"]["waiting"]["why"],
+        "busy",
+        "the busy wait was read as a lease"
+    );
+    assert_eq!(
+        runner.lock().unwrap().next_ceiling(),
+        Some(Duration::from_secs(CEILING)),
+        "the busy wait left no ceiling to wake for"
+    );
+
+    rig.clock.advance(CEILING - 1);
+    assert!(matches!(driven.pass(), Pass::Idle));
+    assert!(
+        !busy.returned(),
+        "the busy wait was ended before its ceiling"
+    );
+    rig.clock.advance(1);
+    assert!(matches!(driven.pass(), Pass::Idle));
+    assert!(
+        busy.answered(CALL_PATIENCE),
+        "the busy wait ran past its ceiling"
+    );
+    assert!(matches!(
+        driven.landed(),
+        Some(StepReport::TimedOut { issue, .. }) if issue == ticket(7)
+    ));
 }
 
 #[test]
