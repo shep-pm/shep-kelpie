@@ -6,8 +6,8 @@
 //! its own holds. An agent limited by a lease is never paced. A reading that
 //! finds a hold is trusted for [`RECHECK_SECS`] or until the hold ends. One
 //! that finds no hold is never reused past its step, which reads it with the
-//! lock let go. With `pacing.enabled` off the reading still runs for `status`,
-//! and neither limit holds anything but a spent week, which fails every turn.
+//! lock let go. Only a spent window or week holds anything, and the reading
+//! runs for `status` whatever `pacing.enabled` says.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -19,7 +19,7 @@ use super::report::{Begin, StepReport};
 use super::turn::reads::Job;
 use crate::agents::Runs;
 use crate::board::Skip;
-use crate::pacer::{Assessment, Hold, RECHECK_SECS, Reading, Scope, assess, named, spent_week};
+use crate::pacer::{Assessment, Hold, RECHECK_SECS, Reading, Scope, assess, named, spent};
 use crate::ports::{Meter, PaddockHolder, Timestamp};
 use crate::settings::{Account, AgentHarness, AgentName, GatewayName, Limit, ModelHost};
 use crate::state::StateError;
@@ -27,7 +27,7 @@ use crate::state::StateError;
 /// What `status` shows of the pacer
 #[derive(Debug, Serialize)]
 pub struct PacerStatus<'a> {
-    /// Whether the limits hold anything, from `pacing.enabled`
+    /// What `pacing.enabled` says, which holds nothing by itself
     pub enabled: bool,
     /// Each account the worker spends or a reading was taken of
     #[serde(flatten)]
@@ -157,6 +157,13 @@ impl Runner {
             },
         };
         let prior = self.state.day_start(account);
+        // Only a spent window or week holds a turn or a dispatch, whatever
+        // `pacing.enabled` says. The agent board's waits read the 50% mark
+        // themselves, from `pacer::window`.
+        let limit = match &read {
+            Ok(usage) => spent(account, usage),
+            Err(_) => None,
+        };
         let mut assessment = match read {
             Ok(usage) => assess(
                 account,
@@ -178,11 +185,8 @@ impl Runner {
             *next.day_start_mut(account) = assessment.day_start;
             self.save(next)?;
         }
-        if !self.settings.pacing.enabled {
-            assessment.allowance = None;
-            assessment.window = (assessment.reading.as_ref())
-                .and_then(|reading| spent_week(account, &reading.week));
-        }
+        assessment.allowance = None;
+        assessment.window = limit;
         let hold = assessment.hold(scope).cloned();
         self.pacing.insert(account, (now, assessment));
         Ok(hold.map_or(Pace::Clear, Pace::Held))
@@ -224,8 +228,8 @@ impl Runner {
 
     /// Paces a new work item on every account the project's calls spend
     ///
-    /// A work item spends each role's account, so any one over its allowance
-    /// or past its 5-hour mark holds it, the first such account in order.
+    /// A work item spends each role's account, so a spent window or week on
+    /// any of them holds it, the first such account in order.
     pub(super) fn pace_dispatch(&mut self) -> Result<Pace, StateError> {
         for account in self.spent_accounts() {
             match self.pace(Scope::Dispatch, &Limit::Account(account))? {
@@ -426,18 +430,7 @@ mod tests {
     // A running project on a day that began with `used` percent of the week
     // spent, as a runner restarted partway through the day finds it
     fn running_since(project: &str, used: u32) -> (Rig, Mutex<Runner>) {
-        running_paced(project, used, true)
-    }
-
-    fn running_paced(project: &str, used: u32, enabled: bool) -> (Rig, Mutex<Runner>) {
         let rig = Rig::new(project);
-        if !enabled {
-            rig.edit_settings(|s| {
-                let on = "[app.dogs.kelpie.pacing]\nenabled = true";
-                assert!(s.contains(on), "the example's pacing moved");
-                s.replace(on, "[app.dogs.kelpie.pacing]\nenabled = false")
-            });
-        }
         let mut state = ProjectState::new();
         state.pacing = Some(DayStart {
             week_resets_at: Timestamp(Rig::EPOCH + 7 * DAY),
@@ -485,29 +478,16 @@ mod tests {
     }
 
     #[test]
-    fn an_allowance_is_spent_at_a_seventh_of_a_fresh_week() {
-        // 100 / 7 is 14.29%
-        for (spent, goes) in [(14, true), (15, false)] {
-            let (rig, runner) = running_since("koji", 0);
-            rig.forge.list_ready(7, false);
-            rig.meter.set(Rig::utilization(spent, 0));
-            let report = step(&runner).unwrap();
-            assert_eq!(dispatched(&report), goes, "{spent}% spent: {report:?}");
-        }
-    }
-
-    #[test]
-    fn over_the_allowance_nothing_new_is_dispatched_and_status_says_why() {
+    fn status_says_why_a_spent_week_holds() {
         let (rig, runner) = running_since("golbat", 0);
         rig.forge.list_ready(7, false);
-        rig.meter.set(Rig::utilization(15, 3));
+        rig.meter.set(Rig::utilization(100, 3));
 
         let (kind, reason, until) = held(step(&runner).unwrap());
-        assert_eq!((kind, until), (HoldKind::Allowance, Rig::EPOCH + DAY));
+        assert_eq!((kind, until), (HoldKind::Window, Rig::EPOCH + 7 * DAY));
         assert_eq!(
             reason,
-            "today's allowance of 14.3% of the week is spent (15% since the day began), \
-             so no new work item is dispatched until the next day; the current one continues"
+            "the week is at 100%, so no turn starts until it resets"
         );
         let status = rig.ask(&runner, "status", None);
         assert_eq!(status["work_item"], json!(null));
@@ -519,15 +499,15 @@ mod tests {
                     "reading": {
                         "at": Rig::EPOCH,
                         "session": { "used_pct": 3, "resets_at": Rig::EPOCH + 5 * 3600 },
-                        "week": { "used_pct": 15, "resets_at": Rig::EPOCH + 7 * DAY },
+                        "week": { "used_pct": 100, "resets_at": Rig::EPOCH + 7 * DAY },
                         "allowance_pct": 14.3,
-                        "spent_today_pct": 15,
+                        "spent_today_pct": 100,
                         "per_hour_pct": 1.8,
                     },
                     "holding": {
-                        "kind": "allowance",
+                        "kind": "window",
                         "reason": reason,
-                        "until": Rig::EPOCH + DAY,
+                        "until": Rig::EPOCH + 7 * DAY,
                     },
                 },
             })
@@ -539,7 +519,7 @@ mod tests {
     fn a_pick_the_pacer_holds_shows_the_hold_in_skipped_and_on_the_board() {
         let (rig, runner) = running_since("golbat", 0);
         rig.forge.list_ready(7, false);
-        rig.meter.set(Rig::utilization(15, 3));
+        rig.meter.set(Rig::utilization(100, 3));
 
         let (_, reason, _) = held(step(&runner).unwrap());
 
@@ -561,7 +541,7 @@ mod tests {
     fn a_hold_is_not_read_again_until_the_recheck() {
         let (rig, runner) = running_since("reactmap", 0);
         rig.forge.list_ready(7, false);
-        rig.meter.set(Rig::utilization(15, 0));
+        rig.meter.set(Rig::utilization(100, 0));
         step(&runner).unwrap();
         for _ in 0..3 {
             rig.clock.advance(60);
@@ -571,42 +551,7 @@ mod tests {
 
         rig.clock.advance(RECHECK_SECS);
         let (kind, ..) = held(step(&runner).unwrap());
-        assert_eq!((kind, rig.meter.reads()), (HoldKind::Allowance, 2));
-    }
-
-    #[test]
-    fn the_allowance_refreshes_with_each_new_day() {
-        let (rig, runner) = running_since("xilriws", 0);
-        rig.forge.list_ready(7, false);
-        rig.meter.set(Rig::utilization(15, 0));
-        step(&runner).unwrap();
-
-        // The 15% spent is now what the day began with: 85% over 6 days.
-        rig.clock.advance(DAY);
-        assert!(dispatched(&step(&runner).unwrap()));
-        let reading = &rig.ask(&runner, "status", None)["pacer"]["claude"]["reading"];
-        assert_eq!(
-            (&reading["allowance_pct"], &reading["spent_today_pct"]),
-            (&json!(14.2), &json!(0))
-        );
-    }
-
-    #[test]
-    fn the_allowance_refreshes_with_each_weekly_reset() {
-        let (rig, runner) = running_since("chelone", 0);
-        rig.forge.list_ready(7, false);
-        rig.meter.set(Rig::utilization(15, 0));
-        step(&runner).unwrap();
-
-        rig.clock.advance(7 * DAY + 3600);
-        let mut next_week = Rig::utilization(3, 0);
-        next_week.week.resets_at = Timestamp(Rig::EPOCH + 14 * DAY);
-        rig.meter.set(next_week);
-        assert!(dispatched(&step(&runner).unwrap()));
-        assert_eq!(
-            rig.ask(&runner, "status", None)["pacer"]["claude"]["reading"]["allowance_pct"],
-            13.9
-        );
+        assert_eq!((kind, rig.meter.reads()), (HoldKind::Window, 2));
     }
 
     #[test]
@@ -627,21 +572,8 @@ mod tests {
     }
 
     #[test]
-    fn the_current_work_item_continues_over_the_allowance() {
-        let (rig, runner) = running_since("shep", 0);
-        rig.ask(&runner, "add", Some("7"));
-        rig.meter.set(Rig::utilization(30, 0));
-        rig.claude.script([reply()]);
-
-        assert!(ended(&step(&runner).unwrap()));
-        assert_eq!(rig.claude.calls().len(), 1);
-        let status = rig.ask(&runner, "status", None);
-        assert_eq!(status["pacer"]["claude"]["holding"]["kind"], "allowance");
-    }
-
-    #[test]
-    fn a_turn_starts_below_half_the_window_and_parks_from_half() {
-        for (session, starts) in [(49, true), (50, false)] {
+    fn a_turn_starts_below_a_spent_window_and_holds_at_100() {
+        for (session, starts) in [(99, true), (100, false)] {
             let (rig, runner) = running_since("koji", 0);
             rig.ask(&runner, "add", Some("7"));
             rig.meter.set(Rig::utilization(0, session));
@@ -656,13 +588,13 @@ mod tests {
     fn a_parked_worker_resumes_after_the_window_resets() {
         let (rig, runner) = running_since("golbat", 0);
         rig.ask(&runner, "add", Some("7"));
-        rig.meter.set(Rig::utilization(0, 55));
+        rig.meter.set(Rig::utilization(0, 100));
 
         let (kind, reason, until) = held(step(&runner).unwrap());
         assert_eq!((kind, until), (HoldKind::Window, Rig::EPOCH + 5 * 3600));
         assert_eq!(
             reason,
-            "the 5-hour window is at 55%, past the 50% mark, so no turn starts until it resets"
+            "the 5-hour window is at 100%, so no turn starts until it resets"
         );
         assert_eq!(rig.claude.calls(), []);
         let holding = &rig.ask(&runner, "status", None)["pacer"]["claude"]["holding"];
@@ -688,7 +620,7 @@ mod tests {
     fn a_window_that_reset_early_is_noticed_at_the_recheck() {
         let (rig, runner) = running_since("reactmap", 0);
         rig.ask(&runner, "add", Some("7"));
-        rig.meter.set(Rig::utilization(0, 60));
+        rig.meter.set(Rig::utilization(0, 100));
         step(&runner).unwrap();
 
         rig.clock.advance(RECHECK_SECS);
@@ -702,9 +634,9 @@ mod tests {
         let (rig, runner) = running_since("xilriws", 0);
         rig.ask(&runner, "add", Some("7"));
         rig.meter.set(Rig::utilization(0, 10));
-        // The turn itself takes the window to 70% and the week past its allowance.
+        // The turn itself spends the 5-hour window and the whole week.
         rig.claude.script([Scripted::Spend(
-            Rig::utilization(30, 70),
+            Rig::utilization(100, 100),
             Usage::default(),
             Cost(1),
         )]);
@@ -714,14 +646,14 @@ mod tests {
     }
 
     #[test]
-    fn a_turn_cut_short_by_a_restart_carries_on_over_half_the_window() {
+    fn a_turn_cut_short_by_a_restart_carries_on_past_a_spent_window() {
         let (rig, runner) = running_since("chelone", 0);
         rig.ask(&runner, "add", Some("7"));
         rig.claude.script([Scripted::Kill]);
         let _ = catch_unwind(AssertUnwindSafe(|| step(&runner)));
         drop(runner);
 
-        rig.meter.set(Rig::utilization(0, 60));
+        rig.meter.set(Rig::utilization(0, 100));
         let runner = rig.open().unwrap();
         rig.claude.script([reply()]);
         assert!(ended(&step(&runner).unwrap()));
@@ -729,54 +661,36 @@ mod tests {
     }
 
     #[test]
-    fn usage_that_cannot_be_read_holds_everything_until_it_can() {
+    fn usage_that_cannot_be_read_holds_nothing() {
         let (rig, runner) = running_since("rotom", 0);
         rig.forge.list_ready(7, false);
         rig.meter.fail(MeterError::Spawn("no such file".into()));
 
-        let (kind, reason, until) = held(step(&runner).unwrap());
-        assert_eq!(
-            (kind, until),
-            (HoldKind::Unreadable, Rig::EPOCH + RECHECK_SECS)
-        );
-        assert_eq!(reason, "cannot read usage: cannot run claude: no such file");
+        assert!(dispatched(&step(&runner).unwrap()));
         let status = rig.ask(&runner, "status", None);
         assert_eq!(status["pacer"]["claude"]["reading"], json!(null));
-        assert_eq!(step(&runner).unwrap(), None);
+        assert_eq!(
+            status["pacer"]["claude"]["holding"],
+            json!(null),
+            "a reading that failed holds nothing"
+        );
 
-        rig.clock.advance(RECHECK_SECS);
-        rig.meter.set(Rig::utilization(0, 0));
-        assert!(dispatched(&step(&runner).unwrap()));
+        rig.claude.script([reply()]);
+        assert!(
+            ended(&step(&runner).unwrap()),
+            "the worker's turn goes ahead too"
+        );
+        assert_eq!(rig.claude.calls().len(), 1);
     }
 
     #[test]
-    fn unreadable_usage_parks_a_worker_between_turns_too() {
-        let (rig, runner) = running_since("koji", 0);
-        rig.ask(&runner, "add", Some("7"));
-        rig.meter.fail(MeterError::TimedOut);
-        let (kind, ..) = held(step(&runner).unwrap());
-        assert_eq!(kind, HoldKind::Unreadable);
-        assert_eq!(rig.claude.calls(), []);
-    }
-
-    #[test]
-    fn a_window_and_an_allowance_both_reached_report_the_longer_hold() {
+    fn a_dispatch_goes_ahead_past_a_days_share_of_the_week() {
         let (rig, runner) = running_since("shep", 0);
-        rig.forge.list_ready(7, false);
-        rig.meter.set(Rig::utilization(20, 60));
-        let (kind, _, until) = held(step(&runner).unwrap());
-        assert_eq!((kind, until), (HoldKind::Allowance, Rig::EPOCH + DAY));
-    }
-
-    #[test]
-    fn with_pacing_off_a_dispatch_goes_ahead_past_the_allowance() {
-        let (rig, runner) = running_paced("shep", 0, false);
         rig.forge.list_ready(7, false);
         rig.meter.set(Rig::utilization(60, 0));
 
         assert!(dispatched(&step(&runner).unwrap()));
         let status = rig.ask(&runner, "status", None);
-        assert_eq!(status["pacer"]["enabled"], false);
         assert_eq!(status["pacer"]["claude"]["holding"], json!(null));
         let reading = &status["pacer"]["claude"]["reading"];
         assert_eq!(
@@ -786,8 +700,8 @@ mod tests {
     }
 
     #[test]
-    fn with_pacing_off_a_turn_starts_past_half_the_window() {
-        let (rig, runner) = running_paced("koji", 0, false);
+    fn a_turn_starts_past_half_the_window() {
+        let (rig, runner) = running_since("koji", 0);
         rig.ask(&runner, "add", Some("7"));
         rig.meter.set(Rig::utilization(0, 80));
         rig.claude.script([reply()]);
@@ -802,13 +716,34 @@ mod tests {
     }
 
     #[test]
-    fn with_pacing_off_usage_that_cannot_be_read_holds_nothing() {
-        let (rig, runner) = running_paced("rotom", 0, false);
+    fn a_table_holding_pacing_enabled_true_is_held_by_nothing_but_a_spent_limit() {
+        let (rig, runner) = running_since("shep", 0);
         rig.forge.list_ready(7, false);
-        rig.meter.fail(MeterError::TimedOut);
+        // 60% of the week since the day began, past its share of 100 / 7, and 80% of the window
+        rig.meter.set(Rig::utilization(60, 80));
 
         assert!(dispatched(&step(&runner).unwrap()));
         let status = rig.ask(&runner, "status", None);
+        assert_eq!(
+            status["pacer"]["enabled"],
+            json!(true),
+            "the table still says on"
+        );
         assert_eq!(status["pacer"]["claude"]["holding"], json!(null));
+        let reading = &status["pacer"]["claude"]["reading"];
+        assert_eq!(
+            (&reading["spent_today_pct"], &reading["allowance_pct"]),
+            (&json!(60), &json!(14.3))
+        );
+
+        rig.ask(&runner, "drop", Some("7"));
+        rig.forge.list_ready(8, false);
+        rig.meter.set(Rig::utilization(60, 100));
+        let (kind, reason, until) = held(step(&runner).unwrap());
+        assert_eq!((kind, until), (HoldKind::Window, Rig::EPOCH + 5 * 3600));
+        assert_eq!(
+            reason,
+            "the 5-hour window is at 100%, so no turn starts until it resets"
+        );
     }
 }

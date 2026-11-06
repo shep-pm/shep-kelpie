@@ -54,30 +54,28 @@ fn a_rework_pinned_to_an_implementer_is_held_by_its_account() {
     rig.write_codex_implementer();
     rig.forge.label(7, "agent:codex!");
     rig.codex_day_began(0);
-    // 15% of Codex's week since the day began, past its allowance of 100 / 7.
-    rig.codex_meter.set(Rig::utilization(15, 0));
+    rig.codex_meter.set(Rig::utilization(100, 0));
     let runner = running(&rig);
 
     let Some(StepReport::Held { kind, reason, .. }) = step(&runner).unwrap() else {
         panic!("expected a hold");
     };
-    assert_eq!(kind, crate::pacer::HoldKind::Allowance);
-    assert!(reason.starts_with("today's Codex allowance"), "{reason}");
+    assert_eq!(kind, crate::pacer::HoldKind::Window);
+    assert!(reason.starts_with("Codex's week is at 100%"), "{reason}");
     assert_eq!(rig.codex_meter.reads(), 1);
     assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
     assert_eq!(rig.forge.pull_request_labels(71), [READY, HUMAN]);
 }
 
 #[test]
-fn a_rework_whose_top_pick_has_spent_its_day_opens_on_the_next_the_pacer_lets_start() {
+fn a_rework_whose_top_pick_has_spent_its_week_opens_on_the_next_the_pacer_lets_start() {
     let rig = Rig::new("webapp");
     reviewed_71(&rig);
     rig.forge.label_pull_request(71, READY);
     rig.write_codex_implementer();
     rig.agent_board.ranks(&["codex", "sonnet-high"]);
     rig.codex_day_began(0);
-    // 15% of Codex's week since the day began, past its allowance of 100 / 7.
-    rig.codex_meter.set(Rig::utilization(15, 0));
+    rig.codex_meter.set(Rig::utilization(100, 0));
     let runner = running(&rig);
 
     let report = step(&runner).unwrap();
@@ -109,7 +107,7 @@ fn a_rework_held_by_its_labelled_account_leaves_the_ones_after_it_to_start() {
     rig.forge.label(6, "agent:codex!");
     rig.agent_board.ranks(&["sonnet-high", "codex"]);
     rig.codex_day_began(0);
-    rig.codex_meter.set(Rig::utilization(15, 0));
+    rig.codex_meter.set(Rig::utilization(100, 0));
     let runner = running(&rig);
 
     assert!(matches!(

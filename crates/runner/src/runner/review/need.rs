@@ -109,7 +109,7 @@ fn a_reviewer_whose_plan_is_held_is_skipped_for_the_next_pick() {
     rig.reviews_need(Some(1));
     let runner = at_review(&rig, "work.txt");
     rig.agent_board.ranks(&["claude", "mine", "other"]);
-    rig.meter.set(Rig::utilization(0, 60)); // Claude's 5-hour window is held
+    rig.meter.set(Rig::utilization(0, 100)); // Claude's 5-hour window is held
 
     reviewers_until_ci(&rig, &runner);
 

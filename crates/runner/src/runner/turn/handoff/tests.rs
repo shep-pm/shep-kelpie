@@ -281,7 +281,7 @@ fn a_ranking_the_pacer_holds_leaves_the_turn_on_its_own_agent() {
     let (rig, runner) = later_turn_due(&[]);
     falls_behind(&rig, "codex", SLACK + 1);
     // Codex's 5-hour window is past what the pacer lets a turn start on.
-    rig.codex_meter.set(Rig::utilization(0, 55));
+    rig.codex_meter.set(Rig::utilization(0, 100));
     let (model, session) = next_turn(&rig, &runner);
     assert_eq!(model, "claude-sonnet-5-5");
     assert!(resumed(&session), "{session:?}");
@@ -361,8 +361,8 @@ fn an_own_agent_the_board_leaves_unranked_hands_off_with_no_finish() {
 fn every_ranked_agent_held_keeps_the_turn_and_the_held_agent_asks_no_more() {
     let (rig, runner) = later_turn_due(&[]);
     falls_behind(&rig, "codex", SLACK + 1);
-    rig.codex_meter.set(Rig::utilization(0, 55));
-    rig.meter.set(Rig::utilization(0, 55));
+    rig.codex_meter.set(Rig::utilization(0, 100));
+    rig.meter.set(Rig::utilization(0, 100));
     step(&runner).unwrap();
     assert_eq!(rig.claude.calls().len(), 1, "no turn starts");
     assert_eq!(item(&rig, &runner)["agent"], "sonnet-high");

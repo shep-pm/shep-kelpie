@@ -211,11 +211,10 @@ per_item_usd = 10
 # absent.
 # light_max_lines = 10
 
-# Turn `enabled` off for a stretch when usage limits do not matter: neither
-# the daily allowance nor the 5-hour window then holds anything, and `status`
-# says pacing is off. Usage is still read and shown. `kickoff_hours` is the
-# hours a day that the per-hour figure in `status` divides the day's
-# allowance by.
+# `enabled` is what `status` reports as pacing. Only a spent 5-hour window
+# or week holds a turn or a new work item, on or off, and usage is read and
+# shown either way. `kickoff_hours` is the hours a day that the per-hour
+# figure in `status` divides the day's allowance by.
 [app.dogs.kelpie.pacing]
 enabled = true
 kickoff_hours = 8
