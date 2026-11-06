@@ -22,7 +22,8 @@ pub(super) fn mark_done(notification: &Notification) -> Result<(), ForgeError> {
     gh(&["api", "--method", "DELETE", &path]).map(drop)
 }
 
-// `--paginate` prints one JSON array for each page, one after another.
+// `--paginate` prints one array holding every page, and older `gh` one array
+// for each page, one after another. Reading a stream of arrays takes both.
 fn parse_listing(stdout: &[u8]) -> Result<Vec<Notification>, ForgeError> {
     #[derive(Deserialize)]
     struct Row {
@@ -41,8 +42,7 @@ fn parse_listing(stdout: &[u8]) -> Result<Vec<Notification>, ForgeError> {
 mod tests {
     use super::*;
 
-    // A listing in the shape `gh api --paginate` prints, two pages of arrays,
-    // whose rows hold the nine keys measured on the maintainer's login.
+    // Three rows of `gh api --paginate` on shep-pm/shep-kelpie's notifications.
     const RECORDED: &str = include_str!("../../../../../fixtures/gh-api-notifications.json");
 
     #[test]
@@ -52,7 +52,14 @@ mod tests {
             .into_iter()
             .map(|n| n.id)
             .collect();
-        assert_eq!(ids, ["19000000001", "19000000002", "19000000003"]);
+        assert_eq!(ids, ["26985669461", "26902698638", "26967646426"]);
+    }
+
+    #[test]
+    fn pages_printed_one_after_another_read_as_one_listing() {
+        let listing = parse_listing(br#"[{"id":"1"}][{"id":"2"}]"#).unwrap();
+        let ids: Vec<&str> = listing.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, ["1", "2"]);
     }
 
     #[test]
