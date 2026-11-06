@@ -1,14 +1,16 @@
 //! The agent board's pick and fit, asked at the dog's door
 //!
 //! The dog keeps one board for every runner, so a runner asks it which agents
-//! may start an item, in the order to try them, and whether an agent still
-//! fits a kind of work. A runner that cannot reach the dog, or cannot read its
-//! answer, gets none and starts or raises nothing.
+//! may start an item and whether an agent still fits a kind of work. The dog
+//! reads and orders none: the runner ranks its answer. A runner that cannot
+//! reach the dog, or cannot read its answer, gets none and starts or raises
+//! nothing.
 
 use std::path::{Path, PathBuf};
 
 use super::door::{Answer, Ask, FIT, FitAsk, Fits, PICK, Pick, PickAsk, REFUSED};
 use super::door_pace::answered;
+use crate::agent_board::rank;
 use crate::api_refusal::Refusal;
 use crate::ports::{AgentBoard, Timestamp};
 
@@ -41,6 +43,7 @@ impl AgentBoard for DoorBoard {
 
 /// The agents the dog at `door` would start `item` on, in order, or None when it cannot say
 ///
+/// The dog reads each agent and the runner ranks them with the ask's slack.
 /// An empty list is the dog's answer that no allowed agent fits.
 pub fn pick(door: &Path, item: &PickAsk) -> Option<Vec<Pick>> {
     let ask = Ask {
@@ -48,7 +51,7 @@ pub fn pick(door: &Path, item: &PickAsk) -> Option<Vec<Pick>> {
         ..Ask::new(PICK, std::process::id(), "pick")
     };
     match answered(door, &ask)? {
-        Answer::Picks(picks) => Some(picks),
+        Answer::Picks(picks) => Some(rank(picks, item.slack)),
         _ => None,
     }
 }

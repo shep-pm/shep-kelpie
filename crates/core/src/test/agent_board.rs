@@ -149,11 +149,9 @@ impl AgentBoard for FakeAgentBoard {
                 && !item.leave_out.contains(agent)
                 && item.pin.as_ref().is_none_or(|pin| pin == agent)
         };
-        let picks = order.into_iter().filter(fits).map(|(agent, finish)| Pick {
-            wait: book.waits.get(&agent).copied().unwrap_or(0),
-            agent,
-            finish,
-            cost_usd: None,
+        let picks = (order.into_iter().filter(fits)).map(|(agent, finish)| {
+            let wait = book.waits.get(&agent).copied().unwrap_or(0);
+            Pick::new(agent, finish, wait)
         });
         Some(picks.collect())
     }

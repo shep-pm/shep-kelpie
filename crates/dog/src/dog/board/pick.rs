@@ -14,7 +14,7 @@ use crate::ipc::ServerWriteHalf;
 use crate::lease::door::{Answer, Ask, Pick, PickAsk};
 use crate::pacer::{self, Assessment, Hold, HoldKind};
 use crate::ports::Timestamp;
-use crate::settings::Limit;
+use crate::settings::{AgentName, Limit};
 
 impl View {
     /// Each implementer's typical time and cost for an item of no kind, and its wait
@@ -77,17 +77,17 @@ impl View {
     }
 }
 
-// The agents `ask` names, in the order the board tries them for its item at `now`.
-pub(super) fn answer(
-    view: &View,
+// What the board read of each of `names` for an item of `kind` at `now`.
+fn candidates<'a>(
+    view: &'a View,
     shown: &Availability,
-    ask: &PickAsk,
+    names: &[AgentName],
+    kind: Option<&str>,
     now: Timestamp,
-) -> Vec<Pick> {
+) -> Vec<Candidate<'a>> {
     let history = view.history();
-    let kind = ask.kind.as_deref();
-    let candidates: Vec<_> = (view.ranked.iter())
-        .filter(|(name, _)| ask.agents.contains(name))
+    (view.ranked.iter())
+        .filter(|(name, _)| names.contains(name))
         .map(|(name, agent)| {
             let (typical, turn) = estimate(&history, name.as_str(), agent, kind);
             Candidate {
@@ -99,22 +99,62 @@ pub(super) fn answer(
                 held: bills_api(agent) && shown.api_held(now).is_some(),
             }
         })
-        .collect();
+        .collect()
+}
+
+// What the dog reads of `candidate`, which starts in `wait` seconds. The ask's
+// runner orders it, so the cost, tier, local and held flags and the list's
+// place all go with it.
+fn read(view: &View, candidate: &Candidate<'_>, wait: u64) -> Pick {
+    Pick {
+        cost_usd: candidate.typical.cost_usd,
+        tier: Some(candidate.fit.tier()),
+        local: candidate.local,
+        held: candidate.held,
+        listed: view.prefer.iter().position(|p| p == candidate.agent),
+        ..Pick::new(
+            candidate.agent.clone(),
+            wait.saturating_add(candidate.typical.secs),
+            wait,
+        )
+    }
+}
+
+// The agents `ask` names that fit its item and have a window at `now`, soonest
+// finish first. The dog ranks none: the runner does, from what each carries.
+pub(super) fn answer(
+    view: &View,
+    shown: &Availability,
+    ask: &PickAsk,
+    now: Timestamp,
+) -> Vec<Pick> {
+    let kind = ask.kind.as_deref();
+    let candidates = candidates(view, shown, &ask.agents, kind, now);
     let item = Item {
         kind,
         tier: ask.tier,
         pin: ask.pin.as_ref(),
-        slack: ask.slack,
         leave_out: &ask.leave_out,
-        prefer: &view.prefer,
     };
     (agent_board::pick(&item, &candidates).into_iter())
-        .map(|choice| Pick {
-            agent: choice.agent.clone(),
-            finish: choice.finish,
-            wait: choice.wait,
-            cost_usd: choice.cost_usd,
+        .filter_map(|choice| {
+            let candidate = candidates.iter().find(|c| c.agent == choice.agent)?;
+            Some(read(view, candidate, choice.wait))
         })
+        .collect()
+}
+
+// Each of `names` the dog has a window for, read for an item of no kind as
+// `status` reads it, whatever kinds its file takes.
+pub(super) fn reading(
+    view: &View,
+    shown: &Availability,
+    names: &[AgentName],
+    now: Timestamp,
+) -> Vec<Pick> {
+    let candidates = candidates(view, shown, names, None, now);
+    (candidates.iter())
+        .filter_map(|c| Some(read(view, c, c.wait?)))
         .collect()
 }
 
@@ -174,14 +214,18 @@ fn wait(agent: &Agent, shown: &Availability, turn_secs: u64, now: Timestamp) -> 
     agent_board::wait(availability, turn_secs, now)
 }
 
-/// Answers a runner's `pick` ask and ends the visit
+/// Answers a runner's `pick` ask, for a work item or for the agents it names, and ends the visit
 pub(in crate::dog) async fn visit(place: &Place, ask: Ask, write: &mut ServerWriteHalf) {
-    let Some(item) = ask.pick else {
+    if ask.pick.is_none() && ask.reading.is_empty() {
         let why = "a pick ask names the work item it picks for".to_owned();
         return say(write, &Answer::Error(why)).await;
-    };
+    }
     let now = lock_desk(&place.desk).desk.book.now();
     let shown = availability::lock(&place.shown).clone();
     let view = super::lock(&place.board).view();
-    say(write, &Answer::Picks(answer(&view, &shown, &item, now))).await;
+    let picks = match &ask.pick {
+        Some(item) if ask.reading.is_empty() => answer(&view, &shown, item, now),
+        _ => reading(&view, &shown, &ask.reading, now),
+    };
+    say(write, &Answer::Picks(picks)).await;
 }
