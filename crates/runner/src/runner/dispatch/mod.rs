@@ -130,6 +130,7 @@ impl Runner {
         if let Some(begin) = self.close_done_parent(&ready, read.unlisted) {
             return Ok(begin);
         }
+        self.close_merged_left_open(&ready);
         // An adopted pull request, then one asking for a rework, goes before
         // any ready issue, and one that cannot start is passed over like one.
         let (begin, mut failed, adopt_hold) = self.adopt_waiting(&open)?;
