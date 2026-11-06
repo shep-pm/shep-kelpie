@@ -2,13 +2,9 @@
 
 No reviewer read it in its last review. Review bot threads are still open on it.
 
-| | Option | If you pick it |
-|---|---|---|
-| **A** | Merge | Merges it into main |
-| **B** | Send back | Sends the worker back for a change the whole review reads again |
+| Answer | What it does |
+|---|---|
+| 👍 or `71 yes` | Merges it into main |
+| 👎 or `71 no <note>` | Sends the worker back for a change the whole review reads again |
 
 @octocat
-- 👍 or 👎 answers, or tick one:
-- [ ] A
-- [ ] B
-- Or reply `71 no <note>`

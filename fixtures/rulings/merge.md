@@ -1,14 +1,9 @@
 ### Merge this pull request at 6b0606e into main?
 
-| | Option | If you pick it |
-|---|---|---|
-| **A** | Merge | Merges it into main |
-| **B** | Send back | Sends the worker back for a fix that goes to CI and back to you |
-| **C** | Rework | Sends the worker back for a change the whole review reads again |
+| Answer | What it does |
+|---|---|
+| 👍 or `71 yes` | Merges it into main |
+| 👎 or `71 no <note>` | Sends the worker back for a fix that goes to CI and back to you |
+| `71 rework <note>` | Sends the worker back for a change the whole review reads again |
 
 @octocat
-- 👍 or 👎 answers, or tick one:
-- [ ] A
-- [ ] B
-- [ ] C
-- Or reply `71 no <note>` or `71 rework <note>`

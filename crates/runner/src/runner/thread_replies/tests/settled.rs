@@ -27,7 +27,14 @@ fn a_ruling_answered_at_the_terminal_has_its_comment_edited_to_say_so() {
     // The question stays.
     assert!(body.contains("### Merge this pull request at"), "{body}");
     // Nothing invites a reply.
-    for gone in ["@octocat", "- [ ]", "👍", "Reply", "| Option |"] {
+    for gone in [
+        "@octocat",
+        "- [ ]",
+        "👍",
+        "Reply",
+        "| Option |",
+        "| Answer |",
+    ] {
         assert!(!body.contains(gone), "{gone} is still in:\n{body}");
     }
 }

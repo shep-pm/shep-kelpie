@@ -90,17 +90,12 @@ fn a_merge_ruling_is_posted_through_the_app_on_its_pull_request_and_mentions_the
     let short = &head[..7];
     let body = format!(
         "### Merge this pull request at {short} into main?\n\n\
-         | | Option | If you pick it |\n\
-         |---|---|---|\n\
-         | **A** | Merge | Merges it into main and closes #7: Title of #7. CI passed. 2 review rounds read it. |\n\
-         | **B** | Send back | Sends the worker back for a fix that goes to CI and back to you, with no new review round. |\n\
-         | **C** | Rework | Sends the worker back for a change the whole review reads again. |\n\n\
-         @octocat\n\
-         - 👍 or 👎 answers, or tick one:\n\
-         - [ ] A\n\
-         - [ ] B\n\
-         - [ ] C\n\
-         - Or reply `71 no <note>` or `71 rework <note>`"
+         | Answer | What it does |\n\
+         |---|---|\n\
+         | 👍 or `71 yes` | Merges it into main and closes #7: Title of #7. CI passed. 2 review rounds read it. |\n\
+         | 👎 or `71 no <note>` | Sends the worker back for a fix that goes to CI and back to you, with no new review round. |\n\
+         | `71 rework <note>` | Sends the worker back for a change the whole review reads again. |\n\n\
+         @octocat"
     );
     // The two review rounds that came first are on the thread too.
     let comments = rig.github.comments();
@@ -139,7 +134,7 @@ fn a_merge_card_says_what_waits_behind_it_and_who_read_the_pull_request() {
 
     assert!(
         card.contains(
-            "| **A** | Merge | Merges it into main and closes #7: Title of #7. CI passed. \
+            "| 👍 or `71 yes` | Merges it into main and closes #7: Title of #7. CI passed. \
              2 review rounds read it. 1 ruling is waiting, and `concurrency.pending_rulings` \
              is 1, so no new work item opens until one is answered. |"
         ),
@@ -290,8 +285,8 @@ fn a_merge_card_says_roughly_what_another_review_round_costs() {
     // Round 1 reported no dollars, so the one priced round is the whole average.
     assert!(
         card.contains(
-            "| **C** | Rework | Sends the worker back for a change the whole review reads \
-             again. Another review round costs about $0.42. |"
+            "| `71 rework <note>` | Sends the worker back for a change the whole review \
+             reads again. Another review round costs about $0.42. |"
         ),
         "{card}"
     );
@@ -303,8 +298,8 @@ fn a_review_round_under_a_cent_is_not_called_free() {
 
     assert!(
         card.contains(
-            "| **C** | Rework | Sends the worker back for a change the whole review reads \
-             again. Another review round costs under $0.01. |"
+            "| `71 rework <note>` | Sends the worker back for a change the whole review \
+             reads again. Another review round costs under $0.01. |"
         ),
         "{card}"
     );
@@ -334,7 +329,7 @@ fn with_no_maintainer_set_a_ruling_mentions_the_login_gh_acts_as_asked_once_a_ru
     step(&runner).unwrap(); // the fix turn asks a question: a second ruling
 
     let mentions = (rig.github.comments().into_iter())
-        .filter(|(_, body)| body.contains("\n@the-maintainer\n"))
+        .filter(|(_, body)| body.contains("@the-maintainer"))
         .count();
     assert_eq!(mentions, 2, "the merge ruling and the question");
     assert_eq!(rig.forge.viewer_reads(), 1);
@@ -353,7 +348,7 @@ fn a_maintainer_that_is_set_wins_over_the_login_gh_acts_as() {
     });
 
     let comments = rig.github.comments();
-    assert!(comments.last().unwrap().1.contains("\n@octocat\n"));
+    assert!(comments.last().unwrap().1.contains("@octocat"));
     assert_eq!(rig.forge.viewer_reads(), 0, "gh is not asked");
 }
 
