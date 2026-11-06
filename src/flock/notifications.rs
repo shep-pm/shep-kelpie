@@ -12,11 +12,14 @@ use crate::settings::ForgeSlug;
 /// How many limits in a row, with no call succeeding between them, stop the loop
 const LIMITS_IN_A_ROW: u32 = 5;
 
+/// How many notifications go by between lines saying how far the run is
+const SAY_EVERY: usize = 100;
+
 /// Marks each notification on `repo` done, in the order GitHub lists them, and
 /// returns the line to print
 ///
-/// Each wait is said through `say` as it starts, so a long run does not look
-/// hung.
+/// The count, each [`SAY_EVERY`] cleared and each wait are said through `say`
+/// as they happen, so a long run does not look hung.
 ///
 /// # Errors
 ///
@@ -41,6 +44,7 @@ pub fn clear(
         return Ok(vec![format!("no notifications on {repo}")]);
     }
     let total = all.len();
+    say(&format!("clearing {total} notifications on {repo}"));
     for (done, notification) in all.iter().enumerate() {
         limits
             .ask(Some((done, total)), || {
@@ -51,6 +55,10 @@ pub fn clear(
                     "cleared {done} of {total} notifications on {repo} before GitHub refused: {e}"
                 )
             })?;
+        let cleared = done + 1;
+        if cleared % SAY_EVERY == 0 && cleared < total {
+            say(&format!("cleared {cleared} of {total}"));
+        }
     }
     Ok(vec![format!("cleared {total} notifications on {repo}")])
 }
@@ -177,7 +185,7 @@ mod tests {
     }
 
     // Runs `clear` on a clock at `START`, returning its answer, the lines said
-    // while it waited and the seconds the clock moved.
+    // as it ran and the seconds the clock moved.
     fn run(inbox: &Inbox) -> (Result<Vec<String>, String>, Vec<String>, u64) {
         let clock = FakeClock::at(START);
         let said = Mutex::new(Vec::new());
@@ -197,16 +205,42 @@ mod tests {
         let (answer, said, waited) = run(&inbox);
         assert_eq!(answer.unwrap(), ["cleared 3 notifications on shep-pm/koji"]);
         assert_eq!(inbox.done(), ["11", "12", "13"]);
-        assert!(said.is_empty());
+        assert_eq!(said, ["clearing 3 notifications on shep-pm/koji"]);
         assert_eq!(waited, 0);
+    }
+
+    #[test]
+    fn a_long_run_says_how_far_it_is_every_hundred() {
+        let inbox = Inbox::of(&["11"; 250]);
+        let (answer, said, _) = run(&inbox);
+        assert_eq!(
+            answer.unwrap(),
+            ["cleared 250 notifications on shep-pm/koji"]
+        );
+        assert_eq!(
+            said,
+            [
+                "clearing 250 notifications on shep-pm/koji",
+                "cleared 100 of 250",
+                "cleared 200 of 250",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_last_notification_leaves_its_line_to_the_answer() {
+        let inbox = Inbox::of(&["11"; 100]);
+        let (_, said, _) = run(&inbox);
+        assert_eq!(said, ["clearing 100 notifications on shep-pm/koji"]);
     }
 
     #[test]
     fn an_empty_inbox_says_so() {
         let inbox = Inbox::of(&[]);
-        let (answer, _, _) = run(&inbox);
+        let (answer, said, _) = run(&inbox);
         assert_eq!(answer.unwrap(), ["no notifications on shep-pm/koji"]);
         assert!(inbox.done().is_empty());
+        assert!(said.is_empty(), "there is no count to say");
     }
 
     #[test]
@@ -230,7 +264,13 @@ mod tests {
         assert_eq!(answer.unwrap(), ["cleared 3 notifications on shep-pm/koji"]);
         assert_eq!(inbox.done(), ["11", "12", "13"]);
         assert_eq!(waited, 30);
-        assert_eq!(said, ["GitHub's limit: waiting 30s, 1 of 3 cleared"]);
+        assert_eq!(
+            said,
+            [
+                "clearing 3 notifications on shep-pm/koji",
+                "GitHub's limit: waiting 30s, 1 of 3 cleared",
+            ]
+        );
     }
 
     #[test]
@@ -256,9 +296,10 @@ mod tests {
         assert_eq!(waited, FALLBACK);
         assert_eq!(
             said,
-            [format!(
-                "GitHub's limit: waiting {FALLBACK}s, 0 of 2 cleared"
-            )]
+            [
+                "clearing 2 notifications on shep-pm/koji".to_owned(),
+                format!("GitHub's limit: waiting {FALLBACK}s, 0 of 2 cleared"),
+            ]
         );
     }
 
@@ -270,7 +311,13 @@ mod tests {
         assert_eq!(answer.unwrap(), ["cleared 2 notifications on shep-pm/koji"]);
         assert_eq!(inbox.done(), ["11", "12"]);
         assert_eq!(waited, 45);
-        assert_eq!(said, ["GitHub's limit: waiting 45s, none cleared yet"]);
+        assert_eq!(
+            said,
+            [
+                "GitHub's limit: waiting 45s, none cleared yet",
+                "clearing 2 notifications on shep-pm/koji",
+            ]
+        );
     }
 
     #[test]
@@ -284,7 +331,8 @@ mod tests {
              gh failed: You have exceeded a secondary rate limit"
         );
         assert_eq!(inbox.done(), ["11"]);
-        assert_eq!(said.len(), 4, "it waits after each of the first four");
+        let waits = said.iter().filter(|line| line.contains("waiting"));
+        assert_eq!(waits.count(), 4, "it waits after each of the first four");
         assert_eq!(waited, 40);
     }
 
