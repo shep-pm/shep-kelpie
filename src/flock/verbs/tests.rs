@@ -1,6 +1,7 @@
 use super::*;
 use crate::ports::{ForgeError, Notification};
 use crate::settings::ForgeSlug;
+use crate::test::FakeClock;
 
 fn words(line: &str) -> Vec<String> {
     line.split(' ').map(str::to_owned).collect()
@@ -550,6 +551,7 @@ fn notifications_in(
         kelpie_home: Path::new("/nowhere/kelpie"),
         here: folder,
         ports: inbox,
+        clock: &FakeClock::at(1_000),
     };
     shepherd::block_on(notify(at, None, args))
 }

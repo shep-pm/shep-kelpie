@@ -15,7 +15,7 @@ use super::{
 };
 use crate::adapters::Gh;
 use crate::home::{ProjectName, ProjectPaths};
-use crate::ports::Notifications;
+use crate::ports::{Clock, Notifications, SystemClock};
 use crate::settings::source::{self, Loaded};
 use crate::shepherd::{self, Connection, Dial, Socket};
 use crate::state::Projects;
@@ -187,6 +187,7 @@ async fn run(
             kelpie_home: &kelpie_home,
             here: &here,
             ports: &Gh::default(),
+            clock: &SystemClock,
         };
         return notify(at, named, &args).await;
     }
@@ -410,6 +411,7 @@ struct Notify<'a> {
     kelpie_home: &'a Path,
     here: &'a Path,
     ports: &'a dyn Notifications,
+    clock: &'a dyn Clock,
 }
 
 // `notifications clear`, which runs as the maintainer's login. The repo is
@@ -439,7 +441,7 @@ async fn notify(
         }
         None => Checkout::of(at.here)?.forge,
     };
-    notifications::clear(at.ports, &repo)
+    notifications::clear(at.ports, at.clock, &|line| println!("{line}"), &repo)
 }
 
 // `rule`: the ruling and its answer read first, asking in a terminal, so
