@@ -425,6 +425,13 @@ impl Runner {
             && stood.is_none()
             && !found.open.is_empty()
             && self.askable(author);
+        // The login the questions go to and whose reply answers them. On an issue
+        // kelpie's own App opened, it is the maintainer: the App is nobody to ask,
+        // and its own comments can never be the answers.
+        let asked = match ask {
+            true => self.asked_login(author),
+            false => None,
+        };
         // An issue with no priority gets one. The research naming none, or `P0`,
         // which kelpie never sets, leaves the fallback. A pass that asks its author
         // owes the label with the rest, put on when the wait ends: the answers
@@ -551,11 +558,18 @@ impl Runner {
             .map(|t| t.comment)
             .into_iter()
             .collect();
+        // The asked login is someone other than the author only on an issue the
+        // App opened, where the maintainer is notified under the words.
+        let greeted = asked.as_deref().unwrap_or(author);
+        let asked_cc = match greeted.eq_ignore_ascii_case(author) {
+            true => None,
+            false => Some(greeted),
+        };
         let post = IssuePost {
             kind,
             facts: &facts,
             earlier: &earlier,
-            author,
+            author: greeted,
             said,
         };
         let Some(words) = self.word_triage(issue, &post) else {
@@ -564,7 +578,7 @@ impl Runner {
         // The comment that asks lists the questions under the words and holds the
         // prompt for the author's own terminal, collapsed.
         let (body, local_seen) = match ask {
-            true => match self.ask_comment(issue, &words, found) {
+            true => match self.ask_comment(issue, &words, found, asked_cc) {
                 Some((body, seen)) => (body, Some(seen)),
                 None => return Ok(()),
             },

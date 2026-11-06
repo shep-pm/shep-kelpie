@@ -1,13 +1,13 @@
 //! The author's round: the questions, the answers
 //!
 //! An open question goes to the issue's author before the maintainer. The first
-//! triage comment lists the questions with the answer the research recommends,
-//! and holds a prompt for the author's terminal in a collapsed section
-//! ([`super::local`]). Whatever the author writes next is their answers; kelpie
-//! reads no word in it. No reply `triage.wait_days` on, and the maintainer
-//! triages the issue as it stands. Only the maintainer's issues, and any under
-//! `pick = "all"`, are asked ([`Runner::askable`]). While the wait is open no
-//! status label goes on ([`Runner::finish_triage`]); [`super::heard`] hears the author.
+//! triage comment lists the questions with the answer the research recommends and
+//! holds a collapsed prompt for their terminal ([`super::local`]). Whatever the
+//! asked login writes next is their answers; kelpie reads no word in it. No reply
+//! `triage.wait_days` on, and the maintainer triages it as it stands.
+//! [`Runner::askable`] asks the maintainer's own issues, any under `pick = "all"`,
+//! and an App issue of the maintainer. No status label goes on while a wait is
+//! open ([`Runner::finish_triage`]); [`super::heard`] hears the answers.
 
 use std::collections::BTreeMap;
 
@@ -85,10 +85,23 @@ pub(super) fn closed_note(issue: u64) -> String {
 }
 
 impl Runner {
-    // Whether `author` is one kelpie asks to settle its open questions itself:
-    // the maintainer on their own issue, and any author under `pick = "all"`.
-    // Anyone else gets `needs-triage` with no ask.
+    // The login an open question goes to and whose reply answers it: the
+    // maintainer when the project's own App opened the issue, else `author`.
+    // `None` when the App opened it and no maintainer login can be read.
+    pub(in crate::runner) fn asked_login(&self, author: &str) -> Option<String> {
+        match super::is_app(author, self.app_login().as_deref()) {
+            true => self.maintainer().ok(),
+            false => Some(author.to_owned()),
+        }
+    }
+
+    // Whether `asked_login` names anyone to ask: the maintainer on their own
+    // issue, and any author under `pick = "all"`. An issue the App opened is
+    // asked of the maintainer. Anyone else gets `needs-triage` with no ask.
     pub(in crate::runner) fn askable(&self, author: &str) -> bool {
+        if self.asked_login(author).is_none() {
+            return false;
+        }
         if self.settings.triage.pick == TriagePick::All {
             return true;
         }
