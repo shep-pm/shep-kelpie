@@ -65,12 +65,13 @@ impl CallPacer {
         }
     }
 
-    /// `None` when a call of `project`'s may go at `now`, which counts it, or
-    /// the seconds it waits
+    /// `None` when a call of `project`'s may go at `now`, which counts it, or the seconds it waits
     ///
-    /// The minute's calls are shared fairly: while other projects have calls
-    /// in the minute, `project` gets no more than its share of the cap, so a
-    /// busy project cannot use up what a newcomer is owed.
+    /// The minute's calls are shared fairly while its places run short: the
+    /// minute keeps one free place for every project in it. While places are
+    /// that short, `project` is held to its share of the cap and waits for its
+    /// oldest call to leave; while places are ample, a project past its share
+    /// goes.
     pub fn ask(&mut self, project: &str, now: Timestamp) -> Option<u64> {
         while self
             .grants
@@ -92,8 +93,9 @@ impl CallPacer {
         projects.sort_unstable();
         projects.dedup();
         let share = (self.per_minute / projects.len()).max(1);
+        let free = self.per_minute.saturating_sub(self.grants.len());
         let mut own = self.grants.iter().filter(|(_, p)| p == project);
-        if projects.len() > 1 && own.clone().count() >= share {
+        if projects.len() > 1 && free <= projects.len() && own.clone().count() >= share {
             wait = wait.max(own.next().map_or(1, |(at, _)| leaves(*at)));
         }
         if wait > 0 {
@@ -219,6 +221,33 @@ mod tests {
         // The busy project is then over its half of the cap, so a freed place goes to the newcomer.
         assert_eq!(pacer.ask("busy", at(61)), Some(1));
         assert_eq!(pacer.ask("new", at(61)), None);
+    }
+
+    #[test]
+    fn a_project_past_its_share_goes_while_the_minute_has_places() {
+        let mut pacer = CallPacer::new(12, 10);
+        assert_eq!(pacer.ask("new", at(0)), None);
+        // busy is owed 6 of the 12 places and takes 9 of them while 3 stay free.
+        for second in 1..10 {
+            assert_eq!(pacer.ask("busy", at(second)), None);
+        }
+    }
+
+    #[test]
+    fn a_project_past_its_share_waits_once_places_run_short() {
+        let mut pacer = CallPacer::new(12, 10);
+        assert_eq!(pacer.ask("new", at(0)), None);
+        for second in 1..10 {
+            assert_eq!(pacer.ask("busy", at(second)), None);
+        }
+        // 10 of 12 places are used and 2 projects are in the minute: the 2 left
+        // are the reserve each is owed, so busy waits for its oldest call.
+        assert_eq!(pacer.ask("busy", at(10)), Some(51));
+        // The short places go to the project under its share.
+        assert_eq!(pacer.ask("new", at(10)), None);
+        assert_eq!(pacer.ask("new", at(10)), None);
+        // The cap is spent, so nothing goes until a call leaves the minute.
+        assert_eq!(pacer.ask("new", at(10)), Some(50));
     }
 
     #[test]
