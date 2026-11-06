@@ -33,7 +33,7 @@ pub use disputes::Dispute;
 pub use follow_ups::FollowUps;
 pub use known::{Known, foreign_change};
 pub use local::LOCAL_FAILURES_DOWN;
-pub use review::{Awaited, Reading, Review, ReviewStage, TestCheck};
+pub use review::{Awaited, Reading, Review, ReviewPlan, ReviewStage, TestCheck};
 pub use seat::Seat;
 pub use spend::{Priced, QwenTally, RoleSpend, Spend, raised_cap};
 pub use talked::{TALK_ROUNDS, Talked};
@@ -146,6 +146,9 @@ pub struct WorkItem {
     /// Whether the project manager's pick called its issue a small change
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pm_light: bool,
+    /// The review the project manager's pick planned for its pull request
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_plan: Option<ReviewPlan>,
     /// How much review its pull request gets, once a round has weighed its
     /// change. None until then, and for a project whose `reviews.light` is
     /// not below `reviews.need`.
@@ -513,6 +516,7 @@ impl WorkItem {
             tier: None,
             slack: None,
             pm_light: false,
+            review_plan: None,
             weight: None,
             left: Vec::new(),
             handoff: None,

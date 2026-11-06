@@ -880,6 +880,7 @@ fn a_version_53_file_loads_with_no_disputes_and_saves_at_the_current_version() {
 mod handed_off;
 mod lit;
 mod picked;
+mod planned;
 mod tickets;
 mod weighed;
 

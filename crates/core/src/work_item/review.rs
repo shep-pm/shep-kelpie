@@ -1,5 +1,7 @@
 //! Where a work item's review stands: the pass, its round and that round's stage
 
+use std::num::NonZeroU32;
+
 use serde::{Deserialize, Serialize};
 
 use super::is_zero;
@@ -55,6 +57,19 @@ pub struct Review {
     /// The run kelpie waits on before a reviewer reads a head (ADR 0008)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ci: Option<Box<Awaited>>,
+}
+
+/// How many reviews an item's pull request gets, as the project manager's
+/// pick set it
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewPlan {
+    /// The reviews its pass runs
+    pub reads: NonZeroU32,
+    /// What the reads are for
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub about: Option<String>,
 }
 
 /// CI on the head a round's reviewer is about to read
