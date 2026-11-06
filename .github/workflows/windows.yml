@@ -1,14 +1,14 @@
 name: windows
 # Windows runs on main, not on a pull request: a run of it held every pull
 # request's merge, and a break shows as red on main. It has a workflow of its
-# own so its 71 minutes (run 42123777127) hold up nothing else: a job in `test`
-# waits only for the runs of `test`, and a run of this one only for the runs of
-# this one.
+# own so its minutes hold up nothing else: a job in `test` waits only for the
+# runs of `test`, and a run of this one only for the runs of this one (#1740).
 #
-# A merge runs the checks and the gating tests, and nothing else. In that run
-# the lib step took 64 of the 71 minutes and reported 529 failing tests as a
-# warning line, so it gates nothing and a merge cannot wait on it. It runs
-# nightly and by hand instead, where its result is read as its own (#1742).
+# A push to main, a merge, runs the checks, door, totp and the gating save
+# step, 6.4 minutes between them. The lib step is left out: on run
+# 42123777127 it took 64 of the job's 71 minutes and reported 529 failing
+# tests as a warning line, so it gates nothing. It runs nightly and by hand
+# instead, where its result is read as its own (#1742).
 #
 # Ported crates and saved state gate Windows. The workspace check, door, ACL
 # and lib steps report gaps without gating. `--keep-going` reports every crate
