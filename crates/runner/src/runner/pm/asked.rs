@@ -479,6 +479,12 @@ impl Runner {
         &self.pm.released
     }
 
+    /// Sets whether the question about to be raised is one the project manager
+    /// parked the work item on, which is the maintainer's alone to answer
+    pub(in crate::runner) fn pm_parking(&mut self, on: bool) {
+        self.pm.parking = on;
+    }
+
     /// Forgets the calls on `comments`, which a comment read has carried out
     pub(in crate::runner) fn pm_carried_out(&mut self, comments: &[u64]) {
         self.pm

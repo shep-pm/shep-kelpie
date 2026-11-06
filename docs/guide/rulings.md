@@ -125,7 +125,7 @@ On a worker's question, an answer that is exactly `14 pm recommend`, `14 pm opti
 Your comment on a pull request that is no reply to a ruling, such as a question about the change, wakes the project manager with your words, on a project that names one. It answers with one call per thread, and each call and its reason is in `pm-notes.md` and the journal:
 
 - `send-back`: with a ruling waiting, it answers the ruling `no <note>`, so the worker takes its note as it takes any `no`, and the answer is posted headed `Answered by the project manager`; `<id> no <note>` there reopens it as above. With no ruling, your comment goes to the worker with its note at the next comment read.
-- `park`: with a ruling waiting, the ruling stays and the project manager says why in the thread. With none, a question is raised to you at the next comment read, saying who parked the work item and why.
+- `park`: with a ruling waiting, the ruling stays and the project manager says why in the thread. With none, a question is raised to you at the next comment read, saying who parked the work item and why, and the project manager is not asked to answer it.
 - `settle`: on a merge ruling held by review bot threads, it accepts those threads, withdraws the ruling and has CI looked at again. It takes every thread that holds the ruling.
 - `none`, or no call: the thread says it made no call, and the ruling and work item wait for you.
 

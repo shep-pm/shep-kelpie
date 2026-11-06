@@ -767,8 +767,7 @@ fn send_back_with_no_ruling_and_no_note_is_named_and_the_comment_stays_held() {
 fn park_with_no_ruling_raises_a_question_at_the_next_comment_read() {
     let (rig, runner, head) = bare_put("said-bare-park");
     let call = calling("park", "", "It asks for a design choice");
-    rig.claude
-        .script_for(Role::Pm, [Scripted::Say(call), Scripted::Say(NOTHING)]);
+    rig.claude.script_for(Role::Pm, [Scripted::Say(call)]);
     let before = turns(&rig);
 
     let (acted, dropped) = said_bare(&rig, &runner, "Should this be two changes?");
@@ -780,6 +779,15 @@ fn park_with_no_ruling_raises_a_question_at_the_next_comment_read() {
     assert!(said.contains("Should this be two changes?"), "{said}");
     assert!(said.contains("It asks for a design choice"), "{said}");
     assert!(pending(&rig), "a question waits for the maintainer");
+    let asked_pm = rig
+        .claude
+        .calls()
+        .iter()
+        .any(|c| c.prompt.contains("parked this work item"));
+    assert!(
+        !asked_pm,
+        "the project manager is not asked to answer its own park"
+    );
     let runner = runner.lock().unwrap();
     assert!(matches!(
         runner.state.rulings[0].kind,

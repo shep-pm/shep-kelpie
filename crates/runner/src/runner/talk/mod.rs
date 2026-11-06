@@ -279,7 +279,7 @@ impl Runner {
              Say what the worker should do about them.",
             list.join("\n\n")
         );
-        self.put_to_maintainer(number, at, sorted, asked)
+        self.put_to_maintainer(number, at, sorted, asked, false)
     }
 
     // The project manager parked the work item on the maintainer's words, so
@@ -304,7 +304,7 @@ impl Runner {
              you:\n\n{}\n\n{more}Say what the worker should do.",
             parks.join("\n\n")
         );
-        self.put_to_maintainer(number, at, sorted, asked)
+        self.put_to_maintainer(number, at, sorted, asked, true)
     }
 
     // Raises a question of `asked` to the maintainer in place of the comments
@@ -316,6 +316,7 @@ impl Runner {
         at: &At,
         sorted: &Sorted,
         asked: String,
+        by_pm: bool,
     ) -> Result<Option<Begin>, StateError> {
         let (phase, noted_from, parked) = self.after_comments(at);
         let resume = match (at, phase) {
@@ -345,7 +346,11 @@ impl Runner {
             self.say_withdrawn(id, issue, Some(number), why);
         }
         let kind = RulingKind::Question { asked, resume };
-        Ok(Some(self.raise(number, kind)?))
+        // A question the project manager parked the work item on is not its to answer
+        self.pm_parking(by_pm);
+        let raised = self.raise(number, kind);
+        self.pm_parking(false);
+        Ok(Some(raised?))
     }
 
     /// Replies on the threads the last round of comments was sent, and

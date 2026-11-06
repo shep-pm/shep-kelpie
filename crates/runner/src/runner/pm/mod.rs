@@ -299,6 +299,8 @@ pub(super) struct Desk {
     // Each comment of the maintainer's it called on with no ruling waiting, for the
     // next comment read to carry out, which a restart returns to it unread
     released: BTreeMap<u64, Released>,
+    // The question being raised is one it parked the work item on, the maintainer's alone
+    parking: bool,
     flying: Option<Flying>,
     // What the wake read with the lock let go, kept while it launches
     logs: Option<ci_logs::Logs>,
