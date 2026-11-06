@@ -10,7 +10,7 @@ The agent kelpie wakes to pick, answer and unstick. The board file it reads is i
 - Its notes files: `pm-standing.md` holds the rules that hold across work items, each carrying its end at the line's end (`(until #12)` for when a ticket closes, `(until 2026-10-05)` for after a day), and `pm-notes.md` the state of one work item. Kelpie writes the standing notes and ends every line whose end has passed. The log, its archive and the reads behind an end: pm-notes.md
 - No git or gh: kelpie writes diffs (64 KiB each) + a `still-red` item's CI log. #452. The CI logs (`failed_run_logs` per still-red item, `run_log_tail` per red workflow) are read in one job with the runner's lock let go, and the files are written under it from the result (#1210, `runner-lock.md`). A wake from `pm_ended` or `shep kelpie pm` reads them in place.
 - Answer is one JSON object (`pick`, `hold`, `unstick`, `answer`, `follow_up`, `reply`) checked against the board; anything else dropped + logged. #327
-- What it may pick, hold and set on a pick, and how a pick is read: [pm-pick.md](pm-pick.md)
+- A `pick` entry may be an object `{ issue, tier, agent, slack, light, review }`, `review` an object of `reads` and `about` that a work item keeps as `review_plan` (state version 100). The pick, its holds and how an entry is read: [pm-pick.md](pm-pick.md)
 - One session resumed per wake, compacted past 100k; failed call passed over 10 min, board rule picks meanwhile. #327
 - Answers or escalates worker questions, holding the ruling from maintainer one wake (10 min max). #437
 - Decides `follow-up` rulings, filing `ready-for-agent` or `needs-triage`. #510, #511
