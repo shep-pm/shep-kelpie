@@ -595,6 +595,7 @@ impl Rig {
         setup(&rig);
         let runner = rig.open().unwrap();
         rig.ask(&runner, "add", Some("7"));
+        runner.lock().unwrap().plan_two_reads_for_the_rig();
         rig.forge.open_pull_request(71, "kelpie/7", &[7]);
         rig.claude.script([work, Scripted::Text(CLEAN)]);
         step(&runner).unwrap(); // the worker's first turn: opens the pull request

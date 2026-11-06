@@ -6,6 +6,8 @@ use crate::ports::Finding;
 use crate::runner::Runner;
 use crate::runner::pm::Wake;
 use crate::work_item::Review;
+#[cfg(any(test, feature = "test-support"))]
+use crate::work_item::ReviewPlan;
 
 impl Runner {
     /// What to ask the project manager once `review`'s round, which sent
@@ -41,6 +43,29 @@ impl Runner {
             weight: item.weight.clone(),
             lines: lines.flatten(),
         })
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl Runner {
+    /// Plans two reads for every open item on a project that names `agents.pm`
+    ///
+    /// The rig's pull request is read by two reviewers, and with no plan a
+    /// project manager's item has one.
+    ///
+    /// # Panics
+    ///
+    /// When the state cannot be saved.
+    pub fn plan_two_reads_for_the_rig(&mut self) {
+        if self.agents.pm.is_none() {
+            return;
+        }
+        let mut next = self.state.clone();
+        for item in &mut next.work_items {
+            let reads = std::num::NonZeroU32::new(2).expect("two is not zero");
+            item.review_plan = Some(ReviewPlan { reads, about: None });
+        }
+        self.save(next).expect("the state saves");
     }
 }
 
