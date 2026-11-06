@@ -6,7 +6,7 @@ use super::ask_tests::{
     wrote,
 };
 use super::pick_tests::MAINTAINER;
-use super::research_tests::{calls, reply};
+use super::research_tests::{APP, calls, reply};
 use crate::ports::Role;
 use crate::runner::step;
 use crate::test::Scripted;
@@ -194,6 +194,49 @@ fn a_settled_question_holding_a_letter_outside_ascii_is_not_asked_again() {
         !again.contains("plante sous Wayland"),
         "the question its author answered is not asked again: {again}"
     );
+}
+
+// #1756: on an issue kelpie's own App opened, the rounds went to the maintainer,
+// so a re-ask reads their replies and keeps what they settled from the new pass.
+// Reading the rounds by the issue's author instead asks the maintainer the
+// questions they already answered.
+#[test]
+fn an_app_s_issue_asked_again_reads_the_maintainer_s_answers() {
+    let (rig, runner) = filed("pick = \"maintainer\"", APP, asked());
+    assert_eq!(step(&runner).unwrap(), None);
+    wrote(&rig, MAINTAINER, "ok");
+    rig.claude.script_for(Role::Triager, [reply(settled())]);
+    rig.claude
+        .script_for(Role::Representative, [Scripted::Say(A_WORDS)]);
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(record(&rig, &runner)["step"], "done");
+
+    rig.ask(&runner, "triage", Some("30"));
+    rig.claude.script_for(Role::Triager, [reply(asked())]);
+    rig.claude
+        .script_for(Role::Representative, [Scripted::Say(ASK_WORDS)]);
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+    let prompts: Vec<String> = (calls(&rig, Role::Triager))
+        .into_iter()
+        .map(|seen| seen.call.prompt)
+        .collect();
+    let last = prompts.last().unwrap();
+    assert!(
+        last.contains(&format!("{MAINTAINER} wrote:")),
+        "the maintainer's answer reaches the triager: {last}"
+    );
+    assert!(
+        last.contains("Do not ask again in `open` what those rounds settled"),
+        "{last}"
+    );
+    let again = posted(&rig).last().expect("a comment").clone();
+    assert!(
+        !again.contains("Which OS crashes?"),
+        "the question the maintainer settled is not asked again: {again}"
+    );
+    assert!(!again.contains("Q1 - "), "no questions block: {again}");
 }
 
 // #1304 round 2: a question is compared as the questions block wrote it, so the

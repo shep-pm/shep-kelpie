@@ -317,13 +317,13 @@ impl Runner {
     }
 
     // What a pass asked again over an issue kelpie already triaged is shown:
-    // the App's triage comments on it and their author's replies as one text,
-    // oldest first, with the questions those rounds asked and their author
+    // the App's triage comments on it and the asked login's replies as one text,
+    // oldest first, with the questions those rounds asked and that login
     // answered after them. `None` when the issue holds no triage comment.
     fn earlier_rounds(
         &self,
         issue: u64,
-        author: &str,
+        asked: Option<&str>,
     ) -> Result<Option<(String, Vec<String>)>, ForgeError> {
         let comments = self
             .ports
@@ -332,11 +332,15 @@ impl Runner {
         let Some(app) = self.app_login().map(|app| plain_login(&app)) else {
             return Ok(None);
         };
-        let mine = plain_login(author);
+        // The login those rounds went to (`asked_login`), which on an issue the
+        // App opened is the maintainer. With none, no reply counts as an answer.
+        let mine = asked.map(plain_login);
         let mut ours: Vec<&ThreadComment> = (comments.iter())
             .filter(|c| {
                 (plain_login(&c.author) == app && c.body.contains(marker::MARKER))
-                    || plain_login(&c.author) == mine
+                    || mine
+                        .as_deref()
+                        .is_some_and(|mine| plain_login(&c.author) == mine)
             })
             .collect();
         if ours.iter().all(|c| plain_login(&c.author) != app) {
@@ -347,26 +351,27 @@ impl Runner {
             .map(|c| format!("{} wrote:\n\n{}", c.author, c.body.trim()))
             .collect::<Vec<_>>()
             .join("\n\n---\n\n");
-        // What each round's author settled, from their replies to that round
+        // What each round settled, from the asked login's replies to that round
         // alone: a line that is only `ok` settles the round, a `Qn: ...` line
         // settles that one, and a reply in neither form settles none that code can
-        // name. Their replies end where the next round went up.
+        // name. Those replies end where the next round went up.
         let mut settled: Vec<String> = Vec::new();
         let rounds: Vec<&ThreadComment> = (ours.iter())
             .filter(|c| plain_login(&c.author) == app && ask::holds_questions(&c.body))
             .copied()
             .collect();
-        for (at, asked) in rounds.iter().enumerate() {
+        for (at, round) in rounds.iter().enumerate() {
             let until = rounds.get(at + 1).map(|c| (c.created, c.id));
             let replies: Vec<&ThreadComment> = (ours.iter())
                 .filter(|c| {
-                    plain_login(&c.author) == mine
-                        && (c.created, c.id) > (asked.created, asked.id)
+                    mine.as_deref()
+                        .is_some_and(|mine| plain_login(&c.author) == mine)
+                        && (c.created, c.id) > (round.created, round.id)
                         && until.is_none_or(|next| (c.created, c.id) < next)
                 })
                 .copied()
                 .collect();
-            for (n, question) in asked_in(&asked.body).iter().enumerate() {
+            for (n, question) in asked_in(&round.body).iter().enumerate() {
                 if (replies.iter()).any(|c| ask::answers_one(&c.body, n + 1)) {
                     settled.push(ask::question_key(question));
                 }
@@ -390,13 +395,13 @@ impl Runner {
         // triage label that comes by later is the maintainer's own.
         let taken = self.taken_seen(issue);
         // A pass asked again over an issue kelpie already triaged reads the
-        // rounds it ran: its own triage comments on the issue and their
-        // author's replies go into the prompt, and the questions those rounds
-        // settled are kept from the new pass.
+        // rounds it ran: its own triage comments on the issue and the replies of
+        // the login those rounds went to go into the prompt, and the questions
+        // those rounds settled are kept from the new pass.
         let earlier = match (matches!(purpose, Purpose::First)
             && self.triage_record(issue).is_some_and(|t| t.comment != 0))
         {
-            true => match self.earlier_rounds(issue, &this.author) {
+            true => match self.earlier_rounds(issue, self.asked_login(&this.author).as_deref()) {
                 Ok(earlier) => earlier,
                 Err(e) => {
                     let why = format!("cannot read its earlier triage rounds: {e}");
