@@ -2,11 +2,9 @@
 
 This pull request was changed: labels added: `ready-for-human`.
 
-| | Option | If you pick it |
-|---|---|---|
-| **A** | Yes | Accepts the change and kelpie carries on |
-| **B** | No | Sends the worker back with a note, and the review reads its change again |
+| Answer | What it does |
+|---|---|
+| 👍 or `71 yes` | Accepts the change and kelpie carries on |
+| 👎 or `71 no <note>` | Sends the worker back with a note, and the review reads its change again |
 
 @octocat
-- 👍 answers yes, 👎 answers no
-- Or reply `71 yes` or `71 no <note>`
