@@ -36,13 +36,7 @@ impl Runner {
         kelpie: KelpieSettings,
     ) -> Result<Option<String>, OpenError> {
         // The owner's template does not depend on the settings, so it is read whatever they say.
-        let (owner_template, note) = super::owner_template::refreshed(
-            self.ports.forge.as_ref(),
-            self.remote.owner(),
-            self.owner_template.take(),
-        );
-        self.owner_template = owner_template;
-        self.notes.extend(note);
+        self.refresh_owner_template();
         let mut waiting = Vec::new();
         if settings.git.checkout != self.settings.git.checkout {
             waiting.push("git.checkout");
@@ -179,7 +173,7 @@ impl Runner {
         let named_new = named != was_named;
         // A CodeRabbit that is not public is left out and logged, once, when it is first named.
         let coderabbit_note = if names_coderabbit(&named) && !names_coderabbit(&was_named) {
-            coderabbit_left_out(&self.remote, &named, &self.ports)?
+            coderabbit_left_out(&self.remote, &named, &self.ports)
         } else {
             None
         };

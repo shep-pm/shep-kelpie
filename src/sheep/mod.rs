@@ -275,7 +275,9 @@ fn serve(project: &str, arrival: Option<Arrival<Carry>>) -> Result<(), Exit> {
         let (dial, shep_home, project) = (Arc::clone(&dial), shep_home.clone(), project.clone());
         Box::new(move |runner| stop_own_sheep(&dial, &shep_home, &project, runner))
     };
-    let runner = Runner::open(
+    // The start's paced forge calls wait for the loop, which makes them while a
+    // trigger answers from the status `opened` posted.
+    let runner = Runner::opened(
         project,
         settings,
         kelpie_settings,
@@ -558,6 +560,14 @@ fn work(
     stopping: &AtomicBool,
 ) {
     let mut reread = Reread::at(&runner.lock().unwrap_or_else(PoisonError::into_inner));
+    // The start's forge calls, made with the lock held before any pass: a trigger
+    // asked meanwhile answers from the status the start posted.
+    if !stopping.load(Ordering::SeqCst) {
+        runner
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .settle_on_forge();
+    }
     while !stopping.load(Ordering::SeqCst) {
         let (notes, stop) = {
             let mut runner = runner.lock().unwrap_or_else(PoisonError::into_inner);
