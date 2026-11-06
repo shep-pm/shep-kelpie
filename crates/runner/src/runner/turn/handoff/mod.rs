@@ -1,17 +1,17 @@
 //! A work item handed off to the agent board's next pick before a due turn
 //!
-//! Before each due turn the runner asks the board, pinning nothing and leaving
-//! out the agents the item has left. The turn goes on when its own agent is
-//! ranked and can start within the slack, however long it takes, as dispatch
-//! judged it. Otherwise the item goes to the first ranked agent the pacer lets
-//! start, on a session of its own, with a note of where the work stands. A
-//! pinned item never moves, nor does one on an agent the board may not rank,
-//! one the board cannot answer or ranks nobody for, or one whose ranking the
-//! pacer holds.
+//! Before each due turn the runner asks the board, leaving out the agents the
+//! item has left. The turn goes on when its own agent is ranked and can start
+//! within the slack, as dispatch judged it. Otherwise, with a project manager
+//! able to answer, the turn waits for it to name the next agent; with none, the
+//! item goes to the first ranked agent the pacer lets start, on a session of
+//! its own, with a note. A pinned item never moves, nor does one the board
+//! cannot rank, or whose ranking the pacer holds.
 
 use super::super::Runner;
-use super::super::pace::Walked;
+use super::super::pace::{Pace, Walked};
 use super::super::report::{Begin, StepReport};
+use super::held_up::Reason;
 use crate::agent_board::starts_within_slack;
 use crate::lease::door::PickAsk;
 use crate::pacer::Scope;
@@ -30,7 +30,7 @@ impl Runner {
         let Some(item) = self.current().filter(|item| !item.pinned) else {
             return Ok(None);
         };
-        let slack = self.slack(item.slack);
+        let (issue, slack) = (item.issue, self.slack(item.slack));
         let ask = PickAsk {
             kind: item.kind.clone(),
             tier: item.tier,
@@ -53,8 +53,23 @@ impl Runner {
         let from = item.agent.clone();
         let own = picks.iter().find(|pick| pick.agent == from);
         if own.is_some_and(|pick| starts_within_slack(pick.wait, Some(slack))) {
+            // Its agent is back before the project manager named another.
+            self.pm_agent_back(issue);
             return Ok(None);
         }
+        // With no ranking to fall back on, the next agent is the project manager's to name.
+        if let Some(own) = own {
+            match self.pm_pace() {
+                Some(Pace::Clear) => {
+                    self.pm_agent_out(issue, &from, own.wait);
+                    return Ok(Some(self.idle(Reason::AgentOut(from))));
+                }
+                // The step is made again with the project manager's account read.
+                Some(Pace::Reads(job)) => return Ok(Some(Begin::Reads(job))),
+                Some(Pace::Held(_) | Pace::StillHeld(_)) | None => {}
+            }
+        }
+        self.pm_agent_back(issue);
         let from_finish = own.map(|pick| pick.finish);
         let to = match self.first_unpaced(picks.iter().map(|pick| &pick.agent), Scope::Turn)? {
             Walked::Opens(to) if to != from => to,
@@ -70,7 +85,7 @@ impl Runner {
     // Hands the current work item to `to` on a session of its own, with a note
     // that says `why`, or None when kelpie cannot draw a session id. A `refused`
     // item that holds a note from an earlier handoff has `why` added to it.
-    pub(in crate::runner::turn) fn move_item(
+    pub(in crate::runner) fn move_item(
         &mut self,
         to: AgentName,
         from_finish: Option<u64>,

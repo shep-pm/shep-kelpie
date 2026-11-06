@@ -14,6 +14,7 @@ use super::{Pick, Picked, StuckState, stuck_on};
 use crate::board::briefing::ticket_ref;
 use crate::runner::thread_replies::Settler;
 use crate::runner::{Answer as Ruled, RuleError, Runner};
+use crate::settings::AgentName;
 use crate::state::{PmHeld, RulingKind, StateError};
 use crate::ticket::TicketId;
 use crate::work_item::Phase;
@@ -92,7 +93,13 @@ impl Runner {
             let ticket = picked.issue;
             let named = ticket_ref(ticket);
             let unlisted = (picked.agent.as_ref()).filter(|a| !implementers.contains(a));
-            if picks.len() >= slots {
+            // An item whose agent is out takes no slot, since it is not a ready issue.
+            if self.waiting_out(ticket).is_some() {
+                match self.pick_waiting(picked, &implementers)? {
+                    Ok(done) => acted.push(done),
+                    Err(why) => dropped.push(why),
+                }
+            } else if picks.len() >= slots {
                 dropped.push(format!(
                     "pick {named}: only {slots} can start from this wake"
                 ));
@@ -183,10 +190,16 @@ impl Runner {
             )));
         };
         let now = self.ports.clock.now();
-        let done = match (stuck, action) {
+        let done = match (&stuck, action) {
             (_, Action::Leave) => {
                 self.pm_left_alone(ticket, stuck, now);
                 format!("left {named} to resolve itself")
+            }
+            (StuckState::AgentOut(agent), action) => {
+                return Ok(Err(format!(
+                    "{} {named}: its agent {agent} is out, so name the agent to move it to in `pick`",
+                    action.as_str()
+                )));
             }
             (StuckState::Idle(..), action) => {
                 self.pm.left_alone.remove(&ticket);
@@ -197,7 +210,7 @@ impl Runner {
             }
             (StuckState::Ruling { id, .. }, action) => {
                 self.pm.left_alone.remove(&ticket);
-                if let Err(e) = self.settle(ticket, id, *action, why)? {
+                if let Err(e) = self.settle(ticket, *id, *action, why)? {
                     return Ok(Err(e));
                 }
                 match action {
@@ -207,6 +220,49 @@ impl Runner {
             }
         };
         Ok(Ok(done))
+    }
+
+    // What a `pick` entry for a work item whose agent is out did, or why it was
+    // dropped: the item moves to the agent it names, on a session of its own.
+    fn pick_waiting(
+        &mut self,
+        picked: &Picked,
+        implementers: &[AgentName],
+    ) -> Result<Result<String, String>, StateError> {
+        let ticket = picked.issue;
+        let named = ticket_ref(ticket);
+        let Some(item) = self.state.item(ticket) else {
+            return Ok(Err(format!("pick {named}: not a work item on the board")));
+        };
+        let Some(to) = picked.agent.clone() else {
+            return Ok(Err(format!(
+                "pick {named}: its agent is out, so the entry must name the agent to move it to"
+            )));
+        };
+        let from = item.agent.clone();
+        let why = if !implementers.contains(&to) {
+            format!("`{to}` is no implementer agent file `agents.allow` holds")
+        } else if item.left.contains(&to) {
+            format!("{named} already left `{to}`")
+        } else if to == from {
+            format!("`{to}` is the agent that is out")
+        } else {
+            let (focus, note) = (
+                self.focus,
+                "its agent was out, and the project manager named the next",
+            );
+            let moved = self
+                .on(Some(ticket))
+                .move_item(to.clone(), None, 0, note, false);
+            self.on(focus);
+            let Some(report) = moved? else {
+                return Ok(Err(format!("pick {named}: kelpie cannot move it just now")));
+            };
+            self.pm_agent_back(ticket);
+            self.started.push(report);
+            return Ok(Ok(format!("moved {named} from {from} to {to}")));
+        };
+        Ok(Err(format!("pick {named}: {why}")))
     }
 
     /// Settles a work item whose idle call the project manager had ended,
@@ -291,6 +347,9 @@ impl Runner {
                 id,
                 raised: ruling.raised,
             });
+        }
+        if let Some(out) = self.waiting_out(ticket) {
+            return Some(StuckState::AgentOut(out.agent.clone()));
         }
         let watched = self.flights.watched(ticket)?;
         watched.idle.then_some(StuckState::Idle(watched.started))

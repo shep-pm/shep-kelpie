@@ -13,6 +13,7 @@ use serde::Serialize;
 
 use crate::ports::Timestamp;
 use crate::runner::report::{Begin, StepReport};
+use crate::settings::AgentName;
 use crate::ticket::TicketId;
 
 use super::ticket_name;
@@ -40,6 +41,8 @@ pub(in crate::runner) enum Reason {
     /// Its build folder or the disk is still past a `builds` limit after the
     /// turn's cache was pruned, in the reading's words
     Builds(String),
+    /// Its agent is out, and the project manager's next pick names the one after
+    AgentOut(AgentName),
 }
 
 impl Reason {
@@ -57,6 +60,9 @@ impl Reason {
             }
             Self::Attached => "attached by the maintainer, so no turn starts".into(),
             Self::Builds(why) => format!("held by the `builds` limits: {why}"),
+            Self::AgentOut(agent) => format!(
+                "its agent {agent} is out, so the turn waits for the project manager to name the next"
+            ),
         }
     }
 }
