@@ -100,6 +100,20 @@ pub fn read_answer(wants: Wants, words: &str) -> Result<Answer, String> {
     }
 }
 
+/// Whether `words` are free text, which a project with a project manager
+/// reads as words to it: they open with none of a number, `yes`, `no`,
+/// `rework`, `rerun`, `restore` or `pm`
+pub(super) fn is_free_text(words: &str) -> bool {
+    let Some(first) = words.split_whitespace().next() else {
+        return false;
+    };
+    let first = first.trim_start_matches('#');
+    first.parse::<TicketId>().is_err()
+        && !["yes", "no", "rework", "rerun", "restore", "pm"]
+            .iter()
+            .any(|word| first.eq_ignore_ascii_case(word))
+}
+
 impl Answer {
     /// `rule`'s params for this answer to ruling `id`
     pub fn params(&self, id: TicketId) -> String {
@@ -240,6 +254,41 @@ mod tests {
         assert_eq!(read("answer use it"), Ok(Answer::Text("use it".into())));
         assert_eq!(read("answer"), Ok(Answer::Text("answer".into())));
         assert!(read("  ").is_err());
+    }
+
+    #[test]
+    fn free_text_is_what_no_number_or_answer_word_opens() {
+        for text in [
+            "Why is this one so large?",
+            "looks good to me",
+            "maybe",
+            "nope, not this",
+            "No, it is wrong",
+            "yesterday it passed",
+            "71x is wrong",
+            "k",
+            "please rerun it",
+        ] {
+            assert!(is_free_text(text), "{text:?}");
+        }
+        for text in [
+            "71 looks wrong",
+            "#71 looks wrong",
+            "k12 yes",
+            "yes",
+            "Yes please",
+            "no",
+            "rework split it",
+            "rerun",
+            "restore",
+            "pm recommend",
+            "  PM options",
+            "yes\nand more",
+            "",
+            "   ",
+        ] {
+            assert!(!is_free_text(text), "{text:?}");
+        }
     }
 
     #[test]

@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 
 use self::sort::{Left, Request, Sieve, Sorted, sort};
 use super::Runner;
+use super::pm::held_line;
 use super::report::Begin;
 use super::review_bot::Answered;
 use super::ruling::needs_pass;
@@ -72,10 +73,18 @@ impl Runner {
         let mut own: BTreeSet<u64> = self.state.posted.iter().copied().collect();
         own.extend(self.posted.borrow().iter().copied());
         let left = self.ruling_replies(number);
+        // What the maintainer writes is the project manager's to read, where
+        // one is named and the maintainer's login is known without asking
+        let maintainer = self
+            .agents
+            .pm
+            .as_ref()
+            .and_then(|_| self.known_maintainer());
         let sieve = Sieve {
             talked: &item.talked,
             own: &own,
             left: &left,
+            maintainer: maintainer.as_deref(),
             quiet: !item.talked.read && (item.adopted || item.rework || item.talked.quiet),
         };
         let sorted = sort(&talk, &sieve);
@@ -102,7 +111,9 @@ impl Runner {
     }
 
     // The logins of the people a pending ruling on the pull request asks to
-    // reply in its thread, where kelpie's App reads those replies.
+    // reply in its thread, where kelpie's App reads those replies. With a
+    // project manager named no comment withdraws a merge ruling: free text
+    // is held for it, and the ruling waits for an answer.
     fn ruling_replies(&self, number: u64) -> Vec<Left> {
         if !self.app_covers() {
             return Vec::new();
@@ -114,7 +125,8 @@ impl Runner {
                 Some(Left {
                     login: heard.mentions.clone(),
                     takes_text: Wants::of(&r.kind) == Wants::Answer,
-                    merge: matches!(r.kind, RulingKind::Merge { .. }),
+                    merge: matches!(r.kind, RulingKind::Merge { .. }) && self.agents.pm.is_none(),
+                    after: self.agents.pm.as_ref().map(|_| heard.comment),
                 })
             })
             .collect()
@@ -134,10 +146,32 @@ impl Runner {
         for (thread, id) in &sorted.threads {
             after.hear_thread(thread, *id);
         }
-        if after == before {
+        if after == before && sorted.held.is_empty() {
             return Ok(());
         }
-        self.update(|item| item.talked = after)
+        // The words are held in the save that marks them heard
+        let told = self.held_lines(sorted);
+        let mut next = self.state.clone();
+        if let Some(item) = self.current_in(&mut next) {
+            item.talked = after;
+        }
+        next.pm_told.extend(told);
+        self.save(next)
+    }
+
+    // The entries for the project manager's next wake that the comments held
+    // in `sorted` make, each naming the ruling that waits on the pull request
+    // if one does.
+    fn held_lines(&self, sorted: &Sorted) -> Vec<String> {
+        let Some(number) = self.current().and_then(|item| item.pull_request) else {
+            return Vec::new();
+        };
+        let ruling = (self.state.rulings.iter())
+            .find(|r| r.pull_request == Some(number))
+            .map(|r| r.id);
+        (sorted.held.iter())
+            .map(|(id, text)| held_line(number, *id, ruling, text))
+            .collect()
     }
 
     // Sends the requests to the worker as its next turn, in place of the
@@ -155,6 +189,7 @@ impl Runner {
         let (phase, noted_from, parked) = self.after_comments(at);
         let prompt = prompt(number, &sorted.requests);
         let ids: Vec<String> = sorted.requests.iter().map(|r| r.id.clone()).collect();
+        let told = self.held_lines(sorted);
         let mut next = self.state.clone();
         next.rulings.retain(|r| Some(r.id) != parked);
         let item = self
@@ -177,6 +212,7 @@ impl Runner {
         item.noted_from = noted_from.or(item.noted_from.take());
         item.late_from = None;
         let issue = item.issue;
+        next.pm_told.extend(told);
         self.save(next)?;
         let Some(id) = parked else {
             return Ok(Some(Begin::Idle));
@@ -233,6 +269,7 @@ impl Runner {
             (_, Some(Phase::Review(_))) => Resume::ReviewFirst,
             _ => Resume::Nothing,
         };
+        let told = self.held_lines(sorted);
         let mut next = self.state.clone();
         next.rulings.retain(|r| Some(r.id) != parked);
         let item = self
@@ -246,6 +283,7 @@ impl Runner {
         }
         item.noted_from = noted_from.or(item.noted_from.take());
         let issue = item.issue;
+        next.pm_told.extend(told);
         self.save(next)?;
         if let Some(id) = parked {
             self.late_reads.remove(&issue);

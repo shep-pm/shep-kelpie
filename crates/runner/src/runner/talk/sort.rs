@@ -6,6 +6,7 @@ use super::COMMENT_REQUEST;
 use crate::ports::{Remark, Standing, Talk};
 use crate::runner::review_bot::is_reply;
 use crate::runner::thread_replies::is_reply_words;
+use crate::runner::words::is_free_text;
 use crate::work_item::Talked;
 
 /// What was written, to be sent to the worker as one numbered request
@@ -30,6 +31,9 @@ pub(super) struct Sorted {
     pub comments: Vec<u64>,
     /// Each review thread handled, and the latest comment of it
     pub threads: Vec<(String, u64)>,
+    /// The conversation comments the maintainer wrote that are the project
+    /// manager's to read, each with its id and what it says
+    pub held: Vec<(u64, String)>,
 }
 
 /// A login a pending ruling asks to reply
@@ -40,6 +44,10 @@ pub(super) struct Left {
     /// Whether it is a merge ruling, whose thread a plain comment is the
     /// worker's to read in
     pub merge: bool,
+    /// With a project manager named, the id of the comment the ruling's
+    /// thread reads after: a comment up to it is older than that read, which
+    /// never sees it, so it is sorted here
+    pub after: Option<u64>,
 }
 
 /// What a read is sorted by
@@ -50,6 +58,9 @@ pub(super) struct Sieve<'a> {
     /// The logins a pending ruling asks to reply in its thread, whose replies
     /// that thread reads
     pub left: &'a [Left],
+    /// The maintainer's login, where a project manager is named to read what
+    /// they write in the conversation, and none where it is not
+    pub maintainer: Option<&'a str>,
     /// Whether what is already written is only noted: a pull request kelpie
     /// did not open has comments the worker has seen
     pub quiet: bool,
@@ -72,13 +83,22 @@ pub(super) fn sort(talk: &Talk, sieve: &Sieve<'_>) -> Sorted {
         }
         let aimed_at_a_ruling = sieve.left.iter().any(|left| {
             left.login.eq_ignore_ascii_case(&comment.author)
-                && (left.takes_text || !left.merge || is_reply_words(&comment.body))
+                && (left.takes_text
+                    || (!left.merge && left.after.is_none_or(|after| comment.id > after))
+                    || is_reply_words(&comment.body))
         });
         if aimed_at_a_ruling {
             continue;
         }
         sorted.comments.push(comment.id);
-        if !sieve.quiet {
+        if sieve.quiet {
+            continue;
+        }
+        let theirs =
+            (sieve.maintainer).is_some_and(|login| login.eq_ignore_ascii_case(&comment.author));
+        if theirs && is_free_text(&comment.body) {
+            sorted.held.push((comment.id, comment.body.clone()));
+        } else {
             sorted.requests.push(Request {
                 id: format!("{COMMENT_REQUEST}{}", comment.id),
                 place: None,
@@ -136,4 +156,103 @@ fn ignored(remark: &Remark, on: &str) -> String {
         "ignored comment {} by {} on {on}: {who} is not trusted to ask for changes",
         remark.id, remark.author
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn written(id: u64, body: &str) -> Remark {
+        Remark {
+            id,
+            author: "octocat".into(),
+            standing: Standing::Writer,
+            body: body.into(),
+        }
+    }
+
+    fn sorted_with(after: Option<u64>, comments: Vec<Remark>) -> Sorted {
+        let talk = Talk {
+            comments,
+            threads: Vec::new(),
+        };
+        let left = [Left {
+            login: "octocat".into(),
+            takes_text: false,
+            merge: false,
+            after,
+        }];
+        let sieve = Sieve {
+            talked: &Talked::default(),
+            own: &BTreeSet::new(),
+            left: &left,
+            maintainer: Some("octocat"),
+            quiet: false,
+        };
+        sort(&talk, &sieve)
+    }
+
+    #[test]
+    fn a_maintainer_comment_older_than_a_rulings_place_is_held_not_skipped() {
+        let sorted = sorted_with(
+            Some(10),
+            vec![
+                written(7, "Why is this one so large?"),
+                written(11, "Later"),
+            ],
+        );
+
+        assert_eq!(
+            sorted.held,
+            vec![(7, "Why is this one so large?".to_owned())]
+        );
+        assert_eq!(
+            sorted.comments,
+            vec![7],
+            "the later one is left to its thread"
+        );
+    }
+
+    // No ruling waits, so every comment is the comment round's to sort
+    fn sorted_bare(maintainer: Option<&str>, body: &str) -> Sorted {
+        let talk = Talk {
+            comments: vec![written(7, body)],
+            threads: Vec::new(),
+        };
+        let sieve = Sieve {
+            talked: &Talked::default(),
+            own: &BTreeSet::new(),
+            left: &[],
+            maintainer,
+            quiet: false,
+        };
+        sort(&talk, &sieve)
+    }
+
+    #[test]
+    fn a_maintainer_comment_is_held_unless_it_opens_with_an_answer_word() {
+        let held = sorted_bare(Some("octocat"), "Why is the cache a map?");
+        assert_eq!(held.held.len(), 1);
+        assert_eq!(held.requests, Vec::new());
+        for text in ["rerun the checks", "restore it", "pm recommend", "71 yes"] {
+            let sorted = sorted_bare(Some("octocat"), text);
+            assert_eq!(sorted.held, Vec::new(), "{text}");
+            assert_eq!(sorted.requests.len(), 1, "{text}");
+        }
+    }
+
+    #[test]
+    fn with_no_project_manager_a_maintainer_comment_is_a_request() {
+        let sorted = sorted_bare(None, "Why is the cache a map?");
+        assert_eq!(sorted.held, Vec::new());
+        assert_eq!(sorted.requests.len(), 1);
+    }
+
+    #[test]
+    fn with_no_project_manager_a_comment_under_a_yes_or_no_ruling_is_left_to_its_thread() {
+        let sorted = sorted_with(None, vec![written(7, "Why is this one so large?")]);
+
+        assert_eq!(sorted.held, Vec::new());
+        assert_eq!(sorted.comments, Vec::<u64>::new());
+    }
 }
