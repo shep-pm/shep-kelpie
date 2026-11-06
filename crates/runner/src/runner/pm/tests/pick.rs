@@ -1,6 +1,7 @@
 //! A project manager's pick through a board that changes before dispatch
 //! takes it
 
+use std::num::NonZeroU32;
 use std::sync::Mutex;
 
 use serde_json::{Value, json};
@@ -9,6 +10,7 @@ use super::{PICK_12, answered, pm_on, pm_seen, step_until, with_pm};
 use crate::agents::Tier;
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Rig, Scripted, ticket};
+use crate::work_item::ReviewPlan;
 
 // A project with #9 and #12 ready, whose project manager picked #12 and has
 // not been stepped past it.
@@ -448,4 +450,50 @@ fn a_picks_light_tag_is_kept_on_its_work_item() {
     let held = runner.lock().unwrap();
     assert!(held.state.item(ticket(12)).unwrap().pm_light);
     assert!(!held.state.item(ticket(14)).unwrap().pm_light);
+}
+
+#[test]
+fn a_picks_review_plan_is_kept_on_its_work_item() {
+    let (rig, runner) = three_slots();
+    rig.claude.script([Scripted::Say(
+        "```json\n{\"pick\": [{\"issue\": 12, \"review\": {\"reads\": 2, \"about\": \"the rollback \
+         path\"}}, {\"issue\": 14, \"review\": {\"reads\": 1}}], \"why\": \"w\"}\n```",
+    )]);
+    answered(step(&runner).unwrap());
+
+    step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+    step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+
+    let held = runner.lock().unwrap();
+    let plan = |n| held.state.item(ticket(n)).unwrap().review_plan.clone();
+    assert_eq!(
+        plan(12),
+        Some(ReviewPlan {
+            reads: NonZeroU32::new(2).unwrap(),
+            about: Some("the rollback path".to_owned()),
+        })
+    );
+    assert_eq!(
+        plan(14),
+        Some(ReviewPlan {
+            reads: NonZeroU32::new(1).unwrap(),
+            about: None,
+        })
+    );
+}
+
+#[test]
+fn a_pick_with_no_review_plan_leaves_its_work_item_with_none() {
+    let (rig, runner) = three_slots();
+    rig.claude.script([Scripted::Say(
+        "```json\n{\"pick\": [12, {\"issue\": 14, \"tier\": \"light\"}], \"why\": \"w\"}\n```",
+    )]);
+    answered(step(&runner).unwrap());
+
+    step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+    step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+
+    let held = runner.lock().unwrap();
+    assert_eq!(held.state.item(ticket(12)).unwrap().review_plan, None);
+    assert_eq!(held.state.item(ticket(14)).unwrap().review_plan, None);
 }
