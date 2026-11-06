@@ -51,9 +51,12 @@ mod tests {
     use super::super::several::{at_review, reviewer_models, reviewers_until_ci, two_local};
     use crate::agents::Tier;
     use crate::ports::{AgentError, Finding, Role, Severity};
-    use crate::runner::{Runner, StepReport, step};
-    use crate::settings::Harness;
-    use crate::test::{CALL_PATIENCE, Rig, Scripted, ScriptedRound};
+    use crate::ports::{Clock, Timestamp};
+    use crate::runner::flight::advance;
+    use crate::runner::{Pass, Runner, StepReport, step};
+    use crate::settings::{AgentName, Harness};
+    use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, ScriptedRound};
+    use crate::work_item::BotSkipped;
     use crate::work_item::{Heavier, Lighter, ReviewPlan, ReviewWeight};
 
     // `two_local`'s candidates `mine`, `other` and `claude` on a project that names `agents.pm`,
@@ -172,14 +175,21 @@ mod tests {
         rig.reviewer.script([ScriptedRound::Findings(found)]);
         rig.claude.script([Scripted::Push("fixed.txt", "fixed\n")]);
         step(runner).unwrap(); // the reviewer reads
+        if fixed {
+            until_fixed(runner);
+        }
+    }
+
+    // Steps until the worker's fix turn, which runs on its own thread, ends.
+    fn until_fixed(runner: &Mutex<Runner>) {
         let deadline = std::time::Instant::now() + CALL_PATIENCE;
-        while fixed && std::time::Instant::now() < deadline {
-            // The worker's fix turn runs on its own thread.
+        while std::time::Instant::now() < deadline {
             match step(runner).unwrap() {
-                Some(StepReport::FixPushed { .. } | StepReport::NitsDeclined { .. }) => break,
+                Some(StepReport::FixPushed { .. } | StepReport::NitsDeclined { .. }) => return,
                 _ => std::thread::yield_now(),
             }
         }
+        panic!("the fix turn never ended");
     }
 
     // What the project manager was asked about a round's findings, per call.
@@ -365,5 +375,124 @@ mod tests {
             line,
             "let one more reviewer read #7, which makes 2 reads: the lock is still racy"
         );
+    }
+
+    #[test]
+    fn a_finding_on_a_read_the_plan_still_owes_asks_nothing() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+        plan(&runner, 2, None);
+        read_and_fixed(&rig, &runner, found(Severity::High));
+
+        reviewers_until_ci(&rig, &runner);
+
+        assert!(asked(&rig).is_empty());
+        assert_eq!(rig.reviewer.seen().len(), 2, "the second read ran");
+    }
+
+    #[test]
+    fn a_finding_with_no_candidate_left_asks_nothing() {
+        let rig = pm_project();
+        rig.allow(&["sonnet-high", "mine", "pm"]);
+        let runner = at_review(&rig, "work.txt");
+        read_and_fixed(&rig, &runner, found(Severity::High));
+
+        reviewers_until_ci(&rig, &runner);
+
+        past_review(&rig, &runner);
+        assert!(asked(&rig).is_empty());
+    }
+
+    #[test]
+    fn a_pass_kept_in_review_by_a_skipped_bot_still_asks() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+        rig.claude.script_for(Role::Pm, [answer(NO)]);
+        rig.reviewer
+            .script([ScriptedRound::Findings(found(Severity::High))]);
+        rig.claude.script([Scripted::Push("fixed.txt", "fixed\n")]);
+        step(&runner).unwrap(); // the reviewer reads
+        let bot = AgentName::kelpies("coderabbit");
+        let opens = Timestamp(rig.clock.now().0 + 60);
+        let skipped = BotSkipped::Window {
+            reviewer: bot,
+            opens,
+        };
+        runner.lock().unwrap().state.work_items[0]
+            .bots_skipped
+            .push(skipped);
+        until_fixed(&runner);
+
+        until_answered(&runner);
+
+        assert_eq!(asked(&rig).len(), 1);
+    }
+
+    // The ask's call begins and holds, with the item's fix turn done.
+    fn asked_and_held(rig: &Rig, runner: &Mutex<Runner>) -> Hold {
+        let held = Hold::default();
+        rig.claude
+            .script_for(Role::Pm, [Scripted::HoldThenSay(held.clone(), YES)]);
+        read_and_fixed(rig, runner, found(Severity::High));
+        assert!(matches!(advance(runner).unwrap(), Pass::Started));
+        assert!(held.entered(CALL_PATIENCE), "the wake never began");
+        held
+    }
+
+    #[test]
+    fn an_item_waits_in_review_while_the_ask_is_out() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+        let held = asked_and_held(&rig, &runner);
+
+        assert!(matches!(advance(&runner).unwrap(), Pass::Idle));
+
+        assert_eq!(phase(&rig, &runner), "review");
+        assert_eq!(
+            rig.reviewer.seen().len(),
+            1,
+            "no one reads before the answer"
+        );
+        held.release();
+        until_answered(&runner);
+        reviewers_until_ci(&rig, &runner);
+        assert_eq!(rig.reviewer.seen().len(), 2, "the yes ran one more");
+    }
+
+    #[test]
+    fn a_restart_with_the_ask_out_ends_the_pass_at_ci() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+        let held = asked_and_held(&rig, &runner);
+        held.release();
+        drop(runner);
+
+        let runner = rig.open().unwrap();
+
+        reviewers_until_ci(&rig, &runner);
+        assert_eq!(rig.reviewer.seen().len(), 1, "no one read again");
+        past_review(&rig, &runner);
+    }
+
+    #[test]
+    fn a_draining_runner_asks_nothing() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+        let fixing = Hold::default();
+        let push = Scripted::Push("fixed.txt", "fixed\n");
+        rig.claude
+            .script([Scripted::Queued(fixing.clone(), Box::new(push))]);
+        rig.reviewer
+            .script([ScriptedRound::Findings(found(Severity::High))]);
+        step(&runner).unwrap(); // the reviewer reads
+        while !matches!(advance(&runner).unwrap(), Pass::Started) {}
+        assert!(fixing.entered(CALL_PATIENCE), "the fix turn never began");
+        rig.ask(&runner, "drain", None);
+        fixing.release();
+
+        until_fixed(&runner);
+
+        left_alone(&runner);
+        assert!(asked(&rig).is_empty());
     }
 }
