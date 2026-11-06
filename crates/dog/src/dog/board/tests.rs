@@ -5,9 +5,10 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use super::*;
+use crate::agents::Tier;
 use crate::api_refusal::{CREDIT_RECHECK_SECS, Refusal};
 use crate::dog::availability::{Availability, Readers, Sources, read};
-use crate::lease::door::PickAsk;
+use crate::lease::door::{Pick, PickAsk};
 use crate::ports::{Meter, Timestamp, Utilization};
 use crate::settings::{Account, Gateway, GatewayName, Gateways};
 use crate::test::{EPOCH, FakeClock, FakeMeter, LeaseReads, utilization, write_in};
@@ -183,7 +184,7 @@ async fn a_plan_whose_week_is_spent_waits_until_the_week_resets() {
         agents: ["on-claude", "on-codex"].map(AgentName::kelpies).to_vec(),
         leave_out: vec![],
     };
-    let picks = pick::answer(&view, &shown, &ask, now);
+    let picks = ranked_answer(&view, &shown, &ask, now);
 
     assert_eq!(status["on-claude"]["wait"], week_resets);
     assert_eq!(status["on-codex"]["wait"], 0);
@@ -247,6 +248,11 @@ fn plan_api_and_local(dir: &Path) -> Agents {
     Agents::load(dir).unwrap()
 }
 
+// What the asking side makes of the dog's answer: `pick::answer`, ranked with the ask's slack.
+fn ranked_answer(view: &View, shown: &Availability, ask: &PickAsk, now: Timestamp) -> Vec<Pick> {
+    crate::agent_board::rank(pick::answer(view, shown, ask, now), ask.slack)
+}
+
 // Every candidate is within the slack, so cost alone orders them.
 fn ask_all() -> PickAsk {
     PickAsk {
@@ -269,7 +275,7 @@ async fn an_api_agent_is_not_ranked_as_a_local_model() {
     refresh(&board, &home);
     let shown = seen(&agents, &Gateways::default(), 10).await;
 
-    let picks = pick::answer(&lock(&board).view(), &shown, &ask_all(), Timestamp(EPOCH));
+    let picks = ranked_answer(&lock(&board).view(), &shown, &ask_all(), Timestamp(EPOCH));
 
     let order: Vec<_> = picks.iter().map(|p| p.agent.as_str()).collect();
     assert_eq!(
@@ -293,7 +299,7 @@ async fn an_api_agent_waits_nothing_while_the_plan_is_spent() {
     let now = Timestamp(EPOCH);
 
     let status = Board::new(&agents).view().status(&shown, now);
-    let picks = pick::answer(&Board::new(&agents).view(), &shown, &ask_all(), now);
+    let picks = ranked_answer(&Board::new(&agents).view(), &shown, &ask_all(), now);
 
     assert_eq!(status["plan"]["wait"], 7 * 86_400, "the plan's week resets");
     assert_eq!(status["billed"]["wait"], 0);
@@ -425,7 +431,7 @@ fn ask_of(agents: &[&'static str]) -> PickAsk {
     }
 }
 
-fn order(picks: &[crate::lease::door::Pick]) -> Vec<&str> {
+fn order(picks: &[Pick]) -> Vec<&str> {
     picks.iter().map(|p| p.agent.as_str()).collect()
 }
 
@@ -446,8 +452,8 @@ async fn an_api_agent_ranks_as_any_other() {
         ..ask.clone()
     };
 
-    let picks = pick::answer(&view, &shown, &ask, Timestamp(EPOCH));
-    let one = pick::answer(&view, &shown, &pinned, Timestamp(EPOCH));
+    let picks = ranked_answer(&view, &shown, &ask, Timestamp(EPOCH));
+    let one = ranked_answer(&view, &shown, &pinned, Timestamp(EPOCH));
 
     assert_eq!(
         order(&picks),
@@ -481,8 +487,8 @@ async fn a_listed_api_agent_ranks_first_and_an_unlisted_one_ranks_as_any_other()
     let (unlisted, _) = priced_plans(dir.path(), &["plan-b"]).await;
     let ask = ask_of(&["plan-a", "plan-b", "billed"]);
 
-    let first = pick::answer(&listed, &shown, &ask, Timestamp(EPOCH));
-    let other = pick::answer(&unlisted, &shown, &ask, Timestamp(EPOCH));
+    let first = ranked_answer(&listed, &shown, &ask, Timestamp(EPOCH));
+    let other = ranked_answer(&unlisted, &shown, &ask, Timestamp(EPOCH));
 
     assert_eq!(order(&first), ["billed", "plan-a", "plan-b"]);
     assert_eq!(
@@ -504,7 +510,7 @@ fn the_list_orders_reviewers_as_it_orders_implementers() {
     let ask = ask_of(&["read-a", "read-b"]);
     let ranked = |prefer: &[&'static str]| {
         let view = Board::new(&agents).preferring(names(prefer)).view();
-        let picks = pick::answer(&view, &Availability::default(), &ask, Timestamp(EPOCH));
+        let picks = ranked_answer(&view, &Availability::default(), &ask, Timestamp(EPOCH));
         order(&picks)
             .iter()
             .map(|a| (*a).to_owned())
@@ -531,8 +537,8 @@ async fn a_new_prefer_list_orders_the_next_pick_and_not_one_already_read() {
     lock(&board).set_prefer(names(&["plan-b"]));
     let after = lock(&board).view();
 
-    let old = pick::answer(&before, &shown, &ask, Timestamp(EPOCH));
-    let new = pick::answer(&after, &shown, &ask, Timestamp(EPOCH));
+    let old = ranked_answer(&before, &shown, &ask, Timestamp(EPOCH));
+    let new = ranked_answer(&after, &shown, &ask, Timestamp(EPOCH));
     assert_eq!(order(&old), ["billed", "plan-a", "plan-b"]);
     assert_eq!(order(&new), ["plan-b", "plan-a", "billed"]);
 }
@@ -561,8 +567,8 @@ async fn new_agents_order_the_next_pick_and_not_one_already_read() {
     lock(&board).set_agents(&Agents::load(&folder).unwrap());
     let after = lock(&board).view();
 
-    let old = pick::answer(&before, &shown, &ask, Timestamp(EPOCH));
-    let new = pick::answer(&after, &shown, &ask, Timestamp(EPOCH));
+    let old = ranked_answer(&before, &shown, &ask, Timestamp(EPOCH));
+    let new = ranked_answer(&after, &shown, &ask, Timestamp(EPOCH));
     assert_eq!(order(&old), ["billed", "plan-a", "plan-b"]);
     assert_eq!(
         order(&new),
@@ -580,7 +586,7 @@ async fn a_handoff_ask_leaves_out_the_agent_left_and_takes_the_next_listed() {
         ..ask_of(&["plan-a", "plan-b", "billed"])
     };
 
-    let picks = pick::answer(&view, &shown, &ask, Timestamp(EPOCH));
+    let picks = ranked_answer(&view, &shown, &ask, Timestamp(EPOCH));
 
     assert_eq!(order(&picks), ["plan-a", "billed"]);
 }
@@ -591,7 +597,7 @@ async fn a_listed_name_with_no_agent_file_is_ignored_and_the_rest_rank() {
     let (view, shown) = priced_plans(dir.path(), &["ghost", "billed", "gone"]).await;
     let ask = ask_of(&["plan-a", "plan-b", "billed"]);
 
-    let picks = pick::answer(&view, &shown, &ask, Timestamp(EPOCH));
+    let picks = ranked_answer(&view, &shown, &ask, Timestamp(EPOCH));
 
     assert_eq!(order(&picks), ["billed", "plan-a", "plan-b"]);
 }
@@ -620,14 +626,12 @@ async fn a_held_api_agent_waits_until_the_hold_ends_and_ranks_behind_agents_that
     let mut shown = seen(&agents, &Gateways::default(), 10).await;
     let now = Timestamp(EPOCH);
     let view = Board::new(&agents).view();
-    let before = pick::answer(&view, &shown, &ask_soon(), now);
-    let billed = |picks: &[crate::lease::door::Pick]| {
-        picks.iter().find(|p| p.agent.as_str() == "billed").cloned()
-    };
+    let before = ranked_answer(&view, &shown, &ask_soon(), now);
+    let billed = |picks: &[Pick]| picks.iter().find(|p| p.agent.as_str() == "billed").cloned();
     assert_eq!(billed(&before).unwrap().wait, 0);
 
     shown.refused(limit_hit(), now);
-    let picks = pick::answer(&view, &shown, &ask_soon(), now);
+    let picks = ranked_answer(&view, &shown, &ask_soon(), now);
     let status = view.status(&shown, now);
 
     assert_eq!(billed(&picks).unwrap().wait, HELD_FOR);
@@ -637,7 +641,7 @@ async fn a_held_api_agent_waits_until_the_hold_ends_and_ranks_behind_agents_that
         pin: Some(AgentName::kelpies("billed")),
         ..ask_soon()
     };
-    let one = pick::answer(&view, &shown, &pinned, now);
+    let one = ranked_answer(&view, &shown, &pinned, now);
     assert_eq!(
         order(&one),
         ["billed"],
@@ -645,7 +649,7 @@ async fn a_held_api_agent_waits_until_the_hold_ends_and_ranks_behind_agents_that
     );
 
     let ended = Timestamp(EPOCH + HELD_FOR);
-    let after = pick::answer(&view, &shown, &ask_soon(), ended);
+    let after = ranked_answer(&view, &shown, &ask_soon(), ended);
     assert_eq!(billed(&after).unwrap().wait, 0, "the hold has ended");
 }
 
@@ -656,7 +660,7 @@ async fn a_short_hold_does_not_lift_an_api_agent_over_agents_that_can_start() {
     let mut shown = seen(&agents, &Gateways::default(), 10).await;
     let now = Timestamp(EPOCH);
     let view = Board::new(&agents).view();
-    let free = pick::answer(&view, &shown, &ask_all(), now);
+    let free = ranked_answer(&view, &shown, &ask_all(), now);
     assert_eq!(order(&free), ["local", "billed", "plan"], "ranked on tier");
 
     shown.refused(
@@ -665,14 +669,14 @@ async fn a_short_hold_does_not_lift_an_api_agent_over_agents_that_can_start() {
         },
         now,
     );
-    let held = pick::answer(&view, &shown, &ask_all(), now);
+    let held = ranked_answer(&view, &shown, &ask_all(), now);
     assert_eq!(
         order(&held),
         ["local", "plan", "billed"],
         "inside the slack it still goes after both that can start"
     );
 
-    let after = pick::answer(&view, &shown, &ask_all(), Timestamp(EPOCH + 60));
+    let after = ranked_answer(&view, &shown, &ask_all(), Timestamp(EPOCH + 60));
     assert_eq!(
         order(&after),
         ["local", "billed", "plan"],
@@ -696,7 +700,7 @@ async fn a_hold_reaches_an_api_reviewer_as_it_does_an_implementer() {
     shown.refused(limit_hit(), Timestamp(EPOCH));
     let ask = ask_of(&["read-api", "read-plan"]);
 
-    let picks = pick::answer(&Board::new(&agents).view(), &shown, &ask, Timestamp(EPOCH));
+    let picks = ranked_answer(&Board::new(&agents).view(), &shown, &ask, Timestamp(EPOCH));
 
     let waits: Vec<_> = picks.iter().map(|p| (p.agent.as_str(), p.wait)).collect();
     assert_eq!(waits, [("read-plan", 0), ("read-api", HELD_FOR)]);
@@ -714,4 +718,42 @@ async fn a_plan_agent_is_not_held_by_an_api_refusal() {
     assert_eq!(status["plan"]["wait"], 0);
     assert_eq!(status["local"]["wait"], 0);
     assert_eq!(status["billed"]["wait"], CREDIT_RECHECK_SECS);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_answer_reports_each_agents_cost_tier_and_place_and_ranks_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = plan_api_and_local(&dir.path().join("agents"));
+    let home = dir.path().join("kelpie");
+    finished(&home, "koji", ("plan", "fix"), 5, (600, 3.0));
+    let board = Mutex::new(Board::new(&agents).preferring(names(&["billed"])));
+    refresh(&board, &home);
+    let mut shown = seen(&agents, &Gateways::default(), 10).await;
+    let now = Timestamp(EPOCH);
+    shown.refused(limit_hit(), now);
+
+    let picks = pick::answer(&lock(&board).view(), &shown, &ask_all(), now);
+
+    // A turn takes the hour of an agent with no history.
+    let plan = Pick {
+        cost_usd: Some(3.0),
+        tier: Some(Tier::Heavy),
+        ..Pick::new(AgentName::kelpies("plan"), 600, 0)
+    };
+    let local = Pick {
+        tier: Some(Tier::Light),
+        local: true,
+        ..Pick::new(AgentName::kelpies("local"), 3600, 0)
+    };
+    let billed = Pick {
+        tier: Some(Tier::Light),
+        held: true,
+        listed: Some(0),
+        ..Pick::new(AgentName::kelpies("billed"), HELD_FOR + 3600, HELD_FOR)
+    };
+    assert_eq!(
+        picks,
+        [plan, local, billed],
+        "the dearer plan agent finishes first, ahead of the free local one and the listed, held one"
+    );
 }
