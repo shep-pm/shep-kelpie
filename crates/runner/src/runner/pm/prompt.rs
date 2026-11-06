@@ -3,6 +3,7 @@
 
 use std::fmt::Write as _;
 
+use super::maintainer::held_on;
 use super::red::short;
 use super::{Wake, diffs};
 use crate::board::briefing::ticket_ref;
@@ -137,6 +138,29 @@ macro_rules! answering {
          a public interface or the project's direction, and sends the ruling to the \
          maintainer with your option as the one you recommend. A ruling you give no \
          answer on goes to the maintainer as it stands."
+    };
+}
+
+/// The `said` key as the answer shows it, which a wake carrying the maintainer's
+/// held words shows, and none other
+macro_rules! said_key {
+    () => {
+        "\"said\": [{\"thread\": <the number the comment's heading gives after #>, \"call\": \"park\" | \"send-back\" | \"settle\" | \"none\", \"note\": \"<for send-back, what the worker is told>\", \"why\": \"<at most 300 characters, one line>\"}]"
+    };
+}
+
+/// What each `said` call does, shown with the `said` key
+macro_rules! saying {
+    () => {
+        "A comment of the maintainer's above is words to you, and it waits on your call. \
+         `send-back` sends the worker your `note` as its next turn, and where a ruling \
+         waits on the thread it answers it `no <note>`, which the maintainer can reopen. \
+         `park` stops the work item for the maintainer: the ruling stays, or a question \
+         is raised, and your `why` is posted there. `settle` accepts the review bot \
+         threads that hold a merge ruling and has CI looked at again. `none` makes no call. \
+         A merge is not a call: the maintainer's `yes` names it. Kelpie tells the \
+         maintainer in the thread what it cannot carry out, and the item waits for them. \
+         Name each thread once, and give no call on a thread you were told nothing on."
     };
 }
 
@@ -375,6 +399,14 @@ pub(super) fn wake(
             }
         }
     }
+    if told.iter().any(|line| held_on(line).is_some()) {
+        let _ = write!(
+            out,
+            "\nThe object takes this key as well:\n\n```\n{}\n```\n\n{}\n",
+            said_key!(),
+            saying!()
+        );
+    }
     out.push_str(&notes_note(notes));
     if wakes.iter().any(|w| matches!(w, Wake::Stuck { .. })) {
         out.push_str(RED);
@@ -567,6 +599,7 @@ mod tests {
     use super::*;
     use crate::ports::Timestamp;
     use crate::runner::pm::StuckState;
+    use crate::runner::pm::held_line;
     use crate::test::ticket;
 
     /// A board a test's wake carries, as kelpie writes it to `board.md`
@@ -606,6 +639,38 @@ mod tests {
             text.contains("or a list of them where the wake carried several"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn the_said_key_shows_only_on_a_wake_carrying_held_words() {
+        let held = held_line(71, 9, Some(ticket(71)), "Why so large?");
+        let told = |lines: &[String], fresh| {
+            wake(
+                "koji",
+                &[Wake::Told],
+                lines,
+                &[],
+                fresh,
+                &Notes::default(),
+                BOARD,
+            )
+        };
+        for fresh in [true, false] {
+            let plain = told(&["Hold #12 until the release.".into()], fresh);
+            let none = told(&[], fresh);
+            assert!(!plain.contains("\"said\""), "fresh {fresh}: {plain}");
+            assert!(!none.contains("\"said\""), "fresh {fresh}: {none}");
+            let with = told(&["Hold #12.".into(), held.clone()], fresh);
+            assert_eq!(with.matches("\"said\": [{\"thread\"").count(), 1, "{with}");
+            assert!(
+                with.contains("`send-back` sends the worker your `note`"),
+                "{with}"
+            );
+            assert!(
+                with.contains("> The maintainer's comment 9 on #71, under ruling 71:"),
+                "{with}"
+            );
+        }
     }
 
     #[test]

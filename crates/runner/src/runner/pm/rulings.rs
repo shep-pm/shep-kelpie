@@ -11,13 +11,14 @@ use std::collections::BTreeMap;
 
 use super::act::{WORDS, plain};
 use crate::pm_answer::PmAnswer;
-use crate::runner::Runner;
 use crate::runner::ruling;
 use crate::runner::thread_replies::Settler;
-use crate::runner::voice::{RECOMMENDS, SAYS, answer_for, brief, named, settled_comment};
+use crate::runner::voice::{RECOMMENDS, SAYS, answer_for, brief, chosen, named, settled_comment};
+use crate::runner::{Answer, RuleError, Runner};
 use crate::settings::{Merging, RulingName};
-use crate::state::{Ruling, RulingKind, Stuck};
+use crate::state::{Ruling, RulingKind, StateError, Stuck};
 use crate::ticket::TicketId;
+use crate::work_item::Phase;
 
 impl Runner {
     /// Whether the project manager answers `ruling` for the maintainer
@@ -158,6 +159,82 @@ impl Runner {
         Ok(())
     }
 
+    // Answers `ruling` with a no whose note is the worker's next turn, as the
+    // maintainer's words asked, and posts it as an answer of its own would be,
+    // for a `no <note>` to reopen. A kind whose no sends the worker nothing is
+    // refused, and the ruling waits.
+    pub(super) fn pm_sent_back(
+        &mut self,
+        ruling: &Ruling,
+        note: &str,
+        why: &str,
+    ) -> Result<String, String> {
+        no_sends_worker(&ruling.kind)?;
+        if note.is_empty() {
+            return Err("it gave no note for the worker".into());
+        }
+        let note = format!("(from the project manager, on the maintainer's words) {note}");
+        let ruled = Answer::No(note);
+        let key = chosen(&ruling.kind, &ruled).ok_or("the ruling lists no `no` to answer")?;
+        let id = ruling.id;
+        let by = Settler::Pm {
+            answer: "no, the worker is sent back with a note".to_owned(),
+            why: why.to_owned(),
+            unread: false,
+        };
+        match self.rule_by(id, ruled, by) {
+            Ok(()) => {}
+            Err(RuleError::State(e)) => return Err(format!("it could not be saved: {e}")),
+            Err(e) => return Err(format!("its answer could not be applied: {e}")),
+        }
+        let withdrawn = (self.threads_told(id)).is_some_and(|t| t.starts_with("is withdrawn"));
+        if !withdrawn {
+            self.post_answered(ruling, key);
+        }
+        Ok(format!("sent the worker back on ruling {id}: {why}"))
+    }
+
+    // Accepts the review bot threads that hold merge ruling `ruling`, withdraws it and has the
+    // work item parked on it look at CI again, as a yes would past those threads.
+    pub(super) fn pm_settled(&mut self, ruling: &Ruling, why: &str) -> Result<String, String> {
+        let RulingKind::Merge { held_by, .. } = &ruling.kind else {
+            return Err("only a merge ruling held by review bot threads is settled".into());
+        };
+        if held_by.is_empty() {
+            return Err("no review bot thread holds it".into());
+        }
+        let id = ruling.id;
+        let parked = |phase: &Phase| *phase == Phase::Ruling { id };
+        let Some(issue) =
+            (self.state.work_items.iter().find(|i| parked(&i.phase))).map(|i| i.issue)
+        else {
+            return Err("no work item waits on it".into());
+        };
+        let now = self.ports.clock.now();
+        let mut next = self.state.clone();
+        next.rulings.retain(|r| r.id != id);
+        if let Some(item) = next.item_mut(issue) {
+            for thread in held_by {
+                if !item.threads_accepted.contains(thread) {
+                    item.threads_accepted.push(thread.clone());
+                }
+            }
+            item.phase = Phase::Ci {
+                head: None,
+                since: now,
+            };
+        }
+        self.save(next)
+            .map_err(|e: StateError| format!("it could not be saved: {e}"))?;
+        self.late_reads.remove(&issue);
+        let said = format!(
+            "the project manager accepted the review bot threads that held it, on the \
+             maintainer's words, and CI is looked at again: {why}"
+        );
+        self.say_withdrawn(id, issue, ruling.pull_request, &said);
+        Ok(format!("settled the threads that held ruling {id}: {why}"))
+    }
+
     // Adds the project manager's pick and why to ruling `id`, for the card
     // the maintainer is asked with.
     pub(super) fn pm_recommends(&mut self, id: TicketId, answer: &PmAnswer) {
@@ -210,6 +287,26 @@ impl Runner {
             )),
         }
     }
+}
+
+// Why a no to a ruling of `kind` sends the worker no note, where it does not:
+// `decide` makes another move of it, or refuses it.
+fn no_sends_worker(kind: &RulingKind) -> Result<(), String> {
+    let why = match kind {
+        RulingKind::Stuck(
+            Stuck::TurnTimeout { .. } | Stuck::TurnFailed { .. } | Stuck::PushRefused { .. },
+        )
+        | RulingKind::AgentFiles { .. } => "a no stops the work item, since no note helps it",
+        RulingKind::Stuck(Stuck::CheckQueued { .. } | Stuck::NoChecks { .. }) => {
+            "a no only waits for the checks again"
+        }
+        RulingKind::Stuck(Stuck::OverBudget { .. }) => "a no raises the work item's cap",
+        RulingKind::Stuck(Stuck::AdoptFailed { .. }) => "it takes a yes only",
+        RulingKind::FollowUp { .. } | RulingKind::AgentFit(..) => "no worker is left to send",
+        RulingKind::Question { .. } | RulingKind::Contribution(_) => "a no is not an answer to it",
+        _ => return Ok(()),
+    };
+    Err(format!("a send-back is refused here: {why}"))
 }
 
 // `ruling` with the project manager's pick and why under its question, as

@@ -7,12 +7,13 @@
 use serde_json::{Map, Value};
 
 use super::picked::{PICK, Picked, picked};
+use super::said::{SAID, SaidCall, said};
 use crate::board::{READY, TRIAGE};
 use crate::ticket::TicketId;
 
 /// The keys an answer takes, an object with none of them being none: `why`
 /// is left out, since an unstick inside an answer has one of its own
-const KEYS: [&str; 9] = [
+const KEYS: [&str; 10] = [
     "pick",
     "hold",
     "unstick",
@@ -20,6 +21,7 @@ const KEYS: [&str; 9] = [
     "follow_up",
     "red",
     "votes",
+    "said",
     "standing",
     "reply",
 ];
@@ -55,6 +57,8 @@ pub(super) struct Answer {
     /// answered with. The key keeps its old name for the project manager's
     /// session.
     pub(super) votes: Vec<(TicketId, Map<String, Value>)>,
+    /// What to do about the maintainer's held words, thread by thread
+    pub(super) said: Vec<SaidCall>,
     /// The whole of its standing notes, which replaces the file kelpie holds.
     /// None leaves the file as it is, and empty text clears it.
     pub(super) standing: Option<String>,
@@ -297,6 +301,22 @@ pub(super) fn read(text: &str) -> Option<Answer> {
                 }
                 _ => answer.unread.push(unread("a list of votes")),
             },
+            "said" => match &value {
+                Value::Null => {}
+                // One thread is one object; several are a list of them.
+                Value::Array(items) => {
+                    for item in items {
+                        match said(item) {
+                            Some(s) => answer.said.push(s),
+                            None => answer.unread.push(format!("`said`: {SAID}, not {item}")),
+                        }
+                    }
+                }
+                value => match said(value) {
+                    Some(s) => answer.said.push(s),
+                    None => answer.unread.push(unread(SAID)),
+                },
+            },
             "standing" => match value {
                 Value::Null => {}
                 Value::String(text) => answer.standing = Some(plain(text.trim())),
@@ -348,7 +368,7 @@ fn last_object(text: &str) -> Option<Map<String, Value>> {
 
 // `text` with every control character but a newline taken out, cut past
 // [`LONGEST`] characters, since it is printed and posted as it is.
-fn printable(text: &str) -> String {
+pub(super) fn printable(text: &str) -> String {
     let kept = plain(text);
     match kept.char_indices().nth(LONGEST) {
         Some((at, _)) => format!("{} …", &kept[..at]),
@@ -534,12 +554,43 @@ mod tests {
                 follow_up: None,
                 red: Vec::new(),
                 votes: Vec::new(),
+                said: Vec::new(),
                 standing: None,
                 reply: None,
                 why: Some("#12 touches nothing open.".into()),
                 unread: Vec::new(),
             }
         );
+    }
+
+    #[test]
+    fn a_said_entry_is_read_and_a_malformed_one_is_named() {
+        use super::super::said::SaidHow;
+        let answer = read(
+            "{\"said\": [{\"thread\": 71, \"call\": \"send-back\", \"note\": \" Rename it. \", \
+             \"why\": \"asked\"}, {\"thread\": \"#72\", \"call\": \"none\"}, \
+             {\"thread\": 73, \"call\": \"merge\"}, {\"call\": \"park\"}]}",
+        )
+        .unwrap();
+
+        let calls: Vec<_> = (answer.said.iter())
+            .map(|s| (s.thread, s.call, s.note.as_str(), s.why.as_str()))
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                (71, SaidHow::SendBack, "Rename it.", "asked"),
+                (72, SaidHow::Nothing, "", ""),
+            ]
+        );
+        assert_eq!(answer.unread.len(), 2, "{:?}", answer.unread);
+        assert!(
+            answer.unread[0].contains("\"call\":\"merge\""),
+            "{:?}",
+            answer.unread
+        );
+        let one = read("{\"said\": {\"thread\": 5, \"call\": \"settle\"}}").unwrap();
+        assert_eq!(one.said[0].call, SaidHow::Settle);
     }
 
     #[test]

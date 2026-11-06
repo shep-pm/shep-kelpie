@@ -42,6 +42,7 @@ mod question;
 mod red;
 mod requests;
 mod rulings;
+mod said;
 #[cfg(test)]
 mod tests;
 mod unstartable;
@@ -52,6 +53,7 @@ pub(super) use ci_logs::wake_off_lock;
 pub(super) use maintainer::held_line;
 pub use maintainer::{PmAttaching, PmError, PmHeld, PmStatus, Settled};
 pub(super) use picked::Picked;
+pub(super) use said::{Released, SaidHow};
 
 use answer::Action;
 use ci_logs::Woke;
@@ -294,6 +296,11 @@ pub(super) struct Desk {
     unposted: BTreeSet<TicketId>,
     // The last few questions it settled, newest last
     settled: Vec<Settled>,
+    // Each comment of the maintainer's it called on with no ruling waiting, for the
+    // next comment read to carry out, which a restart returns to it unread
+    released: BTreeMap<u64, Released>,
+    // The question being raised is one it parked the work item on, the maintainer's alone
+    parking: bool,
     flying: Option<Flying>,
     // What the wake read with the lock let go, kept while it launches
     logs: Option<ci_logs::Logs>,
@@ -879,6 +886,10 @@ impl Runner {
         if !requested.is_empty() {
             acted.extend(self.pm_requested(&requested, &answer.votes));
         }
+        // What it called on the maintainer's words it read in this wake.
+        let (said, unsaid) = self.pm_said(&flying.told, &answer.said);
+        acted.extend(said);
+        dropped.extend(unsaid);
         // One line of what the wake was for, what kelpie did with it, and the
         // answer's own `why`, so a wake that wrote nothing of its own left its
         // record behind. A wake that failed or gave no readable answer wrote
