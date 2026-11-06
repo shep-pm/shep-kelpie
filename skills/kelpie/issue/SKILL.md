@@ -18,7 +18,7 @@ An issue meant for kelpie is written the same way wherever it comes from. One is
 - **Labels**: one priority label, `priority: P0` to `priority: P4`, by the repo's `docs/agents/triage-labels.md` where it has one.
 - **Kind**: the title's type, one of `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `ci`, `chore` or `style`. A repo whose issue titles carry no type keeps the title a plain sentence and puts the kind in one `kind:<type>` label instead. Follow what the repo's own issues do, and never add two `kind:` labels. `bug` and `enhancement` are not kinds.
 
-A piece of a split starts with `Slice <n> of #<parent>.`. A decision the docs leave open goes in the body as a stated assumption, "Assumed: X. Say otherwise.", never as a silent guess.
+A piece of a split starts with `Slice <n> of #<parent>.` and is linked to the parent as a sub-issue on the tracker (`gh issue create --parent <parent>`), since that link is what closes the parent. A decision the docs leave open goes in the body as a stated assumption, "Assumed: X. Say otherwise.", never as a silent guess.
 
 ```markdown
 Touches: `crates/adapters/src/adapters/pi/skills.rs`, `crates/adapters/src/adapters/claude/mod.rs`, `docs/design/plugins.md`
