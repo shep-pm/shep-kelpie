@@ -248,9 +248,11 @@ A resumed turn that sends the worker what people with write access wrote on
 its pull request since kelpie last looked: new comments and review threads,
 numbered as requests. Kelpie reads at the start of a review round, at green
 CI and while a merge ruling waits; a comment landing under a merge ruling
-withdraws it and is handled as its `no <note>`. A work item gets three before
-a `question` ruling takes over. Apps and people without write access are
-ignored and logged.
+withdraws it and is handled as its `no <note>`. With a project manager named,
+the maintainer's free text is held for it instead: no ruling is withdrawn and no
+round starts, though other writers' comments and review threads still do. A
+work item gets three before a `question` ruling takes over. Apps and people
+without write access are ignored and logged.
 _Avoid_: comment fix, auto-fix
 
 ## In shep's terms

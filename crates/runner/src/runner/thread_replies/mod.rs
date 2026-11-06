@@ -466,8 +466,7 @@ impl Runner {
     // Whether `comment` is the worker's to read: it is neither a number-led
     // reply nor a yes, a no or a rework, and every ruling `aimed` names that
     // still waits is a merge ruling on a pull request, where the maintainer's
-    // plain comment is a `no <note>`. On an issue no worker reads it. With a
-    // project manager named none is, since free text is its to read.
+    // plain comment is a `no <note>`. With a project manager none is.
     fn is_plain(&self, comment: &ThreadComment, aimed: &[TicketId]) -> bool {
         if self.agents.pm.is_some() {
             return false;
