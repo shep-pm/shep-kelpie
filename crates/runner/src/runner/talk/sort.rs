@@ -6,6 +6,7 @@ use super::COMMENT_REQUEST;
 use crate::ports::{Remark, Standing, Talk};
 use crate::runner::review_bot::is_reply;
 use crate::runner::thread_replies::is_reply_words;
+use crate::runner::words::is_free_text;
 use crate::work_item::Talked;
 
 /// What was written, to be sent to the worker as one numbered request
@@ -95,7 +96,7 @@ pub(super) fn sort(talk: &Talk, sieve: &Sieve<'_>) -> Sorted {
         }
         let theirs =
             (sieve.maintainer).is_some_and(|login| login.eq_ignore_ascii_case(&comment.author));
-        if theirs && !is_reply_words(&comment.body) {
+        if theirs && is_free_text(&comment.body) {
             sorted.held.push((comment.id, comment.body.clone()));
         } else {
             sorted.requests.push(Request {
@@ -210,6 +211,41 @@ mod tests {
             vec![7],
             "the later one is left to its thread"
         );
+    }
+
+    // No ruling waits, so every comment is the comment round's to sort
+    fn sorted_bare(maintainer: Option<&str>, body: &str) -> Sorted {
+        let talk = Talk {
+            comments: vec![written(7, body)],
+            threads: Vec::new(),
+        };
+        let sieve = Sieve {
+            talked: &Talked::default(),
+            own: &BTreeSet::new(),
+            left: &[],
+            maintainer,
+            quiet: false,
+        };
+        sort(&talk, &sieve)
+    }
+
+    #[test]
+    fn a_maintainer_comment_is_held_unless_it_opens_with_an_answer_word() {
+        let held = sorted_bare(Some("octocat"), "Why is the cache a map?");
+        assert_eq!(held.held.len(), 1);
+        assert_eq!(held.requests, Vec::new());
+        for text in ["rerun the checks", "restore it", "pm recommend", "71 yes"] {
+            let sorted = sorted_bare(Some("octocat"), text);
+            assert_eq!(sorted.held, Vec::new(), "{text}");
+            assert_eq!(sorted.requests.len(), 1, "{text}");
+        }
+    }
+
+    #[test]
+    fn with_no_project_manager_a_maintainer_comment_is_a_request() {
+        let sorted = sorted_bare(None, "Why is the cache a map?");
+        assert_eq!(sorted.held, Vec::new());
+        assert_eq!(sorted.requests.len(), 1);
     }
 
     #[test]
