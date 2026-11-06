@@ -126,6 +126,7 @@ impl Runner {
                     login: heard.mentions.clone(),
                     takes_text: Wants::of(&r.kind) == Wants::Answer,
                     merge: matches!(r.kind, RulingKind::Merge { .. }) && self.agents.pm.is_none(),
+                    after: self.agents.pm.as_ref().map(|_| heard.comment),
                 })
             })
             .collect()

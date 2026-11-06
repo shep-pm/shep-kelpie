@@ -43,6 +43,10 @@ pub(super) struct Left {
     /// Whether it is a merge ruling, whose thread a plain comment is the
     /// worker's to read in
     pub merge: bool,
+    /// With a project manager named, the id of the comment the ruling's
+    /// thread reads after: a comment up to it is older than that read, which
+    /// never sees it, so it is sorted here
+    pub after: Option<u64>,
 }
 
 /// What a read is sorted by
@@ -78,7 +82,9 @@ pub(super) fn sort(talk: &Talk, sieve: &Sieve<'_>) -> Sorted {
         }
         let aimed_at_a_ruling = sieve.left.iter().any(|left| {
             left.login.eq_ignore_ascii_case(&comment.author)
-                && (left.takes_text || !left.merge || is_reply_words(&comment.body))
+                && (left.takes_text
+                    || (!left.merge && left.after.is_none_or(|after| comment.id > after))
+                    || is_reply_words(&comment.body))
         });
         if aimed_at_a_ruling {
             continue;
@@ -149,4 +155,68 @@ fn ignored(remark: &Remark, on: &str) -> String {
         "ignored comment {} by {} on {on}: {who} is not trusted to ask for changes",
         remark.id, remark.author
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn written(id: u64, body: &str) -> Remark {
+        Remark {
+            id,
+            author: "octocat".into(),
+            standing: Standing::Writer,
+            body: body.into(),
+        }
+    }
+
+    fn sorted_with(after: Option<u64>, comments: Vec<Remark>) -> Sorted {
+        let talk = Talk {
+            comments,
+            threads: Vec::new(),
+        };
+        let left = [Left {
+            login: "octocat".into(),
+            takes_text: false,
+            merge: false,
+            after,
+        }];
+        let sieve = Sieve {
+            talked: &Talked::default(),
+            own: &BTreeSet::new(),
+            left: &left,
+            maintainer: Some("octocat"),
+            quiet: false,
+        };
+        sort(&talk, &sieve)
+    }
+
+    #[test]
+    fn a_maintainer_comment_older_than_a_rulings_place_is_held_not_skipped() {
+        let sorted = sorted_with(
+            Some(10),
+            vec![
+                written(7, "Why is this one so large?"),
+                written(11, "Later"),
+            ],
+        );
+
+        assert_eq!(
+            sorted.held,
+            vec![(7, "Why is this one so large?".to_owned())]
+        );
+        assert_eq!(
+            sorted.comments,
+            vec![7],
+            "the later one is left to its thread"
+        );
+    }
+
+    #[test]
+    fn with_no_project_manager_a_comment_under_a_yes_or_no_ruling_is_left_to_its_thread() {
+        let sorted = sorted_with(None, vec![written(7, "Why is this one so large?")]);
+
+        assert_eq!(sorted.held, Vec::new());
+        assert_eq!(sorted.comments, Vec::<u64>::new());
+    }
 }
