@@ -1,3 +1,5 @@
+//! What a wake says to the project manager
+
 use super::*;
 use crate::ports::Timestamp;
 use crate::runner::pm::StuckState;
@@ -389,6 +391,101 @@ fn a_wake_for_a_ruling_left_to_the_project_manager_shows_it_and_asks_for_its_ans
         BOARD,
     );
     assert!(!other.contains("\"votes\""), "{other}");
+}
+
+// A wake for the round just fixed on #12's pull request 71.
+fn round_of(findings: Vec<crate::ports::Finding>) -> Wake {
+    use crate::work_item::{Heavier, ReviewWeight};
+    Wake::Findings {
+        ticket: ticket(12),
+        pull_request: 71,
+        reads: 1,
+        findings,
+        weight: Some(ReviewWeight::Full(Heavier::Touched("src/lib.rs".into()))),
+        lines: Some(42),
+    }
+}
+
+fn found(severity: crate::ports::Severity, line: u32) -> crate::ports::Finding {
+    crate::ports::Finding::new(
+        severity,
+        "src/lib.rs",
+        line,
+        "the flag   is read\nfirst",
+        "a caller sees nothing",
+    )
+}
+
+#[test]
+fn a_wake_for_a_rounds_findings_names_each_and_what_the_change_touches() {
+    use crate::ports::Severity::{High, Medium};
+    let wake = round_of(vec![found(High, 3), found(Medium, 9)]);
+
+    let text = reason(&wake);
+
+    assert_eq!(
+        text,
+        "#12's pull request 71 has had 1 read, and its last round sent 2 findings above a nit. \
+         The change is full (diff touched src/), 42 lines changed. Give `read` for it: `more` \
+         true has one more reviewer read it, false ends its reads here:\n\
+         \n- HIGH src/lib.rs:3 the flag is read first (why it matters: a caller sees nothing)\
+         \n- MEDIUM src/lib.rs:9 the flag is read first (why it matters: a caller sees nothing)"
+    );
+}
+
+#[test]
+fn a_wake_for_a_rounds_findings_says_how_many_it_left_out() {
+    let many = (1..=25)
+        .map(|n| found(crate::ports::Severity::Medium, n))
+        .collect();
+
+    let text = reason(&round_of(many));
+
+    assert_eq!(text.matches("\n- MEDIUM").count(), 20, "{text}");
+    assert!(text.contains("src/lib.rs:20 "), "{text}");
+    assert!(!text.contains("src/lib.rs:21 "), "{text}");
+    assert!(text.ends_with("\n\n5 more findings left out"), "{text}");
+}
+
+#[test]
+fn the_read_key_shows_on_a_first_wake_and_again_on_a_resumed_wake_for_findings() {
+    let key = "\"read\": [] or [{\"item\": <the work item whose findings you rule on>";
+    let findings = round_of(vec![found(crate::ports::Severity::High, 3)]);
+    for (fresh, wakes) in [(true, vec![Wake::Told]), (false, vec![findings.clone()])] {
+        let text = wake("koji", &wakes, &[], &[], fresh, &Notes::default(), BOARD);
+        assert!(text.contains(key), "fresh {fresh}: {text}");
+        assert!(
+            text.contains("raises the item's plan by one read"),
+            "{text}"
+        );
+    }
+    let resumed = wake(
+        "koji",
+        &[Wake::Told],
+        &[],
+        &[],
+        false,
+        &Notes::default(),
+        BOARD,
+    );
+    assert!(!resumed.contains(key), "{resumed}");
+}
+
+#[test]
+fn the_pm_prompt_says_one_reviewer_reads_an_item_with_no_review() {
+    let text = wake(
+        "koji",
+        &[Wake::Told],
+        &[],
+        &[],
+        true,
+        &Notes::default(),
+        BOARD,
+    );
+    assert!(
+        text.contains("With no `review`, one reviewer reads the item"),
+        "{text}"
+    );
 }
 
 #[test]

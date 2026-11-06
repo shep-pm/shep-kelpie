@@ -1,0 +1,7 @@
+# One more read
+
+What a pass reads of the project manager's plan, and how a finding above a nit asks for one more read. The pass it sits in is in review.md.
+
+## One more read
+
+- A pass on a project that names `agents.pm` reads the plan's `reads` (`need_of` in `review-pick.md`), and each reviewer's prompt ends with the plan's `about`, what the project manager wants those reads for (`plan_note`; none with no plan or no `about`; a local command or a bot takes no prompt). A round that sent a finding above a nit (a Medium or High, not a `Low`) asks the project manager for one more read once the worker's fix turn ends (`after_fix`, in place of `after_round`), when every read the plan calls for is in, a candidate is left (`due`) and the pass is not `bots_only`. It decides after `after_round_in` has chosen `Phase::Ci` or `Phase::Review`, since a skipped bot can keep a finished pass in review. An ask leaves the item at `Phase::Review` and idles it: `choose_reviewer` gives `Begin::Idle` until the answer. `read` `more: true` raises the plan to one above the reads the pass has in, for the rest of the item, so the next step picks a reviewer, and a later pass on a new head reads that many too; `more: false`, no `read` entry, a failed wake or a restart ends the pass as it did before. The ask lives in memory, so the state file is unchanged, and a read that sends a finding above a nit may ask again, bounded by the candidates left and the item's spend cap. A project with no `agents.pm` asks nothing. ADR 0020, #1764, `runner/review/one_more.rs`, `pm.md`

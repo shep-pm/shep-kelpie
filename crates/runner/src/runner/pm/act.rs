@@ -152,6 +152,19 @@ impl Runner {
                 Err(why) => dropped.push(why),
             }
         }
+        let mut read: Vec<TicketId> = Vec::new();
+        for call in &answer.read {
+            if read.contains(&call.item) {
+                let named = ticket_ref(call.item);
+                dropped.push(format!("read {named}: the answer names it twice"));
+                continue;
+            }
+            read.push(call.item);
+            match self.settle_read(call)? {
+                Ok(done) => acted.push(done),
+                Err(why) => dropped.push(why),
+            }
+        }
         if let Some(reply) = &answer.reply {
             self.pm.reply = Some(reply.clone());
         }

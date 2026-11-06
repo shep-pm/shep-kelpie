@@ -40,6 +40,7 @@ mod local;
 mod need;
 #[cfg(test)]
 mod nits;
+mod one_more;
 mod outcomes;
 pub(super) mod prompts;
 pub(super) mod pushed;
@@ -264,6 +265,7 @@ impl Runner {
         );
         prompt.push_str(&prompts::disputes_note(&item.disputes));
         prompt.push_str(&prompts::asked_note(&item.held));
+        prompt.push_str(&prompts::plan_note(item.review_plan.as_ref()));
         let call =
             calls::reviewer_call(ticket, &worktree, &self.paths.worker, model, prompt, tests);
         match call.and_then(|call| self.prepared(call)) {
@@ -470,7 +472,7 @@ impl Runner {
                 return Ok(raised);
             }
         } else {
-            let next = self.after_round(review, self.ports.clock.now());
+            let next = self.after_fix(review, sent.findings, self.ports.clock.now());
             self.update(|item| next.apply(item))?;
         }
         Ok(Begin::Report(match left_open {
@@ -514,7 +516,7 @@ impl Runner {
             Answered::Retry(reason) => return Ok(self.gate_failed(reason)),
             Answered::LeftOpen { threads, reason } => left_open = Some((threads, reason)),
         }
-        let next = self.after_round(review, self.ports.clock.now());
+        let next = self.after_fix(review, sent.findings, self.ports.clock.now());
         self.update(|item| next.apply(item))?;
         if let Some((threads, reason)) = left_open {
             return Ok(Begin::Report(StepReport::ThreadsLeftOpen {
