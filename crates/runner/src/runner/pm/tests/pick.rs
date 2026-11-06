@@ -12,7 +12,7 @@ use crate::board::briefing::date_time;
 use crate::ports::{Clock, Session, Timestamp};
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Rig, Scripted, ticket};
-use crate::work_item::ReviewPlan;
+use crate::work_item::{Holder, ReviewPlan};
 
 // A project with #9 and #12 ready, whose project manager picked #12 and has
 // not been stepped past it.
@@ -701,6 +701,63 @@ fn a_pick_for_a_waiting_item_naming_no_usable_agent_is_dropped_saying_why() {
             "{project}"
         );
     }
+}
+
+#[test]
+fn a_pick_for_a_waiting_item_the_maintainer_has_attached_is_dropped() {
+    let (rig, runner) = waiting("out-attached");
+    let before = item(&rig, &runner);
+    {
+        let pid = std::process::id();
+        // Where `ps` cannot run (a sandbox) the hold counts as live, as `live` says.
+        let by = crate::runner::attach::running(pid).unwrap_or_else(|_| Holder {
+            pid,
+            started: "unknown".to_owned(),
+        });
+        let since = rig.clock.now();
+        let mut held = runner.lock().unwrap();
+        let item = held.state.item_mut(ticket(7)).expect("the item");
+        item.attached = Some(crate::work_item::Attached {
+            by,
+            session: None,
+            since,
+        });
+    }
+
+    let (acted, dropped) = answers(&rig, &runner, PICK_7_FOR_CODER);
+
+    assert_eq!(acted, Vec::<String>::new());
+    assert_eq!(
+        dropped,
+        ["pick #7: the maintainer has #7 attached, so its session is not to be replaced"]
+    );
+    let now = item(&rig, &runner);
+    assert_eq!(
+        (&now["agent"], &now["session"]),
+        (&before["agent"], &before["session"])
+    );
+}
+
+#[test]
+fn an_item_left_unnamed_twice_is_woken_for_again_after_the_second_back_off() {
+    let (rig, runner) = waiting("out-silent-twice");
+    answers(&rig, &runner, NOTHING);
+    // Past the first back-off (30 minutes), the item wakes the project manager again.
+    rig.clock.advance(31 * 60);
+    assert_eq!(step(&runner).unwrap(), None, "the wake waits its window");
+    answers(&rig, &runner, NOTHING);
+    assert_eq!(pm_seen(&rig).len(), 2);
+
+    // The second silence backs off again, 60 minutes, and then wakes it a third time.
+    rig.clock.advance(40 * 60);
+    for _ in 0..3 {
+        assert_eq!(step(&runner).unwrap(), None);
+    }
+    assert_eq!(pm_seen(&rig).len(), 2);
+    rig.clock.advance(21 * 60);
+    assert_eq!(step(&runner).unwrap(), None, "the wake waits its window");
+    answers(&rig, &runner, NOTHING);
+    assert_eq!(pm_seen(&rig).len(), 3);
 }
 
 #[test]

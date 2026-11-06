@@ -183,10 +183,10 @@ impl Runner {
                 continue;
             };
             let waits = matches!(state, StuckState::AgentOut(_));
-            if waits
-                && self.stuck_now(*ticket).is_some()
-                && !self.pm.left_alone.contains_key(ticket)
-            {
+            // An entry the answer did not refresh is absent, or was asked again
+            // once its back-off ended, which this answer leaves alone anew.
+            let unrefreshed = (self.pm.left_alone.get(ticket)).is_none_or(|entry| entry.asked);
+            if waits && unrefreshed && self.stuck_now(*ticket).is_some() {
                 self.pm_left_alone(*ticket, state.clone(), now);
             }
         }

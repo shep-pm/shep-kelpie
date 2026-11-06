@@ -240,7 +240,9 @@ impl Runner {
             )));
         };
         let from = item.agent.clone();
-        let why = if !implementers.contains(&to) {
+        let why = if item.attached.is_some() {
+            format!("the maintainer has {named} attached, so its session is not to be replaced")
+        } else if !implementers.contains(&to) {
             format!("`{to}` is no implementer agent file `agents.allow` holds")
         } else if !self.board_agents().contains(&to) {
             format!("no turn can run on `{to}`: the worker's fence or a gateway key rules it out")
