@@ -10,3 +10,4 @@
 {"take":"refused","pid":42,"what":"refused","refused":"no_credit"}
 {"take":"refused","pid":42,"what":"refused","refused":{"spend_limit":{"resumes":1788220800}}}
 {"take":"refused","pid":42,"what":"refused","refused":{"spend_limit":{}}}
+{"take":"pick","pid":42,"what":"pick","reading":["sonnet-high","iq3-xxs"]}

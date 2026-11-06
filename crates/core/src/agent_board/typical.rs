@@ -140,8 +140,9 @@ pub(super) fn middle<T: Copy>(sorted: &[T], mean: impl Fn(T, T) -> T) -> T {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_board::{Candidate, Item, pick};
+    use crate::agent_board::{Candidate, Item, pick, rank};
     use crate::agents::Fit;
+    use crate::lease::door::Pick;
     use crate::ports::{Timestamp, Usage};
     use crate::settings::AgentName;
     use crate::test::ticket;
@@ -357,9 +358,14 @@ mod tests {
                 held: false,
             },
         ];
-        let order: Vec<&str> = pick(&Item::default(), &candidates)
-            .iter()
-            .map(|c| c.agent.as_str())
+        let picks = (pick(&Item::default(), &candidates).into_iter())
+            .map(|c| Pick {
+                cost_usd: c.cost_usd,
+                ..Pick::new(c.agent.clone(), c.finish, c.wait)
+            })
+            .collect();
+        let order: Vec<_> = (rank(picks, None).iter())
+            .map(|p| p.agent.to_string())
             .collect();
         assert_eq!(order, ["opus", "local"]);
     }

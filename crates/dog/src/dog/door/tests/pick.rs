@@ -10,7 +10,7 @@ use crate::dog::availability::{Readers, Sources, read};
 use crate::dog::board::refresh;
 use crate::dog::board::tests::finished;
 use crate::forwarder::Upstream;
-use crate::lease::door::{Pick, PickAsk};
+use crate::lease::door::{Answer, Ask, PICK, Pick, PickAsk, Visit};
 use crate::lease::door_pick::{pick, refused};
 use crate::ports::{LocalLeases, Meter, ModelLoad, PaddockHolder, Timestamp, Utilization};
 use crate::settings::{Account, AgentName, Gateway, GatewayName, Gateways};
@@ -160,20 +160,19 @@ async fn a_free_agent_with_history_is_ranked_above_a_busy_one() {
 
     let picks = picked(&dog.socket, item(Some("fix"), &["busy", "fast"])).await;
 
-    let fast = Pick {
-        agent: name("fast"),
-        finish: 600,
-        wait: 0,
-        cost_usd: Some(0.25),
-    };
+    // The four things the test has always read: the order, the finishes, the
+    // waits and the cost. The ask's other flags are read in `dog::board`.
+    let seen: Vec<_> = (picks.iter())
+        .map(|p| (p.agent.as_str(), p.finish, p.wait, p.cost_usd))
+        .collect();
     // Three turns ahead on one slot, each the hour a turn takes with no history.
-    let busy = Pick {
-        agent: name("busy"),
-        finish: 4 * 3600,
-        wait: 3 * 3600,
-        cost_usd: None,
-    };
-    assert_eq!(picks, [fast, busy]);
+    assert_eq!(
+        seen,
+        [
+            ("fast", 600, 0, Some(0.25)),
+            ("busy", 4 * 3600, 3 * 3600, None)
+        ]
+    );
 }
 
 #[tokio::test]
@@ -307,10 +306,8 @@ async fn a_reviewer_on_a_held_plan_finishes_after_its_hold() {
     assert_eq!(
         picks,
         [Pick {
-            agent: name("held"),
-            finish: 6 * 3600,
-            wait: 5 * 3600,
-            cost_usd: None,
+            tier: Some(Tier::Standard),
+            ..Pick::new(name("held"), 6 * 3600, 5 * 3600)
         }],
         "the hold ends when the plan's window resets"
     );
@@ -359,4 +356,84 @@ async fn a_refusal_a_runner_reports_holds_every_api_agent_for_the_next_pick() {
     let picks = picked(&dog.socket, item(None, &["billed", "fast"])).await;
     let waits: Vec<_> = picks.iter().map(|p| (p.agent.as_str(), p.wait)).collect();
     assert_eq!(waits, [("fast", 0), ("billed", CREDIT_RECHECK_SECS)]);
+}
+
+// The picks the dog at `socket` answers `ask` with.
+async fn answered_with(socket: &Path, ask: &Ask) -> Vec<Pick> {
+    let mut visit = Visit::knock(socket, ask).await.unwrap();
+    match answer(&mut visit).await {
+        Some(Answer::Picks(picks)) => picks,
+        other => panic!("the dog did not answer picks: {other:?}"),
+    }
+}
+
+// What a runner of an older build writes: a slack, and no reading.
+#[tokio::test]
+async fn an_ask_naming_a_slack_as_an_older_runner_sends_it_is_answered() {
+    let files = [
+        ("fast.md", on_paddock("fast-coder", "")),
+        ("busy.md", on_paddock("busy-coder", "")),
+    ];
+    let loads = [("fast-coder", FREE), ("busy-coder", BUSY)];
+    let dog = dog(&files, &loads).await;
+    finished(&dog.home, "koji", ("fast", "fix"), 5, (600, 0.25));
+    refresh(&dog.board, &dog.home);
+    let line = r#"{"take":"pick","pid":42,"what":"pick","pick":{"kind":"fix","tier":"light","slack":30,"agents":["busy","fast"]}}"#;
+    let old: Ask = serde_json::from_str(line).unwrap();
+
+    let picks = answered_with(&dog.socket, &old).await;
+
+    assert_eq!(
+        agents_of(&picks),
+        ["fast", "busy"],
+        "the dog reads the slack out and answers soonest first"
+    );
+}
+
+#[tokio::test]
+async fn a_reading_ask_answers_every_agent_named_whatever_its_kinds() {
+    let files = [
+        ("docs.md", on_paddock("docs-coder", "kinds: [docs]\n")),
+        ("fix.md", on_paddock("fix-coder", "kinds: [fix]\n")),
+        ("any.md", on_paddock("any-coder", "")),
+        ("other.md", on_paddock("other-coder", "")),
+    ];
+    let loads = [
+        ("docs-coder", FREE),
+        ("fix-coder", FREE),
+        ("any-coder", FREE),
+        ("other-coder", FREE),
+    ];
+    let dog = dog(&files, &loads).await;
+    let reading = Ask {
+        reading: ["fix", "docs", "any"].map(name).to_vec(),
+        ..Ask::new(PICK, std::process::id(), "pick")
+    };
+
+    let picks = answered_with(&dog.socket, &reading).await;
+
+    let mut named = agents_of(&picks);
+    named.sort_unstable();
+    assert_eq!(named, ["any", "docs", "fix"], "`other` is not named");
+    assert!(
+        picks.iter().all(|p| p.finish == 3600 && p.wait == 0),
+        "each is read for an item of no kind, which takes the hour a turn takes with no history"
+    );
+}
+
+#[tokio::test]
+async fn a_reading_ask_leaves_out_an_agent_with_no_window() {
+    let files = [
+        ("fast.md", on_paddock("fast-coder", "")),
+        ("lost.md", on_paddock("lost-coder", "")),
+    ];
+    let dog = dog(&files, &[("fast-coder", FREE)]).await;
+    let reading = Ask {
+        reading: ["fast", "lost", "unknown-agent"].map(name).to_vec(),
+        ..Ask::new(PICK, std::process::id(), "pick")
+    };
+
+    let picks = answered_with(&dog.socket, &reading).await;
+
+    assert_eq!(agents_of(&picks), ["fast"]);
 }
