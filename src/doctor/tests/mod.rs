@@ -955,6 +955,7 @@ mod e2e;
 mod github;
 mod harnesses;
 mod implementers;
+mod install;
 mod plugins;
 mod pm_decides;
 mod registries;

@@ -156,7 +156,8 @@ impl Runner {
         }
         let (args, mut env) = command_of(&configuration, port, picked, &temp);
         // The caches the worker's own tools use, so its install and the server's share them.
-        env.extend(self.settings.worker.build_env.iter().map(|(name, dir)| {
+        let caches = self.settings.worker.build_env_in(&item.worktree);
+        env.extend(caches.iter().map(|(name, dir)| {
             let folder = item.build.join(dir.as_path());
             (name.as_str().to_owned(), folder.display().to_string())
         }));

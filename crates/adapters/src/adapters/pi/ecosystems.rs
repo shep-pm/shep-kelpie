@@ -63,6 +63,12 @@ fn an_npm_project_installs_tests_and_pushes_inside_the_fence() {
 }
 
 #[test]
+#[ignore = "runs the real sandbox with pnpm 12, after `cargo build`"]
+fn a_pnpm_project_installs_tests_and_pushes_inside_the_fence() {
+    ecosystems::project(&PI, Ecosystem::Pnpm);
+}
+
+#[test]
 #[ignore = "runs the real sandbox with Node, after `cargo build`"]
 fn a_hook_script_loads_its_neighbours_inside_the_fence() {
     ecosystems::hook_script(&PI);
