@@ -1,7 +1,9 @@
 //! The forge calls a runner's start makes after its socket opened, through the
 //! runner's stand-ins
 
+use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::Runner;
 use crate::board::check;
@@ -112,4 +114,30 @@ fn a_visibility_read_that_fails_is_noted_and_the_runner_goes_on() {
         "{notes:?}"
     );
     assert_eq!(kinds(&rig), KINDS, "the labels the repo lacks are made");
+}
+
+// A stop reaches a start still waiting its turn in the login's pace, which is
+// how a restart of every project can hold one call for far over JOIN_BOUND.
+#[test]
+fn a_stop_ends_the_start_forge_calls() {
+    let rig = Rig::new("shep");
+    rig.forge
+        .put_file(OWNERS, ".github/pull_request_template.md", "## Summary\n");
+    let runner = rig.opened().unwrap();
+    let stopping = Arc::new(AtomicBool::new(false));
+    runner.lock().unwrap().stop_with(Arc::clone(&stopping));
+    let held = rig.forge.hold_next_call();
+
+    rig.during_read(
+        held,
+        || runner.lock().unwrap().settle_on_forge(),
+        || stopping.store(true, Ordering::SeqCst),
+    );
+
+    assert_eq!(
+        rig.forge.repo_labels_now(),
+        Vec::<String>::new(),
+        "the settle went on past the call it was waiting at"
+    );
+    assert_eq!(template_of(&runner), serde_json::json!({ "owner": OWNERS }));
 }

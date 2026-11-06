@@ -49,7 +49,8 @@ impl Runner {
 
     // Puts the label right after a start: on for each work item held, off
     // for each finished or dropped ticket with no work item open, whose own
-    // removal a refusal may have missed
+    // removal a refusal may have missed. Each is a call of its own, so a stop
+    // that comes between two leaves the rest to the next start.
     pub(super) fn settle_labels(&mut self) {
         let held = self.state.open_tickets();
         let state = &self.state;
@@ -58,9 +59,15 @@ impl Runner {
             .copied()
             .collect();
         for issue in held {
+            if self.loop_stopped() {
+                return;
+            }
             self.mark_held(issue, true);
         }
         for issue in finished {
+            if self.loop_stopped() {
+                return;
+            }
             self.mark_held(issue, false);
         }
     }

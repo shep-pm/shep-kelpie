@@ -6,25 +6,48 @@
 //! A restart runs every project's runner at once, and a login answers 60 calls
 //! a minute, so a start that made them before its socket opened answered no
 //! trigger for minutes. [`Runner::opened`] opens and posts a status first, and
-//! these come after it, before the loop's first pass. A call that fails is a
-//! note and the runner goes on.
+//! these come after it, each waiting its turn in the login's pace. A failed
+//! call is a note and the runner goes on, and [`Self::stop_with`] ends them.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::{Runner, coderabbit_left_out, left_in, owner_template};
 
 impl Runner {
+    /// Tells the runner that `stopping` ends its loop, so a start gives up the
+    /// rest of its forge calls once it is set
+    ///
+    /// Each of those calls waits its turn in the login's pace, which a restart
+    /// of every project can fill for minutes, and the runner's lock is held
+    /// while it waits. A stop that reached no such runner left its work items'
+    /// time unsaved, and the labels it did not make are made at the next start.
+    pub fn stop_with(&mut self, stopping: Arc<AtomicBool>) {
+        self.loop_stop = Some(stopping);
+    }
+
     /// Makes the forge calls a start makes, which [`Self::opened`] left for here
     pub fn settle_on_forge(&mut self) {
-        self.refresh_owner_template();
-        let named = left_in(
-            self.settings.named_reviewers(&self.book, &self.home),
-            &self.lineup,
-        );
-        self.notes
-            .extend(coderabbit_left_out(&self.remote, &named, &self.ports));
-        self.settle_labels();
-        self.make_agent_labels();
-        self.make_priority_labels();
-        self.make_kind_labels();
+        for call in [
+            Runner::refresh_owner_template,
+            Runner::note_coderabbit_left_out,
+            Runner::settle_labels,
+            Runner::make_agent_labels,
+            Runner::make_priority_labels,
+            Runner::make_kind_labels,
+        ] {
+            if self.loop_stopped() {
+                return;
+            }
+            call(self);
+        }
+    }
+
+    // Whether the loop this runner works in has been asked to end
+    pub(super) fn loop_stopped(&self) -> bool {
+        self.loop_stop
+            .as_ref()
+            .is_some_and(|stopping| stopping.load(Ordering::SeqCst))
     }
 
     // The owner's `.github` template as of now, keeping the last read when this one fails
@@ -36,5 +59,15 @@ impl Runner {
         );
         self.owner_template = template;
         self.notes.extend(note);
+    }
+
+    // The note telling a CodeRabbit the repo's visibility leaves out, when the project named one
+    fn note_coderabbit_left_out(&mut self) {
+        let named = left_in(
+            self.settings.named_reviewers(&self.book, &self.home),
+            &self.lineup,
+        );
+        self.notes
+            .extend(coderabbit_left_out(&self.remote, &named, &self.ports));
     }
 }

@@ -507,12 +507,15 @@ impl Worker {
         woken: Receiver<()>,
         died: Sender<Stop>,
     ) -> Self {
-        (runner.lock())
-            .unwrap_or_else(PoisonError::into_inner)
-            .wake_with(wake.clone());
         let stopping = Arc::new(AtomicBool::new(false));
         let (ending, ended) = mpsc::channel::<()>();
         let flag = Arc::clone(&stopping);
+        {
+            let mut runner = runner.lock().unwrap_or_else(PoisonError::into_inner);
+            runner.wake_with(wake.clone());
+            // The start's forge calls give up what is left once the stop comes
+            runner.stop_with(Arc::clone(&flag));
+        }
         let thread = std::thread::spawn(move || {
             let _ending = ending;
             // A runner with no worker thread would answer triggers and never work.
@@ -561,13 +564,12 @@ fn work(
 ) {
     let mut reread = Reread::at(&runner.lock().unwrap_or_else(PoisonError::into_inner));
     // The start's forge calls, made with the lock held before any pass: a trigger
-    // asked meanwhile answers from the status the start posted.
-    if !stopping.load(Ordering::SeqCst) {
-        runner
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .settle_on_forge();
-    }
+    // asked meanwhile answers from the status the start posted, and the stop
+    // `spawn` handed the runner ends them between two of them.
+    runner
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .settle_on_forge();
     while !stopping.load(Ordering::SeqCst) {
         let (notes, stop) = {
             let mut runner = runner.lock().unwrap_or_else(PoisonError::into_inner);

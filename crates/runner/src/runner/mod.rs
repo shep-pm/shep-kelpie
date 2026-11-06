@@ -10,6 +10,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use crate::agents::{Agents, AgentsError};
 use crate::board::Skip;
@@ -450,6 +451,8 @@ pub struct Runner {
     holds: lock_hold::Holds,
     // The passes of the loop completed since the runner was built, in memory only
     passes: u64,
+    // The stop the loop this runner works in answers, in memory only
+    loop_stop: Option<Arc<AtomicBool>>,
 }
 
 impl Runner {
@@ -748,6 +751,7 @@ impl Runner {
             posted: std::cell::RefCell::default(),
             holds: lock_hold::Holds::default(),
             passes: 0,
+            loop_stop: None,
         };
         runner.settle_older_bots()?;
         runner.notes.extend(runner.left_out_notes(&[]));
