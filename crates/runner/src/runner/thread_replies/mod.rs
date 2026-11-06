@@ -14,9 +14,9 @@ use std::sync::{Arc, Mutex};
 
 use self::settled::Ended;
 pub(super) use self::settled::{Outcome, Settler};
-use super::pm::{PmReply, pm_reply};
+use super::pm::{PmReply, held_line, pm_reply};
 use super::trigger::lock;
-use super::words::{Wants, read_answer};
+use super::words::{Wants, is_free_text, read_answer};
 use super::{Answer, RuleError, Runner, voice};
 use crate::ports::{CommentMarks, Forge, ThreadComment, Timestamp};
 use crate::settings::ForgeSlug;
@@ -301,8 +301,13 @@ impl Runner {
                 // reply acted on moves the place read to on its thread: any
                 // other comment moving it would skip a reply the forge lists
                 // later.
-                self.hear(comment)?;
-                self.respond(comment, &aimed);
+                let held = self.held_by(comment, &aimed);
+                self.hear(comment, held.as_deref())?;
+                if held.is_some() {
+                    self.react_held(comment);
+                } else {
+                    self.respond(comment, &aimed);
+                }
             } else {
                 self.threads.judged.insert(comment.id, comment.created);
             }
@@ -431,7 +436,7 @@ impl Runner {
 
     // Moves the place read to forward to `comment` for each ruling on its
     // thread, and saves it with each pending ruling.
-    fn hear(&mut self, comment: &ThreadComment) -> Result<(), StateError> {
+    fn hear(&mut self, comment: &ThreadComment, held: Option<&str>) -> Result<(), StateError> {
         let plain = self.is_plain(comment, &self.threads.aimed_by(comment));
         let mut moved = false;
         for watch in self.threads.watching.values_mut() {
@@ -441,10 +446,13 @@ impl Runner {
                 moved = true;
             }
         }
-        if !moved {
+        if !moved && held.is_none() {
             return Ok(());
         }
         let mut next = self.state.clone();
+        // The words a comment held are saved with it marked heard, so a kill
+        // between the two cannot lose them.
+        next.pm_told.extend(held.map(str::to_owned));
         // A reply is the ruling's answer, not a request of the worker. A plain
         // comment is left for the worker's comment round to read.
         if let Some(item) = next
@@ -466,8 +474,11 @@ impl Runner {
     // Whether `comment` is the worker's to read: it is neither a number-led
     // reply nor a yes, a no or a rework, and every ruling `aimed` names that
     // still waits is a merge ruling on a pull request, where the maintainer's
-    // plain comment is a `no <note>`. On an issue no worker reads it.
+    // plain comment is a `no <note>`. With a project manager none is.
     fn is_plain(&self, comment: &ThreadComment, aimed: &[TicketId]) -> bool {
+        if self.agents.pm.is_some() {
+            return false;
+        }
         let waiting: Vec<_> = (self.state.rulings.iter())
             .filter(|r| aimed.contains(&r.id))
             .collect();
@@ -481,31 +492,10 @@ impl Runner {
         if self.is_plain(comment, aimed) {
             return;
         }
-        let words = comment.body.trim();
-        let (named, words) = self.threads.name_of(words, comment, &self.state.rulings);
-        let open = |id: &TicketId| self.state.rulings.iter().any(|r| r.id == *id);
-        let waiting: Vec<TicketId> = aimed.iter().copied().filter(open).collect();
-        let aimed = match named {
-            Some((id, naming)) if waiting.contains(&id) => Aimed::At(id, naming),
-            Some((id, _)) => match self.threads.watching.get(&id) {
-                Some(Watch {
-                    settled: Some(_), ..
-                }) => Aimed::Settled(id),
-                Some(Watch { thread, .. }) => Aimed::Elsewhere(id, *thread),
-                None => Aimed::Nothing,
-            },
-            None => match waiting.as_slice() {
-                [id] => Aimed::At(*id, Naming::Not),
-                [] => match self.undecided(aimed, words) {
-                    Some(id) => Aimed::Undecided(id),
-                    None => Aimed::Nothing,
-                },
-                several => Aimed::Unnamed(several.to_vec()),
-            },
-        };
+        let (aim, words) = self.aim(comment, aimed);
         let who = &comment.author;
         let thread = comment.thread;
-        match aimed {
+        match aim {
             Aimed::Nothing => {}
             Aimed::At(id, naming) => self.answer(comment, id, naming, words),
             Aimed::Settled(id) if self.reopens(comment, id, words) => {}
@@ -547,6 +537,47 @@ impl Runner {
                 self.say(thread, &said);
             }
         }
+    }
+
+    // What `comment` is a reply to, and its words with any number off.
+    fn aim<'a>(&self, comment: &'a ThreadComment, aimed: &[TicketId]) -> (Aimed, &'a str) {
+        let words = comment.body.trim();
+        let (named, words) = self.threads.name_of(words, comment, &self.state.rulings);
+        let open = |id: &TicketId| self.state.rulings.iter().any(|r| r.id == *id);
+        let waiting: Vec<TicketId> = aimed.iter().copied().filter(open).collect();
+        let aimed = match named {
+            Some((id, naming)) if waiting.contains(&id) => Aimed::At(id, naming),
+            Some((id, _)) => match self.threads.watching.get(&id) {
+                Some(Watch {
+                    settled: Some(_), ..
+                }) => Aimed::Settled(id),
+                Some(Watch { thread, .. }) => Aimed::Elsewhere(id, *thread),
+                None => Aimed::Nothing,
+            },
+            None => match waiting.as_slice() {
+                [id] => Aimed::At(*id, Naming::Not),
+                [] => match self.undecided(aimed, words) {
+                    Some(id) => Aimed::Undecided(id),
+                    None => Aimed::Nothing,
+                },
+                several => Aimed::Unnamed(several.to_vec()),
+            },
+        };
+        (aimed, words)
+    }
+
+    // The `pm_told` line for `comment` where a project manager is named and
+    // it is free text under a pending merge or yes-or-no ruling, which waits.
+    fn held_by(&self, comment: &ThreadComment, aimed: &[TicketId]) -> Option<String> {
+        self.agents.pm.as_ref()?;
+        let (Aimed::At(id, naming), words) = self.aim(comment, aimed) else {
+            return None;
+        };
+        let ruling = self.state.rulings.iter().find(|r| r.id == id)?;
+        let stale = naming == Naming::Number
+            && ruling.raised.is_some_and(|raised| comment.created < raised);
+        (!stale && Wants::of(&ruling.kind) != Wants::Answer && is_free_text(words))
+            .then(|| held_line(comment.thread, comment.id, Some(id), words))
     }
 
     // The number ruling `id` is read by, or `id` once it has left the state
@@ -618,6 +649,15 @@ impl Runner {
             }
         };
         self.say(thread, &said);
+    }
+
+    // Reacts to `comment`, whose words are held for the project manager.
+    fn react_held(&mut self, comment: &ThreadComment) {
+        if let Err(e) = self.ports.voice.thumbs_up(&self.remote, comment.id) {
+            let (who, thread) = (&comment.author, comment.thread);
+            self.notes
+                .push(format!("cannot react to {who}'s comment on #{thread}: {e}"));
+        }
     }
 
     /// What became of ruling `id` as a reply in its thread is told, if it ended

@@ -19,6 +19,7 @@ use crate::runner::Runner;
 use crate::ticket::TicketId;
 
 use super::act::{WORDS, plain};
+use super::maintainer::held_on;
 use super::prompt;
 
 /// The file the rolled part of the notes moves to, at its end
@@ -470,6 +471,8 @@ impl Runner {
     /// answer that gave the whole file was told to carry its own tells, so
     /// its caller does not add them a second time.
     pub(super) fn pm_stand_tells(&mut self, told: &[String]) {
+        // One item's words are no standing rule
+        let told: Vec<&String> = told.iter().filter(|t| held_on(t).is_none()).collect();
         if told.is_empty() {
             return;
         }

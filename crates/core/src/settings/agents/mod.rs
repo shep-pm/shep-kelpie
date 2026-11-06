@@ -24,7 +24,7 @@ use super::{Gateways, HookPoint, RoleModel, Settings, SettingsError};
 use crate::agents::{Agent, Agents, FOLDER, Role, Runs};
 use crate::forwarder::Upstream;
 
-/// The minutes past the soonest finish an item allows when nothing names a slack
+/// The minutes an item may wait for an agent to start when nothing names a slack
 pub const DEFAULT_SLACK_MINUTES: u32 = 60;
 
 /// An agent's name: lowercase letters, digits and `-`
@@ -361,10 +361,10 @@ pub struct RoleAgentNames {
     #[serde(default)]
     #[schemars(extend("deprecated" = true))]
     pub fallback_after: Option<Gone>,
-    /// Minutes past the soonest finish the agent board lets a work item's agent
-    /// take: a new item opens on the cheapest agent finishing within it, and a
-    /// later turn moves on when its own agent cannot start within it. The project
-    /// manager's pick may name its own. Whole minutes, `0` allowed. 60 when absent.
+    /// Minutes a work item may wait for its agent to start: a new item opens
+    /// on the cheapest agent that can start within it, and a later turn moves
+    /// on when its own agent cannot start within it. The project manager's pick
+    /// may name its own. Whole minutes, `0` allowed. 60 when absent.
     #[serde(default = "default_slack")]
     pub slack: u32,
     /// Read by nothing: a pass's candidates are every reviewer file
