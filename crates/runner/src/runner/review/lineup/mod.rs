@@ -102,10 +102,11 @@ impl Runner {
         let left_out = self.left_out_of(review);
         let ask = PickAsk {
             kind: item.kind.clone(),
-            tier: item
-                .weight
-                .as_ref()
-                .map_or(item.tier, |w| w.tier(item.tier)),
+            tier: match self.agents.pm {
+                // The project manager's tier stands, whatever the change weighs.
+                Some(_) => item.tier,
+                None => (item.weight.as_ref()).map_or(item.tier, |w| w.tier(item.tier)),
+            },
             pin: None,
             slack: Some(self.slack(item.slack)),
             agents: due.iter().map(|r| r.name.clone()).collect(),

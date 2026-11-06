@@ -9,7 +9,7 @@ use std::path::Path;
 
 use super::calls::severity_tag;
 use crate::ports::{CLEAN, Finding};
-use crate::work_item::Dispute;
+use crate::work_item::{Dispute, ReviewPlan};
 
 /// `body` with `base` and `diff` in their places
 fn filled(body: &str, base: &str, diff: &str) -> String {
@@ -102,6 +102,19 @@ pub(in crate::runner) fn asked_note(held: &[Finding]) -> String {
          changes. A change in the diff that answers one of them counts as asked for: \
          do not report it as behaviour nobody asked for.\n\n\
          --- the findings earlier rounds sent ---\n{lines}--- end ---"
+    )
+}
+
+/// What a reader is told of why the project manager wants these reads, to
+/// add after its prompt, and nothing when there is no plan or it says nothing
+/// of what the reads are for
+pub(in crate::runner) fn plan_note(plan: Option<&ReviewPlan>) -> String {
+    let Some(about) = plan.and_then(|plan| plan.about.as_deref()) else {
+        return String::new();
+    };
+    format!(
+        "\n\nThe project manager planned the reads of this pull request, yours among \
+         them, for this: {about}\nGive it your attention beside the rest of the change."
     )
 }
 
@@ -298,6 +311,30 @@ SEVERITY|file:line|what is wrong, and its trigger|what goes wrong, and who sees 
             ),
             "{note}"
         );
+    }
+
+    fn planned(about: Option<&str>) -> ReviewPlan {
+        ReviewPlan {
+            reads: 2.try_into().unwrap(),
+            about: about.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn the_plan_note_says_what_the_reads_are_for() {
+        let note = plan_note(Some(&planned(Some("the migration's rollback path"))));
+
+        assert!(note.starts_with("\n\nThe project manager planned"), "{note}");
+        assert!(
+            note.contains("for this: the migration's rollback path\n"),
+            "{note}"
+        );
+    }
+
+    #[test]
+    fn the_plan_note_is_empty_with_no_about() {
+        assert_eq!(plan_note(Some(&planned(None))), "");
+        assert_eq!(plan_note(None), "");
     }
 
     #[test]
