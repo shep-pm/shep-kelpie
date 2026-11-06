@@ -19,7 +19,9 @@ const RECORDED: &str = r#"{"project":"koji","merging":"ask","run":"finishing",
         "reading":{"at":300,"session":{"used_pct":3,"resets_at":400},
             "week":{"used_pct":15,"resets_at":500},"allowance_pct":14.3,
             "spent_today_pct":15,"per_hour_pct":1.8},
-        "holding":{"kind":"allowance","reason":"today's allowance is spent","until":600}}}}"#;
+        "holding":{"kind":"window",
+            "reason":"the 5-hour window is at 100%, so no turn starts until it resets",
+            "until":600}}}}"#;
 
 #[test]
 fn a_plain_status_names_what_the_maintainer_looks_for() {
@@ -36,7 +38,8 @@ fn a_plain_status_names_what_the_maintainer_looks_for() {
             "    ruling 1: merge, #7, PR #71",
             "  pacer: on",
             "    claude: session 3%, week 15%, 15% of the week spent today of 14.3% allowed",
-            "    claude holding (allowance): today's allowance is spent",
+            "    claude holding (window): the 5-hour window is at 100%, \
+             so no turn starts until it resets",
         ]
     );
 }

@@ -244,7 +244,7 @@ fn a_read_the_pacer_asks_for_names_the_agent_it_is_for_not_one_it_held_ahead() {
     rig.write_codex_implementer();
     rig.agent_board.ranks(&["api", "codex", "sonnet-high"]);
     // The Codex account is past its window when the item opens, the Claude one unread.
-    rig.codex_meter.set(Rig::utilization(0, 55));
+    rig.codex_meter.set(Rig::utilization(0, 100));
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.claude

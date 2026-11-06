@@ -301,7 +301,7 @@ fn codex_holds_12() -> (Rig, Mutex<Runner>) {
     let rig = Rig::new("koji");
     rig.write_codex_implementer();
     let (rig, runner) = pm_on(rig);
-    rig.codex_meter.set(Rig::utilization(0, 55));
+    rig.codex_meter.set(Rig::utilization(0, 100));
     rig.forge.list_ready(12, false);
     rig.forge.label(12, "agent:codex!");
     step(&runner).unwrap();
