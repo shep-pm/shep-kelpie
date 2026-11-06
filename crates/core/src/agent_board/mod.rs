@@ -2,8 +2,9 @@
 //!
 //! [`History`] reads an agent's typical time and cost from the ledger's merged
 //! items, [`wait`] reads how long its model's load or its plan's hold keeps it
-//! from starting, [`pick`] orders the agents that fit an item, and [`fit`]
-//! reads which agents do clearly worse at a kind than another that takes it.
+//! from starting, [`pick`] reads the agents that fit an item, [`rank`] orders
+//! them, and [`fit`] reads which agents do clearly worse at a kind than
+//! another that takes it.
 //! Every duration is in seconds but a slack, in minutes.
 
 use schemars::JsonSchema;
@@ -18,7 +19,7 @@ mod typical;
 mod wait;
 
 pub use fit::{FIT_AGAIN, FIT_ITEMS, Finding, Measure, Taker, fit};
-pub use pick::{Candidate, Choice, Item, pick, starts_within_slack, within_slack};
+pub use pick::{Candidate, Choice, Item, pick, rank, starts_within_slack, within_slack};
 pub use record::{HEAVY_FIX_TURNS, Record, records};
 pub use typical::{DEFAULT_SECS, History, SAMPLES, Typical};
 pub use wait::{Availability, wait};
