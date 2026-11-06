@@ -6,15 +6,15 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
+use super::super::held_line;
 use super::super::said::{SaidCall, SaidHow};
-use super::super::{asked::never_decided, held_line};
 use super::{NOTHING, name_pm, pm_seen, step_until};
-use crate::ports::{AgentError, Checks, Cost, Role};
+use crate::ports::{AgentError, CLEAN, Checks, Cost, Role};
 use crate::runner::flight::advance;
 use crate::runner::retro::journal::{self, Entry};
 use crate::runner::{Runner, StepReport, step};
-use crate::settings::{Harness, RulingName};
-use crate::state::{AgentFit, AgentMeasure, Held, Ruling, RulingKind, Stuck};
+use crate::settings::Harness;
+use crate::state::{AgentFit, AgentMeasure, RulingKind, Stuck};
 use crate::test::ticket;
 use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
 use crate::work_item::{Phase, Priced, Turn};
@@ -359,129 +359,6 @@ fn pm_n_with_no_approaches_or_past_the_last_is_refused_and_says_why() {
     assert!(pending(&rig));
 }
 
-// Handing one ruling to the project manager with `pm decide`
-
-/// A project with a project manager whose worker is parked on ruling 71,
-/// a label put on its pull request outside kelpie, posted to the maintainer
-pub(super) fn foreign_put(project: &str) -> (Rig, Mutex<Runner>) {
-    let (rig, runner, _) = Rig::with_pull_request_set(project, |rig| {
-        rig.with_app();
-        rig.maintainer("octocat");
-        name_pm(rig);
-    });
-    rig.forge.label_pull_request(71, "bug");
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::Ruling { id, .. }) if id == ticket(71)
-    ));
-    rig.forge.threads.grant_write("octocat");
-    let card = |c: &String| c.starts_with("### Accept a change made outside kelpie?");
-    assert!(comments(&rig).iter().any(card), "{:?}", comments(&rig));
-    rig.clock.advance(5);
-    (rig, runner)
-}
-
-/// The project manager's vote on ruling 71 for `choice`, flagged `design`
-pub(super) fn decided(choice: char, design: bool) -> &'static str {
-    let text = format!(
-        "{{\"pick\": null, \"votes\": [{{\"ruling\": 71, \"choice\": \"{choice}\", \"why\": \
-         \"PM-WHY\", \"design\": {design}}}]}}"
-    );
-    Box::leak(text.into_boxed_str())
-}
-
-#[test]
-fn pm_decide_applies_its_answer_as_if_the_project_left_the_ruling_to_it() {
-    let (rig, runner) = foreign_put("asked-decide");
-    rig.claude
-        .script_for(Role::Pm, [Scripted::Say(decided('A', false))]);
-
-    let said = replied(&rig, &runner, "71 pm decide", |c| {
-        c.starts_with("**Answered by the project manager")
-    });
-
-    assert!(
-        said.starts_with("**Answered by the project manager: A, Yes**"),
-        "{said}"
-    );
-    assert!(
-        said.contains("Reply `71 no <note>` to reopen it."),
-        "{said}"
-    );
-    assert!(!pending(&rig), "the answer was applied");
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["pm_answers"]["foreign-change"], 1, "{status}");
-}
-
-#[test]
-fn a_design_flag_on_pm_decide_leaves_the_ruling_the_maintainers_with_its_pick() {
-    let (rig, runner) = foreign_put("asked-decide-design");
-    rig.claude
-        .script_for(Role::Pm, [Scripted::Say(decided('B', true))]);
-
-    let said = replied(&rig, &runner, "71 pm decide", |c| {
-        c.contains("**Project manager: B**")
-    });
-
-    assert!(said.contains("**Project manager: B**. PM-WHY"), "{said}");
-    assert!(
-        said.contains("It would answer `71 no <note>` (No)."),
-        "{said}"
-    );
-    assert!(
-        said.contains("Ruling #71 is still yours, since it flagged design"),
-        "{said}"
-    );
-    assert!(pending(&rig));
-}
-
-#[test]
-fn pm_decide_on_a_merge_is_refused_naming_the_kind_and_wakes_nothing() {
-    let (rig, runner) = merge_put("asked-decide-merge", true);
-
-    let said = replied(&rig, &runner, "71 pm decide", |c| {
-        c.contains("was not put to the project manager")
-    });
-
-    assert!(
-        said.contains("the project manager never decides a `merge` ruling"),
-        "{said}"
-    );
-    assert_eq!(pm_seen(&rig).len(), 0);
-    assert!(pending(&rig));
-}
-
-#[test]
-fn pm_decide_is_refused_on_every_kind_the_project_manager_never_decides() {
-    let never: Vec<RulingName> = (RulingName::ALL.into_iter())
-        .filter(|n| n.pm_default().is_none())
-        .collect();
-    assert!(never.iter().any(|n| n.as_str() == "local-model-spilled"));
-    for name in never {
-        let refused = never_decided(name).unwrap_err();
-        assert!(
-            refused.contains(&format!("`{}`", name.as_str())),
-            "{refused}"
-        );
-    }
-    let (_rig, runner) = super::with_pm("asked-decide-refused");
-    let runner = runner.lock().unwrap();
-    let merge = RulingKind::Contribution(Held::Merge {
-        head: "abc".into(),
-        rework_off: false,
-    });
-    let refused = runner.pm_may_decide(&Ruling::new(ticket(9), "q", merge));
-    assert!(refused.unwrap_err().contains("`contribution-merge`"));
-    let rebase = RulingKind::from(Stuck::Rebase {
-        why: "conflicts".into(),
-        review: None,
-    });
-    assert_eq!(
-        runner.pm_may_decide(&Ruling::new(ticket(9), "q", rebase)),
-        Ok(())
-    );
-}
-
 // Free text under a ruling, which a project with a project manager reads as
 // words to it
 
@@ -737,7 +614,8 @@ fn send_back_on_a_kind_whose_no_makes_no_worker_turn_is_named_and_the_ruling_wai
         next.rulings[0].kind = kind.clone();
         runner.save(next).unwrap();
 
-        let (acted, dropped) = runner.pm_said(std::slice::from_ref(&words), &[call.clone()]);
+        let (acted, dropped) =
+            runner.pm_said(std::slice::from_ref(&words), std::slice::from_ref(&call));
 
         assert_eq!(acted, Vec::<String>::new(), "{name}");
         assert_eq!(dropped.len(), 1, "{name}: {dropped:?}");
@@ -810,4 +688,231 @@ fn settle_with_nothing_held_is_named_and_the_ruling_waits() {
     let said = not_carried_out(&rig);
     assert!(said[0].contains("It is still yours."), "{said:?}");
     assert!(pending(&rig));
+}
+
+/// A project with a project manager whose pull request 71 is open and whose
+/// CI is pending, with no ruling raised, the maintainer able to write; also
+/// the head
+fn bare_put(project: &str) -> (Rig, Mutex<Runner>, String) {
+    let rig = Rig::new(project);
+    rig.with_app();
+    rig.maintainer("octocat");
+    name_pm(&rig);
+    rig.ci_on();
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.forge.threads.grant_write("octocat");
+    rig.claude
+        .script([Scripted::Push("work.txt", "work\n"), Scripted::Text(CLEAN)]);
+    step(&runner).unwrap(); // the worker's first turn: opens the pull request
+    let head = rig.forge.head_of("kelpie/7").expect("the worker pushed");
+    rig.forge.set_checks(&head, Checks::Pending(Vec::new()));
+    (rig, runner, head)
+}
+
+/// Writes `words` as the maintainer on [`bare_put`]'s pull request, which
+/// the review round reads, and steps until the project manager's wake on
+/// them ends
+fn said_bare(rig: &Rig, runner: &Mutex<Runner>, words: &str) -> (Vec<String>, Vec<String>) {
+    rig.writes_on(71, "octocat", words);
+    rig.next_look();
+    wake_ended(runner)
+}
+
+/// Passes CI on `head` and lets the checks settle, so the gate reads the
+/// comments again
+fn passed(rig: &Rig, head: &str) {
+    rig.forge.set_checks(head, Checks::Passed);
+    rig.clock.advance(crate::runner::CHECKS_SETTLE);
+    rig.next_look();
+}
+
+#[test]
+fn send_back_with_no_ruling_reaches_the_worker_at_the_next_comment_read() {
+    let (rig, runner, head) = bare_put("said-bare-send");
+    let call = calling("send-back", "Cache it in a map", "The words ask for it");
+    rig.claude.script_for(Role::Pm, [Scripted::Say(call)]);
+    rig.claude.script([Scripted::Push("map.txt", "map\n")]);
+
+    let (acted, dropped) = said_bare(&rig, &runner, "Why is the cache a vector?");
+    passed(&rig, &head);
+    worker_sent(&rig, &runner, "Cache it in a map");
+
+    assert_eq!(dropped, Vec::<String>::new());
+    assert!(acted[0].contains("send-back on #71"), "{acted:?}");
+    let sent = rig.claude.calls();
+    let sent = sent.iter().find(|c| c.prompt.contains("Cache it in a map"));
+    let sent = &sent.unwrap().prompt;
+    assert!(sent.contains("Why is the cache a vector?"), "{sent}");
+    assert!(runner.lock().unwrap().pm_released().is_empty());
+}
+
+#[test]
+fn park_with_no_ruling_raises_a_question_at_the_next_comment_read() {
+    let (rig, runner, head) = bare_put("said-bare-park");
+    let call = calling("park", "", "It asks for a design choice");
+    rig.claude
+        .script_for(Role::Pm, [Scripted::Say(call), Scripted::Say(NOTHING)]);
+    let before = turns(&rig);
+
+    let (acted, dropped) = said_bare(&rig, &runner, "Should this be two changes?");
+    passed(&rig, &head);
+    let said = posted(&rig, &runner, |c| c.contains("parked this work item"));
+
+    assert_eq!(dropped, Vec::<String>::new());
+    assert!(acted[0].contains("park on #71"), "{acted:?}");
+    assert!(said.contains("Should this be two changes?"), "{said}");
+    assert!(said.contains("It asks for a design choice"), "{said}");
+    assert!(pending(&rig), "a question waits for the maintainer");
+    let runner = runner.lock().unwrap();
+    assert!(matches!(
+        runner.state.rulings[0].kind,
+        RulingKind::Question { .. }
+    ));
+    assert_eq!(turns(&rig), before, "no worker turn started");
+}
+
+#[test]
+fn a_released_comment_is_held_again_after_a_restart() {
+    let (rig, runner, head) = bare_put("said-bare-restart");
+    let call = calling("send-back", "Cache it in a map", "The words ask for it");
+    rig.claude.script_for(Role::Pm, [Scripted::Say(call)]);
+    said_bare(&rig, &runner, "Why is the cache a vector?");
+    assert_eq!(runner.lock().unwrap().pm_released().len(), 1);
+    drop(runner);
+    let runner = rig.open().unwrap();
+    rig.claude.script_for(Role::Pm, [Scripted::Say(NOTHING)]);
+
+    passed(&rig, &head);
+    let prompt = woken_prompt(&rig, &runner);
+
+    assert!(prompt.contains("Why is the cache a vector?"), "{prompt}");
+    assert!(runner.lock().unwrap().pm_released().is_empty());
+    let calls = rig.claude.calls();
+    assert!(!calls.iter().any(|c| c.prompt.contains("Cache it in a map")));
+}
+
+#[test]
+fn a_call_on_a_thread_the_wake_held_no_words_for_is_dropped() {
+    let (rig, runner) = merge_put("said-unheld", true);
+    let call = calling("send-back", "Split the parser", "A note told it so");
+    rig.claude.script_for(Role::Pm, [Scripted::Say(call)]);
+    let before = turns(&rig);
+
+    rig.ask(&runner, "tell", Some("Split the parser on #71"));
+    let (acted, dropped) = wake_ended(&runner);
+
+    assert_eq!(acted, Vec::<String>::new());
+    assert!(
+        dropped[0].contains("the maintainer's words on it were not held for this wake"),
+        "{dropped:?}"
+    );
+    assert!(pending(&rig));
+    assert_eq!(turns(&rig), before, "no worker turn started");
+    assert_eq!(not_carried_out(&rig), Vec::<String>::new());
+}
+
+#[test]
+fn held_words_given_no_call_are_named_in_the_thread() {
+    let (rig, runner) = merge_put("said-no-call", true);
+    rig.claude.script_for(Role::Pm, [Scripted::Say(NOTHING)]);
+
+    let (acted, dropped) = said_words(&rig, &runner, "Why is this one so large?");
+    let said = posted(&rig, &runner, |c| c.contains("made no call on it"));
+
+    assert_eq!(acted, Vec::<String>::new());
+    assert!(
+        dropped[0].contains("made no call on the maintainer's words on #71"),
+        "{dropped:?}"
+    );
+    assert!(said.starts_with("@octocat "), "{said}");
+    assert!(said.contains("It is still yours."), "{said}");
+    assert!(pending(&rig));
+}
+
+#[test]
+fn a_wake_that_fails_keeps_the_held_words_for_the_next_wake() {
+    let (rig, runner) = merge_put("said-failed", true);
+    let failed = AgentError::Failed(Harness::ClaudeCode, "it crashed".into());
+    let call = calling("park", "", "It asks for a design choice");
+    rig.claude
+        .script_for(Role::Pm, [Scripted::Fail(failed), Scripted::Say(call)]);
+
+    rig.writes_on(71, "octocat", "Should this be two changes?");
+    rig.next_look();
+    let deadline = Instant::now() + CALL_PATIENCE;
+    while runner.lock().unwrap().state.pm_told.is_empty() || pm_seen(&rig).is_empty() {
+        assert!(Instant::now() < deadline, "the first wake never ran");
+        step(&runner).unwrap();
+        std::thread::yield_now();
+    }
+    assert_eq!(runner.lock().unwrap().state.pm_told.len(), 1, "kept");
+    let ended = |r: &StepReport| matches!(r, StepReport::PmAnswered { .. });
+    let deadline = Instant::now() + CALL_PATIENCE;
+    let mut report = None;
+    while report.is_none() && Instant::now() < deadline {
+        rig.clock.advance(60 * 60);
+        rig.next_look();
+        report = step(&runner).unwrap().filter(ended);
+    }
+    let Some(StepReport::PmAnswered { acted, .. }) = report else {
+        panic!("the wake never ran again: {:?}", pm_seen(&rig).len());
+    };
+
+    assert!(acted[0].contains("parked on ruling"), "{acted:?}");
+    let seen = pm_seen(&rig);
+    let again = seen
+        .iter()
+        .filter(|s| s.call.prompt.contains("two changes"));
+    assert_eq!(again.count(), 2, "the second wake read the words again");
+    assert!(runner.lock().unwrap().state.pm_told.is_empty());
+}
+
+#[test]
+fn each_call_leaves_its_why_in_the_journal() {
+    let (rig, runner) = merge_put("said-journal", true);
+    let park = calling("park", "", "PARK-WHY");
+    let settle = calling("settle", "", "SETTLE-WHY");
+    rig.claude
+        .script_for(Role::Pm, [Scripted::Say(park), Scripted::Say(settle)]);
+
+    let (acted, _) = said_words(&rig, &runner, "Should this be two changes?");
+    assert!(acted[0].contains("PARK-WHY"), "{acted:?}");
+    rig.clock.advance(5 * 60);
+    let (_, dropped) = said_words(&rig, &runner, "Those bot threads are only nits.");
+    assert!(dropped[0].contains("SETTLE-WHY"), "{dropped:?}");
+
+    let wakes = journaled(&rig);
+    assert!(
+        wakes
+            .iter()
+            .any(|(a, _)| a.iter().any(|a| a.contains("PARK-WHY")))
+    );
+    assert!(
+        wakes
+            .iter()
+            .any(|(_, d)| d.iter().any(|d| d.contains("SETTLE-WHY")))
+    );
+    let notes = std::fs::read_to_string(rig.paths().pm.join("pm-notes.md")).unwrap();
+    assert!(notes.contains("PARK-WHY"), "{notes}");
+}
+
+#[test]
+fn a_said_call_adds_no_wake() {
+    let (rig, runner) = merge_put("said-one-wake", true);
+    let call = calling("park", "", "It asks for a design choice");
+    rig.claude
+        .script_for(Role::Pm, [Scripted::Say(call), Scripted::Say(NOTHING)]);
+
+    said_words(&rig, &runner, "Should this be two changes?");
+    for _ in 0..4 {
+        looked(&rig, &runner);
+        rig.clock.advance(crate::runner::review_bot::LATE_READ);
+    }
+
+    let wakes = pm_seen(&rig);
+    assert_eq!(wakes.len(), 1, "{:?}", wakes.iter().map(|s| &s.call.prompt));
+    assert!(wakes[0].call.prompt.contains("two changes"));
+    assert!(runner.lock().unwrap().state.pm_told.is_empty());
 }

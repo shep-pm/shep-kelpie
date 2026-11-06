@@ -5,8 +5,8 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use super::asked::{
-    advanced_until, comments, looked, made_stuck, merge_put, pending, refusals, turns,
-    woken_prompt, worker_sent,
+    advanced_until, looked, made_stuck, merge_put, pending, refusals, turns, woken_prompt,
+    worker_sent,
 };
 use super::{NOTHING, name_pm, pm_seen};
 use crate::ports::{Checks, Role};

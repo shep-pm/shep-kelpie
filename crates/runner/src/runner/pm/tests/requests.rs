@@ -3,9 +3,9 @@
 use std::time::Duration;
 
 use super::asked::{
-    advanced_until, approaches, comments, decided, foreign_put, merge_put, pending, posted,
-    replied, vote,
+    advanced_until, approaches, comments, merge_put, pending, posted, replied, vote,
 };
+use super::decide::{decided, foreign_put};
 use crate::ports::{Role, Timestamp};
 use crate::runner::Answer;
 use crate::runner::ruling::{Answerer, Record};

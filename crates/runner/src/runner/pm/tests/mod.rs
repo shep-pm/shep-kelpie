@@ -21,6 +21,7 @@ mod asked;
 mod attach;
 mod code;
 mod conflicts;
+mod decide;
 mod follow_up;
 mod free_slot;
 mod held;
