@@ -8,11 +8,15 @@
 //! over as if `rulings.pm_decides` left it to the project manager. A wake
 //! that fails or gives no answer says so in the thread.
 
+use std::collections::BTreeMap;
+
 use serde_json::{Map, Value};
 
 use super::Wake;
 use super::act::{WORDS, plain};
+use super::maintainer::held_on;
 use super::requests::Request;
+use super::said::{Released, SaidCall, SaidHow};
 use crate::pm_answer::{PmAnswer, WHY_LONGEST, from_fields};
 use crate::ports::ThreadComment;
 use crate::runner::voice::{answer_for, brief, inert, named};
@@ -21,6 +25,7 @@ use crate::runner::{Answer, Runner};
 use crate::settings::RulingName;
 use crate::state::{Ruling, RulingKind, Stuck};
 use crate::ticket::TicketId;
+use crate::work_item::Phase;
 
 /// What a `pm` reply takes after `pm`
 const TAKES: &str = "`pm` takes `recommend`, `options`, `decide` or an approach's number";
@@ -368,12 +373,156 @@ impl Runner {
         self.pm_says(ruling, &said);
     }
 
+    /// Acts on the project manager's `said` calls on the maintainer's words
+    /// that `told` held for this wake, and says what each did, for the log
+    ///
+    /// A call on a thread no held line names is dropped. What it cannot carry
+    /// out, and held words it made no call on, are named in the thread, where
+    /// the ruling and the work item wait for the maintainer.
+    pub(super) fn pm_said(
+        &mut self,
+        told: &[String],
+        said: &[SaidCall],
+    ) -> (Vec<String>, Vec<String>) {
+        let held: Vec<(u64, u64)> = told.iter().filter_map(|line| held_on(line)).collect();
+        let (mut acted, mut dropped) = (Vec::new(), Vec::new());
+        let mut threads: Vec<u64> = Vec::new();
+        for call in said {
+            let (thread, how) = (call.thread, call.call.as_str());
+            if !held.iter().any(|(held, _)| *held == thread) {
+                dropped.push(format!(
+                    "said {how} on #{thread}: the maintainer's words on it were not held for this wake"
+                ));
+            } else if threads.contains(&thread) {
+                dropped.push(format!(
+                    "said {how} on #{thread}: the answer names it twice"
+                ));
+            } else {
+                threads.push(thread);
+                let comments: Vec<u64> = (held.iter())
+                    .filter(|(held, _)| *held == thread)
+                    .map(|(_, comment)| *comment)
+                    .collect();
+                match self.pm_said_on(call, &comments) {
+                    Ok(done) => acted.push(done),
+                    Err(why) => dropped.push(why),
+                }
+            }
+        }
+        for (thread, _) in &held {
+            if threads.contains(thread) {
+                continue;
+            }
+            threads.push(*thread);
+            let said = "The project manager read your comment and made no call on it, so nothing \
+                        changed. It is still yours.";
+            self.pm_says_on(*thread, said);
+            dropped.push(format!(
+                "made no call on the maintainer's words on #{thread}"
+            ));
+        }
+        (acted, dropped)
+    }
+
+    // What one call did, or why it was refused, which it has said in the thread.
+    fn pm_said_on(&mut self, call: &SaidCall, comments: &[u64]) -> Result<String, String> {
+        let thread = call.thread;
+        let why = plain(&self.shown(call.why.clone()), WORDS);
+        let note = self.shown(call.note.clone());
+        let ruling = (self.state.rulings.iter())
+            .find(|r| {
+                r.pull_request == Some(thread) || r.issue.and_then(|t| t.github()) == Some(thread)
+            })
+            .cloned();
+        let done = match (&ruling, call.call) {
+            (_, SaidHow::Nothing) => Err("it made no call".to_owned()),
+            (Some(ruling), SaidHow::SendBack) => self.pm_sent_back(ruling, &note, &why),
+            (Some(ruling), SaidHow::Settle) => self.pm_settled(ruling, &why),
+            (Some(ruling), SaidHow::Park) => {
+                let said = format!(
+                    "**Project manager: parked**. Ruling #{} waits for you. {}",
+                    ruling.number(),
+                    inert(&why)
+                );
+                self.pm_says(ruling, &said);
+                Ok(format!("parked on ruling {}: {why}", ruling.id))
+            }
+            (None, SaidHow::Settle) => Err("no ruling waits on the thread to settle".to_owned()),
+            (None, how) => {
+                let released = Released {
+                    call: how,
+                    note,
+                    why: why.clone(),
+                };
+                self.pm_releases(thread, comments, released)
+                    .map(|()| format!("{} on #{thread}: {why}", how.as_str()))
+            }
+        };
+        done.map_err(|refused| {
+            let how = call.call.as_str();
+            let said = format!(
+                "The project manager's call on your comment was {how}, and it was not carried \
+                 out: {}. It is still yours.",
+                inert(&refused)
+            );
+            self.pm_says_on(thread, &said);
+            format!("said {how} on #{thread}: {refused}: {why}")
+        })
+    }
+
+    /// The comments the project manager called on with no ruling waiting,
+    /// which the next comment read carries out
+    pub(in crate::runner) fn pm_released(&self) -> &BTreeMap<u64, Released> {
+        &self.pm.released
+    }
+
+    /// Forgets the calls on `comments`, which a comment read has carried out
+    pub(in crate::runner) fn pm_carried_out(&mut self, comments: &[u64]) {
+        self.pm
+            .released
+            .retain(|comment, _| !comments.contains(comment));
+    }
+
+    // Hands the comments back to the next comment read, as `released` says,
+    // for the work item whose pull request is `thread`.
+    fn pm_releases(
+        &mut self,
+        thread: u64,
+        comments: &[u64],
+        released: Released,
+    ) -> Result<(), String> {
+        let open = |phase: &Phase| !matches!(phase, Phase::Done { .. });
+        let item = (self.state.work_items.iter())
+            .find(|i| i.pull_request == Some(thread) && open(&i.phase))
+            .map(|i| i.issue);
+        let Some(item) = item else {
+            return Err(format!("no open work item has pull request #{thread}"));
+        };
+        let mut next = self.state.clone();
+        if let Some(item) = next.item_mut(item) {
+            item.talked.comments.retain(|c| !comments.contains(c));
+        }
+        if next != self.state {
+            self.save(next)
+                .map_err(|e| format!("it could not be saved: {e}"))?;
+        }
+        for comment in comments {
+            self.pm.released.insert(*comment, released.clone());
+        }
+        Ok(())
+    }
+
     // Posts `text` in `ruling`'s thread, to the maintainer where they are known.
     pub(super) fn pm_says(&mut self, ruling: &Ruling, text: &str) {
         let Some(thread) = (ruling.pull_request).or_else(|| ruling.issue.and_then(|t| t.github()))
         else {
             return;
         };
+        self.pm_says_on(thread, text);
+    }
+
+    // Posts `text` on `thread`, to the maintainer where they are known.
+    fn pm_says_on(&mut self, thread: u64, text: &str) {
         let text = match self.maintainer() {
             Ok(login) => format!("@{login} {text}"),
             Err(_) => text.to_owned(),

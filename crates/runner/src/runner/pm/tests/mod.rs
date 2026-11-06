@@ -23,6 +23,7 @@ mod code;
 mod conflicts;
 mod follow_up;
 mod free_slot;
+mod held;
 mod hold;
 mod inert;
 mod lease;
