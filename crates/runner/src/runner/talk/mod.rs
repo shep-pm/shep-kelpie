@@ -11,13 +11,14 @@
 
 use std::collections::BTreeSet;
 
-use self::sort::{Left, Request, Sieve, Sorted, sort};
+use self::sort::{Left, Park, Request, Sieve, Sorted, sort};
 use super::Runner;
 use super::pm::held_line;
 use super::report::Begin;
 use super::review_bot::Answered;
 use super::ruling::needs_pass;
 use super::turn::KEEP_BODY_TRUE;
+use super::voice::inert;
 use super::words::Wants;
 use crate::board::HUMAN;
 use crate::state::{Resume, RulingKind, StateError};
@@ -86,16 +87,19 @@ impl Runner {
             left: &left,
             maintainer: maintainer.as_deref(),
             quiet: !item.talked.read && (item.adopted || item.rework || item.talked.quiet),
+            released: self.pm_released(),
         };
         let sorted = sort(&talk, &sieve);
         let capped = item.talked.capped();
-        if sorted.requests.is_empty() {
+        if sorted.requests.is_empty() && sorted.parks.is_empty() {
             self.note_heard(&sorted)?;
             self.notes.extend(sorted.ignored);
             self.reads.talked_on(number);
             return Ok(None);
         }
-        let begin = if capped {
+        let begin = if !sorted.parks.is_empty() {
+            self.parked_by_pm(number, at, &sorted)?
+        } else if capped {
             self.too_many_rounds(number, at, &sorted)?
         } else {
             self.send_requests(number, at, &sorted)?
@@ -105,6 +109,18 @@ impl Runner {
             .as_ref()
             .is_some_and(|b| !matches!(b, Begin::Reads(_)))
         {
+            // A send the gate stopped saved nothing: its calls are carried out next read
+            let heard: Vec<u64> = (self.current().map(|item| &item.talked.comments))
+                .map(|saved| {
+                    sorted
+                        .comments
+                        .iter()
+                        .filter(|c| saved.contains(c))
+                        .copied()
+                        .collect()
+                })
+                .unwrap_or_default();
+            self.pm_carried_out(&heard);
             self.notes.extend(sorted.ignored);
         }
         Ok(begin)
@@ -263,6 +279,45 @@ impl Runner {
              Say what the worker should do about them.",
             list.join("\n\n")
         );
+        self.put_to_maintainer(number, at, sorted, asked, false)
+    }
+
+    // The project manager parked the work item on the maintainer's words, so
+    // the maintainer is asked what the worker should do, as a question.
+    fn parked_by_pm(
+        &mut self,
+        number: u64,
+        at: &At,
+        sorted: &Sorted,
+    ) -> Result<Option<Begin>, StateError> {
+        let parks: Vec<String> = sorted.parks.iter().map(Park::quoted).collect();
+        let others: Vec<String> = sorted.requests.iter().map(Request::quoted).collect();
+        let more = match others.is_empty() {
+            true => String::new(),
+            false => format!(
+                "Others commented on the pull request as well:\n\n{}\n\n",
+                others.join("\n\n")
+            ),
+        };
+        let asked = format!(
+            "The project manager parked this work item on your words, so the worker waits for \
+             you:\n\n{}\n\n{more}Say what the worker should do.",
+            parks.join("\n\n")
+        );
+        self.put_to_maintainer(number, at, sorted, asked, true)
+    }
+
+    // Raises a question of `asked` to the maintainer in place of the comments
+    // of `sorted`, which are handled with it, and withdraws the merge ruling
+    // that waits, if one does.
+    fn put_to_maintainer(
+        &mut self,
+        number: u64,
+        at: &At,
+        sorted: &Sorted,
+        asked: String,
+        by_pm: bool,
+    ) -> Result<Option<Begin>, StateError> {
         let (phase, noted_from, parked) = self.after_comments(at);
         let resume = match (at, phase) {
             (At::Round(review), _) => Resume::Review(review.clone()),
@@ -291,7 +346,11 @@ impl Runner {
             self.say_withdrawn(id, issue, Some(number), why);
         }
         let kind = RulingKind::Question { asked, resume };
-        Ok(Some(self.raise(number, kind)?))
+        // A question the project manager parked the work item on is not its to answer
+        self.pm_parking(by_pm);
+        let raised = self.raise(number, kind);
+        self.pm_parking(false);
+        Ok(Some(raised?))
     }
 
     /// Replies on the threads the last round of comments was sent, and
@@ -319,6 +378,18 @@ impl Runner {
         }
         self.update(|item| item.talked.head = None)?;
         Ok(None)
+    }
+}
+
+impl Park {
+    // The words the project manager parked the work item on, and why.
+    fn quoted(&self) -> String {
+        let quoted: Vec<String> = self.text.lines().map(|l| format!("> {l}")).collect();
+        let why = match self.why.is_empty() {
+            true => String::new(),
+            false => format!("\nIts reason: {}", inert(&self.why)),
+        };
+        format!("{}:\n{}{why}", self.who, quoted.join("\n"))
     }
 }
 

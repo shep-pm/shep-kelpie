@@ -14,6 +14,11 @@ impl FakeForge {
         *self.visibility.lock().unwrap() = visibility;
     }
 
+    /// Makes reading any repository's visibility fail with `error`
+    pub fn set_visibility_down(&self, error: ForgeError) {
+        *self.visibility_down.lock().unwrap() = Some(error);
+    }
+
     /// Makes `repo` alone `visibility`, whatever the rest are
     pub fn set_visibility_of(&self, repo: &ForgeSlug, visibility: Visibility) {
         let key = repo.as_str().to_lowercase();

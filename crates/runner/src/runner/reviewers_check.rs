@@ -3,7 +3,6 @@
 
 use crate::ports::{Ports, Visibility};
 use crate::review_bot::Bot;
-use crate::runner::OpenError;
 use crate::settings::{ForgeSlug, ListedReviewer, SettingsError};
 
 // The reviewers `named` that `lineup` still holds, since a round never reaches one it left out.
@@ -50,29 +49,35 @@ pub(super) fn check_bots(lineup: &[ListedReviewer], ports: &Ports) -> Result<(),
 
 // CodeRabbit's free plan reviews public repos only, so a project that names it
 // for a repo the forge reports otherwise has it left out of the agent board's
-// ask, as an implementer no turn can run on is. The log line says so.
+// ask, as an implementer no turn can run on is. A repo whose visibility cannot
+// be read is told and kept: its round passes CodeRabbit over by it when known.
 pub(super) fn coderabbit_left_out(
     remote: &ForgeSlug,
     lineup: &[ListedReviewer],
     ports: &Ports,
-) -> Result<Option<String>, OpenError> {
+) -> Option<String> {
     let listed = lineup
         .iter()
         // parity: review-bot.private-repos
-        .find(|r| r.bot().is_some_and(|b| b.bot == Bot::Coderabbit));
-    let Some(listed) = listed else {
-        return Ok(None);
+        .find(|r| r.bot().is_some_and(|b| b.bot == Bot::Coderabbit))?;
+    let ask = "left out of the agent board's ask";
+    let visibility = match ports.forge.visibility(remote) {
+        Ok(Visibility::Public) => return None,
+        Ok(Visibility::Private) => "private",
+        Ok(Visibility::Internal) => "internal",
+        Err(e) => {
+            return Some(format!(
+                "cannot read {}'s visibility: {e}, so kelpie cannot tell whether reviewer {} \
+                 is {ask}",
+                remote.as_str(),
+                listed.name
+            ));
+        }
     };
-    let visibility = match ports.forge.visibility(remote)? {
-        Visibility::Public => return Ok(None),
-        Visibility::Private => "private",
-        Visibility::Internal => "internal",
-    };
-    Ok(Some(format!(
-        "reviewer {} is left out of the agent board's ask: {} is {visibility}, and {}'s free \
-         plan reviews public repos only",
+    Some(format!(
+        "reviewer {} is {ask}: {} is {visibility}, and {}'s free plan reviews public repos only",
         listed.name,
         remote.as_str(),
         Bot::Coderabbit.name()
-    )))
+    ))
 }

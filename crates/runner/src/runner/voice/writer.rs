@@ -1,9 +1,11 @@
 //! What writes to the repo for the runner, as the App where one covers it, with no lock
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use crate::board::make_missing_with;
 use crate::ports::{Forge, ForgeError, NewLabel, Tickets, Voice};
+use crate::runner::open_forge::stop_has_come;
 use crate::settings::{ForgeSlug, TicketSource};
 use crate::ticket::TicketId;
 
@@ -19,6 +21,8 @@ pub(in crate::runner) struct Writer {
     pub(super) source: TicketSource,
     /// Whether kelpie's App covers the repo
     pub(super) app: bool,
+    // The stop of the loop these hands write in, copied from the runner they came from
+    pub(super) loop_stop: Option<Arc<AtomicBool>>,
 }
 
 impl Writer {
@@ -38,10 +42,16 @@ impl Writer {
         wanted: impl IntoIterator<Item = NewLabel<'a>>,
     ) -> Result<(), String> {
         let repo = &self.remote;
-        make_missing_with(self.forge.as_ref(), repo, wanted, |label| match self.app {
-            true => self.voice.create_label(repo, label),
-            false => self.forge.create_label(repo, label),
-        })
+        make_missing_with(
+            self.forge.as_ref(),
+            repo,
+            wanted,
+            &|| stop_has_come(&self.loop_stop),
+            |label| match self.app {
+                true => self.voice.create_label(repo, label),
+                false => self.forge.create_label(repo, label),
+            },
+        )
     }
 
     /// Opens an issue, as the App where one covers the repo

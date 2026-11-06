@@ -275,7 +275,9 @@ fn serve(project: &str, arrival: Option<Arrival<Carry>>) -> Result<(), Exit> {
         let (dial, shep_home, project) = (Arc::clone(&dial), shep_home.clone(), project.clone());
         Box::new(move |runner| stop_own_sheep(&dial, &shep_home, &project, runner))
     };
-    let runner = Runner::open(
+    // The start's paced forge calls wait for the loop, which makes them while a
+    // trigger answers from the status `opened` posted.
+    let runner = Runner::opened(
         project,
         settings,
         kelpie_settings,
@@ -505,12 +507,15 @@ impl Worker {
         woken: Receiver<()>,
         died: Sender<Stop>,
     ) -> Self {
-        (runner.lock())
-            .unwrap_or_else(PoisonError::into_inner)
-            .wake_with(wake.clone());
         let stopping = Arc::new(AtomicBool::new(false));
         let (ending, ended) = mpsc::channel::<()>();
         let flag = Arc::clone(&stopping);
+        {
+            let mut runner = runner.lock().unwrap_or_else(PoisonError::into_inner);
+            runner.wake_with(wake.clone());
+            // The start's forge calls give up what is left once the stop comes
+            runner.stop_with(Arc::clone(&flag));
+        }
         let thread = std::thread::spawn(move || {
             let _ending = ending;
             // A runner with no worker thread would answer triggers and never work.
@@ -558,6 +563,13 @@ fn work(
     stopping: &AtomicBool,
 ) {
     let mut reread = Reread::at(&runner.lock().unwrap_or_else(PoisonError::into_inner));
+    // The start's forge calls, made with the lock held before any pass: a trigger
+    // asked meanwhile answers from the status the start posted, and the stop
+    // `spawn` handed the runner ends them between two of them.
+    runner
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .settle_on_forge();
     while !stopping.load(Ordering::SeqCst) {
         let (notes, stop) = {
             let mut runner = runner.lock().unwrap_or_else(PoisonError::into_inner);

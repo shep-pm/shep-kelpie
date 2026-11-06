@@ -272,6 +272,7 @@ impl Runner {
             let new = !self.state.rulings.iter().any(|r| r.id == ruling.id);
             let id = ruling.id;
             let wake = match (&ruling.kind, ruling.issue, ruling.pull_request, new) {
+                (RulingKind::Question { .. }, _, _, true) if self.pm.parking => continue,
                 (RulingKind::Question { asked, .. }, Some(ticket), _, true) => Wake::Question {
                     ticket,
                     id,

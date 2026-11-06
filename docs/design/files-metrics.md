@@ -4,7 +4,8 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 
 | file | covers | touch (`core/`: `crates/core/src/`, `dog/`: `crates/dog/src/dog/`, `adapters/`: `crates/adapters/src/`, `runner/`: `crates/runner/src/runner/`) |
 |---|---|---|
-| budget.md | pacing, dog + leases, settings | `runner/pace.rs`, `dog/`, `core/settings/`, `src/sheep/mod.rs` |
+| budget.md | pacing, settings, watching | `runner/pace.rs`, `core/settings/` |
+| budget-forge.md | the dog, leases, the login's pace and its limits | `dog/`, `runner/open_forge.rs`, `src/sheep/mod.rs` |
 | budget-usage.md | time by phase, the usage ledger | `core/usage/`, `runner/mod.rs` |
 | waits-and-spend.md | waits, held-up turns, failing steps, spend | `runner/{turn/unreachable,looks}/`, `adapters/{unreachable,codex}/`, `core/usage/` |
 | log-lines.md | log lines | `runner/{drain,skip_log,claim}`, `runner/review_bot/lease_wait.rs`, `dog/{desk.rs,door/}` |
