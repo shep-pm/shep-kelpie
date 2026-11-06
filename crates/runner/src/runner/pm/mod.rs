@@ -393,7 +393,11 @@ impl Runner {
             return false;
         };
         let ticket = *ticket;
-        if self.draining() || !self.pm_available() {
+        // A step in a pass has not read the account's usage, so the pace is
+        // the wake's to judge, which gives the ask up if it cannot run.
+        let now = self.ports.clock.now();
+        let down = self.pm.down_until.is_some_and(|until| now < until);
+        if self.draining() || down || self.pm_held_by_terminal() {
             return false;
         }
         self.pm.reading.insert(ticket);

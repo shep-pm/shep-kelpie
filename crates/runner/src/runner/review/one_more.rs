@@ -1,14 +1,58 @@
 //! A pass runs the project manager's plan, and a round's finding above a nit
 //! asks it for one more read
 
+use super::lineup::changed_lines;
+use crate::ports::Finding;
+use crate::runner::Runner;
+use crate::runner::pm::Wake;
+use crate::work_item::Review;
+
+impl Runner {
+    /// What to ask the project manager once `review`'s round, which sent
+    /// `sent` to the worker, is fixed, or None when its pass asks nothing
+    ///
+    /// A pass asks when a finding above a nit was sent, every read the plan
+    /// calls for is in, and a candidate is left to read once more. A bot's
+    /// pass asks nothing, since a bot reads on its own rounds.
+    pub(super) fn findings_wake(&self, review: &Review, sent: &[Finding]) -> Option<Wake> {
+        let item = self.current().filter(|_| self.agents.pm.is_some())?;
+        let above: Vec<Finding> = sent.iter().filter(|f| !f.is_nit()).cloned().collect();
+        if review.bots_only || above.is_empty() {
+            return None;
+        }
+        let next = Review {
+            ran: self.ran_of(review),
+            ..review.clone()
+        }
+        .next_round();
+        let reads = self.reads_in(item, &next);
+        if reads < self.need_of(item) {
+            return None;
+        }
+        let base = item.review_base(self.item_base(item));
+        let left = self.due(&next, &item.worktree, &base).ok()?;
+        let lines = changed_lines(&self.settings.git.checkout, &item.worktree, &base).ok();
+        let pull_request = item.pull_request?;
+        (!left.is_empty()).then(|| Wake::Findings {
+            ticket: item.issue,
+            pull_request,
+            reads,
+            findings: above,
+            weight: item.weight.clone(),
+            lines: lines.flatten(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
 
     use super::super::several::{at_review, reviewer_models, reviewers_until_ci, two_local};
     use crate::agents::Tier;
-    use crate::runner::{Runner, step};
-    use crate::test::Rig;
+    use crate::ports::{Finding, Role, Severity};
+    use crate::runner::{Runner, StepReport, step};
+    use crate::test::{CALL_PATIENCE, Rig, Scripted, ScriptedRound};
     use crate::work_item::{Heavier, Lighter, ReviewPlan, ReviewWeight};
 
     // `two_local`'s candidates `mine`, `other` and `claude` on a project that names `agents.pm`,
@@ -114,5 +158,104 @@ mod tests {
 
         let ask = rig.agent_board.asks().pop().unwrap();
         assert_eq!(ask.tier, Some(Tier::Heavy));
+    }
+
+    fn found(severity: Severity) -> Vec<Finding> {
+        vec![Finding::new(severity, "work.txt", 1, "wrong", "it is")]
+    }
+
+    // The pass's first reader reads with `found`, and the worker fixes what it
+    // sent, so the round is over.
+    fn read_and_fixed(rig: &Rig, runner: &Mutex<Runner>, found: Vec<Finding>) {
+        let fixed = !found.is_empty();
+        rig.reviewer.script([ScriptedRound::Findings(found)]);
+        rig.claude.script([Scripted::Push("fixed.txt", "fixed\n")]);
+        step(runner).unwrap(); // the reviewer reads
+        let deadline = std::time::Instant::now() + CALL_PATIENCE;
+        while fixed && std::time::Instant::now() < deadline {
+            // The worker's fix turn runs on its own thread.
+            match step(runner).unwrap() {
+                Some(StepReport::FixPushed { .. } | StepReport::NitsDeclined { .. }) => break,
+                _ => std::thread::yield_now(),
+            }
+        }
+    }
+
+    // What the project manager was asked about a round's findings, per call.
+    fn asked(rig: &Rig) -> Vec<String> {
+        let calls = rig.claude.all_calls();
+        let pm = calls.iter().filter(|c| c.role == Role::Pm);
+        let about = |c: &&crate::ports::AgentCall| c.prompt.contains("above a nit");
+        pm.filter(about).map(|c| c.prompt.clone()).collect()
+    }
+
+    // Steps until the project manager's answer is reported.
+    fn until_answered(runner: &Mutex<Runner>) -> StepReport {
+        let deadline = std::time::Instant::now() + CALL_PATIENCE;
+        while std::time::Instant::now() < deadline {
+            match step(runner).unwrap() {
+                Some(report @ StepReport::PmAnswered { .. }) => return report,
+                _ => std::thread::yield_now(),
+            }
+        }
+        panic!("the project manager never answered");
+    }
+
+    // Steps a few times, as a runner left alone does.
+    fn left_alone(runner: &Mutex<Runner>) {
+        for _ in 0..5 {
+            step(runner).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_clean_round_ends_the_pass_with_no_wake() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+        read_and_fixed(&rig, &runner, Vec::new());
+
+        assert_eq!(phase(&rig, &runner), "ci");
+        left_alone(&runner);
+        assert!(asked(&rig).is_empty());
+    }
+
+    #[test]
+    fn a_round_of_nits_ends_the_pass_with_no_wake() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+        read_and_fixed(&rig, &runner, found(Severity::Low));
+
+        assert_eq!(phase(&rig, &runner), "ci");
+        left_alone(&runner);
+        assert!(asked(&rig).is_empty());
+    }
+
+    #[test]
+    fn a_medium_finding_on_the_last_read_wakes_the_project_manager() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+        rig.claude
+            .script_for(Role::Pm, [Scripted::Say("{\"pick\": null}")]);
+        read_and_fixed(&rig, &runner, found(Severity::Medium));
+
+        until_answered(&runner);
+
+        let [prompt] = asked(&rig).try_into().unwrap();
+        assert!(prompt.contains("MEDIUM work.txt:1 wrong"), "{prompt}");
+        assert!(prompt.contains("has had 1 read"), "{prompt}");
+    }
+
+    #[test]
+    fn a_high_finding_on_the_last_read_wakes_the_project_manager() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+        rig.claude
+            .script_for(Role::Pm, [Scripted::Say("{\"pick\": null}")]);
+        read_and_fixed(&rig, &runner, found(Severity::High));
+
+        until_answered(&runner);
+
+        let [prompt] = asked(&rig).try_into().unwrap();
+        assert!(prompt.contains("HIGH work.txt:1 wrong"), "{prompt}");
     }
 }

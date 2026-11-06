@@ -472,7 +472,7 @@ impl Runner {
                 return Ok(raised);
             }
         } else {
-            let next = self.after_round(review, self.ports.clock.now());
+            let next = self.after_fix(review, sent.findings, self.ports.clock.now());
             self.update(|item| next.apply(item))?;
         }
         Ok(Begin::Report(match left_open {
@@ -516,7 +516,7 @@ impl Runner {
             Answered::Retry(reason) => return Ok(self.gate_failed(reason)),
             Answered::LeftOpen { threads, reason } => left_open = Some((threads, reason)),
         }
-        let next = self.after_round(review, self.ports.clock.now());
+        let next = self.after_fix(review, sent.findings, self.ports.clock.now());
         self.update(|item| next.apply(item))?;
         if let Some((threads, reason)) = left_open {
             return Ok(Begin::Report(StepReport::ThreadsLeftOpen {

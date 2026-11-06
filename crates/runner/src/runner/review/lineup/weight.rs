@@ -80,7 +80,7 @@ impl Runner {
     /// else `reviews.need` for an adopted item, else one where the project
     /// names `agents.pm`, else the light count for a change weighed light and
     /// `reviews.need` otherwise
-    pub(super) fn need_of(&self, item: &WorkItem) -> u32 {
+    pub(in crate::runner) fn need_of(&self, item: &WorkItem) -> u32 {
         let reviews = &self.settings.reviews;
         if let Some(plan) = &item.review_plan {
             return plan.reads.get();
