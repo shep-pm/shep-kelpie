@@ -45,6 +45,7 @@ impl Runner {
         issue: u64,
         words: &str,
         found: &Found,
+        cc: Option<&str>,
     ) -> Option<(String, u64)> {
         let read =
             super::ticket(issue).and_then(|ticket| self.ports.tickets.issue(&self.remote, ticket));
@@ -64,9 +65,12 @@ impl Runner {
             &found.files,
             &found.open,
         );
+        // The questions go to someone other than the author only on an issue the
+        // App opened, and the mention under the words is what notifies them.
+        let cc = cc.map_or_else(String::new, |login| format!("cc @{login}\n\n"));
         let body = format!(
-            "{words}\n\n{questions}\n\n{REPLY_HINT}\n\n<details>\n<summary>Settle these in your own \
-             terminal</summary>\n\n{SKILL_WHERE}\n\n```text\n{prompt}\n```\n\n</details>\n\n{MARKER}"
+            "{words}\n\n{cc}{questions}\n\n{REPLY_HINT}\n\n<details>\n<summary>Settle these in \
+             your own terminal</summary>\n\n{SKILL_WHERE}\n\n```text\n{prompt}\n```\n\n</details>\n\n{MARKER}"
         );
         Some((body, body_hash(&read.body)))
     }
