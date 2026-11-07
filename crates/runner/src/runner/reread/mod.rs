@@ -249,7 +249,7 @@ impl Runner {
         self.gpu.point_at(gpu_metrics_url);
         self.extra_instructions = extra_instructions;
         self.webhook = webhook;
-        // Read again under the new pacing settings at the next look.
+        // Read again at the next look.
         self.pacing.clear();
         let mut line = String::from("settings changed");
         if !changed.is_empty() {
