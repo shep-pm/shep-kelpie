@@ -95,7 +95,7 @@ pub struct Settings {
     pub agents: RoleAgentNames,
     /// Read by nothing: `shep kelpie upgrade` deletes the table
     #[serde(default)]
-    #[schemars(extend("deprecated" = true))]
+    #[schemars(extend("deprecated" = true, "type" = "object"))]
     pub pacing: Option<Gone>,
     /// What every worker is started with
     pub worker: Worker,
