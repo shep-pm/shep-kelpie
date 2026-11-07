@@ -6,7 +6,7 @@
 //! the lock, so a trigger sent meanwhile is answered: [`Runner::triage_poll_job`]
 //! decides a poll is due, [`PollJob::run`] reads, and [`Runner::apply_poll`] acts
 //! on what was read, on the state it finds then. The pull requests are read only
-//! to take back a hand-labelled issue ([`super::hand`]) or to tell the triager
+//! to finish a swap a `taken` record owes ([`super::hand`]) or to tell the triager
 //! what is open. The listing and pull requests stay as the poll's snapshot.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -29,7 +29,8 @@ pub(in crate::runner) struct PollJob {
     local: Vec<u64>,
     /// The issues kelpie took back, whose swap is not yet seen done
     taken: BTreeSet<u64>,
-    /// Whether a hand-labelled issue may be taken back
+    /// Whether a `taken` record is saved and an App covers the repo, so a swap
+    /// it owes can be finished in this poll
     take_back: bool,
     /// Whether the triager may be started: an issue is queued or a wait is open
     research: bool,
@@ -56,7 +57,7 @@ pub(in crate::runner) struct PollRead {
 /// is made from
 #[derive(Debug, Clone)]
 pub(in crate::runner) struct Listing {
-    /// The open issues, as the poll's take-back left their labels
+    /// The open issues, as the swaps the poll finished left their labels
     pub(super) open: Vec<OpenIssue>,
     /// The open pull requests, or why they could not be listed. None when the
     /// poll had no use for them.
@@ -94,9 +95,7 @@ impl PollJob {
 
     // Whether the pass has a use for the open pull requests
     fn pulls_used(&self, open: &[OpenIssue]) -> bool {
-        let hand_labelled = self.take_back
-            && (open.iter())
-                .any(|i| i.labels.iter().any(|l| l == READY) || self.taken.contains(&i.number));
+        let taken_back = self.take_back && (open.iter()).any(|i| self.taken.contains(&i.number));
         let app = self.app.as_deref();
         // Every issue the pick rule may list, whoever opened it: a superset of
         // what the apply lists, which decides it from the state it finds.
@@ -122,7 +121,7 @@ impl PollJob {
                 && self.checked.get(&i.number) != Some(&key)
                 && check::check(&i.title, &i.body, &i.labels).is_empty()
         });
-        hand_labelled || to_triage || to_check
+        taken_back || to_triage || to_check
     }
 }
 
@@ -171,17 +170,20 @@ impl Runner {
             .map(|record| record.issue)
             .filter(|&issue| self.flights.triaging() != Some(issue) && !self.triage_given_up(issue))
             .collect();
-        let taken = (triage.iter().flat_map(|t| t.issues.iter()))
+        let taken: BTreeSet<u64> = (triage.iter().flat_map(|t| t.issues.iter()))
             .filter(|record| record.step == TriageStep::Taken)
             .map(|record| record.issue)
             .collect();
+        // A swap is owed only where a `taken` record is saved, so the App is
+        // asked whether it covers the repo only then. Asking mints a token.
+        let take_back = !taken.is_empty() && self.app_covers();
         let job = PollJob {
             tickets: Arc::clone(&self.ports.tickets),
             forge: Arc::clone(&self.ports.forge),
             repo: self.remote.clone(),
             local,
             taken,
-            take_back: triage.is_some() && self.settings.triage.hand_ready && self.app_covers(),
+            take_back,
             research: triage.is_some() && (!self.triage_queue.is_empty() || !waiting.is_empty()),
             triage: triage.map(|t| (t.since, t.pruned_through)),
             asked: self.looks.triage_asks(),
@@ -269,10 +271,9 @@ impl Runner {
             },
             TriagePick::All | TriagePick::Off => None,
         };
-        // A hand-labelled `ready-for-agent` the maintainer's own is swapped for
-        // `needs-triage` here, before the board reads its pick, and listed as
-        // the swap left it.
-        self.take_back_ready(&mut open, pulls.as_ref(), since, pruned_through)?;
+        // A swap a `taken` record owes is finished here, before the board reads
+        // its pick, and listed as the swap leaves it.
+        self.take_back_ready(&mut open, pulls.as_ref())?;
         // Worked out from the state as it stands, so an issue that got a record
         // while the listing was read is not listed as untouched.
         let mut due: Vec<&OpenIssue> = (open.iter())

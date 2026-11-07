@@ -234,8 +234,8 @@ mod tests {
                 "[app.dogs.kelpie.contributions]\npick = \"off\"\nreviewers = [\"defect-hunter\"]\nsecurity_reviewer = \"security-reviewer\"\nquiet_days = 7\nnudge_days = 3\n",
             )
             .replace(
-                "# [app.dogs.kelpie.triage]\n# pick = \"off\"\n# hand_ready = false\n# wait_days = 7\n# max_questions = 10\n# agent = \"triager\"\n# per_day = 10\n# per_author_per_day = 2\n# min_account_days = 30\n# max_body_kb = 20\n",
-                "[app.dogs.kelpie.triage]\npick = \"off\"\nhand_ready = false\nwait_days = 7\nmax_questions = 10\nagent = \"triager\"\nper_day = 10\nper_author_per_day = 2\nmin_account_days = 30\nmax_body_kb = 20\n",
+                "# [app.dogs.kelpie.triage]\n# pick = \"off\"\n# wait_days = 7\n# max_questions = 10\n# agent = \"triager\"\n# per_day = 10\n# per_author_per_day = 2\n# min_account_days = 30\n# max_body_kb = 20\n",
+                "[app.dogs.kelpie.triage]\npick = \"off\"\nwait_days = 7\nmax_questions = 10\nagent = \"triager\"\nper_day = 10\nper_author_per_day = 2\nmin_account_days = 30\nmax_body_kb = 20\n",
             )
             .replace(
                 "# authors = { \"qc-tester\"",
@@ -474,6 +474,18 @@ mod tests {
     fn the_agent_board_table_is_deprecated_and_takes_any_value() {
         let root = schema();
         let key = &root["properties"]["agent_board"];
+        assert_eq!(key["deprecated"], true, "{key}");
+        assert!(resolve(&root, key).get("type").is_none(), "{key}");
+    }
+
+    // `triage.hand_ready` decides nothing, so the example documents no key for
+    // it, and a table that still holds one loads whatever its value.
+    #[test]
+    fn the_triage_hand_ready_key_is_deprecated_and_takes_any_value() {
+        let root = schema();
+        let project = resolve(&root, &root[SHEEP_SCHEMA_KEY]);
+        let triage = resolve(&root, &project["properties"]["triage"]);
+        let key = &triage["properties"]["hand_ready"];
         assert_eq!(key["deprecated"], true, "{key}");
         assert!(resolve(&root, key).get("type").is_none(), "{key}");
     }

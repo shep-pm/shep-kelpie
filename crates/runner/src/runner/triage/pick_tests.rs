@@ -391,7 +391,7 @@ fn an_issue_labelled_while_the_listing_was_read_is_not_triaged_twice() {
 // the one the job was built on.
 #[test]
 fn a_ruling_saved_while_the_listing_was_read_is_kept() {
-    let rig = rig_with("pick = \"maintainer\"\nhand_ready = true");
+    let rig = rig_with("pick = \"maintainer\"");
     let mut by_hand = issue(&rig, 30, MAINTAINER, 5);
     by_hand.labels = vec!["ready-for-agent".to_owned()];
     list(&rig, by_hand);
@@ -417,10 +417,11 @@ fn a_ruling_saved_while_the_listing_was_read_is_kept() {
 
     let status = status(&rig, &runner);
     assert_eq!(status["rulings"].as_array().map(Vec::len), Some(1));
-    let records = &status["triage"]["issues"];
+    let saved =
+        serde_json::to_value(StateStore::new(rig.paths().state).load().unwrap().unwrap()).unwrap();
+    let kept = &saved["checks"];
     assert_eq!(
-        records[0]["issue"], 30,
-        "the apply saved its record: {records}"
+        kept[0]["issue"], 30,
+        "the apply saved its result: {kept} for {saved}"
     );
-    assert_eq!(records[0]["step"], "taken");
 }
