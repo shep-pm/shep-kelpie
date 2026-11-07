@@ -12,6 +12,7 @@
 use super::super::Runner;
 use super::super::contributions::post::forge_is_busy;
 use super::super::representative::IssuePost;
+use super::WaitingLabel;
 use super::addressed::Cover;
 use super::ask::{self, Purpose};
 use super::facts::{Reader, Wording, duplicate_facts, facts};
@@ -970,13 +971,12 @@ impl Runner {
                             return Ok(());
                         }
                     }
-                    if let Err(why) = self.make_missing_labels([NEEDS_TRIAGE]) {
-                        self.triage_failed(issue, &format!("cannot make `{TRIAGE}`: {why}"), true);
-                        return Ok(());
-                    }
-                    if let Err(e) = self.label_issue(issue, TRIAGE, true) {
-                        let why = format!("cannot label it `{TRIAGE}`: {e}");
-                        self.triage_failed(issue, &why, !forge_is_busy(&e));
+                    if let Err(failed) = self.put_waiting_label(issue) {
+                        let counts = match &failed {
+                            WaitingLabel::Make(_) => true,
+                            WaitingLabel::Label(e) => !forge_is_busy(e),
+                        };
+                        self.triage_failed(issue, &failed.to_string(), counts);
                         return Ok(());
                     }
                     self.triage_stepped(issue, TriageStep::Done)?;

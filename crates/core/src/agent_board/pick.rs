@@ -79,17 +79,16 @@ pub fn pick<'a>(item: &Item<'_>, candidates: &[Candidate<'a>]) -> Vec<Choice<'a>
 ///
 /// An agent that can start within `slack` minutes (see [`starts_within_slack`])
 /// is available, and the available come first: one held on its API key after
-/// every one that is not, then a listed agent first, in the list's order, then
-/// cost, a local agent with no priced history counting as free. An agent with
-/// no cost follows, lowest tier first as a stand-in for price. Ties go soonest
-/// finish first, then by name. The rest follow, soonest start first, then by name.
+/// every one that is not, then cost, a local agent with no priced history
+/// counting as free. An agent with no cost follows, lowest tier first as a
+/// stand-in for price. Ties go soonest finish first, then by name. The rest
+/// follow, soonest start first, then by name.
 pub fn rank(picks: Vec<Pick>, slack: Option<u32>) -> Vec<Pick> {
     let (mut available, mut rest): (Vec<_>, Vec<_>) =
         (picks.into_iter()).partition(|p| starts_within_slack(p.wait, slack));
     available.sort_by(|a, b| {
         a.held
             .cmp(&b.held)
-            .then_with(|| preferred(a.listed, b.listed))
             .then_with(|| cheaper(priced(a), priced(b), a.tier, b.tier))
             .then_with(|| (a.finish, &a.agent).cmp(&(b.finish, &b.agent)))
     });
@@ -118,16 +117,6 @@ pub(super) fn takes(fit: &Fit, kind: Option<&str>) -> bool {
         (None, _) => true,
         (Some(kinds), Some(kind)) => kinds.iter().any(|k| k == kind),
         (Some(_), None) => false,
-    }
-}
-
-// A listed agent beats an unlisted one, and an earlier place beats a later
-fn preferred(a: Option<usize>, b: Option<usize>) -> Ordering {
-    match (a, b) {
-        (Some(a), Some(b)) => a.cmp(&b),
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
     }
 }
 
@@ -198,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn the_boards_answer_goes_soonest_first_whatever_the_cost_or_the_list() {
+    fn the_boards_answer_goes_soonest_first_whatever_the_cost() {
         let (local, dear, held, cheap) = (name("local"), name("dear"), name("held"), name("cheap"));
         let any = Fit::default();
         let candidates = [
@@ -506,104 +495,23 @@ mod tests {
     }
 
     #[test]
-    fn a_listed_agent_within_the_slack_ranks_before_a_cheaper_unlisted_one() {
-        let (listed, cheap) = (name("listed"), name("cheap"));
-        let on_the_list = Pick {
-            listed: Some(0),
-            ..read(&listed, 900, Some(9.0))
-        };
-        let picks = vec![read(&cheap, 600, Some(0.1)), on_the_list.clone()];
-        assert_eq!(ranked(picks, None), ["listed", "cheap"]);
-        let unlisted = vec![read(&cheap, 600, Some(0.1)), read(&listed, 900, Some(9.0))];
-        assert_eq!(
-            ranked(unlisted, None),
-            ["cheap", "listed"],
-            "with no list the cheaper goes first"
-        );
-    }
-
-    #[test]
-    fn listed_agents_rank_in_the_lists_order_whatever_they_cost() {
-        let (a, b, c) = (name("a"), name("b"), name("c"));
-        let listed = |agent, place, cost_usd| Pick {
-            listed: Some(place),
-            ..read(agent, 600, cost_usd)
-        };
-        let picks = vec![
-            listed(&a, 2, Some(0.1)),
-            listed(&b, 1, Some(5.0)),
-            listed(&c, 0, Some(1.0)),
-        ];
-        assert_eq!(ranked(picks, None), ["c", "b", "a"]);
-    }
-
-    #[test]
     fn a_held_agent_within_the_slack_ranks_behind_every_agent_that_can_start() {
-        let (held, listed, cheap, dear) =
-            (name("held"), name("listed"), name("cheap"), name("dear"));
-        let held_first = |place| Pick {
+        let (held, cheap, dear) = (name("held"), name("cheap"), name("dear"));
+        let held_first = Pick {
             held: true,
-            listed: place,
             wait: 300,
             ..read(&held, 900, Some(0.01))
         };
-        let picks = |place| {
-            vec![
-                held_first(place),
-                read(&dear, 900, Some(9.0)),
-                read(&cheap, 900, Some(1.0)),
-                Pick {
-                    listed: place.map(|p| p + 1),
-                    ..read(&listed, 900, Some(5.0))
-                },
-            ]
-        };
+        let picks = vec![
+            held_first.clone(),
+            read(&dear, 900, Some(9.0)),
+            read(&cheap, 900, Some(1.0)),
+        ];
         assert_eq!(
-            ranked(picks(None), None),
-            ["cheap", "listed", "dear", "held"],
+            ranked(picks, None),
+            ["cheap", "dear", "held"],
             "it is the cheapest and finishes first, yet waits on the hold"
         );
-        assert_eq!(
-            ranked(picks(Some(0)), None),
-            ["listed", "cheap", "dear", "held"],
-            "a listed agent on hold does not outrank one that can start"
-        );
-        assert_eq!(ranked(vec![held_first(None)], None), ["held"]);
-    }
-
-    #[test]
-    fn a_listed_agent_past_the_slack_stays_behind_the_agents_within_it() {
-        let (soon, late, later) = (name("soon"), name("late"), name("later"));
-        let listed = |agent, place, wait| Pick {
-            listed: Some(place),
-            wait,
-            ..read(agent, wait + 600, Some(0.1))
-        };
-        let picks = vec![
-            listed(&later, 0, 5400),
-            listed(&late, 1, 4200),
-            read(&soon, 600, Some(9.0)),
-        ];
-        assert_eq!(
-            ranked(picks, Some(60)),
-            ["soon", "late", "later"],
-            "past the slack they go soonest start first, whatever the list says"
-        );
-    }
-
-    #[test]
-    fn unlisted_agents_follow_the_listed_ones_in_todays_order() {
-        let (listed, cheap, dear, unknown) =
-            (name("listed"), name("cheap"), name("dear"), name("unknown"));
-        let picks = vec![
-            read(&unknown, 600, None),
-            read(&dear, 600, Some(5.0)),
-            read(&cheap, 600, Some(0.5)),
-            Pick {
-                listed: Some(0),
-                ..read(&listed, 600, Some(9.0))
-            },
-        ];
-        assert_eq!(ranked(picks, None), ["listed", "cheap", "dear", "unknown"]);
+        assert_eq!(ranked(vec![held_first], None), ["held"]);
     }
 }

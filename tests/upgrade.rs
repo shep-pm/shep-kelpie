@@ -185,7 +185,8 @@ fn answer(
                 .filter_map(|s| Some((s.name.clone(), s.dogs.get(dog)?.clone())))
                 .collect(),
         },
-        Request::DogConfigResolved { .. } => Response::DogSection {
+        // Kelpie's own section holds no `[agent_board]`, so the strip has nothing to send.
+        Request::DogConfig { .. } | Request::DogConfigResolved { .. } => Response::DogSection {
             toml: String::new().into(),
         },
         Request::SheepConfig { name } => {

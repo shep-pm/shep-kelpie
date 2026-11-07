@@ -66,8 +66,7 @@ async fn started_on(section: &str) -> Dog {
         codex_meter: |_| Arc::new(FakeMeter::idle()),
     };
     let agents = Agents::load(dir.path()).unwrap();
-    let board = Board::new(&agents).preferring(started.settings.agent_board.prefer.clone());
-    let board = Arc::new(Mutex::new(board));
+    let board = Arc::new(Mutex::new(Board::new(&agents)));
     let (shown, live) = availability::begin(&agents, &started.settings, ports);
     let reread = Reread::new(
         &started,
@@ -142,11 +141,6 @@ impl Dog {
         capacity_of(&self.desk)
     }
 
-    fn prefer(&self) -> Vec<String> {
-        let prefer = crate::dog::board::lock(&self.board).prefer();
-        prefer.iter().map(|a| a.as_str().to_owned()).collect()
-    }
-
     // The models the dog reads a load for, as `gateway/model`.
     fn models(&self) -> Vec<String> {
         let status = self.shown.lock().unwrap().status();
@@ -168,22 +162,27 @@ impl Dog {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_changed_section_applies_the_capacity_and_the_prefer_list_at_the_next_pass() {
+async fn a_changed_section_applies_the_capacity_at_the_next_pass() {
     let mut dog = started_on(BASE).await;
-    assert_eq!((dog.capacity(), dog.prefer()), (3, vec!["opus".to_owned()]));
+    assert_eq!(dog.capacity(), 3);
 
-    dog.edit("[leases]\ncargo-test = 5\n[agent_board]\nprefer = [\"sonnet\", \"opus\"]\n");
+    dog.edit("[leases]\ncargo-test = 5\n");
     let lines = dog.pass().await;
 
     assert_eq!(dog.capacity(), 5);
-    assert_eq!(dog.prefer(), ["sonnet", "opus"]);
-    assert_eq!(
-        lines,
-        [
-            "applied leases.cargo-test: 5 at a time",
-            "applied agent_board.prefer: sonnet, opus"
-        ]
-    );
+    assert_eq!(lines, ["applied leases.cargo-test: 5 at a time"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_section_still_holding_the_list_applies_nothing_for_it() {
+    let mut dog = started_on("[leases]\ncargo-test = 3\n").await;
+
+    dog.edit(BASE);
+    let lines = dog.pass().await;
+
+    assert_eq!(dog.capacity(), 3);
+    assert_eq!(lines, Vec::<String>::new());
+    assert_eq!(dog.state(), SettingsState::default());
 }
 
 #[tokio::test(start_paused = true)]
@@ -193,7 +192,7 @@ async fn a_section_read_again_unchanged_applies_nothing() {
     assert_eq!(dog.pass().await, Vec::<String>::new());
     assert_eq!(dog.pass().await, Vec::<String>::new());
 
-    assert_eq!((dog.capacity(), dog.prefer()), (3, vec!["opus".to_owned()]));
+    assert_eq!(dog.capacity(), 3);
     assert_eq!(dog.state(), SettingsState::default());
 }
 
@@ -249,7 +248,7 @@ async fn a_section_that_does_not_parse_keeps_the_old_settings_and_alerts_once_pe
     dog.pass().await;
     dog.pass().await;
 
-    assert_eq!((dog.capacity(), dog.prefer()), (3, vec!["opus".to_owned()]));
+    assert_eq!(dog.capacity(), 3);
     assert!(first[0].contains("old settings stand"), "{first:?}");
     let posts = dog.alerts.posts();
     assert_eq!(posts.len(), 2, "one alert per reason");
@@ -511,7 +510,6 @@ async fn a_section_that_cannot_be_asked_for_keeps_the_settings_and_logs_once() {
     dog.edit("");
     dog.pass().await;
     assert_eq!(dog.capacity(), 3, "an empty text is the default capacity");
-    assert!(dog.prefer().is_empty());
 }
 
 #[tokio::test(start_paused = true)]
