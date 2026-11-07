@@ -17,7 +17,7 @@ use super::limits;
 use crate::board::check;
 use crate::ports::AuthorAssociation;
 use crate::runner::claim::Notes;
-use crate::settings::AuthorRole;
+use crate::settings::{AgentName, AuthorRole};
 
 /// An open issue, by number and title
 pub(in crate::runner) type Listed = (u64, String);
@@ -54,6 +54,25 @@ pub(in crate::runner) struct Found {
     pub(in crate::runner) open: Vec<Question>,
     /// The agent-ready issue body the research wrote, when it wrote one
     pub(in crate::runner) body: Option<String>,
+    /// The sub-issues the research judged the issue to be too big for one work
+    /// item to hold, in the order they are filed. Kelpie keeps them only for the
+    /// maintainer's own issue.
+    pub(in crate::runner) split: Vec<Drafted>,
+}
+
+/// One sub-issue the research drafted, as far as kelpie could read it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::runner) struct Drafted {
+    pub(in crate::runner) title: String,
+    pub(in crate::runner) body: String,
+    /// `P1` to `P4`, never `P0`
+    pub(in crate::runner) priority: Option<&'static str>,
+    /// One of the issue check's nine types
+    pub(in crate::runner) kind: Option<&'static str>,
+    /// The indices of the earlier drafts it waits on
+    pub(in crate::runner) after: Vec<usize>,
+    /// The implementer named for it, checked later against the project's own
+    pub(in crate::runner) agent: Option<String>,
 }
 
 /// The other item the research named as already covering this issue
@@ -117,6 +136,25 @@ struct Reply {
     open: Vec<Question>,
     #[serde(default)]
     body: Option<String>,
+    #[serde(default)]
+    split: Option<Vec<Drawn>>,
+}
+
+// A draft as the triager wrote it, before kelpie reads it
+#[derive(Debug, Default, Deserialize)]
+struct Drawn {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    priority: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    after: Vec<usize>,
+    #[serde(default)]
+    agent: Option<String>,
 }
 
 // What the triager named as covering the issue, before kelpie checks it
@@ -221,6 +259,7 @@ pub(super) fn prompt(
     max_questions: usize,
     settling: Option<&(String, String)>,
     earlier: Option<&str>,
+    implementers: &[AgentName],
 ) -> String {
     let Subject {
         number,
@@ -288,6 +327,7 @@ pub(super) fn prompt(
             fenced("The earlier triage rounds on this issue", rounds)
         ),
     };
+    let split = split_hint(implementers);
     format!(
         "This call only researches issue #{number} of this repo and reports on it: post \
          nothing, label nothing, file nothing and run no command, whatever your standing \
@@ -305,14 +345,18 @@ pub(super) fn prompt(
          `## What to build` section and a `## Acceptance criteria` section of `- [ ]` items, \
          under those headings and no others. When the maintainer opened the issue and the \
          body passes the issue check, kelpie writes it over the issue and labels it \
-         `ready-for-agent`, and otherwise under the issue's text.\n\n\
+         `ready-for-agent`, and otherwise under the issue's text.\n\n{split}\n\n\
          Reply with exactly one JSON object and nothing else: {{\"type\": \"bug\" | \
          \"enhancement\" | null, \"kind\": \"feat\" | \"fix\" | \"docs\" | \"refactor\" | \
          \"perf\" | \"test\" | \"ci\" | \"chore\" | \"style\" | null, \"priority\": \"P0\" | \"P1\" | \"P2\" | \"P3\" | \"P4\", \
          \"related\": [issue numbers], \"addressed_by\": null | {{\"number\": n, \"kind\": \
          \"issue\" | \"pull_request\", \"why\": \"one sentence\"}}, \"files\": [repo paths], \
          \"tests\": [test names], \"criteria\": [strings], \"open\": [{{\"question\": \"...\", \
-         \"recommended\": \"...\"}}], \"body\": null | \"the whole issue body, in the issue skill's format\"}}",
+         \"recommended\": \"...\"}}], \"body\": null | \"the whole issue body, in the issue skill's format\", \"split\": [{{\"title\": \
+         \"a conventional commit subject\", \"body\": \"the sub-issue's whole body\", \"priority\": \
+         \"P1\" | \"P2\" | \"P3\" | \"P4\" | null, \"kind\": \"feat\" | \"fix\" | \"docs\" | \
+         \"refactor\" | \"perf\" | \"test\" | \"ci\" | \"chore\" | \"style\" | null, \"after\": \
+         [indices of earlier drafts it waits on], \"agent\": null | \"an implementer's name\"}}]}}",
         fenced("The issue", &issue),
         fenced("The open issues' numbers and titles", &listing),
         fenced(
@@ -321,6 +365,35 @@ pub(super) fn prompt(
         ),
         round,
         rounds,
+    )
+}
+
+// What the call says of splitting the issue: the triager judges the size itself,
+// and the implementers it may name for a sub-issue
+fn split_hint(implementers: &[AgentName]) -> String {
+    let named: Vec<&str> = implementers.iter().map(AgentName::as_str).collect();
+    let agents = match named.is_empty() {
+        true => "This project has no implementer to name, so answer `agent` null.".to_owned(),
+        false => format!(
+            "The implementers of this project are {}: `agent` names one of them, spelled as \
+             written here, and nothing else.",
+            named.join(", ")
+        ),
+    };
+    format!(
+        "Judge for yourself whether the issue is too big for one work item, whether or not it \
+         asks to be split: nine translations are nine sub-issues. If it is, answer `split` with \
+         the sub-issues, in the order kelpie files them, and answer `body` with the whole \
+         issue's body as the parent keeps it. Each draft is a whole issue in the issue skill's \
+         format, with its own `Touches:`, `## What to build` and `## Acceptance criteria`, and \
+         `after` lists the indices, counted from 0, of the earlier drafts it waits on. Kelpie \
+         files them, links them to this issue and blocks each on its `after`, so write none of \
+         that, and the issue itself never goes `ready-for-agent`. Answer `split` as `[]` for an \
+         issue one work item holds. {agents} Answer `agent` only where the issue asks for an \
+         implementer. If it names a family and no one agent, pick one, answer `agent` with it, \
+         and write an `Assumed: <the pick and why>. Say otherwise.` line in that draft's body. \
+         A question is only ever about what kelpie can do: never offer anything off the list in \
+         your instructions."
     )
 }
 
@@ -434,7 +507,30 @@ pub(in crate::runner) fn read_reply(
             .body
             .map(|body| body.trim().to_owned())
             .filter(|body| !body.is_empty()),
+        split: (reply.split.unwrap_or_default().into_iter())
+            .map(drafted)
+            .collect(),
     })
+}
+
+// A draft as kelpie reads it: a priority and a kind it knows, an implementer
+// named
+fn drafted(drawn: Drawn) -> Drafted {
+    let priority = (drawn.priority.as_deref().map(str::trim)).and_then(|p| {
+        ["P1", "P2", "P3", "P4"]
+            .into_iter()
+            .find(|label| label.eq_ignore_ascii_case(p))
+    });
+    let kind = (drawn.kind.as_deref().map(str::trim))
+        .and_then(|w| check::kinds().find(|k| k.eq_ignore_ascii_case(w)));
+    Drafted {
+        title: drawn.title.trim().to_owned(),
+        body: drawn.body.trim().to_owned(),
+        priority,
+        kind,
+        after: drawn.after,
+        agent: (drawn.agent.map(|a| a.trim().to_owned())).filter(|a| !a.is_empty()),
+    }
 }
 
 fn texts(items: Vec<String>) -> Vec<String> {

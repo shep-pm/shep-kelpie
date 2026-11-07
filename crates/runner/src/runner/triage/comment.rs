@@ -18,11 +18,14 @@ use super::facts::{Reader, Wording, duplicate_facts, facts};
 use super::marker::{MARKER, duplicate_marker};
 use super::ready;
 use super::research::{Addressed, Found, Question};
+use super::rewrite::priority_label;
 use crate::board::{self, TRIAGE};
 use crate::local_paths::Leak;
 use crate::ports::{NewLabel, Timestamp};
 use crate::settings::AuthorRole;
-use crate::state::{CheckTriage, StateError, TriageLocal, TriageQuestions, TriageStep, Triaged};
+use crate::state::{
+    CheckTriage, SplitDraft, StateError, TriageLocal, TriageQuestions, TriageStep, Triaged,
+};
 
 /// How many times a step may fail for an issue before kelpie stops trying it
 pub(super) const TRIES: u32 = 5;
@@ -35,25 +38,7 @@ pub(super) const NEEDS_TRIAGE: NewLabel<'static> = NewLabel {
 };
 
 // The priority an issue gets when the research names none
-const FALLBACK_PRIORITY: &str = "P3";
-
-// The label made for a priority on a repo that has no label for it, under
-// the name the board ranks by
-pub(in crate::runner) fn priority_label(priority: &str) -> Option<NewLabel<'static>> {
-    let (name, description) = match priority {
-        "P0" => ("priority: P0", "Drop everything"),
-        "P1" => ("priority: P1", "Next up"),
-        "P2" => ("priority: P2", "After P1"),
-        "P3" => ("priority: P3", "Wanted, once higher priorities are done"),
-        "P4" => ("priority: P4", "Wanted someday, after everything above it"),
-        _ => return None,
-    };
-    Some(NewLabel {
-        name,
-        color: "c5def5",
-        description,
-    })
-}
+pub(super) const FALLBACK_PRIORITY: &str = "P3";
 
 /// What kind of post the representative is asked for
 const KIND: &str = "Write the first triage comment on this issue, from what kelpie found in the \
@@ -123,6 +108,9 @@ pub(in crate::runner) struct Tries {
     // The agent-ready body the reply gave for a maintainer's issue the pass
     // rewrites into one the check passes, kept until the record carries it
     ready_body: Option<String>,
+    // The drafts of the split the reply gave for the issue, kept until the
+    // record carries them
+    pub(super) split: Vec<SplitDraft>,
     // The labels the issue carried when its pass began, so a triage label it
     // carries later came by hand and stands; kept once, whatever retry runs
     pub(in crate::runner) seen: Option<Vec<String>>,
@@ -456,6 +444,7 @@ impl Runner {
         let ready = ready::readiness(self, issue, author, found, &labels);
         // A rewrite the check still refuses is written as settled answers are,
         // and the issue ends `needs-triage`.
+        let (mut plan, mut refused) = (Vec::new(), Vec::new());
         let (ready_body, rewrite) = match (stood.as_ref(), ready) {
             (Some(label), _) => {
                 self.notes.push(format!(
@@ -471,6 +460,17 @@ impl Runner {
                     "triage #{issue}: its rewritten body names {leak}, so it is not written \
                      and the issue ends `{TRIAGE}"
                 ));
+                (None, None)
+            }
+            (None, ready::Ready::Split { body, drafts }) => {
+                plan = drafts;
+                (Some(body), None)
+            }
+            (None, ready::Ready::SplitRefused(why)) => {
+                self.notes.push(format!(
+                    "triage #{issue}: its split files nothing, since it fails the issue check"
+                ));
+                refused = why;
                 (None, None)
             }
             (None, ready::Ready::Not) => (None, None),
@@ -540,7 +540,8 @@ impl Runner {
             (false, false) => Reader::Other,
         };
         let wording = Wording {
-            ready: ready_body.is_some(),
+            ready: ready_body.is_some() && plan.is_empty(),
+            split: !plan.is_empty(),
             ask,
             answers,
             local,
@@ -550,6 +551,9 @@ impl Runner {
             fallback: set,
         };
         let mut facts = facts(found, &labels, wording, reader);
+        if !refused.is_empty() {
+            facts.push_str(&super::split::refused_facts(&refused));
+        }
         if plain {
             facts.push_str(PLAIN_FACTS);
         }
@@ -595,6 +599,7 @@ impl Runner {
             None => labels,
         };
         tries.ready_body = ready_body;
+        tries.split = plan;
         tries.stood = stood;
         tries.duplicate = None;
         tries.ask = ask;
@@ -757,6 +762,7 @@ impl Runner {
         triage.issues.retain(|t| t.issue != issue);
         let labels = (self.triage_tries.get(&issue)).map_or_else(Vec::new, |t| t.labels.clone());
         let ready_body = (self.triage_tries.get(&issue)).and_then(|t| t.ready_body.clone());
+        let split = (self.triage_tries.get(&issue)).map_or_else(Vec::new, |t| t.split.clone());
         // The labels the pass began with go into the record with it: a pass
         // that resumes after a restart has no in-memory reading left, and
         // without these it takes kelpie's own `needs-triage` for the
@@ -819,6 +825,7 @@ impl Runner {
             record.add_call(at);
         }
         triage.issues.push(record);
+        super::split::plan(triage, issue, split);
         // The triager ran on the issue as the check last read it, so its end
         // is checked again.
         if let Some(kept) = next.checks.iter_mut().find(|c| c.issue == issue) {
@@ -839,6 +846,7 @@ impl Runner {
             tries.waiting = None;
             tries.duplicate = None;
             tries.ready_body = None;
+            tries.split.clear();
             tries.stood = None;
             tries.ask = false;
             tries.local_seen = None;

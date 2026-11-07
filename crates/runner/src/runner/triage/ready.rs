@@ -3,11 +3,11 @@
 //!
 //! The rewrite runs for an issue by [`Runner::maintainer`], ignoring case. The
 //! reply must have a `body` and no open question. Where the check passes the
-//! issue as left, the body goes over the issue's. Then the labels
-//! go on, `ready-for-agent` last. Otherwise the body goes under the issue's
-//! text, and the issue ends `needs-triage`. The comment is worded first. It
-//! promises nothing the local guard would refuse, or while a hand-put triage
-//! label stands.
+//! issue as left, the body goes over the issue's and the labels go on,
+//! `ready-for-agent` last. Otherwise the body goes under the issue's text, and
+//! the issue ends `needs-triage`. The comment is worded first. A reply that
+//! splits the issue is made ready as a split or refused as one
+//! ([`super::split`]).
 
 use super::super::Runner;
 use super::super::contributions::post::{forge_is_busy, refused_text};
@@ -18,7 +18,7 @@ use crate::board::has_criteria;
 use crate::board::{READY, TRIAGE};
 use crate::local_paths::{Leak, Surface};
 use crate::ports::{ForgeError, NewLabel};
-use crate::state::{CheckTriage, StateError, TriageStep};
+use crate::state::{CheckTriage, SplitDraft, StateError, TriageStep};
 
 /// Made on a repo that lacks it before the first issue that passes the issue
 /// check is made ready
@@ -50,6 +50,16 @@ pub(in crate::runner) enum Ready {
     /// The maintainer's own issue, but the body names something of this
     /// machine, so kelpie will not write it
     Local(Leak),
+    /// The maintainer's own issue, which the research judged too big for one
+    /// work item: the body to write over the issue's, which never goes ready,
+    /// and the drafts to file as its sub-issues
+    Split {
+        body: String,
+        drafts: Vec<SplitDraft>,
+    },
+    /// The same, but the body or a draft fails: one line for each, and nothing
+    /// is filed
+    SplitRefused(Vec<String>),
 }
 
 /// Whether kelpie is going to rewrite `issue`, with `labels` the pass puts on,
@@ -65,15 +75,16 @@ pub(in crate::runner) fn readiness(
     found: &Found,
     labels: &[String],
 ) -> Ready {
+    if !found.open.is_empty() || !runner.own_author(author) {
+        return Ready::Not;
+    }
+    // A split from anyone else is dropped: #1847 files it once its author says so.
+    if !found.split.is_empty() {
+        return runner.judged_split(issue, found);
+    }
     let Some(body) = found.body.clone() else {
         return Ready::Not;
     };
-    if !found.open.is_empty() {
-        return Ready::Not;
-    }
-    if !runner.own_author(author) {
-        return Ready::Not;
-    }
     // The maintainer took the label off, now or while the pass ran, so it stays
     // off: the pass ends at `needs-triage`.
     let now = (runner.labels_now(issue)).unwrap_or_else(|_| runner.triage_seen(issue));
@@ -127,6 +138,7 @@ impl Runner {
                      that stands: kelpie labels it no further and writes no new body"
                 ));
                 self.triage_stepped(issue, TriageStep::Done)?;
+                self.unplan(issue)?;
                 self.triage_tries.remove(&issue);
                 return Ok(ReadyWrite::Held);
             }
@@ -270,7 +282,8 @@ impl Runner {
         {
             held.ready_body = None;
         }
-        self.save(next)
+        self.save(next)?;
+        self.unplan(issue)
     }
 
     // Puts on the labels the reply gave and then `ready-for-agent`, last, taking
@@ -302,17 +315,19 @@ impl Runner {
                  that stands: kelpie labels it no further"
             ));
             self.triage_stepped(issue, TriageStep::Done)?;
+            self.unplan(issue)?;
             return Ok(ReadyLabels::Stood);
-        }
-        // A split parent is never ready: its sub-issues are filed in its place.
-        if self.split_of(issue).is_some() {
-            return self.label_split(issue, &carried);
         }
         let labels = self
             .triage_record(issue)
             .map_or_else(Vec::new, |t| t.labels.clone());
         if !self.put_pass_labels(issue, &labels) {
             return Ok(ReadyLabels::Held);
+        }
+        // A split parent is never ready: its sub-issues are filed in its place,
+        // after the pass's own labels, which the comment promised.
+        if self.split_of(issue).is_some() {
+            return self.label_split(issue, &carried);
         }
         // The maintainer may have taken `ready-for-agent` off since the pass
         // began, and then it stays off.

@@ -5,16 +5,21 @@
 //! failing one files none. Then each draft goes, in order: its labels made, the
 //! ticket filed and saved, linked as a sub-issue, blocked by what it waits on,
 //! and `ready-for-agent` last. The parent never gets `ready-for-agent`.
+//!
+//! The plan comes from the triager's `split`: [`Runner::judged_split`] checks
+//! the parent's body and every draft, and a refusal files nothing.
 
 use std::collections::BTreeSet;
 
 use super::super::Runner;
 use super::super::contributions::post::forge_is_busy;
-use super::comment::{NEEDS_TRIAGE, priority_label};
-use super::ready::{READY_LABEL, ReadyLabels};
-use super::rewrite::new_kind_label;
+use super::comment::{FALLBACK_PRIORITY, NEEDS_TRIAGE};
+use super::ready::{READY_LABEL, Ready, ReadyLabels};
+use super::research::{Drafted, Found};
+use super::rewrite::{new_kind_label, priority_label, refusals};
 use crate::board::check;
-use crate::board::{READY, TRIAGE, is_priority_label};
+use crate::board::{AGENT_LABEL, PIN, READY, TRIAGE, agent_label, is_priority_label, priority};
+use crate::local_paths::Surface;
 use crate::ports::{ForgeError, NewLabel, OpenIssue};
 use crate::state::{SplitDraft, StateError, TriageSplit, TriageState, TriageStep};
 use crate::ticket::TicketId;
@@ -59,6 +64,14 @@ fn new_label(name: &str) -> NewLabel<'_> {
     if check::kind_of(name).is_some() {
         return new_kind_label(name);
     }
+    // `AgentLabel::of` makes `agent:<name>` alone, and a draft is pinned
+    if name.starts_with(AGENT_LABEL) && name.ends_with(PIN) {
+        return NewLabel {
+            name,
+            color: "c5def5",
+            description: "Pins a sub-issue to one of kelpie's agents",
+        };
+    }
     NewLabel {
         name,
         color: "ededed",
@@ -66,30 +79,123 @@ fn new_label(name: &str) -> NewLabel<'_> {
     }
 }
 
-/// What the issue check refuses in `split`'s drafts, one line for each draft
-/// that fails
-///
-/// A draft is blocked only by an earlier draft, so an `after` that names itself
-/// or a later one is refused too.
-pub(super) fn split_refusals(split: &TriageSplit) -> Vec<String> {
-    let mut lines = Vec::new();
-    for (n, draft) in split.drafts.iter().enumerate() {
-        let mut why: Vec<String> = (check::check(&draft.title, &draft.body, &draft.labels))
-            .iter()
-            .map(ToString::to_string)
-            .collect();
-        if let Some(late) = draft.after.iter().find(|&&after| after >= n) {
-            why.push(format!(
-                "it is blocked by draft {}, which does not come before it",
-                late + 1
-            ));
+// The labels draft `part` is filed with: its kind, which a conventional title
+// already gives, its priority, which falls back on the one the issue carries
+// (`seen`), then the triager's for it, and the implementer it is pinned to
+fn draft_labels(found: &Found, seen: &[String], part: &Drafted) -> Vec<String> {
+    let kind = part.kind.or_else(|| match check::title_kind(&part.title) {
+        Some(_) => None,
+        None => found.work,
+    });
+    let ranked = (part.priority)
+        .or_else(|| priority(seen))
+        .or(found.priority)
+        .unwrap_or(FALLBACK_PRIORITY);
+    let mut labels: Vec<String> = kind
+        .map(|k| format!("{}{k}", check::KIND))
+        .into_iter()
+        .collect();
+    labels.push(format!("priority: {ranked}"));
+    labels.extend(
+        part.agent
+            .as_ref()
+            .map(|a| format!("{AGENT_LABEL}{a}{PIN}")),
+    );
+    labels
+}
+
+impl Runner {
+    // The drafts of a reply that splits `issue`, checked with its parent's body,
+    // or the lines that say why none is filed. Only the maintainer's own issue
+    // is split, and one already split is not split again.
+    pub(super) fn judged_split(&self, issue: u64, found: &Found) -> Ready {
+        if self.split_of(issue).is_some() {
+            return Ready::Not;
         }
-        if !why.is_empty() {
-            let title = draft.title.trim();
-            lines.push(format!("draft {} (`{title}`): {}", n + 1, why.join("; ")));
+        let mut failures = Vec::new();
+        let body = found.body.clone().unwrap_or_default();
+        match self.local.find(&body, Surface::Prose) {
+            _ if body.is_empty() => failures.push("the issue's own body is missing".to_owned()),
+            Some(leak) => failures.push(format!("the issue's own body names {leak}")),
+            None => failures.extend(
+                refusals(&self.title_now(issue), &body)
+                    .into_iter()
+                    .map(|why| format!("the issue's own body: {why}")),
+            ),
+        }
+        let seen = self.triage_seen(issue);
+        let drafts: Vec<SplitDraft> = (found.split.iter())
+            .map(|part| SplitDraft {
+                title: part.title.clone(),
+                body: part.body.clone(),
+                labels: draft_labels(found, &seen, part),
+                after: part.after.clone(),
+            })
+            .collect();
+        failures.extend(self.split_refusals(&drafts));
+        match failures.is_empty() {
+            true => Ready::Split { body, drafts },
+            false => Ready::SplitRefused(failures),
         }
     }
-    lines
+
+    /// What stops `drafts` from being filed, one line for each draft that fails:
+    /// the issue check, an `agent:` label that names no implementer of this
+    /// project, and text that names a thing of this machine
+    ///
+    /// A draft is blocked only by an earlier draft, so an `after` that names
+    /// itself or a later one is refused too.
+    pub(super) fn split_refusals(&self, drafts: &[SplitDraft]) -> Vec<String> {
+        let implementers = self.implementer_files();
+        let mut lines = Vec::new();
+        for (n, draft) in drafts.iter().enumerate() {
+            let mut why: Vec<String> = (check::check(&draft.title, &draft.body, &draft.labels))
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+            if let Err(e) = agent_label(&draft.labels, &implementers) {
+                why.push(e.to_string());
+            }
+            let leak = (self.local.find(&draft.title, Surface::Prose))
+                .or_else(|| self.local.find(&draft.body, Surface::Prose));
+            why.extend(leak.map(|leak| format!("it names {leak}")));
+            if let Some(late) = draft.after.iter().find(|&&after| after >= n) {
+                why.push(format!(
+                    "it is blocked by draft {}, which does not come before it",
+                    late + 1
+                ));
+            }
+            if !why.is_empty() {
+                let title = draft.title.trim();
+                lines.push(format!("draft {} (`{title}`): {}", n + 1, why.join("; ")));
+            }
+        }
+        lines
+    }
+}
+
+/// What the representative is told of a split kelpie files none of
+pub(super) fn refused_facts(failures: &[String]) -> String {
+    let listed: Vec<String> = failures.iter().map(|line| format!("- {line}")).collect();
+    format!(
+        "\nKelpie judged the issue too big for one work item and drafted a split, and files \
+         none of it, since the issue check refuses what follows. Say so, and what is refused:\n{}\n",
+        listed.join("\n")
+    )
+}
+
+/// Saves `drafts` as the split of `issue`, in place of any plan it had
+pub(super) fn plan(triage: &mut TriageState, issue: u64, drafts: Vec<SplitDraft>) {
+    if drafts.is_empty() {
+        return;
+    }
+    triage.splits.retain(|s| s.issue != issue);
+    triage.splits.push(TriageSplit {
+        issue,
+        drafts,
+        filed: Vec::new(),
+        asked: None,
+    });
 }
 
 // The body kelpie files for draft `index`: the slice line, one `Blocked by:`
@@ -150,6 +256,24 @@ struct Attempt {
 }
 
 impl Runner {
+    // Takes back the plan saved for `issue` when its pass ends with no body
+    // written, since nothing the comment promised came to be: its drafts are
+    // never filed, and a later reply may split the issue again. A plan with a
+    // draft filed, or held, is part done and stays.
+    pub(super) fn unplan(&mut self, issue: u64) -> Result<(), StateError> {
+        let owed = self
+            .split_of(issue)
+            .is_some_and(|s| s.filed.is_empty() && s.asked.is_none());
+        if !owed {
+            return Ok(());
+        }
+        let mut next = self.state.clone();
+        if let Some(triage) = next.triage.as_mut() {
+            triage.splits.retain(|s| s.issue != issue);
+        }
+        self.save(next)
+    }
+
     // The split saved for `issue`, if one is
     pub(super) fn split_of(&self, issue: u64) -> Option<&TriageSplit> {
         self.state
@@ -227,7 +351,7 @@ impl Runner {
         {
             return Ok(self.split_failed(issue, &format!("cannot take `{READY}` off"), &e));
         }
-        let refused = split_refusals(&split);
+        let refused = self.split_refusals(&split.drafts);
         if !refused.is_empty() {
             self.notes.push(format!(
                 "triage #{issue}: its split files nothing, since {} of its {} drafts fail the \
