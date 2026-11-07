@@ -6,11 +6,13 @@ use std::sync::Mutex;
 
 use serde_json::{Value, json};
 
-use super::{PICK_12, answered, pm_on, pm_seen, step_until, with_pm};
+use super::{NOTHING, PICK_12, answered, past_the_window, pm_on, pm_seen, step_until, with_pm};
 use crate::agents::Tier;
+use crate::board::briefing::date_time;
+use crate::ports::{Clock, Session, Timestamp};
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{Rig, Scripted, ticket};
-use crate::work_item::ReviewPlan;
+use crate::work_item::{Holder, ReviewPlan};
 
 // A project with #9 and #12 ready, whose project manager picked #12 and has
 // not been stepped past it.
@@ -518,4 +520,294 @@ fn a_pick_with_no_review_plan_leaves_its_work_item_with_none() {
     let held = runner.lock().unwrap();
     assert_eq!(held.state.item(ticket(12)).unwrap().review_plan, None);
     assert_eq!(held.state.item(ticket(14)).unwrap().review_plan, None);
+}
+
+const CODER: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-coder\n\
+                     effort: low\nusage: none\n---\n";
+
+/// Seconds the board gives the agent that is out before it can start
+const OUT_FOR: u64 = 60 * 60 + 1;
+
+/// The soonest finish the board gives, in seconds
+const SOON: u64 = 600;
+
+/// A pi implementer on the gateway `paddock`, which kelpie's settings do not name
+const ON_PADDOCK: &str = "---\nrole: implementer\nharness: pi\nmodel: m\neffort: low\n\
+                          gateway: paddock\ncontext: 65536\n---\n";
+
+/// What the project manager says to move #7 to `coder`
+const PICK_7_FOR_CODER: &str =
+    "{\"pick\": {\"issue\": 7, \"agent\": \"coder\"}, \"why\": \"coder is free\"}";
+
+// A project with a project manager and #7 open on `sonnet-high`, which the
+// board reads as out, so its first turn waits for a pick and its wake is queued
+fn waiting_in(rig: Rig) -> (Rig, Mutex<Runner>) {
+    rig.write_agent("coder", CODER);
+    rig.agent_board.ranks(&["sonnet-high", "coder"]);
+    let (rig, runner) = pm_on(rig);
+    rig.ask(&runner, "add", Some("7"));
+    rig.agent_board.waits("sonnet-high", OUT_FOR);
+    rig.agent_board
+        .ranks_finishing(&[("coder", SOON), ("sonnet-high", SOON + OUT_FOR)]);
+    assert_eq!(step(&runner).unwrap(), None, "the turn waits for its pick");
+    (rig, runner)
+}
+
+fn waiting(project: &str) -> (Rig, Mutex<Runner>) {
+    waiting_in(Rig::new(project))
+}
+
+fn item(rig: &Rig, runner: &Mutex<Runner>) -> Value {
+    rig.ask(runner, "status", None)["work_item"].clone()
+}
+
+// Wakes the project manager for the waiting item and returns its answer, which says `reply`
+fn answers(rig: &Rig, runner: &Mutex<Runner>, reply: &'static str) -> (Vec<String>, Vec<String>) {
+    rig.claude.script([Scripted::Say(reply)]);
+    past_the_window(rig);
+    let report = step_until(runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    let (_, acted, dropped) = answered(Some(report));
+    (acted, dropped)
+}
+
+#[test]
+fn a_wake_for_an_item_whose_agent_is_out_names_the_item_and_its_agent() {
+    let (rig, runner) = waiting("out-wake");
+    let back = date_time(Timestamp(rig.clock.now().0 + OUT_FOR));
+    rig.claude.script([Scripted::Say(NOTHING)]);
+    past_the_window(&rig);
+
+    let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+
+    let (woke_for, ..) = answered(Some(report));
+    let [reason] = woke_for.as_slice() else {
+        panic!("one wake expected: {woke_for:?}");
+    };
+    let lead = format!("#7 is stuck: its agent sonnet-high is out until {back} UTC");
+    assert!(reason.starts_with(&lead), "{reason}");
+    assert!(reason.contains("`pick`"), "{reason}");
+    let seen = pm_seen(&rig);
+    let prompt = &seen.last().unwrap().call.prompt;
+    assert!(prompt.contains(&lead), "{prompt}");
+}
+
+#[test]
+fn a_pick_naming_an_agent_moves_the_waiting_item_on_a_fresh_session_with_a_note() {
+    let (rig, runner) = waiting("out-move");
+    let before = item(&rig, &runner)["session"].clone();
+
+    let (acted, dropped) = answers(&rig, &runner, PICK_7_FOR_CODER);
+
+    assert_eq!(acted, ["moved #7 from sonnet-high to coder"]);
+    assert_eq!(dropped, Vec::<String>::new());
+    let now = item(&rig, &runner);
+    assert_eq!(
+        (&now["agent"], &now["turn"]["state"]),
+        (&json!("coder"), &json!("due"))
+    );
+    assert_ne!(now["session"], before, "a session of its own");
+
+    rig.agent_board
+        .ranks_finishing(&[("coder", SOON), ("sonnet-high", SOON + OUT_FOR)]);
+    rig.claude.script([Scripted::Say("done")]);
+    step_until(&runner, |r| matches!(r, StepReport::Ended { .. }));
+    let call = rig.claude.calls().pop().expect("a worker call");
+    let fresh = serde_json::from_value(now["session"].clone()).unwrap();
+    assert_eq!(
+        (call.model.as_str(), call.session),
+        ("qwen3-coder", Session::New(fresh))
+    );
+    for told in [
+        "from sonnet-high",
+        "its agent was out, and the project manager named",
+    ] {
+        assert!(
+            call.prompt.contains(told),
+            "{told:?} is not in {}",
+            call.prompt
+        );
+    }
+}
+
+#[test]
+fn a_pick_for_a_waiting_item_takes_no_slot_from_the_wake() {
+    let rig = Rig::new("out-slot");
+    rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 2"));
+    let (rig, runner) = waiting_in(rig);
+    // One slot is free, and #9 and #12 could fill it.
+    rig.forge.list_ready(9, false);
+    rig.forge.list_ready(12, false);
+
+    let reply = "{\"pick\": [{\"issue\": 7, \"agent\": \"coder\"}, 12], \"why\": \"w\"}";
+    let (acted, dropped) = answers(&rig, &runner, reply);
+
+    assert_eq!(acted, ["moved #7 from sonnet-high to coder", "picked #12"]);
+    assert_eq!(dropped, Vec::<String>::new());
+    assert_eq!(item(&rig, &runner)["agent"], "coder");
+    dispatched_12(&runner);
+}
+
+#[test]
+fn a_pick_for_a_waiting_item_naming_no_usable_agent_is_dropped_saying_why() {
+    let cases = [
+        (
+            "out-none",
+            "{\"pick\": 7}",
+            None,
+            "pick #7: its agent is out, so the entry must name the agent to move it to",
+        ),
+        (
+            "out-denied",
+            "{\"pick\": {\"issue\": 7, \"agent\": \"nobody\"}}",
+            None,
+            "pick #7: `nobody` is no implementer agent file `agents.allow` holds",
+        ),
+        (
+            "out-refused",
+            "{\"pick\": {\"issue\": 7, \"agent\": \"local\"}}",
+            None,
+            "pick #7: no turn can run on `local`: the worker's fence or a gateway key rules it out",
+        ),
+        (
+            "out-left",
+            PICK_7_FOR_CODER,
+            Some("coder"),
+            "pick #7: #7 already left `coder`",
+        ),
+    ];
+    for (project, reply, left, why) in cases {
+        let rig = Rig::new(project);
+        // A pi implementer on a gateway kelpie's settings do not name: no turn can run on it.
+        rig.write_agent("local", ON_PADDOCK);
+        let (rig, runner) = waiting_in(rig);
+        if let Some(left) = left {
+            let mut held = runner.lock().unwrap();
+            let item = held.state.item_mut(ticket(7)).expect("the item");
+            item.left.push(left.to_owned().try_into().unwrap());
+        }
+        let before = item(&rig, &runner);
+
+        let (acted, dropped) = answers(&rig, &runner, reply);
+
+        assert_eq!(
+            (acted, dropped),
+            (vec![], vec![why.to_owned()]),
+            "{project}"
+        );
+        assert_eq!(item(&rig, &runner)["agent"], before["agent"], "{project}");
+        assert_eq!(
+            item(&rig, &runner)["session"],
+            before["session"],
+            "{project}"
+        );
+    }
+}
+
+#[test]
+fn a_pick_for_a_waiting_item_the_maintainer_has_attached_is_dropped() {
+    let (rig, runner) = waiting("out-attached");
+    let before = item(&rig, &runner);
+    {
+        let pid = std::process::id();
+        // Where `ps` cannot run (a sandbox) the hold counts as live, as `live` says.
+        let by = crate::runner::attach::running(pid).unwrap_or_else(|_| Holder {
+            pid,
+            started: "unknown".to_owned(),
+        });
+        let since = rig.clock.now();
+        let mut held = runner.lock().unwrap();
+        let item = held.state.item_mut(ticket(7)).expect("the item");
+        item.attached = Some(crate::work_item::Attached {
+            by,
+            session: None,
+            since,
+        });
+    }
+
+    let (acted, dropped) = answers(&rig, &runner, PICK_7_FOR_CODER);
+
+    assert_eq!(acted, Vec::<String>::new());
+    assert_eq!(
+        dropped,
+        ["pick #7: the maintainer has #7 attached, so its session is not to be replaced"]
+    );
+    let now = item(&rig, &runner);
+    assert_eq!(
+        (&now["agent"], &now["session"]),
+        (&before["agent"], &before["session"])
+    );
+}
+
+#[test]
+fn an_item_left_unnamed_twice_is_woken_for_again_after_the_second_back_off() {
+    let (rig, runner) = waiting("out-silent-twice");
+    answers(&rig, &runner, NOTHING);
+    // Past the first back-off (30 minutes), the item wakes the project manager again.
+    rig.clock.advance(31 * 60);
+    assert_eq!(step(&runner).unwrap(), None, "the wake waits its window");
+    answers(&rig, &runner, NOTHING);
+    assert_eq!(pm_seen(&rig).len(), 2);
+
+    // The second silence backs off again, 60 minutes, and then wakes it a third time.
+    rig.clock.advance(40 * 60);
+    for _ in 0..3 {
+        assert_eq!(step(&runner).unwrap(), None);
+    }
+    assert_eq!(pm_seen(&rig).len(), 2);
+    rig.clock.advance(21 * 60);
+    assert_eq!(step(&runner).unwrap(), None, "the wake waits its window");
+    answers(&rig, &runner, NOTHING);
+    assert_eq!(pm_seen(&rig).len(), 3);
+}
+
+#[test]
+fn none_on_a_waiting_item_leaves_it_waiting_and_quiets_its_wake() {
+    let (rig, runner) = waiting("out-none-quiet");
+    let none =
+        "{\"pick\": null, \"unstick\": {\"item\": 7, \"action\": \"none\", \"why\": \"soon\"}}";
+
+    let (acted, _) = answers(&rig, &runner, none);
+
+    assert_eq!(acted, ["left #7 to resolve itself"]);
+    assert_eq!(item(&rig, &runner)["agent"], "sonnet-high");
+    // Inside the back-off the wake does not go out again, and the item waits on.
+    rig.clock.advance(20 * 60);
+    for _ in 0..3 {
+        assert_eq!(step(&runner).unwrap(), None);
+    }
+    assert_eq!(pm_seen(&rig).len(), 1);
+    // Past it, the item wakes the project manager once more.
+    rig.clock.advance(11 * 60);
+    assert_eq!(step(&runner).unwrap(), None, "the wake waits its window");
+    let (_, dropped) = answers(&rig, &runner, NOTHING);
+    assert_eq!(dropped, Vec::<String>::new());
+    assert_eq!(pm_seen(&rig).len(), 2);
+}
+
+#[test]
+fn any_other_unstick_on_a_waiting_item_is_dropped_saying_to_name_an_agent() {
+    let (rig, runner) = waiting("out-retry");
+    let retry =
+        "{\"pick\": null, \"unstick\": {\"item\": 7, \"action\": \"retry\", \"why\": \"x\"}}";
+
+    let (acted, dropped) = answers(&rig, &runner, retry);
+
+    assert_eq!(acted, Vec::<String>::new());
+    assert_eq!(
+        dropped,
+        ["retry #7: its agent sonnet-high is out, so name the agent to move it to in `pick`"]
+    );
+    assert_eq!(item(&rig, &runner)["agent"], "sonnet-high");
+}
+
+#[test]
+fn an_answer_that_names_no_agent_for_a_waiting_item_does_not_wake_it_again_at_once() {
+    let (rig, runner) = waiting("out-silent");
+    answers(&rig, &runner, NOTHING);
+
+    rig.clock.advance(20 * 60);
+    for _ in 0..3 {
+        assert_eq!(step(&runner).unwrap(), None);
+    }
+    assert_eq!(pm_seen(&rig).len(), 1);
 }

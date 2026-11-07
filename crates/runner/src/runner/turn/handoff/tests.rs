@@ -249,13 +249,81 @@ fn an_item_the_project_manager_picked_a_slow_agent_for_stays_while_that_agent_is
 }
 
 #[test]
-fn an_item_the_project_manager_picked_an_agent_for_hands_off_once_that_agent_is_out() {
+fn an_item_whose_agent_goes_out_waits_and_keeps_its_session() {
     let (rig, runner) = picked_by_the_project_manager();
+    let before = item(&rig, &runner)["session"].clone();
+    let worker_calls = rig.claude.calls().len();
     // The agent has fallen behind: it is out, as a spent week leaves it.
+    falls_behind(&rig, "coder", SLACK + 1);
+
+    for _ in 0..2 {
+        assert_eq!(step(&runner).unwrap(), None, "the turn waits");
+        let now = item(&rig, &runner);
+        assert_eq!(now["agent"], "sonnet-high");
+        assert_eq!(now["session"], before);
+        assert_eq!(rig.claude.calls().len(), worker_calls, "no turn runs");
+    }
+    let held = &item(&rig, &runner)["held_up"]["because"];
+    let held = held.as_str().expect("a reason the turn waits");
+    assert!(held.contains("sonnet-high is out"), "{held}");
+}
+
+#[test]
+fn a_project_manager_that_is_down_leaves_the_move_to_the_boards_order() {
+    let (rig, runner) = picked_by_the_project_manager();
     let own = falls_behind(&rig, "coder", SLACK + 1);
+    assert_eq!(step(&runner).unwrap(), None, "the turn waits for its pick");
+
+    // Its call fails, so it is down and no pick comes.
+    let down = AgentError::Failed(Harness::ClaudeCode, "overloaded".into());
+    rig.claude.script([Scripted::Fail(down)]);
+    rig.ask(&runner, "tell", Some("anything"));
+    until(&runner, |r| matches!(r, StepReport::PmFailed { .. }));
 
     assert_eq!(step(&runner).unwrap(), Some(handed_off(own)));
     assert_eq!(item(&rig, &runner)["agent"], "coder");
+}
+
+#[test]
+fn an_agent_back_before_the_pick_runs_the_turn_on_its_own_session() {
+    let (rig, runner) = picked_by_the_project_manager();
+    let before = item(&rig, &runner)["session"].clone();
+    falls_behind(&rig, "coder", SLACK + 1);
+    assert_eq!(step(&runner).unwrap(), None, "the turn waits");
+
+    rig.agent_board.waits("sonnet-high", 0);
+    rig.agent_board
+        .ranks_finishing(&[("coder", SOON), ("sonnet-high", SOON)]);
+    let (model, session) = next_turn(&rig, &runner);
+
+    assert_eq!(model, "claude-sonnet-5-5");
+    assert!(resumed(&session), "{session:?}");
+    let now = item(&rig, &runner);
+    assert_eq!(
+        (&now["agent"], &now["session"]),
+        (&json!("sonnet-high"), &before)
+    );
+}
+
+#[test]
+fn a_board_lost_while_the_turn_waits_ends_the_wait_and_a_late_pick_moves_nothing() {
+    let (rig, runner) = picked_by_the_project_manager();
+    falls_behind(&rig, "coder", SLACK + 1);
+    assert_eq!(step(&runner).unwrap(), None, "the turn waits for its pick");
+
+    // The dog cannot be reached on the next step, so the turn goes on its own agent.
+    rig.agent_board.unreachable();
+    let (model, session) = next_turn(&rig, &runner);
+    assert_eq!(model, "claude-sonnet-5-5");
+    assert!(resumed(&session), "{session:?}");
+
+    // A pick that comes in now finds no item waiting.
+    rig.claude.script([Scripted::Say(
+        "```json\n{\"pick\": {\"issue\": 7, \"agent\": \"coder\"}, \"why\": \"w\"}\n```",
+    )]);
+    rig.ask(&runner, "tell", Some("anything"));
+    until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    assert_eq!(item(&rig, &runner)["agent"], "sonnet-high");
 }
 
 #[test]
