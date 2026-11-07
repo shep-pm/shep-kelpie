@@ -8,7 +8,7 @@ use super::pace::{Started, Walked};
 use super::pm::Picked;
 use super::trigger::issue_list;
 use crate::agent_board::starts_within_slack;
-use crate::board::check::label_kind;
+use crate::board::check::{fenced, label_kind};
 use crate::board::{
     self, LabelError, OpenPullRequest, READY, ReadyIssue, Skip, agent_label, old_worker_label,
     pinned,
@@ -39,6 +39,9 @@ pub enum AddError {
     PassedOver(TicketId, Skip),
     /// The issue's `agent:` label cannot be used
     Label(LabelError),
+    /// The issue's `Touches:` names these paths, which a worker's fence refuses
+    /// to write, so a worker on it would stall
+    Fenced(TicketId, Vec<String>),
     /// The agent board named no agent to open it on
     Unpicked(Unpicked),
     /// `finish` holds the board back, so no new work item opens
@@ -168,6 +171,17 @@ impl fmt::Display for AddError {
                 "the board would pass {} over: {}",
                 ticket.shown(),
                 passed_over(skip, &|text| text).0
+            ),
+            Self::Fenced(ticket, paths) => write!(
+                f,
+                "{} names {} in `Touches:`, which a worker's fence refuses to write on every \
+                 harness: split that change into a `ready-for-human` issue",
+                ticket.shown(),
+                paths
+                    .iter()
+                    .map(|path| format!("`{path}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
             Self::Label(e) => e.fmt(f),
             Self::Unpicked(e) => e.fmt(f),
@@ -366,6 +380,13 @@ impl Runner {
         self.add_allowed(ticket)?;
         if !found.open {
             return Err(AddError::Closed(ticket));
+        }
+        let paths: Vec<String> = fenced(&found.body)
+            .into_iter()
+            .map(|(path, _)| path.to_owned())
+            .collect();
+        if !paths.is_empty() {
+            return Err(AddError::Fenced(ticket, paths));
         }
         let opening = match opening {
             Some(opening) => opening,
