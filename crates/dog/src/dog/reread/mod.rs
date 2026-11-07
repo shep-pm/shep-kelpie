@@ -309,7 +309,7 @@ fn waiting_for_restart(started: &KelpieSettings, now: &KelpieSettings) -> Vec<&'
         gpu_metrics_url: _, // a runner's, read at each of its wakes
         codex_home: _,      // applied live
         gateways: _,        // applied live
-        agent_board: _,     // read by nothing
+        agent_board: _,     // read by nothing, a deprecated key
     } = started;
     let KelpieSettings {
         webhook: now_webhook,

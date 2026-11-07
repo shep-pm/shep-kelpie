@@ -151,6 +151,67 @@ fn a_cancelled_run_is_kept_with_its_conclusion() {
     );
 }
 
+// `gh run list --branch main --status completed --workflow test-macos.yml
+// --json databaseId,workflowName,conclusion,headSha,event,createdAt`, recorded
+// on shep-pm/shep-kelpie where a merge cancelled the run queued behind it and
+// the one still going passed behind that
+const RECORDED_TEST_MACOS: &[u8] = br#"[
+    {"conclusion":"cancelled","createdAt":"2026-11-07T20:46:52Z","databaseId":42412684737,"event":"push","headSha":"fee8bce9bb7731e636de20ceb3c6c25eec6159f2","workflowName":"test-macos"},
+    {"conclusion":"success","createdAt":"2026-11-07T20:25:54Z","databaseId":42411020186,"event":"push","headSha":"7d589916b8a033062d1d15aff32ab522e0742339","workflowName":"test-macos"}
+]"#;
+
+#[test]
+fn a_success_behind_a_newer_cancelled_run_is_the_one_kept() {
+    let runs = latest_runs(RECORDED_TEST_MACOS).unwrap();
+
+    assert_eq!(
+        runs,
+        [BranchRun {
+            workflow: "test-macos".to_owned(),
+            id: 42_411_020_186,
+            head: "7d589916b8a033062d1d15aff32ab522e0742339".to_owned(),
+            event: "push".to_owned(),
+            conclusion: "success".to_owned(),
+            created: Timestamp(1_794_083_154),
+        }]
+    );
+}
+
+#[test]
+fn a_failure_behind_a_newer_cancelled_run_is_the_one_kept() {
+    let listed = br#"[
+        {"conclusion":"cancelled","createdAt":"2026-11-07T21:00:00Z","databaseId":2,"event":"push","headSha":"b","workflowName":"test-macos"},
+        {"conclusion":"failure","createdAt":"2026-11-07T20:00:00Z","databaseId":1,"event":"push","headSha":"a","workflowName":"test-macos"}
+    ]"#;
+
+    let runs = latest_runs(listed).unwrap();
+
+    assert_eq!(
+        runs.iter()
+            .map(|r| (r.id, r.conclusion.as_str()))
+            .collect::<Vec<_>>(),
+        [(1, "failure")]
+    );
+}
+
+#[test]
+fn a_skipped_run_hides_no_older_run() {
+    let listed = br#"[
+        {"conclusion":"skipped","createdAt":"2026-11-07T12:00:00Z","databaseId":3,"event":"push","headSha":"c","workflowName":"test"},
+        {"conclusion":"cancelled","createdAt":"2026-11-07T11:00:00Z","databaseId":2,"event":"push","headSha":"b","workflowName":"test"},
+        {"conclusion":"failure","createdAt":"2026-11-07T10:00:00Z","databaseId":1,"event":"push","headSha":"a","workflowName":"test"}
+    ]"#;
+
+    let runs = latest_runs(listed).unwrap();
+
+    assert_eq!(
+        runs.iter()
+            .map(|r| (r.id, r.conclusion.as_str()))
+            .collect::<Vec<_>>(),
+        [(1, "failure")]
+    );
+}
+
 #[test]
 fn a_run_listed_before_a_newer_one_of_its_workflow_does_not_win_by_position() {
     let listed = br#"[

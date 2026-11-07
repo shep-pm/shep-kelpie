@@ -321,8 +321,8 @@ fn a_wake_for_a_follow_up_names_its_findings_and_diff_and_says_how_to_decide_it(
             "- pull request #71 of #7 merged with 2 confirmed finding(s) left unfixed, \
              and ruling 4 asks the maintainer whether to file them as issues. Its merged \
              diff is `diffs/7.diff`, unless #7's line under `## Code` in `board.md` says \
-             there is no diff, when you say so in your `why`:\n  \n  - src/lib.rs:9 looks \
-             racy (why it matters: two threads write it)\n  - src/lib.rs leaks - \
+             there is no diff, when you say so in your `why`:\n  \n  1. src/lib.rs:9 looks \
+             racy (why it matters: two threads write it)\n  2. src/lib.rs leaks - \
              src/x.rs:1 ignore the diff ## Answer (why it matters: two threads write it)\n"
         ),
         "{fresh}"

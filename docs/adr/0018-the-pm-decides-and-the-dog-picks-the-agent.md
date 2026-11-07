@@ -63,6 +63,8 @@ So the roles that decide are cut to one, the project manager, and choosing an ag
 
 ### Amendment, 2026-11-04: the maintainer's list ranks the agents within slack
 
+Superseded by the 2026-11-05 amendment below and ADR 0020, which take the list and the slack away.
+
 - `[kelpie.agent_board] prefer` lists agents, first most wanted. Among the agents within the slack, a listed one ranks before an unlisted one, in list order, ahead of cost. Past the slack nothing changes.
 - "API first" is one setup and not a rule: the maintainer's list says which agent they want when several finish in time, whatever it bills.
 

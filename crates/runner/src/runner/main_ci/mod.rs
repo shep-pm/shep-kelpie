@@ -5,9 +5,9 @@
 //! workflows whose latest run failed in the project's state, for `status` and
 //! the board to show. A workflow stays red until a run of it succeeds: a run
 //! that was cancelled or skipped says nothing about the code, so it changes
-//! nothing. A workflow the forge no longer runs, because its file is gone or
-//! it is disabled, drops out whatever its last run was. The forge is asked with the runner's lock
-//! let go (see [`read`]).
+//! nothing and hides no older run that ended after it. A workflow the forge no
+//! longer runs, because its file is gone or it is disabled, drops out whatever
+//! its last run was. The forge is asked with the runner's lock let go (see [`read`]).
 
 use serde::Serialize;
 

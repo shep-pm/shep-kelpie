@@ -149,6 +149,9 @@ pub(super) struct Decide {
     pub(super) call: Call,
     /// Why, in its own words
     pub(super) why: String,
+    /// The findings a yes does not file, each by its number from 1 in the
+    /// wake, with why. Empty files them all, and a no has none.
+    pub(super) dropped: Vec<(usize, String)>,
 }
 
 /// What the project manager decides about a follow-up ruling's findings
@@ -269,7 +272,8 @@ pub(super) fn read(text: &str) -> Option<Answer> {
                     Some(d) => answer.follow_up = Some(d),
                     None => answer.unread.push(unread(
                         "`item`, a `decision` of yes or no, a `label` of ready-for-agent or \
-                         needs-triage with a yes, and `why`",
+                         needs-triage with a yes, `why`, and with a yes any `drop` of \
+                         findings by number, each once, with a `why`",
                     )),
                 },
             },
@@ -528,12 +532,33 @@ fn decide(value: &Value) -> Option<Decide> {
         no if no.eq_ignore_ascii_case("no") && label.is_none() => Call::Drop,
         _ => return None,
     };
+    let dropped = match value.get("drop") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => items.iter().map(dropped).collect::<Option<_>>()?,
+        Some(_) => return None,
+    };
+    let twice = |at: usize| {
+        dropped[..at]
+            .iter()
+            .any(|(n, _): &(usize, String)| *n == dropped[at].0)
+    };
+    if (call == Call::Drop && !dropped.is_empty()) || (0..dropped.len()).any(twice) {
+        return None;
+    }
     let why = value.get("why").and_then(Value::as_str).unwrap_or("");
     Some(Decide {
         item,
         call,
         why: why.trim().to_owned(),
+        dropped,
     })
+}
+
+// One finding a yes drops: its number from 1, and why
+fn dropped(value: &Value) -> Option<(usize, String)> {
+    let number = usize::try_from(value.get("finding")?.as_u64()?).ok()?;
+    let why = value.get("why").and_then(Value::as_str).unwrap_or("");
+    (number > 0).then(|| (number, printable(why.trim())))
 }
 
 #[cfg(test)]

@@ -267,6 +267,7 @@ impl Runner {
         answer: Answer,
         by: Answerer,
         unread: bool,
+        dropped: &[usize],
     ) -> Result<bool, RuleError> {
         let at = self.state.rulings.iter().position(|r| r.id == id);
         let at = at.ok_or(RuleError::NoSuchRuling(id))?;
@@ -426,9 +427,7 @@ impl Runner {
         if let Some(item) = next.work_items.iter_mut().find(|item| parked_on(item)) {
             if let (Some(filed), Some(pending)) = (follow_up, item.follow_ups.as_mut()) {
                 if filed {
-                    pending.ruled |= triaged;
-                    pending.unread |= unread;
-                    pending.first_refused = None;
+                    pending.say_yes(triaged, unread, dropped);
                 } else {
                     pending.findings.clear();
                 }
