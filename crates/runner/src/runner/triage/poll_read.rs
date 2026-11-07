@@ -29,8 +29,8 @@ pub(in crate::runner) struct PollJob {
     local: Vec<u64>,
     /// The issues kelpie took back, whose swap is not yet seen done
     taken: BTreeSet<u64>,
-    /// Whether an App covers the repo, so a swap a `taken` record owes can be
-    /// finished in this poll
+    /// Whether a `taken` record is saved and an App covers the repo, so a swap
+    /// it owes can be finished in this poll
     take_back: bool,
     /// Whether the triager may be started: an issue is queued or a wait is open
     research: bool,
@@ -170,17 +170,20 @@ impl Runner {
             .map(|record| record.issue)
             .filter(|&issue| self.flights.triaging() != Some(issue) && !self.triage_given_up(issue))
             .collect();
-        let taken = (triage.iter().flat_map(|t| t.issues.iter()))
+        let taken: BTreeSet<u64> = (triage.iter().flat_map(|t| t.issues.iter()))
             .filter(|record| record.step == TriageStep::Taken)
             .map(|record| record.issue)
             .collect();
+        // A swap is owed only where a `taken` record is saved, so the App is
+        // asked whether it covers the repo only then. Asking mints a token.
+        let take_back = !taken.is_empty() && self.app_covers();
         let job = PollJob {
             tickets: Arc::clone(&self.ports.tickets),
             forge: Arc::clone(&self.ports.forge),
             repo: self.remote.clone(),
             local,
             taken,
-            take_back: self.app_covers(),
+            take_back,
             research: triage.is_some() && (!self.triage_queue.is_empty() || !waiting.is_empty()),
             triage: triage.map(|t| (t.since, t.pruned_through)),
             asked: self.looks.triage_asks(),

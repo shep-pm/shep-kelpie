@@ -68,11 +68,6 @@ impl Runner {
         open: &mut [OpenIssue],
         pulls: Option<&Result<Vec<OpenPull>, ForgeError>>,
     ) -> Result<(), StateError> {
-        // Where no App covers the repo no pass is started, so a label taken off
-        // would not come back
-        if !self.app_covers() {
-            return Ok(());
-        }
         let owed: Vec<usize> = (open.iter().enumerate())
             .filter(|(_, i)| {
                 self.swap_owed(i)
@@ -82,6 +77,12 @@ impl Runner {
             .map(|(at, _)| at)
             .collect();
         if owed.is_empty() {
+            return Ok(());
+        }
+        // Where no App covers the repo no pass is started, so a label taken off
+        // would not come back. Asking costs a token, so it is asked only of an
+        // issue that owes a swap.
+        if !self.app_covers() {
             return Ok(());
         }
         // A pull request that closes an issue is the issue's work, so its swap
