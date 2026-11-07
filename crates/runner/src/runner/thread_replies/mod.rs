@@ -7,7 +7,9 @@
 //! ruling's id first (see [`read_answer`]): `99 yes`, `99 no <note>` or `99
 //! rework <note>`. A bare `yes` answers nothing, so a conversational one never
 //! merges. A 👍 or 👎 on the ruling's own comment, or a ticked box, answers it
-//! too (see [`marked`]). The first answer from any channel wins.
+//! too (see [`marked`]). The first answer from any channel wins. Where a
+//! project manager is named, the same read holds the maintainer's own comment
+//! on an issue nothing is watched on, for it to answer ([`issue_words`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
@@ -50,6 +52,10 @@ struct Watch {
 pub(super) struct Reading {
     /// When the comments were last asked for, however that went
     read: Option<Timestamp>,
+    /// When this runner first asked for them, which is where the maintainer's
+    /// words on an issue are read from: a comment written before it was read
+    /// by a run that is over, and is not held again
+    first: Option<Timestamp>,
     /// The comments before this are not asked for again
     floor: Option<Timestamp>,
     watching: BTreeMap<TicketId, Watch>,
@@ -210,9 +216,9 @@ impl ThreadJob {
 
 impl Runner {
     // Decides whether the threads are read now: at most once a board poll,
-    // where kelpie's App covers the repo and a ruling waits in its thread or a
-    // contribution is followed. One read of the repo's comments serves both.
-    // Returns the time and what the read needs.
+    // where kelpie's App covers the repo and a ruling waits, a contribution is
+    // followed, an issue waits on its author, or a project manager is named.
+    // Returns the time and what it needs; one read of the comments serves all.
     fn thread_job(&mut self) -> Option<(Timestamp, ThreadJob)> {
         let now = self.ports.clock.now();
         self.watch_threads(now);
@@ -220,7 +226,10 @@ impl Runner {
         // An issue whose triage waits on its author is read too: the wait holds
         // no slot and no call, but their word is what ends it.
         let waits = self.triage_waits();
-        if self.threads.watching.is_empty() && followed.is_empty() && waits.is_empty() {
+        // So is the maintainer's comment on an issue nothing else is watched
+        // on, where a project manager is named to answer it.
+        let words = self.agents.pm.is_some();
+        if self.threads.watching.is_empty() && followed.is_empty() && waits.is_empty() && !words {
             return None;
         }
         let poll = self.looks.poll().as_secs();
@@ -230,7 +239,11 @@ impl Runner {
         if !self.app_covers() {
             return None;
         }
+        let last = self.threads.read;
         self.threads.read = Some(now);
+        // Where this runner first asked, which is where the maintainer's words
+        // on an issue are read from, and what an older comment is told apart by
+        self.threads.first = Some(self.threads.first.unwrap_or(now));
         let watches: Vec<Watch> = self.threads.watching.values().cloned().collect();
         let followed = &self.state.contributions;
         let heard = (watches
@@ -240,6 +253,12 @@ impl Runner {
             .chain(waits.iter().map(|(_, at)| *at)))
         .min();
         let since = heard.into_iter().chain(self.threads.floor).max();
+        // The maintainer's words on an issue are read from where the last read
+        // left off, so one the forge lists late is reached again.
+        let since = match (since, words.then_some(last).flatten()) {
+            (Some(since), Some(back)) => Some(since.min(back)),
+            (since, back) => since.or(back),
+        };
         let since = since.unwrap_or(now);
         let reviews = (followed.iter())
             .map(|c| (c.pull_request, c.reviews_since()))
@@ -282,7 +301,17 @@ impl Runner {
                 return Ok(());
             }
             let aimed = self.threads.aimed_by(comment);
-            if aimed.is_empty() || self.threads.judged.contains_key(&comment.id) {
+            if aimed.is_empty() {
+                // On an issue nothing is watched on, the maintainer's own
+                // comment is words for the project manager to answer.
+                if let Some(line) = self.issue_words(comment) {
+                    self.threads.judged.insert(comment.id, comment.created);
+                    self.hear(comment, Some(&line))?;
+                    self.react_held(comment);
+                }
+                continue;
+            }
+            if self.threads.judged.contains_key(&comment.id) {
                 continue;
             }
             // The maintainer's own login wrote it for kelpie, not as an answer.
@@ -943,6 +972,7 @@ fn watch_of(state: &ProjectState, ruling: &Ruling) -> Option<(TicketId, Watch)> 
     ))
 }
 
+mod issue_words;
 mod settled;
 
 #[cfg(test)]

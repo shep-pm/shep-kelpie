@@ -127,6 +127,14 @@ impl PollJob {
 }
 
 impl Runner {
+    // Whether the poll's listing has issue `number` open. It lists issues alone,
+    // so a pull request's number is never in it.
+    pub(in crate::runner) fn listed_issue(&self, number: u64) -> bool {
+        (self.triage_run.listing.iter())
+            .flat_map(|listing| listing.open.iter())
+            .any(|issue| issue.number == number)
+    }
+
     // Whether `issue` carries `ready-for-agent` and is being worked on: it has
     // a work item, or an open pull request closes it, which pull requests that
     // were not read may. One taken back keeps it until its swap is done.
@@ -224,6 +232,9 @@ impl Runner {
             (self.state.triage.as_ref()).map(|t| (t.since, t.pruned_through))
         else {
             self.check_issues(&open, pulls.as_ref(), &busy);
+            // The listing is read whatever `triage.pick` says, and a project
+            // manager's read of the maintainer's issue comments is made from it
+            self.triage_run.listing = Some(Listing { open, pulls });
             return Ok(());
         };
         self.flights.triage_retry();
