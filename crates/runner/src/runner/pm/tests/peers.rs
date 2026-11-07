@@ -157,7 +157,7 @@ fn an_edit_to_the_copy_changes_no_setting() {
 }
 
 #[test]
-fn a_copy_that_cannot_be_written_says_so_and_the_wake_goes_on() {
+fn a_sheep_that_is_no_project_name_gets_no_file_and_the_line_says_so() {
     let (rig, runner) = with_pm("acme");
     peers(
         &runner,
@@ -173,4 +173,21 @@ fn a_copy_that_cannot_be_written_says_so_and_the_wake_goes_on() {
         notes.iter().any(|n| n.contains("settings of `..`")),
         "{notes:?}"
     );
+}
+
+#[test]
+fn a_table_with_no_toml_form_says_why_and_the_wake_goes_on() {
+    let (rig, runner) = with_pm("acme");
+    let mut bad = table(&rig, json!({}));
+    bad.insert("holds".into(), serde_json::Value::Null);
+    peers(&runner, &Tables::from([("koji".into(), bad)]));
+    runner.lock().unwrap().take_notes();
+    wake(&rig, &runner);
+
+    let board = board_of(&rig);
+    assert!(
+        board.contains("no settings for `koji`: it is not TOML: "),
+        "{board}"
+    );
+    assert!(copy(&rig, "koji").is_none());
 }

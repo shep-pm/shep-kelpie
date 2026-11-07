@@ -17,6 +17,8 @@ const SECRET_WORDS: [&str; 4] = ["token", "secret", "password", "credential"];
 /// dropped at any depth. An `env` table, or a `*_env` one, keeps its names and
 /// loses its values. A `*_env` or `*_var` key holding a string names a variable
 /// and stays, whatever its words.
+///
+/// Other names, such as `api_key` or `auth`, are shown on purpose.
 pub fn shown_table(table: &Map<String, Value>) -> Map<String, Value> {
     table
         .iter()

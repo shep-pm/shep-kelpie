@@ -75,7 +75,7 @@ impl Runner {
     fn write_copy(&self, dir: &Path, name: &str, table: &Map<String, Value>) -> Result<(), String> {
         let name = ProjectName::try_from(name).map_err(|e| e.to_string())?;
         let shown = self.withheld(shown_table(table));
-        let text = toml_text(&shown).map_err(|_| "it is not TOML".to_owned())?;
+        let text = toml_text(&shown).map_err(|e| format!("it is not TOML: {e}"))?;
         std::fs::write(dir.join(format!("{name}.toml")), text)
             .map_err(|e| format!("cannot write it: {}", e.kind()))
     }

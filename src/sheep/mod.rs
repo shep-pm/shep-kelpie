@@ -287,7 +287,7 @@ fn serve(project: &str, arrival: Option<Arrival<Carry>>) -> Result<(), Exit> {
         ports,
     )
     .map_err(|e| e.to_string())?;
-    runner.set_peer_tables(look.handing());
+    look.hand_first(&mut runner);
     for notice in runner.skill_notices() {
         eprintln!("{notice}");
     }

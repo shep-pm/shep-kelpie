@@ -85,21 +85,23 @@ impl Look {
         }
     }
 
-    /// Every project's table as the last read held them, and this project's
-    /// own as the runner last took it
-    ///
-    /// Kelpie's own section is not among them.
-    pub(super) fn handing(&mut self) -> Peers {
+    // Every project's table as the last read held them, and this project's
+    // own as the runner last took it. Kelpie's own section is not among them.
+    fn peers(&self) -> Peers {
         let mut peers = self.others.clone();
         peers.extend(self.accepted.clone().map(|own| (self.sheep.clone(), own)));
-        self.handed.clone_from(&peers);
         peers
+    }
+
+    /// Hands a runner that has just opened the tables the last read held
+    pub(super) fn hand_first(&mut self, runner: &mut Runner) {
+        self.handed = self.peers();
+        runner.set_peer_tables(self.handed.clone());
     }
 
     // Hands `runner` the tables if they changed since the last time.
     fn hand(&mut self, runner: &Mutex<Runner>) {
-        let mut peers = self.others.clone();
-        peers.extend(self.accepted.clone().map(|own| (self.sheep.clone(), own)));
+        let peers = self.peers();
         if peers != self.handed {
             self.handed.clone_from(&peers);
             (runner.lock())
