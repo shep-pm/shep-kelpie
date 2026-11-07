@@ -105,7 +105,7 @@ pub use routed::Routed;
 pub use run::{BranchRun, FailedLogs, Workflow, WorkflowState};
 pub use sandbox::{Forward, Policy, Sandbox, SandboxError, Unreadable};
 pub use system_clock::SystemClock;
-pub use talk::{Remark, Standing, Talk, TalkThread};
+pub use talk::{PAGE, Remark, Standing, Talk, TalkThread};
 pub use test_runner::{CEILING, OUTPUT_KEPT, TestOutcome, TestRun, TestRunner, tail};
 pub use thread::{CommentMarks, LineComment, PostedComment, ThreadComment, Thumb};
 pub use tickets::Tickets;

@@ -1,5 +1,9 @@
 //! What people wrote on a pull request: its comments and its review threads
 
+/// How many comments, threads and replies `Forge::talk` asks the forge for in
+/// each list, the most one GraphQL page gives
+pub const PAGE: usize = 100;
+
 /// What the forge says an author may do on the repo
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Standing {

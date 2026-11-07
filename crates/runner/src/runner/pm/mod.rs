@@ -31,6 +31,7 @@ mod act;
 mod answer;
 mod asked;
 mod call;
+mod case;
 mod ci_logs;
 mod diffs;
 mod maintainer;

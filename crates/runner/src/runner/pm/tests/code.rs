@@ -217,7 +217,10 @@ fn a_diff_git_cannot_give_is_left_out_and_named_and_the_wake_runs() {
     assert!(!pm.join("diffs/7.diff").exists(), "no stale diff is left");
     let why = "kelpie/7 is not in the checkout";
     let board = std::fs::read_to_string(pm.join("board.md")).unwrap();
-    assert!(board.contains(&format!(", no diff: {why}\n")), "{board}");
+    assert!(
+        board.contains(&format!(", no diff: {why}, case `cases/7.md`\n")),
+        "{board}"
+    );
     let notes = runner.lock().unwrap().take_notes();
     let note = format!("no diff of #7 for the project manager: {why}");
     assert!(notes.contains(&note), "{notes:?}");

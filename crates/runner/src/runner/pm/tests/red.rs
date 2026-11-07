@@ -53,7 +53,7 @@ fn a_red_item_wakes_it_with_the_failed_logs_tail_in_its_folder_and_the_board_nam
     let worktree = rig.paths().worktree(ticket(7)).display().to_string();
     assert!(
         board.contains(&format!(
-            "- #7: worktree `{worktree}`, diff `diffs/7.diff`, CI log `ci/7.log`\n"
+            "- #7: worktree `{worktree}`, diff `diffs/7.diff`, CI log `ci/7.log`, case `cases/7.md`\n"
         )),
         "{board}"
     );
@@ -80,7 +80,10 @@ fn a_cancelled_runs_log_is_written_for_the_project_manager() {
     let pm = rig.paths().pm;
     assert_eq!(std::fs::read_to_string(pm.join("ci/7.log")).unwrap(), log);
     let board = std::fs::read_to_string(pm.join("board.md")).unwrap();
-    assert!(board.contains(", CI log `ci/7.log`\n"), "{board}");
+    assert!(
+        board.contains(", CI log `ci/7.log`, case `cases/7.md`\n"),
+        "{board}"
+    );
     assert!(!board.contains("no CI log"), "{board}");
 }
 
@@ -94,7 +97,10 @@ fn a_log_that_cannot_be_read_is_noted_and_the_wake_still_happens() {
     assert!(!pm.join("ci/7.log").exists());
     let board = std::fs::read_to_string(pm.join("board.md")).unwrap();
     let why = "kelpie could not read it (gh failed: gh run list failed)";
-    assert!(board.contains(&format!(", no CI log: {why}\n")), "{board}");
+    assert!(
+        board.contains(&format!(", no CI log: {why}, case `cases/7.md`\n")),
+        "{board}"
+    );
     assert_eq!(pm_seen(&rig).len(), 1, "the wake happened");
     let notes = runner.lock().unwrap().take_notes();
     let note = format!("no CI log of #7 for the project manager: {why}");
@@ -119,7 +125,10 @@ fn a_diffs_folder_that_cannot_be_cleared_does_not_cost_the_wake_its_ci_log() {
 
     let board = std::fs::read_to_string(pm.join("board.md")).unwrap();
     assert!(board.contains("(no diffs: cannot clear"), "{board}");
-    assert!(board.contains("- #7: CI log `ci/7.log`\n"), "{board}");
+    assert!(
+        board.contains("- #7: CI log `ci/7.log`, case `cases/7.md`\n"),
+        "{board}"
+    );
     assert!(pm.join("ci/7.log").is_file());
 }
 

@@ -3,6 +3,9 @@
 //! folder before it wakes, since it runs no `gh`, and the source's answer for
 //! each standing line whose ticket end the board cannot answer
 //!
+//! Each parked work item's case is read the same way: its issue, its pull
+//! request and what was said on it.
+//!
 //! The logs are read as a worker's red prompt reads them, with `failed_run_logs`.
 //! The folder is emptied first, so a log never outlives its ruling. The forge
 //! and the ticket source are asked with the runner's lock let go:
@@ -13,7 +16,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use crate::ports::{FailedLogs, Forge, ForgeError, Issue, Tickets};
+use crate::ports::{FailedLogs, Forge, ForgeError, Issue, PullRequest, Talk, Tickets};
 use crate::runner::Runner;
 use crate::runner::trigger::lock;
 use crate::settings::ForgeSlug;
@@ -138,8 +141,16 @@ impl Runner {
     pub(super) fn pm_logs_job(&self) -> Option<LogsJob> {
         let heads: Vec<String> = self.still_red().into_iter().map(|(_, head)| head).collect();
         let runs: Vec<u64> = self.state.red.iter().map(|r| r.run).collect();
-        let ends = self.pm_stand_reads();
-        if heads.is_empty() && runs.is_empty() && ends.is_empty() {
+        let parked = self.parked_items().into_iter().filter(|p| !p.contribution);
+        let parked: Vec<_> = parked.collect();
+        let mut ends = self.pm_stand_reads();
+        ends.extend(parked.iter().map(|p| p.ticket));
+        ends.sort_unstable();
+        ends.dedup();
+        let mut pulls: Vec<u64> = parked.iter().filter_map(|p| p.pull).collect();
+        pulls.sort_unstable();
+        pulls.dedup();
+        if heads.is_empty() && runs.is_empty() && ends.is_empty() && pulls.is_empty() {
             return None;
         }
         Some(LogsJob {
@@ -149,6 +160,7 @@ impl Runner {
             heads,
             runs,
             ends,
+            pulls,
         })
     }
 }
@@ -189,6 +201,8 @@ pub(super) struct LogsJob {
     runs: Vec<u64>,
     // Each standing line's ticket end the board cannot answer
     ends: Vec<TicketId>,
+    // Each parked item's pull request, whose state and talk its case holds
+    pulls: Vec<u64>,
 }
 
 /// What a [`LogsJob`] read, errors as the inline call returns them
@@ -200,6 +214,10 @@ pub(super) struct Logs {
     tails: BTreeMap<u64, Result<String, ForgeError>>,
     // By ticket, whether the source still holds it open
     issues: BTreeMap<TicketId, Result<Issue, ForgeError>>,
+    // By number, a pull request as the forge holds it
+    pulls: BTreeMap<u64, Result<PullRequest, ForgeError>>,
+    // By number, what people wrote on a pull request
+    talks: BTreeMap<u64, Result<Talk, ForgeError>>,
 }
 
 impl Logs {
@@ -207,10 +225,20 @@ impl Logs {
     pub(super) fn found(&self, ticket: TicketId) -> Option<&Result<Issue, ForgeError>> {
         self.issues.get(&ticket)
     }
+
+    // What the read found of pull request `number`, or None when it read none
+    pub(super) fn pull(&self, number: u64) -> Option<&Result<PullRequest, ForgeError>> {
+        self.pulls.get(&number)
+    }
+
+    // What the read found of the talk on pull request `number`, or None when it read none
+    pub(super) fn talk(&self, number: u64) -> Option<&Result<Talk, ForgeError>> {
+        self.talks.get(&number)
+    }
 }
 
 impl LogsJob {
-    // In the order the wake would have asked: each parked item's, then each red workflow's, then each standing end
+    // In the order the wake would have asked: each parked item's, then each red workflow's, then each standing end, then each pull request
     fn run(self) -> Logs {
         let Self {
             forge,
@@ -219,6 +247,7 @@ impl LogsJob {
             heads,
             runs,
             ends,
+            pulls,
         } = self;
         // A `StillRed` ruling is raised only on a pull request's red run
         // (`ci_failed`), never on a merge queue removal, so not `merge_group`.
@@ -237,10 +266,18 @@ impl LogsJob {
                 (ticket, read)
             })
             .collect();
+        let talks = (pulls.iter())
+            .map(|&number| (number, forge.talk(&remote, number)))
+            .collect();
+        let pulls = (pulls.into_iter())
+            .map(|number| (number, forge.pull_request(&remote, number)))
+            .collect();
         Logs {
             failed,
             tails,
             issues,
+            pulls,
+            talks,
         }
     }
 }

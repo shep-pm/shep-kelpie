@@ -282,6 +282,33 @@ impl FakeCodeRabbit {
         id
     }
 
+    /// `author` replies in review thread `thread`, and the reply's id
+    pub fn person_replies(
+        &self,
+        thread: &str,
+        author: &str,
+        standing: Standing,
+        body: &str,
+    ) -> u64 {
+        let remark = self.remark(author, standing, body);
+        let id = remark.id;
+        let mut talk = self.talk.lock().unwrap();
+        let mut found = talk.values_mut().flat_map(|t| &mut t.threads);
+        let found = found.find(|t| t.id == thread);
+        found.expect("the thread exists").remarks.push(remark);
+        id
+    }
+
+    /// Marks review thread `thread` outdated: the lines it is on changed
+    pub fn person_outdates(&self, thread: &str) {
+        let mut talk = self.talk.lock().unwrap();
+        let mut found = talk.values_mut().flat_map(|t| &mut t.threads);
+        found
+            .find(|t| t.id == thread)
+            .expect("the thread exists")
+            .outdated = true;
+    }
+
     fn remark(&self, author: &str, standing: Standing, body: &str) -> Remark {
         Remark {
             id: 7000 + self.remark_ids.fetch_add(1, Ordering::SeqCst) as u64,
