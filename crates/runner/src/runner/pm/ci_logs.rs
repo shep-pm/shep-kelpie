@@ -1,12 +1,8 @@
-//! What a wake reads before it launches: the end of a red run's log for each
-//! work item parked on a `StillRed` ruling, written into the project manager's
-//! folder before it wakes, since it runs no `gh`, and the source's answer for
-//! each standing line whose ticket end the board cannot answer
+//! What a wake reads before it launches: a red run's log end and each parked
+//! item's issue, pull request and talk, written into the project manager's
+//! folder, since it runs no `gh`, and the source's answer for each standing
+//! line whose ticket end the board cannot answer
 //!
-//! Each parked work item's case is read the same way: its issue, its pull
-//! request and what was said on it.
-//!
-//! The logs are read as a worker's red prompt reads them, with `failed_run_logs`.
 //! The folder is emptied first, so a log never outlives its ruling. The forge
 //! and the ticket source are asked with the runner's lock let go:
 //! [`wake_off_lock`] runs them as a [`LogsJob`], and the files and the standing

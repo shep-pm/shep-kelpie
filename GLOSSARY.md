@@ -48,12 +48,18 @@ code does all of that. The PM's agent, an agent file whose role is `pm`
 that a project names in `agents.pm`, picks work, holds it back, unsticks
 items and answers the maintainer. Code wakes it on a free slot with two or
 more ready issues, two open branches in conflict, a stuck work item, or a
-**tell** (`shep kelpie tell "<note>"`), and it reads only the board and its
-own notes, never running git or gh. Kelpie checks each answer against the
+**tell** (`shep kelpie tell "<note>"`), and it reads the board, its own
+notes and the case files kelpie writes, never running git or gh. Kelpie checks each answer against the
 board before acting on it. One session per project is resumed on each wake
 and compacted past 100k tokens of context. Without one, or while it is
 down, the board's rule picks and stuck items wait on their rulings.
 _Avoid_: lead, control room, control center
+
+**Case file**:
+The file `cases/<issue>.md` that kelpie writes in the PM's folder for each
+work item parked on a ruling: the ruling's card, the whole issue, and the
+pull request with its open threads, every line of outside text quoted as
+data. Rewritten at each wake, and gone with its ruling.
 
 **Pick**:
 The PM's choice of which ready issue the next free slot takes. With none named,

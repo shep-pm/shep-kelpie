@@ -6,9 +6,7 @@
 //! someone else wrote goes in whole, shown as the board shows it and quoted
 //! on every line, so a line opening `> ` is data and no text can close a mark
 //! it never opened. What a stranger wrote goes in nowhere. The reads run with
-//! the runner's lock let go, as the logs do: see [`wake_off_lock`].
-//!
-//! [`wake_off_lock`]: super::wake_off_lock
+//! the runner's lock let go, in the logs job.
 
 mod threads;
 
@@ -229,10 +227,10 @@ impl Runner {
         let full = |n: usize| n >= PAGE;
         let replies = talk.threads.iter().any(|t| full(t.remarks.len()));
         if full(talk.comments.len()) || full(talk.threads.len()) || replies {
-            let _ = write!(
+            let _ = writeln!(
                 out,
                 "A list of these came back full at {PAGE}, the most GitHub gives in one page, so \
-                 older text may be missing. Read the rest on the pull request on GitHub.\n"
+                 older text may be missing. Read the rest on the pull request on GitHub."
             );
         }
     }
