@@ -438,7 +438,7 @@ fn answers_given(rig: &Rig) -> String {
 // Steps until `done`, each step waiting for the call it starts to end. A pass
 // that finds nothing due is not the last word: its read may have been dropped
 // for a write that came after it, and the next pass reads again.
-fn step_until(runner: &Mutex<Runner>, mut done: impl FnMut() -> bool) {
+pub(super) fn step_until(runner: &Mutex<Runner>, mut done: impl FnMut() -> bool) {
     let by = Instant::now() + CALL_PATIENCE;
     while !done() {
         assert!(Instant::now() < by, "it never came about");

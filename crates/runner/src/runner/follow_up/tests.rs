@@ -927,22 +927,22 @@ fn under_ask_a_no_drops_the_findings() {
     assert_eq!(rig.forge.created(), []);
 }
 
-// A project under `auto` with `git.issues` as `filing`, CI green on a
-// reviewed pull request whose worker deferred `racy()`, the next step merging it
+// Under `auto` with `git.issues` as `filing`, CI green, `racy()` deferred: next merges it
 fn auto_merging_with_issues(filing: &str) -> (Rig, Mutex<Runner>) {
-    auto_merging_on(Rig::new("shep"), filing, "work\n")
+    auto_merging_on(Rig::new("shep"), filing, "work\n", &[racy()])
 }
 
-// ... on `rig`, whose worker writes `work` to `work.txt`
+// ... on `rig`, whose worker writes `work` to `work.txt` and defers `found`
 pub(in crate::runner) fn auto_merging_on(
     rig: Rig,
     filing: &str,
     work: &'static str,
+    found: &[Finding],
 ) -> (Rig, Mutex<Runner>) {
     rig.merge_auto();
     rig.issues(filing);
-    let (rig, runner, head) = reviewed_pushing(rig, &[racy()], false, work);
-    defer(&rig, &lines(&[racy()]));
+    let (rig, runner, head) = reviewed_pushing(rig, found, false, work);
+    defer(&rig, &lines(found));
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
         rig.verdict(&runner),

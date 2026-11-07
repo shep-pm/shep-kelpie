@@ -48,10 +48,28 @@ impl Runner {
                 continue;
             };
             let replies = match &asked {
-                Some(asked) => self.their_replies(&record, asked, wait_at, comments),
+                Some(asked) => self.their_replies(record.issue, asked, wait_at, comments),
                 None => Vec::new(),
             };
             self.hear_answers(&record, wait_at, &replies)?;
+        }
+        self.hear_split_asks(comments)
+    }
+
+    // Reads the maintainer's replies under each ask for a split of someone
+    // else's issue. Nobody else's word counts: not the author's, not another
+    // writer's, and a reply from anyone else gets no answer.
+    fn hear_split_asks(&mut self, comments: &[ThreadComment]) -> Result<(), StateError> {
+        let Ok(maintainer) = self.maintainer() else {
+            return Ok(());
+        };
+        for (issue, at) in self.split_waits() {
+            if self.flights.triaging() == Some(issue) {
+                continue;
+            }
+            let replies = self.their_replies(issue, &maintainer, at, comments);
+            let said: Vec<&str> = replies.iter().map(|c| c.body.as_str()).collect();
+            self.heard_split(issue, &said)?;
         }
         Ok(())
     }
@@ -60,7 +78,7 @@ impl Runner {
     // words, and no one else's, the App's own included
     fn their_replies<'a>(
         &self,
-        record: &Triaged,
+        issue: u64,
         asked: &str,
         wait_at: Timestamp,
         comments: &'a [ThreadComment],
@@ -70,7 +88,7 @@ impl Runner {
         let mut replies: Vec<&ThreadComment> = comments
             .iter()
             .filter(|c| {
-                c.thread == record.issue
+                c.thread == issue
                     && !c.bot
                     && plain_login(&c.author) == mine
                     && app
