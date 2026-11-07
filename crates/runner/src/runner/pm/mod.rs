@@ -19,7 +19,6 @@ use super::ruling::PostJob;
 use super::trigger::lock;
 use crate::board::ReadyIssue;
 use crate::board::briefing::ticket_ref;
-use crate::pacer::Scope;
 use crate::ports::{AgentError, AgentReply, COMPACT, Session, SessionId, Timestamp};
 use crate::settings::PmAgent;
 use crate::state::StateError;
@@ -423,7 +422,7 @@ impl Runner {
         if self.pm.down_until.is_some_and(|until| now < until) {
             return None;
         }
-        self.pace_now(Scope::Turn, &limit).ok()
+        self.pace_now(&limit).ok()
     }
 
     /// Starts the project manager's call if one is due and it can run,

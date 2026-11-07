@@ -113,8 +113,8 @@ impl Pace {
 }
 
 impl Runner {
-    /// Paces `scope` on the limit of the work item's worker
-    pub(super) fn pace_worker(&mut self, scope: Scope) -> Result<Pace, StateError> {
+    /// Paces a turn on the limit of the work item's worker
+    pub(super) fn pace_worker(&mut self) -> Result<Pace, StateError> {
         let limit = match self.current() {
             Some(item) => match self.worker_agent(item) {
                 Ok(agent) => agent.limit,
@@ -124,26 +124,26 @@ impl Runner {
             // A turn is begun only on a work item, so nothing waits on a window.
             None => return Ok(Pace::Clear),
         };
-        self.pace(scope, &limit)
+        self.pace(&limit)
     }
 
-    /// Paces `scope` on `limit`: an account's windows, or nothing for a lease
-    pub(super) fn pace(&mut self, scope: Scope, limit: &Limit) -> Result<Pace, StateError> {
-        self.pace_on(scope, limit, true)
+    /// Paces on `limit`: an account's windows, or nothing for a lease
+    pub(super) fn pace(&mut self, limit: &Limit) -> Result<Pace, StateError> {
+        self.pace_on(limit, true)
     }
 
     /// [`Runner::pace`] for a caller that cannot be made again, which reads under the lock
     /// whatever its step has not read
-    pub(super) fn pace_now(&mut self, scope: Scope, limit: &Limit) -> Result<Pace, StateError> {
-        self.pace_on(scope, limit, true)
+    pub(super) fn pace_now(&mut self, limit: &Limit) -> Result<Pace, StateError> {
+        self.pace_on(limit, true)
     }
 
-    fn pace_on(&mut self, scope: Scope, limit: &Limit, off_lock: bool) -> Result<Pace, StateError> {
+    fn pace_on(&mut self, limit: &Limit, off_lock: bool) -> Result<Pace, StateError> {
         let Limit::Account(account) = *limit else {
             return Ok(Pace::Clear);
         };
         let now = self.ports.clock.now();
-        if let Some(hold) = self.still_held(account, scope, now) {
+        if let Some(hold) = self.still_held(account, now) {
             return Ok(Pace::StillHeld(hold.clone()));
         }
         let read = match self.reads.usage(account) {
@@ -170,16 +170,16 @@ impl Runner {
             self.metrics.plan(account, reading);
         }
         assessment.window = limit;
-        let hold = assessment.hold(scope).cloned();
+        let hold = assessment.hold().cloned();
         self.pacing.insert(account, (now, assessment));
         Ok(hold.map_or(Pace::Clear, Pace::Held))
     }
 
-    // The hold an earlier reading of `account` found on `scope`, while it is trusted
-    fn still_held(&self, account: Account, scope: Scope, now: Timestamp) -> Option<&Hold> {
+    // The hold an earlier reading of `account` found, while it is trusted
+    fn still_held(&self, account: Account, now: Timestamp) -> Option<&Hold> {
         let (read_at, last) = self.pacing.get(&account)?;
         let trusted = now.0 < read_at.0 + RECHECK_SECS;
-        last.hold(scope).filter(|hold| trusted && now < hold.until)
+        last.hold().filter(|hold| trusted && now < hold.until)
     }
 
     /// Whether a trusted hold still keeps `agent` from starting a turn
@@ -188,7 +188,7 @@ impl Runner {
             return false;
         };
         let now = self.ports.clock.now();
-        self.still_held(account, Scope::Turn, now).is_some()
+        self.still_held(account, now).is_some()
     }
 
     /// The hold the pacer last found on `agent`'s account for a new work item,
@@ -198,13 +198,13 @@ impl Runner {
             return None;
         };
         let (_, last) = self.pacing.get(&account)?;
-        last.hold(Scope::Dispatch).filter(|hold| now < hold.until)
+        last.hold().filter(|hold| now < hold.until)
     }
 
     /// The meters a new work item is paced on, less those a trusted hold answers for
     pub(super) fn dispatch_meters(&self, now: Timestamp) -> Vec<(Account, Arc<dyn Meter>)> {
         (self.spent_accounts().into_iter())
-            .filter(|&account| self.still_held(account, Scope::Dispatch, now).is_none())
+            .filter(|&account| self.still_held(account, now).is_none())
             .map(|account| (account, Arc::clone(self.ports.meter_of(account))))
             .collect()
     }
@@ -215,7 +215,7 @@ impl Runner {
     /// any of them holds it, the first such account in order.
     pub(super) fn pace_dispatch(&mut self) -> Result<Pace, StateError> {
         for account in self.spent_accounts() {
-            match self.pace(Scope::Dispatch, &Limit::Account(account))? {
+            match self.pace(&Limit::Account(account))? {
                 Pace::Clear => {}
                 held => return Ok(held),
             }
@@ -237,7 +237,7 @@ impl Runner {
             let pace = match scope {
                 Scope::Dispatch => self.pace_agent(agent)?,
                 Scope::Turn => match self.agent_limit(agent) {
-                    Some(limit) => self.pace(Scope::Turn, &limit)?,
+                    Some(limit) => self.pace(&limit)?,
                     None => Pace::Clear,
                 },
             };
@@ -283,7 +283,7 @@ impl Runner {
         {
             return Ok(Pace::Clear);
         }
-        self.pace(Scope::Dispatch, &limit)
+        self.pace(&limit)
     }
 
     // Each listed reviewer's limit that runs sessions, and each open work
@@ -381,7 +381,7 @@ impl Runner {
             let status = AccountStatus {
                 reading: last.and_then(|last| last.reading.as_ref()),
                 holding: last
-                    .and_then(|last| last.hold(Scope::Dispatch))
+                    .and_then(|last| last.hold())
                     .filter(|hold| now < hold.until),
             };
             (account, status)

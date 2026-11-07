@@ -29,7 +29,6 @@ use super::rework;
 use super::ruling::park;
 use crate::board::briefing::{closest, missing_paths, names_a_path};
 use crate::guard::Pause;
-use crate::pacer::Scope;
 use crate::ports::{
     AgentCall, AgentError, AgentReply, COMPACT, Cost, ForgeError, InstallationToken, Issue, Reach,
     Role, Session, ThreadComment, Timestamp, Tools,
@@ -352,7 +351,7 @@ impl Runner {
             if let Some(handed) = self.hand_off()? {
                 return Ok(handed);
             }
-            let pace = self.pace_worker(Scope::Turn)?;
+            let pace = self.pace_worker()?;
             if let Pace::StillHeld(hold) | Pace::Held(hold) = &pace {
                 self.held_up.because(Reason::Paced(hold.reason.clone()));
             }
