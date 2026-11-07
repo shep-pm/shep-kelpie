@@ -4,7 +4,7 @@ use std::num::NonZeroU64;
 use std::sync::Mutex;
 
 use super::*;
-use crate::ports::{RateBucket, RateLimits, Visibility};
+use crate::ports::{ForgeError, RateBucket, RateLimits, Visibility};
 use crate::runner::step;
 use crate::state::VERSION;
 use crate::test::ticket;

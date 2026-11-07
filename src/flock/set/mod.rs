@@ -224,6 +224,7 @@ async fn checked(
     let changed = Tables {
         project: Some(table),
         kelpie: read.kelpie,
+        ..Tables::default()
     };
     let settings = runnable(&changed, name, place)?;
     if git_moved {
