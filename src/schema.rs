@@ -368,8 +368,6 @@ mod tests {
     #[test]
     fn a_checked_value_carries_its_bounds() {
         let defs = &schema()["$defs"];
-        assert_eq!(defs["KickoffHours"]["minimum"], 1);
-        assert_eq!(defs["KickoffHours"]["maximum"], 24);
         let active_items = &defs["Concurrency"]["properties"]["active_items"];
         assert_eq!(
             (&active_items["minimum"], &active_items["default"]),

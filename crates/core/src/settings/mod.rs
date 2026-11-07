@@ -3,9 +3,9 @@
 //! Its runner sheep's `[app.dogs.kelpie]` table, every setting in a table of
 //! its own. Unknown keys are refused, so a misspelt or malformed setting
 //! stops the runner with a message naming it. `git.checkout`,
-//! `git.merging`, `ci.block` and `pacing.kickoff_hours` are required, with
-//! the tables that hold them and `[worker]`, and every other key has a
-//! default. `settings.example.toml` beside this crate holds the defaults.
+//! `git.merging` and `ci.block` are required, with the tables that hold
+//! them and `[worker]`, and every other key has a default.
+//! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -93,8 +93,10 @@ pub struct Settings {
     /// may use, from kelpie's agent files
     #[serde(default)]
     pub agents: RoleAgentNames,
-    /// Usage pacing
-    pub pacing: Pacing,
+    /// Read by nothing: `shep kelpie upgrade` deletes the table
+    #[serde(default)]
+    #[schemars(extend("deprecated" = true, "type" = "object"))]
+    pub pacing: Option<Gone>,
     /// What every worker is started with
     pub worker: Worker,
     /// Which kinds of ruling the project manager answers for the
@@ -534,24 +536,6 @@ impl Effort {
     }
 }
 
-/// Usage pacing settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Pacing {
-    /// Whether pacing is on, which only `status` reports
-    ///
-    /// A spent 5-hour window or week holds a turn or a new work item whatever
-    /// this says. On when absent.
-    #[serde(default = "default_pacing_enabled")]
-    pub enabled: bool,
-    /// Hours a day the day's share of the week is spread over
-    pub kickoff_hours: KickoffHours,
-}
-
-fn default_pacing_enabled() -> bool {
-    true
-}
-
 /// What every worker is started with
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -780,32 +764,6 @@ pub fn forge_of(url: &str) -> Option<ForgeSlug> {
     ForgeSlug::try_from(path.to_owned()).ok()
 }
 
-/// Hours in a working day, from 1 to 24
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
-#[serde(try_from = "i64")]
-// schemars describes a `try_from` type by its source, so the range goes here.
-#[schemars(extend("minimum" = 1, "maximum" = 24))]
-pub struct KickoffHours(u8);
-
-impl KickoffHours {
-    /// The number of hours
-    #[inline]
-    pub fn get(self) -> u8 {
-        self.0
-    }
-}
-
-impl TryFrom<i64> for KickoffHours {
-    type Error = &'static str;
-
-    fn try_from(value: i64) -> Result<Self, Self::Error> {
-        match u8::try_from(value) {
-            Ok(hours @ 1..=24) => Ok(Self(hours)),
-            _ => Err("must be from 1 to 24"),
-        }
-    }
-}
-
 /// Why a project's settings cannot be used
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettingsError {
@@ -866,6 +824,13 @@ impl fmt::Display for SettingsError {
 impl core::error::Error for SettingsError {}
 
 impl Settings {
+    /// Each key kelpie reads no longer that the table still holds, by its setting's name
+    pub fn gone_keys(&self) -> Vec<&'static str> {
+        let mut keys = self.agents.gone_keys();
+        keys.extend(self.pacing.map(|_| "pacing"));
+        keys
+    }
+
     // `~/` in a path setting is the home folder.
     fn expand(&mut self, home: &Path) {
         if let Ok(rest) = self.git.checkout.strip_prefix("~") {
