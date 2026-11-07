@@ -259,9 +259,6 @@ pub struct Pick {
     /// Whether its wait is a hold on its API key
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub held: bool,
-    /// Its place in `[kelpie.agent_board] prefer`, 0 the most wanted, or None when unlisted
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub listed: Option<usize>,
 }
 
 impl Pick {
@@ -276,7 +273,6 @@ impl Pick {
             tier: None,
             local: false,
             held: false,
-            listed: None,
         }
     }
 }
@@ -673,14 +669,13 @@ mod tests {
             tier: Some(Tier::Heavy),
             local: true,
             held: true,
-            listed: Some(0),
             ..Pick::new(AgentName::kelpies("opus-high"), 900, 300)
         };
         assert_eq!(
             serde_json::to_value(&read).unwrap(),
             json!({
                 "agent": "opus-high", "finish": 900, "wait": 300, "cost_usd": 1.5,
-                "tier": "heavy", "local": true, "held": true, "listed": 0
+                "tier": "heavy", "local": true, "held": true
             })
         );
     }
@@ -718,7 +713,12 @@ mod tests {
         let answers = include_str!("../../../../fixtures/door-answers.jsonl");
         for line in answers.lines() {
             let answer: Answer = serde_json::from_str(line).unwrap();
-            let written: serde_json::Value = serde_json::from_str(line).unwrap();
+            let mut written: serde_json::Value = serde_json::from_str(line).unwrap();
+            // An older dog's `listed` still reads, and is no longer written.
+            let picks = written.get_mut("picks").and_then(|p| p.as_array_mut());
+            for pick in picks.into_iter().flatten() {
+                pick.as_object_mut().map(|pick| pick.remove("listed"));
+            }
             assert_eq!(serde_json::to_value(&answer).unwrap(), written, "{line}");
         }
     }

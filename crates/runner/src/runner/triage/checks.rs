@@ -12,10 +12,10 @@ use std::collections::BTreeSet;
 
 use super::super::Runner;
 use super::super::contributions::post::forge_is_busy;
-use super::comment::NEEDS_TRIAGE;
+use super::decided;
+use super::opened_by_us_or_people;
 use super::ready::READY_LABEL;
 use super::rewrite::new_kind_label;
-use super::{TRIAGE_LABELS, opened_by_us_or_people};
 use crate::board::{READY, ReadyIssue, Skip, TRIAGE, check};
 use crate::ports::{ForgeError, OpenIssue, OpenPull};
 use crate::settings::TriagePick;
@@ -139,8 +139,7 @@ impl Runner {
             // A pass that rewrote nothing the check reads said all it had in its
             // comment. Silence leaves it so. A triage label put on by hand is the
             // maintainer's word on it.
-            let decided = (issue.labels.iter())
-                .any(|l| l != READY && l != TRIAGE && TRIAGE_LABELS.contains(&l.as_str()));
+            let decided = decided(&issue.labels);
             let (triage, act) = match (failures.is_empty(), ran) {
                 (true, _) => (CheckTriage::None, Act::Passed),
                 (false, true) if same || decided => (CheckTriage::None, Act::Kept),
@@ -322,10 +321,8 @@ impl Runner {
     // the maintainer's take-off of a label it carried. Whether nothing is left.
     fn check_passed(&mut self, issue: &OpenIssue, ready_seen: &mut bool, poll: &mut Poll) -> bool {
         let number = issue.number;
-        let decided = (issue.labels.iter())
-            .any(|l| l != READY && l != TRIAGE && TRIAGE_LABELS.contains(&l.as_str()));
         // A split parent is never ready: its sub-issues are what the board takes.
-        if decided || self.has_work_item(number) || self.split_of(number).is_some() {
+        if decided(&issue.labels) || self.has_work_item(number) || self.split_of(number).is_some() {
             return true;
         }
         let Some(maintainer) = self.poll_maintainer(poll) else {
@@ -357,10 +354,11 @@ impl Runner {
             if poll.writes == 0 {
                 return false;
             }
+            let waiting = label == TRIAGE && on;
             if on && !poll.made.contains(label) {
-                let made = match label == READY {
-                    true => self.make_missing_labels([READY_LABEL]),
-                    false => self.make_missing_labels([NEEDS_TRIAGE]),
+                let made = match waiting {
+                    true => self.make_waiting_label(),
+                    false => self.make_missing_labels([READY_LABEL]),
                 };
                 if let Err(why) = made {
                     self.notes
@@ -370,7 +368,11 @@ impl Runner {
                 poll.made.insert(label.to_owned());
             }
             poll.writes -= 1;
-            if let Err(e) = self.label_issue(number, label, on) {
+            let labelled = match waiting {
+                true => self.label_waiting(number),
+                false => self.label_issue(number, label, on),
+            };
+            if let Err(e) = labelled {
                 let how = if on { "label it" } else { "take off" };
                 self.notes
                     .push(format!("check #{number}: cannot {how} `{label}`: {e}"));

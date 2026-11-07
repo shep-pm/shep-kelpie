@@ -103,15 +103,13 @@ fn candidates<'a>(
 }
 
 // What the dog reads of `candidate`, which starts in `wait` seconds. The ask's
-// runner orders it, so the cost, tier, local and held flags and the list's
-// place all go with it.
-fn read(view: &View, candidate: &Candidate<'_>, wait: u64) -> Pick {
+// runner orders it, so the cost, tier, local and held flags all go with it.
+fn read(candidate: &Candidate<'_>, wait: u64) -> Pick {
     Pick {
         cost_usd: candidate.typical.cost_usd,
         tier: Some(candidate.fit.tier()),
         local: candidate.local,
         held: candidate.held,
-        listed: view.prefer.iter().position(|p| p == candidate.agent),
         ..Pick::new(
             candidate.agent.clone(),
             wait.saturating_add(candidate.typical.secs),
@@ -139,7 +137,7 @@ pub(super) fn answer(
     (agent_board::pick(&item, &candidates).into_iter())
         .filter_map(|choice| {
             let candidate = candidates.iter().find(|c| c.agent == choice.agent)?;
-            Some(read(view, candidate, choice.wait))
+            Some(read(candidate, choice.wait))
         })
         .collect()
 }
@@ -154,7 +152,7 @@ pub(super) fn reading(
 ) -> Vec<Pick> {
     let candidates = candidates(view, shown, names, None, now);
     (candidates.iter())
-        .filter_map(|c| Some(read(view, c, c.wait?)))
+        .filter_map(|c| Some(read(c, c.wait?)))
         .collect()
 }
 
