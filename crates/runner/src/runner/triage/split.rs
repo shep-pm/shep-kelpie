@@ -21,7 +21,7 @@ use crate::board::check;
 use crate::board::{AGENT_LABEL, PIN, READY, TRIAGE, agent_label, is_priority_label, priority};
 use crate::local_paths::Surface;
 use crate::ports::{ForgeError, NewLabel, OpenIssue};
-use crate::state::{SplitDraft, StateError, TriageSplit, TriageState, TriageStep};
+use crate::state::{SplitDraft, StateError, TriageQuestions, TriageSplit, TriageState, TriageStep};
 use crate::ticket::TicketId;
 
 // The marker that ends a sub-issue's body: the parent and the draft's index.
@@ -123,20 +123,54 @@ impl Runner {
                     .map(|why| format!("the issue's own body: {why}")),
             ),
         }
+        let drafts = self.split_drafts(issue, found);
+        failures.extend(self.split_refusals(&drafts));
+        match failures.is_empty() {
+            true => Ready::Split { body, drafts },
+            false => Ready::SplitRefused(failures),
+        }
+    }
+
+    // The drafts of `found`'s split as they are filed, labels and all
+    fn split_drafts(&self, issue: u64, found: &Found) -> Vec<SplitDraft> {
         let seen = self.triage_seen(issue);
-        let drafts: Vec<SplitDraft> = (found.split.iter())
+        (found.split.iter())
             .map(|part| SplitDraft {
                 title: part.title.clone(),
                 body: part.body.clone(),
                 labels: draft_labels(found, &seen, part),
                 after: part.after.clone(),
             })
-            .collect();
-        failures.extend(self.split_refusals(&drafts));
-        match failures.is_empty() {
-            true => Ready::Split { body, drafts },
-            false => Ready::SplitRefused(failures),
+            .collect()
+    }
+
+    // The drafts of a reply that splits someone else's `issue`, to save as a
+    // plan the maintainer's yes releases. Their body is never written, so only
+    // the drafts are checked. A draft that fails, a split already planned, or
+    // no maintainer login to ask files and asks nothing.
+    pub(super) fn asked_split(&self, issue: u64, found: &Found) -> Ready {
+        if found.split.is_empty() || self.split_of(issue).is_some() {
+            return Ready::Not;
         }
+        if let Err(why) = self.maintainer() {
+            self.notes.push(format!(
+                "triage #{issue}: its split asks the maintainer and none is named, so it is \
+                 dropped: {why}"
+            ));
+            return Ready::Not;
+        }
+        let drafts = self.split_drafts(issue, found);
+        let failed = self.split_refusals(&drafts);
+        if !failed.is_empty() {
+            self.notes.push(format!(
+                "triage #{issue}: its split of someone else's issue asks nothing, since {} of \
+                 its {} drafts fail the issue check",
+                failed.len(),
+                drafts.len()
+            ));
+            return Ready::Not;
+        }
+        Ready::Ask(drafts)
     }
 
     /// What stops `drafts` from being filed, one line for each draft that fails:
@@ -184,8 +218,14 @@ pub(super) fn refused_facts(failures: &[String]) -> String {
     )
 }
 
-/// Saves `drafts` as the split of `issue`, in place of any plan it had
-pub(super) fn plan(triage: &mut TriageState, issue: u64, drafts: Vec<SplitDraft>) {
+/// Saves `drafts` as the split of `issue`, in place of any plan it had, held
+/// while `hold` is set
+pub(super) fn plan(
+    triage: &mut TriageState,
+    issue: u64,
+    drafts: Vec<SplitDraft>,
+    hold: Option<TriageQuestions>,
+) {
     if drafts.is_empty() {
         return;
     }
@@ -194,7 +234,7 @@ pub(super) fn plan(triage: &mut TriageState, issue: u64, drafts: Vec<SplitDraft>
         issue,
         drafts,
         filed: Vec::new(),
-        asked: None,
+        asked: hold,
     });
 }
 

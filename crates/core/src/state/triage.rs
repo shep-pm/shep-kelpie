@@ -75,8 +75,16 @@ impl TriageState {
     /// the cap partway through the burst it exists for. The calls kept for an
     /// issue with no record are bounded the same way.
     pub fn prune(&mut self) {
+        // A record whose split waits on the maintainer's word stays: a yes
+        // files from it.
+        let held: Vec<u64> = (self.splits.iter())
+            .filter(|s| s.asked.is_some())
+            .map(|s| s.issue)
+            .collect();
         let finished = |t: &Triaged| {
-            matches!(t.step, TriageStep::Done | TriageStep::Ready) && t.duplicate_of.is_none()
+            matches!(t.step, TriageStep::Done | TriageStep::Ready)
+                && t.duplicate_of.is_none()
+                && !held.contains(&t.issue)
         };
         let mut extra = self
             .issues
@@ -174,8 +182,9 @@ pub struct TriageSplit {
     /// Left out while empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filed: Vec<TicketId>,
-    /// The comment holding the filing back for the issue's author to answer.
-    /// While it is set, nothing is filed.
+    /// The comment holding the filing back for an answer: the issue's author's,
+    /// or on someone else's issue the maintainer's yes. While it is set,
+    /// nothing is filed.
     ///
     /// Left out unless the filing waits on an answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]

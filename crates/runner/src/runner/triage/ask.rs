@@ -131,17 +131,21 @@ impl Runner {
         u64::from(self.settings.triage.wait_days.get()).saturating_mul(86_400)
     }
 
-    // The issues whose triage waits on the author, each with when the wait
-    // began. Their time is what the thread read reaches back to, so a reply is
+    // The issues whose triage waits on the author, or whose split waits on the
+    // maintainer, each with when the wait began. Their time is what the thread read reaches back to, so a reply is
     // not missed, and what silence is measured from.
     pub(in crate::runner) fn triage_waits(&self) -> Vec<(u64, Timestamp)> {
-        self.state.triage.as_ref().map_or_else(Vec::new, |triage| {
-            triage
-                .issues
-                .iter()
-                .filter_map(|record| answers_wait(record).map(|(_, at)| (record.issue, at)))
-                .collect()
-        })
+        let mut waits: Vec<(u64, Timestamp)> =
+            self.state.triage.as_ref().map_or_else(Vec::new, |triage| {
+                triage
+                    .issues
+                    .iter()
+                    .filter_map(|record| answers_wait(record).map(|(_, at)| (record.issue, at)))
+                    .collect()
+            });
+        // So is the maintainer's yes to a split of someone else's issue
+        waits.extend(self.split_waits());
+        waits
     }
 
     // The issues whose triage waits on the author, in the order their records
@@ -525,9 +529,23 @@ fn numbered(line: &str) -> Option<(usize, &str)> {
 // A line that takes every recommended answer: `ok` alone, any case, a trailing
 // `.` or `!` allowed
 fn says_ok(line: &str) -> bool {
-    line.trim()
-        .trim_end_matches(['.', '!'])
-        .eq_ignore_ascii_case("ok")
+    says(line, &["ok"])
+}
+
+// Whether a reply is `yes` or `ok` alone, any case, a trailing `.` or `!`
+// allowed: the maintainer's word on a split, and nothing longer counts
+pub(super) fn says_yes(reply: &str) -> bool {
+    says(reply, &["yes", "ok"])
+}
+
+// Whether a reply is `no` alone, as [`says_yes`] reads it
+pub(super) fn says_no(reply: &str) -> bool {
+    says(reply, &["no"])
+}
+
+fn says(text: &str, words: &[&str]) -> bool {
+    let said = text.trim().trim_end_matches(['.', '!']);
+    words.iter().any(|word| said.eq_ignore_ascii_case(word))
 }
 
 // Whether the author's reply answers question `n` of the round it follows, read

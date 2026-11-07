@@ -29,7 +29,7 @@ The maintainer's path is already the project manager: a ruling's thread, a comme
 ### No ruling reaches the maintainer when the map says so
 
 - `rulings.pm_decides` may hold `true` for every kind it knows. With that, every ruling is answered by the project manager and none reaches the maintainer. `crates/core/src/settings/rulings.rs`
-- This amends ADR 0018's refusal of `true` for `merge`, `security` and `contribution-merge`. What keeps a bad head out is the gate, not who answers the card: CI green on the latest `main` (ADR 0008), the review pass, the unread-head and borrowed-head checks. A contribution's security review still reads every head its author pushes before any of kelpie's calls run on it; the ruling its flag raises is now the project manager's to answer.
+- This amends ADR 0018's refusal of `true` for `merge`, `security` and `contribution-merge`. What keeps a bad head out is the gate, not who answers the card: CI green on the latest `main` (ADR 0008), the review pass, the unread-head and borrowed-head checks. A contribution's security review still reads every head its author pushes before any of kelpie's calls run on it. The amendment below keeps the ruling its flag raises, and `contribution-merge`, the maintainer's.
 - A ruling the project manager answers keeps its posted answer and its `no <note>` reopen, as it does today.
 
 ### The dog reports who is available, and ranks no more
@@ -54,6 +54,15 @@ The maintainer's path is already the project manager: a ruling's thread, a comme
 - Where kelpie already wakes the project manager, the decision goes into that wake: a free slot, a ruling to answer, a round's findings, a stuck item, a lease wait. No wake is added for a call a running wake could make. `runner/pm/wakes.rs`
 - Each decision keeps its reason, on the ruling answer's `why` or in the journal, so the batch retro reads what was decided and what came of it. `runner/ruling/history.rs`, `runner/retro/`
 
+### Amendment, 2026-11-07: `merge` joins the map, `security` and `contribution-merge` stay refused
+
+The maintainer narrowed the two lines above (#1761, #1762). The rest of this record stands.
+
+- `merge` is settable, and starts `false`. It is the one key for unattended merging, with or without a project manager: `git.merging` says whether a green head is asked about at all, and `rulings.pm_decides` says who answers the ask. Set `true`, the project manager's yes merges a head that passed every gate. #1761 put the warning in the gate, so a ruling that warns of an unreviewed pass, open review bot threads, an unread head, an unread fix or a borrowed head still comes to the maintainer: only their yes merges past a warning.
+- `security` and `contribution-merge` stay refused as `true`. A security finding is written from a stranger's diff, and a yes on either puts that stranger's code on `main`. A diff written to read safely could then steer the project manager to the yes, and what keeps the code out is who answers the card. Both kinds are rare, so the maintainer loses little by keeping them.
+- "none reaches the maintainer" holds for what the project manager can carry out. A gate #1761 holds, a `design` flag, a turn kelpie could not set up, a ruling raised in a drain, a wake that failed or gave no answer, and every contribution ruling still reach the maintainer.
+- `local-model-spilled` stays refused. No ruling raises it, and the name stays so ledger and history lines written before it went still read.
+
 ## Considered options
 
 - **Keep the settings as the rulebook.** Every call would need a rule written before the work, so the maintainer reads a file to change how one item runs, and the change lands on every item at once.
@@ -61,7 +70,7 @@ The maintainer's path is already the project manager: a ruling's thread, a comme
 - **Wake the project manager for each decision.** A model call for a call a wake already running could make, on a board it already read.
 - **Let the project manager relax a gate.** It reads text a stranger writes. A gate that holds only while nothing suspicious was written is not a gate.
 - **A per-item setting the maintainer edits.** `shep kelpie set` on one work item keeps the maintainer in the loop and leaves the deciding in a file, which is what this record moves.
-- **Keep `merge` out of `rulings.pm_decides`.** The card is where a merge is asked about, and the safety that keeps a bad head out sits in the gate. Refusing the kind leaves the maintainer answering a form while the control lives elsewhere.
+- **Keep `merge` out of `rulings.pm_decides`.** The card is where a merge is asked about, and the safety that keeps a bad head out sits in the gate. Refusing the kind leaves the maintainer answering a form while the control lives elsewhere. The amendment above rejects this for `merge` and takes it for `security` and `contribution-merge`, where what keeps the code out is who answers the card.
 
 ## Consequences
 

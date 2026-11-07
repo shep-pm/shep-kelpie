@@ -7,13 +7,13 @@
 //! `ready-for-agent` last. Otherwise the body goes under the issue's text, and
 //! the issue ends `needs-triage`. The comment is worded first. A reply that
 //! splits the issue is made ready as a split or refused as one
-//! ([`super::split`]).
+//! ([`super::split`]). On anyone else's issue it only saves the plan, held.
 
 use super::super::Runner;
 use super::super::contributions::post::{forge_is_busy, refused_text};
-use super::TRIAGE_LABELS;
 use super::local::body_hash;
 use super::research::Found;
+use super::{TRIAGE_LABELS, WaitingLabel};
 use crate::board::has_criteria;
 use crate::board::{READY, TRIAGE};
 use crate::local_paths::{Leak, Surface};
@@ -60,12 +60,16 @@ pub(in crate::runner) enum Ready {
     /// The same, but the body or a draft fails: one line for each, and nothing
     /// is filed
     SplitRefused(Vec<String>),
+    /// Someone else's issue, which the research judged too big for one work
+    /// item: the drafts to save as a plan held until the maintainer says yes.
+    /// The issue's body is never written.
+    Ask(Vec<SplitDraft>),
 }
 
 /// Whether kelpie is going to rewrite `issue`, with `labels` the pass puts on,
 /// and whether that makes it ready. Only an issue whose author is
 /// `Runner::own_author`, the maintainer or the App, is ever rewritten or made
-/// ready. The body is read against the same local guard every App post goes
+/// ready; a split of any other is held for the maintainer's yes. The body is read against the same local guard every App post goes
 /// through: the comment is worded before the body is written, so text the
 /// guard would refuse is dropped here rather than promised there.
 pub(in crate::runner) fn readiness(
@@ -75,10 +79,13 @@ pub(in crate::runner) fn readiness(
     found: &Found,
     labels: &[String],
 ) -> Ready {
-    if !found.open.is_empty() || !runner.own_author(author) {
+    if !found.open.is_empty() {
         return Ready::Not;
     }
-    // A split from anyone else is dropped: #1847 files it once its author says so.
+    // A split of someone else's issue is a plan, filed only on the maintainer's yes.
+    if !runner.own_author(author) {
+        return runner.asked_split(issue, found);
+    }
     if !found.split.is_empty() {
         return runner.judged_split(issue, found);
     }
@@ -284,6 +291,52 @@ impl Runner {
         }
         self.save(next)?;
         self.unplan(issue)
+    }
+
+    // The `labelled` step: puts `needs-triage` on, unless a label put on by hand
+    // since the pass began stands (one already there is this step's own), and
+    // ends the pass. A split of someone else's issue is then asked of the
+    // maintainer in a comment of its own.
+    pub(super) fn label_waiting_step(&mut self, issue: u64) -> Result<(), StateError> {
+        match self.triage_labelled_by_hand_but(issue, TRIAGE) {
+            Ok(Some(label)) => {
+                self.notes.push(format!(
+                    "triage #{issue}: `{label}` went on by hand while its labels went on, so \
+                     that stands: kelpie adds no `{TRIAGE}`"
+                ));
+                // The ask is never posted now, so a plan held for it goes too:
+                // left, it would be dated from this comment and filed on a bare
+                // `ok` nobody asked for.
+                if self.split_of(issue).is_some_and(|s| s.asked.is_some()) {
+                    let note =
+                        format!("triage #{issue}: its split was never asked, so it is dropped");
+                    self.drop_split(issue, note)?;
+                }
+                self.triage_stepped(issue, TriageStep::Done)?;
+                self.triage_tries.remove(&issue);
+                return Ok(());
+            }
+            Ok(None) => {}
+            Err(e) => {
+                let why = format!("cannot read its labels: {e}");
+                self.triage_failed(issue, &why, !forge_is_busy(&e));
+                return Ok(());
+            }
+        }
+        if let Err(failed) = self.put_waiting_label(issue) {
+            let counts = match &failed {
+                WaitingLabel::Make(_) => true,
+                WaitingLabel::Label(e) => !forge_is_busy(e),
+            };
+            self.triage_failed(issue, &failed.to_string(), counts);
+            return Ok(());
+        }
+        if !self.ask_split(issue)? {
+            return Ok(());
+        }
+        self.triage_stepped(issue, TriageStep::Done)?;
+        self.triage_tries.remove(&issue);
+        Ok(())
     }
 
     // Puts on the labels the reply gave and then `ready-for-agent`, last, taking

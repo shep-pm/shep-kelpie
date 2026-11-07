@@ -21,12 +21,35 @@ fn a_removed_kind_in_the_list_makes_it_refuse_by_name() {
 }
 
 #[test]
-fn only_a_merge_kind_makes_the_list_refuse() {
+fn only_a_kind_a_stranger_wrote_or_the_retired_one_makes_the_list_refuse() {
+    for kind in ["security", "contribution-merge", "local-model-spilled"] {
+        let refused = rulings(&format!("pm_alone = [\"{kind}\"]"))
+            .refusal()
+            .expect("the kind is refused")
+            .to_string();
+        assert!(refused.contains(&format!("`{kind}`")), "{refused}");
+        assert!(refused.contains("rulings.pm_alone"), "{refused}");
+    }
     let merge = rulings("pm_alone = [\"merge\"]");
-    let refused = merge.refusal().expect("merge is refused").to_string();
-    assert!(refused.contains("merge"), "{refused}");
-    assert!(refused.contains("rulings.pm_alone"), "{refused}");
+    assert_eq!(merge.refusal(), None, "the list may name merge");
+    assert!(merge.pm_decides(RulingName::Merge), "as `true`");
     assert_eq!(parse(EXAMPLE).unwrap().rulings.refusal(), None);
+}
+
+// `merge` is the one kind whose answer merges a head. The gate, not the map,
+// is what keeps a bad head out (#1761), so the map may give it.
+#[test]
+fn merge_may_be_true_and_starts_false() {
+    assert_eq!(RulingName::Merge.pm_default(), Some(false));
+    assert_eq!(RulingName::Merge.as_str(), "merge");
+    let map = rulings("pm_decides = { merge = true }");
+    assert!(map.pm_decides(RulingName::Merge), "the map may give it");
+    assert_eq!(map.refusal(), None, "the project manager may answer it");
+    assert!(
+        !rulings("").pm_decides(RulingName::Merge),
+        "an empty map keeps it the maintainer's"
+    );
+    assert_eq!(rulings("pm_decides = { merge = false }").refusal(), None);
 }
 
 #[test]
@@ -80,12 +103,7 @@ fn the_map_and_the_old_list_set_at_once_are_refused_naming_both() {
 
 #[test]
 fn a_refused_kind_set_true_in_the_map_is_refused_naming_the_map() {
-    for kind in [
-        "merge",
-        "security",
-        "contribution-merge",
-        "local-model-spilled",
-    ] {
+    for kind in ["security", "contribution-merge", "local-model-spilled"] {
         let map = rulings(&format!("pm_decides = {{ {kind} = true }}"));
         let refused = map.refusal().expect("the kind is refused").to_string();
         assert!(refused.contains("rulings.pm_decides"), "{kind}: {refused}");
@@ -105,6 +123,7 @@ fn a_kind_with_no_default_is_exactly_one_the_map_refuses() {
             "{kind:?}"
         );
     }
+    assert_eq!(RulingName::Merge.pm_default(), Some(false));
     assert_eq!(RulingName::Question.pm_default(), Some(false));
     assert_eq!(RulingName::ForeignChange.pm_default(), Some(false));
     assert_eq!(RulingName::AgentFiles.pm_default(), Some(false));
