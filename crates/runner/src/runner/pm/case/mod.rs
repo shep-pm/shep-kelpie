@@ -160,7 +160,7 @@ impl Runner {
                 );
             }
             Err(e) => {
-                let why = format!("kelpie could not read it ({e})");
+                let why = format!("kelpie could not read it ({})", cause(e));
                 let _ = write!(out, "({why})\n\n");
                 gaps.push(("the issue", why));
             }
@@ -173,7 +173,7 @@ impl Runner {
         match pull {
             Ok(pull) => out.push_str(&pull_state(&pull)),
             Err(e) => {
-                let why = format!("kelpie could not read it ({e})");
+                let why = format!("kelpie could not read it ({})", cause(&e));
                 let _ = write!(out, "({why})\n\n");
                 gaps.push(("the pull request", why));
             }
@@ -181,7 +181,7 @@ impl Runner {
         match talk {
             Ok(talk) => self.talk_part(&mut out, &talk),
             Err(e) => {
-                let why = format!("kelpie could not read them ({e})");
+                let why = format!("kelpie could not read them ({})", cause(&e));
                 let _ = write!(out, "### Open review threads and comments\n\n({why})\n");
                 gaps.push(("the threads", why));
             }
@@ -254,6 +254,15 @@ impl Runner {
             true => "(nothing written)".to_owned(),
             false => quoted(&text),
         }
+    }
+}
+
+// Why a read failed. An answer that was not what was asked for holds the
+// forge's whole reply, strangers' text included, so it is named and not shown.
+fn cause(error: &ForgeError) -> String {
+    match error {
+        ForgeError::Unreadable(_) => "gh's answer was not what was asked for".to_owned(),
+        other => other.to_string(),
     }
 }
 

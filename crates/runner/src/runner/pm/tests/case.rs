@@ -516,3 +516,19 @@ fn a_full_list_of_replies_or_comments_names_which_end_may_be_missing() {
         "one thread is not a full page"
     );
 }
+
+#[test]
+fn a_talk_gh_could_not_parse_carries_none_of_its_words_into_the_case_or_the_board() {
+    let (rig, runner, _) = red("case-unparsed", "A title", BODY);
+    rig.forge
+        .set_talk_unreadable("{\"comments\": \"STRANGER-PAYLOAD");
+
+    let seen = wake(&rig, &runner);
+
+    let case = case(&rig, 7).unwrap();
+    assert!(case.contains("kelpie could not read them"), "{case}");
+    let notes = runner.lock().unwrap().take_notes().join("\n");
+    for held in [everything_it_holds(&rig), seen.call.prompt.clone(), notes] {
+        assert!(!held.contains("STRANGER-PAYLOAD"), "{held}");
+    }
+}
