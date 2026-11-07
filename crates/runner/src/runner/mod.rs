@@ -25,7 +25,7 @@ use crate::ports::{
 };
 use crate::review_bot::{Bot, Profile};
 use crate::settings::{
-    Account, ForgeSlug, Gateways, ListedReviewer, RoleAgents, Settings, SettingsError,
+    Account, ForgeSlug, Gateways, ListedReviewer, Merging, RoleAgents, Settings, SettingsError,
 };
 use crate::skills::{RepoPlugins, Skills};
 use crate::state::{ProjectState, Ruling, StateError, StateStore};
@@ -767,7 +767,10 @@ impl Runner {
         let now = self.ports.clock.now();
         Status {
             project: self.project.as_str(),
-            merging: self.settings.git.merging,
+            merging: match self.merges_unasked() {
+                true => Merging::Auto,
+                false => Merging::Ask,
+            },
             work_item: self
                 .state
                 .work_items

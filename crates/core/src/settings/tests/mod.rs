@@ -46,7 +46,7 @@ fn the_example_holds_the_first_build_defaults() {
     let s = parse(EXAMPLE).unwrap();
     assert_eq!(s.git.checkout, Path::new("/home/me/GitHub/shep"));
     assert_eq!(s.git.remote.unwrap().as_str(), "shep-pm/shep");
-    assert_eq!(s.git.merging, Merging::Ask);
+    assert_eq!(s.git.merging, Some(Merging::Ask));
     assert!(s.ci.block);
     assert_eq!(s.ci.fix_attempts.cap(), None);
     assert_eq!(s.concurrency.active_items.get(), 1);
@@ -98,10 +98,17 @@ fn the_instructions_file_expands_the_home_folder_and_defaults_to_none() {
 
 #[test]
 fn a_missing_setting_is_named() {
-    let text = EXAMPLE.replace("merging = \"ask\"\n", "");
+    let text = EXAMPLE.replace("block = true\n", "");
     let err = parse_err(&text);
-    assert!(err.contains("missing field `merging`"), "{err}");
-    assert!(err.contains("`git`"), "{err}");
+    assert!(err.contains("missing field `block`"), "{err}");
+    assert!(err.contains("`ci`"), "{err}");
+}
+
+#[test]
+fn git_merging_may_be_left_out() {
+    assert_eq!(parse(EXAMPLE).unwrap().git.merging, Some(Merging::Ask));
+    let text = EXAMPLE.replace("merging = \"ask\"\n", "");
+    assert_eq!(parse(&text).unwrap().git.merging, None);
 }
 
 #[test]
@@ -465,7 +472,7 @@ fn a_misspelt_setting_is_named() {
 #[test]
 fn merging_auto_is_accepted() {
     let text = EXAMPLE.replace("merging = \"ask\"", "merging = \"auto\"");
-    assert_eq!(parse(&text).unwrap().git.merging, Merging::Auto);
+    assert_eq!(parse(&text).unwrap().git.merging, Some(Merging::Auto));
 }
 
 #[test]
@@ -552,7 +559,10 @@ fn a_table_carrying_several_removed_keys_names_them_all_at_once() {
             "[app.dogs.kelpie.git]\n",
             "[app.dogs.kelpie]\ngenerated = [\"Cargo.lock\"]\n[app.dogs.kelpie.git]\n",
         )
-        .replace("# reviewers = [\"iq3", "reviewers = [\"iq3");
+        .replace(
+            "[app.dogs.kelpie.agents]\n",
+            "[app.dogs.kelpie.agents]\nreviewers = [\"iq3-xxs-review\", \"defect-hunter\"]\n",
+        );
     let text = format!(
         "{text}\n[app.dogs.kelpie.coderabbit]\nenabled = true\ndivisor = 1000\nrounds = 1\n"
     );
@@ -889,21 +899,29 @@ fn with_local_rounds(keys: &str) -> String {
 #[test]
 fn local_rounds_default_to_kept_for_30_days() {
     let rounds = parse(EXAMPLE).unwrap().local_rounds;
-    assert!(rounds.keep);
     assert_eq!(rounds.keep_days.get(), 30);
     assert_eq!(rounds.folder, None);
     let empty = parse(&with_local_rounds("")).unwrap().local_rounds;
-    assert_eq!((empty.keep, empty.keep_days.get()), (true, 30));
+    assert_eq!(empty.keep_days.get(), 30);
+}
+
+#[test]
+fn local_rounds_keep_is_refused_by_name_and_says_migrate_deletes_it() {
+    for value in ["true", "false"] {
+        let err = parse_err(&with_local_rounds(&format!("keep = {value}")));
+        assert!(err.contains("local_rounds.keep"), "{value}: {err}");
+        assert!(
+            err.contains("shep kelpie settings migrate"),
+            "{value}: {err}"
+        );
+    }
 }
 
 #[test]
 fn local_rounds_take_keep_days_and_a_folder() {
-    let set = parse(&with_local_rounds(
-        "keep = false\nkeep_days = 0\nfolder = \"~/rounds\"",
-    ))
-    .unwrap()
-    .local_rounds;
-    assert!(!set.keep);
+    let set = parse(&with_local_rounds("keep_days = 0\nfolder = \"~/rounds\""))
+        .unwrap()
+        .local_rounds;
     assert_eq!(set.keep_days.get(), 0);
     assert_eq!(
         set.folder.as_ref().map(|f| f.as_path()),
