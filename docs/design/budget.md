@@ -18,10 +18,10 @@ Pacing, time, usage, settings. The dog, its leases and the forge limits are in `
 
 - Read through shep client: runner sheep's `[app.dogs.kelpie]` table + kelpie's `[kelpie]` in `dogs.toml` (start needs no dog); missing required key stops runner by name. #114, #332, `crates/core/src/settings/mod.rs`; `settings/x.rs` below is in `crates/core/src/settings/`
 - Changes apply at next wake, or each 30s when busy; some wait for restart. Failing change keeps old settings, alerts once a reason, shows in `status`; hand-written table checked at start, reread. #809, `runner/reread/`
-- Every setting is read by something, apart from `[pacing]`, which loads as `Gone` (any value, never refused), is read by nothing since #1787 and #1789, and is named by doctor until `upgrade` clears it; removed key refused by name with replacement. Pre-table files named. #332, `settings/removed.rs`
+- Every setting is read by something, apart from `[pacing]`, which loads as `Gone` (any value, never refused), is read by nothing since #1787 and #1789, is out of the schema and written by nothing since #1790, is named by doctor, and is deleted by `settings migrate`, which `upgrade` runs; removed key refused by name with replacement. Pre-table files named. #332, #1790, `settings/removed.rs`, `flock/set/migrate.rs`
 - `git`: `checkout`, `remote` (`origin`'s GitHub repo when absent), `merging`, `issues`. `settings/git.rs`
 - `ci`: `block`, `fix_attempts` (-1); `concurrency`: `active_items` (1), `pending_rulings` (2). `settings/ci.rs`
-- `budget.per_item_usd` ($10), `settings/budget.rs`; `[pacing]`, held as `Gone` in `settings/mod.rs`, read by nothing, named by doctor
+- `budget.per_item_usd` ($10), `settings/budget.rs`; `[pacing]`, held as `Gone` in `settings/mod.rs`, read by nothing, named by doctor, deleted by `settings migrate`
 - `agents`: see agents.md. `settings/agents/`
 - `rulings`: `pm_decides`, the kinds the PM answers (see who-answers.md); `decide` and `full_panel_paths` refused, deleted by `settings migrate`. `settings/rulings.rs`
 - `worker`: `allowed_domains`, `guard_hooks`, `instructions_file`, `turn_timeout` (60), `compact_window` (200000; pi a reserve, goose a threshold: compaction.md). `runner/turn/`

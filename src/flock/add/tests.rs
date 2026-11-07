@@ -189,6 +189,21 @@ async fn add_in_a_scratch_repo_writes_the_table_makes_the_labels_and_adds_the_ru
 }
 
 #[tokio::test]
+async fn a_project_add_writes_holds_no_pacing_table_and_loads() {
+    let scene = Scene::new().await;
+    scene.add().await.unwrap();
+
+    let (runner, _) = scene.shepherd.sheep("koji").expect("a runner");
+    let table = runner.dogs.get(DOG).expect("a kelpie table").as_map();
+    assert!(table.get("pacing").is_none(), "{table:?}");
+    assert_eq!(
+        scene.settings().gone_keys(),
+        Vec::<&str>::new(),
+        "the table `add` writes holds no key kelpie reads no longer"
+    );
+}
+
+#[tokio::test]
 async fn add_writes_no_reviewers() {
     let scene = Scene::new().await;
     scene.add().await.unwrap();

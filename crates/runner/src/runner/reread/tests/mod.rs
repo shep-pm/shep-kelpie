@@ -50,6 +50,17 @@ fn a_changed_setting_takes_effect_at_once() {
 #[test]
 fn a_change_to_the_pacing_table_alone_changes_nothing() {
     let rig = Rig::new("shep");
+    // A table an older build wrote, which `settings migrate` has not reached
+    rig.edit_settings(|s| {
+        assert!(
+            !s.contains("[app.dogs.kelpie.pacing]"),
+            "the rig writes no pacing table"
+        );
+        s.replace(
+            "[app.dogs.kelpie.worker]",
+            "[app.dogs.kelpie.pacing]\nenabled = true\nkickoff_hours = 8\n\n[app.dogs.kelpie.worker]",
+        )
+    });
     let runner = rig.open().unwrap();
     let next = settings_with(&rig, |s| {
         s.replace("kickoff_hours = 8", "kickoff_hours = 6")
