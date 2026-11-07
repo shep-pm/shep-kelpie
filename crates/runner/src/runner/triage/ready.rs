@@ -304,6 +304,10 @@ impl Runner {
             self.triage_stepped(issue, TriageStep::Done)?;
             return Ok(ReadyLabels::Stood);
         }
+        // A split parent is never ready: its sub-issues are filed in its place.
+        if self.split_of(issue).is_some() {
+            return self.label_split(issue, &carried);
+        }
         let labels = self
             .triage_record(issue)
             .map_or_else(Vec::new, |t| t.labels.clone());

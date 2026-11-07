@@ -202,6 +202,8 @@ impl Runner {
                 return Err(e.into());
             }
             if self.state.triage.is_none() {
+                self.notes
+                    .extend(triage::split::stopped(was_triaging.as_ref()));
                 // The poll that listed them stops with `pick`, so they would stay as `status` says them.
                 self.triage_due.clear();
                 self.triage_queue.clear();

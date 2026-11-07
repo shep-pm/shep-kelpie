@@ -654,8 +654,8 @@ impl Runner {
         if timings::reload(&mut state, ports.clock.now()) {
             store.save(&state)?;
         }
-        if triage::settle_since(&mut state, &settings, ports.clock.now()) {
-            store.save(&state)?;
+        if let Some(stopped) = triage::settle_stopped(&mut state, &settings, ports.clock.now()) {
+            store.save(&state).map(|()| told.extend(stopped))?;
         }
         let spoken = points::Told::of(&state);
         let postings = Arc::new(posted::Posted::default());
