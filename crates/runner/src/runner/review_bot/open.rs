@@ -15,11 +15,12 @@ pub(in crate::runner) struct RuledThread {
     pub path: String,
     /// The line, when the forge still places it
     pub line: Option<u32>,
-    /// Who opened it
+    /// Who wrote the first remark `case_threads` keeps: the opener, unless
+    /// a stranger did, whose words stay out
     pub author: String,
     /// How serious the bot's profile reads it, when a listed bot opened it
     pub severity: Option<Severity>,
-    /// What it says, to its first sentence
+    /// What that remark says, to its first sentence
     pub what: String,
     /// Whether a writer spoke in it
     pub maintainer_wrote: bool,
@@ -250,6 +251,26 @@ mod tests {
             .map(|t| (t.id.as_str(), t.maintainer_wrote))
             .collect();
         assert_eq!(wrote, [("T1", true), ("T2", false)]);
+    }
+
+    #[test]
+    fn a_thread_a_stranger_opened_and_a_writer_spoke_in_is_the_writers_words_alone() {
+        let stranger = remark(3, "passerby", Standing::Other, "Odd. Very odd.");
+        let talk = talk(vec![thread(
+            "T1",
+            "a.rs",
+            vec![stranger, writer("Please fix this. Soon.")],
+        )]);
+
+        let got = ruled(&item(), &talk).threads;
+
+        let [one] = got.as_slice() else {
+            panic!("{got:?}")
+        };
+        assert_eq!(
+            (one.author.as_str(), one.what.as_str(), one.maintainer_wrote),
+            ("octocat", "Please fix this.", true)
+        );
     }
 
     #[test]
