@@ -54,6 +54,7 @@ pub struct FakeShepherd {
     home: tempfile::TempDir,
     flock: Arc<Mutex<Vec<Sheep>>>,
     section: Arc<Mutex<String>>,
+    secrets: Arc<Mutex<Vec<(String, String)>>>,
     memory: Memory,
     sent: UnboundedReceiver<Request>,
 }
@@ -77,13 +78,20 @@ impl FakeShepherd {
         let answers = Arc::clone(&flock);
         let section = Arc::new(Mutex::new(String::new()));
         let held = Arc::clone(&section);
+        let secrets = Arc::new(Mutex::new(Vec::new()));
+        let known = Arc::clone(&secrets);
         let (memory, sent) = Memory::answering(home.path(), version, move |r| {
-            answer(&mut answers.lock().unwrap(), &held.lock().unwrap(), r)
+            let section = Section {
+                held: &held,
+                secrets: &known.lock().unwrap(),
+            };
+            answer(&mut answers.lock().unwrap(), &section, r)
         });
         Self {
             home,
             flock,
             section,
+            secrets,
             memory,
             sent,
         }
@@ -147,7 +155,15 @@ impl FakeShepherd {
         *self.section.lock().unwrap() = toml.to_owned();
     }
 
-    /// The `[kelpie]` section `holds_section` last held
+    /// Has `{{secret:<name>}}` in the section read as `value` when the shepherd resolves it
+    ///
+    /// A read of the section as written (`DogConfig`) still gives the reference.
+    pub fn holds_secret(&self, name: &str, value: &str) {
+        let mut secrets = self.secrets.lock().unwrap();
+        secrets.push((name.to_owned(), value.to_owned()));
+    }
+
+    /// The `[kelpie]` section `holds_section` last held, or `SetDogConfig` last wrote
     pub fn section(&self) -> String {
         self.section.lock().unwrap().clone()
     }
@@ -270,6 +286,7 @@ impl FakeShepherd {
                     r,
                     Request::ListFlock
                         | Request::DogSheepSettings { .. }
+                        | Request::DogConfig { .. }
                         | Request::DogConfigResolved { .. }
                         | Request::SheepConfig { .. }
                 )
@@ -308,7 +325,26 @@ fn named(flock: &[Sheep], selector: &SelectorSpec) -> Option<usize> {
     flock.iter().position(|s| &s.config.name == name)
 }
 
-fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response {
+// The section the shepherd holds, and the secrets it resolves in it
+struct Section<'a> {
+    held: &'a Mutex<String>,
+    secrets: &'a [(String, String)],
+}
+
+impl Section<'_> {
+    fn as_written(&self) -> String {
+        self.held.lock().unwrap().clone()
+    }
+
+    fn resolved(&self) -> String {
+        let text = self.as_written();
+        (self.secrets.iter()).fold(text, |text, (name, value)| {
+            text.replace(&format!("{{{{secret:{name}}}}}"), value)
+        })
+    }
+}
+
+fn answer(flock: &mut Vec<Sheep>, section: &Section<'_>, request: &Request) -> Response {
     let rows = |flock: &[Sheep]| flock.iter().enumerate().map(|(i, s)| info(i, s)).collect();
     match request {
         Request::ListFlock => Response::Flock(rows(flock)),
@@ -319,8 +355,15 @@ fn answer(flock: &mut Vec<Sheep>, section: &str, request: &Request) -> Response 
                 .collect(),
         },
         Request::DogConfigResolved { .. } => Response::DogSection {
-            toml: section.to_owned().into(),
+            toml: section.resolved().into(),
         },
+        Request::DogConfig { .. } => Response::DogSection {
+            toml: section.as_written().into(),
+        },
+        Request::SetDogConfig { name, toml } => {
+            toml.as_str().clone_into(&mut section.held.lock().unwrap());
+            Response::DogConfigSet { name: name.clone() }
+        }
         Request::SheepConfig { name } => {
             let sheep = flock.iter().find(|s| &s.config.name == name).unwrap();
             Response::SheepConfig(Box::new(SheepConfigView::new(

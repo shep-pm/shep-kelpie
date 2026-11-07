@@ -2,9 +2,8 @@
 //!
 //! Every [`LOAD_TICK`] the dog asks the shepherd for the section. A text that
 //! differs from the last good one is read whole, as the start reads it, with
-//! no salvage. A good read applies `leases.cargo-test`, `agent_board.prefer`,
-//! `gateways` and `codex_home`. The webhook waits for a restart, and `status` names
-//! its keys. A read that fails applies nothing, and the webhook is told once per reason.
+//! no salvage. A good read applies `leases.cargo-test`, `gateways` and
+//! `codex_home`. The webhook waits for a restart, and `status` names its keys. A read that fails applies nothing, and the webhook is told once per reason.
 //!
 //! The pass loads the agents folder again too, and a changed load applies to the
 //! board and the availability. A folder that fails to load keeps the old agents.
@@ -24,7 +23,7 @@ use super::triggers::{Refused, SettingsState};
 use super::{Kept, lock_desk};
 use crate::agents::Agents;
 use crate::ports::{Alert, Alerts, Timestamp};
-use crate::settings::{AgentName, Gateway, GatewayName};
+use crate::settings::{Gateway, GatewayName};
 use crate::shepherd::Connection;
 use crate::webhook::{KelpieSettings, Webhook};
 
@@ -62,7 +61,6 @@ pub(super) struct Reread {
     // The last text that read whole, or the start's.
     text: String,
     capacity: NonZeroU32,
-    prefer: Vec<AgentName>,
     gateways: BTreeMap<GatewayName, Gateway>,
     codex_home: Option<PathBuf>,
     waiting: Vec<&'static str>,
@@ -82,7 +80,6 @@ impl Reread {
             started: started.settings.clone(),
             text: started.text.clone(),
             capacity: started.settings.leases.cargo_test_capacity(),
-            prefer: started.settings.agent_board.prefer.clone(),
             gateways: started.settings.gateways.clone(),
             codex_home: started.settings.codex_home.clone(),
             waiting: Vec::new(),
@@ -191,18 +188,6 @@ impl Reread {
             door::wake(&self.handles.waiters, granted);
             self.capacity = capacity;
             log.push(format!("applied leases.cargo-test: {capacity} at a time"));
-        }
-        let prefer = &settings.agent_board.prefer;
-        if *prefer != self.prefer {
-            board::lock(&self.handles.board).set_prefer(prefer.clone());
-            self.prefer.clone_from(prefer);
-            let names: Vec<_> = prefer.iter().map(AgentName::as_str).collect();
-            let names = if names.is_empty() {
-                "none".into()
-            } else {
-                names.join(", ")
-            };
-            log.push(format!("applied agent_board.prefer: {names}"));
         }
         self.apply_availability(settings, log);
         let waiting = waiting_for_restart(&self.started, settings);
@@ -324,7 +309,7 @@ fn waiting_for_restart(started: &KelpieSettings, now: &KelpieSettings) -> Vec<&'
         gpu_metrics_url: _, // a runner's, read at each of its wakes
         codex_home: _,      // applied live
         gateways: _,        // applied live
-        agent_board: _,     // applied live
+        agent_board: _,     // read by nothing
     } = started;
     let KelpieSettings {
         webhook: now_webhook,

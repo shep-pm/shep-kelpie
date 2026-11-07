@@ -7,16 +7,18 @@
 //! `agents.reviewers` goes too: its names join a listed `agents.allow`, and
 //! `contributions.reviewers` where the project names none. An agent kelpie once
 //! named for a project that left it unset gets that name ([`DEFAULTS`]). Each table
-//! is checked as `set` checks it.
+//! is checked as `set` checks it. Kelpie's own `[agent_board]` table goes last.
 
 use std::process::ExitCode;
 
 use serde_json::{Map, Value};
+use shep_client::shep_core::protocol::Request;
+use shep_client::shep_core::protocol::request::Response;
 
-use super::{Homes, Place, checked, lookup, write};
+use super::{Homes, Place, agent_board, checked, lookup, send, write};
 use crate::home::{ProjectName, ProjectPaths};
 use crate::settings::{PM_ALONE, PM_DECIDES, RulingName};
-use crate::shepherd::{self, Connection, Socket};
+use crate::shepherd::{self, Connection, DOG, Socket};
 use crate::webhook::KelpieSettings;
 
 /// The keys migrate deletes: the loader refuses the first six by name and
@@ -126,6 +128,11 @@ pub async fn migrate(client: &dyn Connection, homes: Homes<'_>) -> Result<Vec<St
             Err(why) => refused.push(format!("project {name}: not migrated: {why}")),
         }
     }
+    match kelpie(client).await {
+        Ok(Some(line)) => said.push(line),
+        Ok(None) => {}
+        Err(why) => refused.push(format!("kelpie: not migrated: {why}")),
+    }
     if !refused.is_empty() {
         return Err(said
             .into_iter()
@@ -137,6 +144,37 @@ pub async fn migrate(client: &dyn Connection, homes: Homes<'_>) -> Result<Vec<St
         said.push("nothing to migrate".to_owned());
     }
     Ok(said)
+}
+
+// Takes `[agent_board]` out of kelpie's own section, and says what it removed, if anything.
+// The section is read as written: the resolved one holds secrets that must not reach `dogs.toml`.
+async fn kelpie(client: &dyn Connection) -> Result<Option<String>, String> {
+    let read = Request::DogConfig { name: DOG.into() };
+    let held = match client.request(read).await {
+        Ok(Response::DogSection { toml }) => toml,
+        Ok(other) => {
+            return Err(format!(
+                "the shepherd answered {other:?} to a read of kelpie's section"
+            ));
+        }
+        Err(e) => {
+            return Err(format!(
+                "the shepherd refused a read of kelpie's section: {e}"
+            ));
+        }
+    };
+    let Some(stripped) = agent_board::strip(held.as_str())? else {
+        return Ok(None);
+    };
+    let write = Request::SetDogConfig {
+        name: DOG.into(),
+        toml: stripped.text.into(),
+    };
+    send(client, write, |r| {
+        matches!(r, Response::DogConfigSet { .. })
+    })
+    .await?;
+    Ok(Some(format!("kelpie: {}", stripped.said)))
 }
 
 // Migrates one project's table, and says what it wrote, if anything.

@@ -468,79 +468,16 @@ fn names(list: &[&'static str]) -> Vec<AgentName> {
 }
 
 // Two plan agents of known cost and an API agent, with a ledger that prices only the plan agents.
-async fn priced_plans(dir: &Path, prefer: &[&'static str]) -> (View, Availability) {
+async fn priced_plans(dir: &Path) -> (View, Availability) {
     let agents = two_plans_and_a_billed(&dir.join("agents"));
     let home = dir.join("kelpie");
     finished(&home, "koji", ("plan-a", "fix"), 5, (600, 1.0));
     finished(&home, "koji", ("plan-b", "fix"), 5, (600, 2.0));
     let shown = seen(&agents, &Gateways::default(), 10).await;
-    let board = Mutex::new(Board::new(&agents).preferring(names(prefer)));
+    let board = Mutex::new(Board::new(&agents));
     refresh(&board, &home);
     let view = lock(&board).view();
     (view, shown)
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_listed_api_agent_ranks_first_and_an_unlisted_one_ranks_as_any_other() {
-    let dir = tempfile::tempdir().unwrap();
-    let (listed, shown) = priced_plans(dir.path(), &["billed"]).await;
-    let (unlisted, _) = priced_plans(dir.path(), &["plan-b"]).await;
-    let ask = ask_of(&["plan-a", "plan-b", "billed"]);
-
-    let first = ranked_answer(&listed, &shown, &ask, Timestamp(EPOCH));
-    let other = ranked_answer(&unlisted, &shown, &ask, Timestamp(EPOCH));
-
-    assert_eq!(order(&first), ["billed", "plan-a", "plan-b"]);
-    assert_eq!(
-        order(&other),
-        ["plan-b", "plan-a", "billed"],
-        "the list names the plan agent, so the API agent follows on its cost as any other"
-    );
-}
-
-#[test]
-fn the_list_orders_reviewers_as_it_orders_implementers() {
-    let dir = tempfile::tempdir().unwrap();
-    let reader = "---\nrole: reviewer\nharness: stand-in\nmodel: lite\neffort: low\n\
-                  usage: none\ntier: standard\n---\nRead the diff for defects.\n";
-    let folder = dir.path().join("agents");
-    write_in(&folder, "read-a.md", reader);
-    write_in(&folder, "read-b.md", reader);
-    let agents = Agents::load(&folder).unwrap();
-    let ask = ask_of(&["read-a", "read-b"]);
-    let ranked = |prefer: &[&'static str]| {
-        let view = Board::new(&agents).preferring(names(prefer)).view();
-        let picks = ranked_answer(&view, &Availability::default(), &ask, Timestamp(EPOCH));
-        order(&picks)
-            .iter()
-            .map(|a| (*a).to_owned())
-            .collect::<Vec<_>>()
-    };
-
-    assert_eq!(ranked(&[]), ["read-a", "read-b"]);
-    assert_eq!(ranked(&["read-b"]), ["read-b", "read-a"]);
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_new_prefer_list_orders_the_next_pick_and_not_one_already_read() {
-    let dir = tempfile::tempdir().unwrap();
-    let agents = two_plans_and_a_billed(&dir.path().join("agents"));
-    let home = dir.path().join("kelpie");
-    finished(&home, "koji", ("plan-a", "fix"), 5, (600, 1.0));
-    finished(&home, "koji", ("plan-b", "fix"), 5, (600, 2.0));
-    let shown = seen(&agents, &Gateways::default(), 10).await;
-    let board = Mutex::new(Board::new(&agents).preferring(names(&["billed"])));
-    refresh(&board, &home);
-    let ask = ask_of(&["plan-a", "plan-b", "billed"]);
-    let before = lock(&board).view();
-
-    lock(&board).set_prefer(names(&["plan-b"]));
-    let after = lock(&board).view();
-
-    let old = ranked_answer(&before, &shown, &ask, Timestamp(EPOCH));
-    let new = ranked_answer(&after, &shown, &ask, Timestamp(EPOCH));
-    assert_eq!(order(&old), ["billed", "plan-a", "plan-b"]);
-    assert_eq!(order(&new), ["plan-b", "plan-a", "billed"]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -578,9 +515,9 @@ async fn new_agents_order_the_next_pick_and_not_one_already_read() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_handoff_ask_leaves_out_the_agent_left_and_takes_the_next_listed() {
+async fn a_handoff_ask_leaves_out_the_agent_left_and_takes_the_next() {
     let dir = tempfile::tempdir().unwrap();
-    let (view, shown) = priced_plans(dir.path(), &["plan-b", "plan-a", "billed"]).await;
+    let (view, shown) = priced_plans(dir.path()).await;
     let ask = PickAsk {
         leave_out: names(&["plan-b"]),
         ..ask_of(&["plan-a", "plan-b", "billed"])
@@ -589,17 +526,6 @@ async fn a_handoff_ask_leaves_out_the_agent_left_and_takes_the_next_listed() {
     let picks = ranked_answer(&view, &shown, &ask, Timestamp(EPOCH));
 
     assert_eq!(order(&picks), ["plan-a", "billed"]);
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_listed_name_with_no_agent_file_is_ignored_and_the_rest_rank() {
-    let dir = tempfile::tempdir().unwrap();
-    let (view, shown) = priced_plans(dir.path(), &["ghost", "billed", "gone"]).await;
-    let ask = ask_of(&["plan-a", "plan-b", "billed"]);
-
-    let picks = ranked_answer(&view, &shown, &ask, Timestamp(EPOCH));
-
-    assert_eq!(order(&picks), ["billed", "plan-a", "plan-b"]);
 }
 
 // Held for the whole of a day from `EPOCH`, as a spend limit that resumes then.
@@ -721,12 +647,12 @@ async fn a_plan_agent_is_not_held_by_an_api_refusal() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn the_answer_reports_each_agents_cost_tier_and_place_and_ranks_none() {
+async fn the_answer_reports_each_agents_cost_and_tier_and_ranks_none() {
     let dir = tempfile::tempdir().unwrap();
     let agents = plan_api_and_local(&dir.path().join("agents"));
     let home = dir.path().join("kelpie");
     finished(&home, "koji", ("plan", "fix"), 5, (600, 3.0));
-    let board = Mutex::new(Board::new(&agents).preferring(names(&["billed"])));
+    let board = Mutex::new(Board::new(&agents));
     refresh(&board, &home);
     let mut shown = seen(&agents, &Gateways::default(), 10).await;
     let now = Timestamp(EPOCH);
@@ -748,12 +674,11 @@ async fn the_answer_reports_each_agents_cost_tier_and_place_and_ranks_none() {
     let billed = Pick {
         tier: Some(Tier::Light),
         held: true,
-        listed: Some(0),
         ..Pick::new(AgentName::kelpies("billed"), HELD_FOR + 3600, HELD_FOR)
     };
     assert_eq!(
         picks,
         [plan, local, billed],
-        "the dearer plan agent finishes first, ahead of the free local one and the listed, held one"
+        "the dearer plan agent finishes first, ahead of the free local one and the held one"
     );
 }

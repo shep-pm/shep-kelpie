@@ -346,3 +346,30 @@ async fn a_bare_upgrade_whose_settings_are_refused_stops_before_the_restarts() {
     );
     assert_eq!(rig.restarts(), Vec::<String>::new());
 }
+
+#[tokio::test]
+async fn a_bare_upgrade_deletes_the_agent_board_table_and_names_it() {
+    let shepherd = FakeShepherd::on(crate::shepherd::SHEP_VERSION);
+    shepherd.holds_section("[leases]\ncargo-test = 3\n[agent_board]\nprefer = [\"opus\"]\n");
+    let table = loading(&shepherd);
+    let mut rig = Rig::holding_on(shepherd, false, table).await;
+    crate::agents::write_bound_stubs(
+        &rig.home.join("agents"),
+        "harness: claude-code\nmodel: claude-opus-5-5\neffort: high\n",
+    );
+    rig.cargo_installs("0.3.0", "0.24.2");
+
+    let (ran, said) = rig.upgrade(Action::Installed).await;
+
+    ran.unwrap();
+    let named = said
+        .iter()
+        .position(|l| l == "kelpie: removed agent_board.prefer = [\"opus\"]");
+    let restarting = said.iter().position(|l| l.contains("restarting onto it"));
+    assert!(
+        named.unwrap_or_else(|| panic!("{said:?}")) < restarting.unwrap(),
+        "{said:?}"
+    );
+    assert_eq!(rig.shepherd.section(), "[leases]\ncargo-test = 3\n");
+    assert_eq!(rig.restarts(), ["kelpie", "koji"]);
+}

@@ -22,6 +22,7 @@ use crate::runner::check_gateway_shapes;
 use crate::settings::{Settings, SettingsError, source};
 use crate::shepherd::{self, Connection, DOG, Tables};
 
+mod agent_board;
 pub mod migrate;
 
 /// What `set` reads a project's settings against, as its runner does
