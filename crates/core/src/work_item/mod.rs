@@ -143,9 +143,6 @@ pub struct WorkItem {
     /// The minutes past its quickest finish the project manager's pick allows it
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slack: Option<u32>,
-    /// Whether the project manager's pick called its issue a small change
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub pm_light: bool,
     /// The review the project manager's pick planned for its pull request
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_plan: Option<ReviewPlan>,
@@ -515,7 +512,6 @@ impl WorkItem {
             kind: None,
             tier: None,
             slack: None,
-            pm_light: false,
             review_plan: None,
             weight: None,
             left: Vec::new(),
