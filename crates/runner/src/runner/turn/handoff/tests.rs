@@ -16,7 +16,7 @@ const CODER: &str = "---\nrole: implementer\nharness: stand-in\nmodel: qwen3-cod
 /// Seconds to the soonest finish the board gives
 const SOON: u64 = 600;
 
-/// The slack an item with none of its own allows, in seconds
+/// The slack an item with none of its own allows, in seconds: an hour
 const SLACK: u64 = 60 * 60;
 
 // Issue 7 open on `sonnet-high` beside `coder`, labelled `labels`, whose first
@@ -24,14 +24,6 @@ const SLACK: u64 = 60 * 60;
 // sends it back, a later turn
 fn later_turn_due(labels: &[&str]) -> (Rig, Mutex<Runner>) {
     later_turn_in(Rig::new("acme"), labels)
-}
-
-// ... in a project whose settings hold `minutes` of slack
-fn later_turn_slacking(minutes: u32) -> (Rig, Mutex<Runner>) {
-    let rig = Rig::new("acme");
-    let slack = format!("[app.dogs.kelpie.agents]\nslack = {minutes}\n");
-    rig.edit_settings(|s| s.replace("[app.dogs.kelpie.agents]\n", &slack));
-    later_turn_in(rig, &[])
 }
 
 // ... on `rig`
@@ -158,41 +150,33 @@ fn a_later_turn_past_the_slack_hands_off_on_a_fresh_session_with_a_note() {
     assert!(events.iter().any(|e| e["what"] == event), "{events:?}");
 }
 
-#[test]
-fn a_later_turn_past_a_short_settings_slack_hands_off() {
-    let (rig, runner) = later_turn_slacking(10);
-    falls_behind(&rig, "coder", 30 * 60);
-    step(&runner).unwrap();
-    assert_eq!(item(&rig, &runner)["agent"], "coder");
-    let ask = rig.agent_board.asks().pop().expect("an ask");
-    assert_eq!(ask.slack, Some(10));
-}
-
-#[test]
-fn a_later_turn_within_a_long_settings_slack_stays() {
-    let (rig, runner) = later_turn_slacking(120);
-    falls_behind(&rig, "coder", SLACK + 1);
-    next_turn(&rig, &runner);
-    assert_eq!(item(&rig, &runner)["agent"], "sonnet-high");
-    let ask = rig.agent_board.asks().pop().expect("an ask");
-    assert_eq!(ask.slack, Some(120));
-}
-
-#[test]
-fn an_items_own_slack_wins_over_the_settings() {
-    let (rig, runner) = later_turn_slacking(120);
+// Issue 7's turn due with `minutes` of its own slack, its agent `wait` seconds from starting
+fn later_turn_with_slack(minutes: u32, wait: u64) -> (Rig, Mutex<Runner>) {
+    let (rig, runner) = later_turn_due(&[]);
     runner
         .lock()
         .unwrap()
         .state
         .item_mut(ticket(7))
         .expect("the item")
-        .slack = Some(0);
-    falls_behind(&rig, "coder", 1);
+        .slack = Some(minutes);
+    falls_behind(&rig, "coder", wait);
+    (rig, runner)
+}
+
+#[test]
+fn an_items_own_slack_decides_when_its_agent_is_out() {
+    let (rig, runner) = later_turn_with_slack(0, 1);
     step(&runner).unwrap();
     assert_eq!(item(&rig, &runner)["agent"], "coder");
     let ask = rig.agent_board.asks().pop().expect("an ask");
     assert_eq!(ask.slack, Some(0));
+
+    let (rig, runner) = later_turn_with_slack(120, SLACK + 1);
+    next_turn(&rig, &runner);
+    assert_eq!(item(&rig, &runner)["agent"], "sonnet-high");
+    let ask = rig.agent_board.asks().pop().expect("an ask");
+    assert_eq!(ask.slack, Some(120));
 }
 
 #[test]

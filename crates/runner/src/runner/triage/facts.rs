@@ -25,6 +25,8 @@ pub(super) enum Reader {
 pub(super) struct Wording {
     /// The check passes the rewrite, which makes the issue ready for the board
     pub(super) ready: bool,
+    /// The reply splits the issue, and kelpie files its sub-issues
+    pub(super) split: bool,
     /// The comment asks its author the open questions
     pub(super) ask: bool,
     /// The pass reads the author's answers
@@ -69,6 +71,7 @@ pub(super) fn duplicate_facts(named: &Addressed) -> String {
 pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: Reader) -> String {
     let Wording {
         ready,
+        split,
         ask,
         settled,
         fallback,
@@ -138,6 +141,7 @@ pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: 
             }
             facts.push('\n');
         }
+        false if split => facts.push_str(&split_facts(found)),
         false => {
             if settled {
                 facts.push_str(
@@ -147,6 +151,28 @@ pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: 
             }
             facts.push_str(&closing(found, wording, reader));
         }
+    }
+    facts
+}
+
+// What the representative is told of a split: the sub-issues to come, in order
+fn split_facts(found: &Found) -> String {
+    let mut facts = String::from(
+        "\nThe issue is too big for one work item. Kelpie rewrites its body from this report \
+         and files these sub-issues of it, in this order, each labelled `ready-for-agent`. The \
+         issue itself never goes ready for an agent: it stays open until its sub-issues close. \
+         Say that the issue is split, and name the sub-issues to come:\n",
+    );
+    for (n, part) in found.split.iter().enumerate() {
+        facts.push_str(&format!("{}. {}", n + 1, part.title));
+        if !part.after.is_empty() {
+            let after: Vec<String> = part.after.iter().map(|a| (a + 1).to_string()).collect();
+            facts.push_str(&format!(" (after {})", after.join(", ")));
+        }
+        if let Some(agent) = &part.agent {
+            facts.push_str(&format!(" (built by {agent})"));
+        }
+        facts.push('\n');
     }
     facts
 }

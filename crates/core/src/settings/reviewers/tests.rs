@@ -6,8 +6,8 @@ use crate::settings::{Effort, EndpointUrl, Gateway, GatewayKind, GatewayName, Ke
 
 const EXAMPLE: &str = include_str!("../../../../../settings.example.toml");
 
-/// The example's reviewers key, commented out and read by nothing
-const GONE: &str = "# reviewers = [\"iq3-xxs-review\", \"defect-hunter-lite\"]\n";
+/// The example's `[agents]` table header
+const AGENTS: &str = "[app.dogs.kelpie.agents]\n";
 
 /// Every reviewer file `book()` holds that a pass may pick, in its order
 const EVERY_REVIEWER: [&str; 11] = [
@@ -66,8 +66,8 @@ fn bound(agents: Agents) -> Agents {
 // `contribution` as its contributions reviewers, and its home. It names
 // `security-reviewer` as its security reviewer, which the example leaves unset.
 fn project(agents: &str, contribution: Option<&str>) -> (Settings, tempfile::TempDir) {
-    assert!(EXAMPLE.contains(GONE), "the example's reviewers key moved");
-    let entry = EXAMPLE.replace(GONE, &format!("{GONE}{agents}"));
+    assert!(EXAMPLE.contains(AGENTS), "the example's agents table moved");
+    let entry = EXAMPLE.replace(AGENTS, &format!("{AGENTS}{agents}"));
     let reviewers = contribution.map_or_else(String::new, |list| format!("reviewers = {list}\n"));
     let entry = crate::test::with_tables(
         &entry,

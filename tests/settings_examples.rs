@@ -41,15 +41,17 @@ fn array_element<'a>(root: &'a Value, node: &'a Value) -> Option<&'a Value> {
     (node["type"] == "array" && resolve(root, element)["properties"].is_object()).then_some(element)
 }
 
-// Every key the schema accepts, dotted. A map's entry name is `*`, an array of
-// tables adds no segment, and a map of strings or a tagged enum is one key: its
-// parts are written inline, in the value.
+// Every live key the schema accepts, dotted, leaving out a key marked `deprecated`. A
+// map's entry name is `*`, an array of tables adds no segment, and a map of
+// strings or a tagged enum is one key: its parts are written inline, in the value.
 fn schema_keys(root: &Value, schema: &Value, prefix: &str, keys: &mut BTreeSet<String>) {
     let node = resolve(root, schema);
     if node["oneOf"].is_null() {
         if let Some(properties) = node["properties"].as_object() {
             for (key, property) in properties {
-                schema_keys(root, property, &format!("{prefix}{key}."), keys);
+                if property["deprecated"] != true {
+                    schema_keys(root, property, &format!("{prefix}{key}."), keys);
+                }
             }
             return;
         }
@@ -292,6 +294,7 @@ fn small_schema() -> Value {
             "build_env": { "type": "object", "additionalProperties": { "type": "string" } },
             "roles": { "type": "array", "items": { "type": "string" } },
             "implement": { "anyOf": [{ "$ref": "#/$defs/Choice" }, { "type": "null" }] },
+            "old": { "deprecated": true },
         },
     })
 }
@@ -326,6 +329,14 @@ checkout = "~/shep"
 #[test]
 fn a_file_that_holds_every_key_with_a_comment_has_no_problem() {
     assert_no_problems(&small_problems(SMALL_EXAMPLE));
+}
+
+#[test]
+fn a_deprecated_key_need_not_be_in_the_file_but_may_be() {
+    assert!(!SMALL_EXAMPLE.contains("old ="), "the file leaves it out");
+    assert_no_problems(&small_problems(SMALL_EXAMPLE));
+    let held = SMALL_EXAMPLE.replace("# Tool caches.\n", "# Gone.\n# old = 1\n# Tool caches.\n");
+    assert_no_problems(&small_problems(&held));
 }
 
 #[test]

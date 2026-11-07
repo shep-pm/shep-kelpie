@@ -16,7 +16,7 @@ use crate::board::{
 use crate::lease::door::{Pick, PickAsk};
 use crate::pacer::Scope;
 use crate::ports::{ForgeError, Issue};
-use crate::settings::{AgentName, GatewayKeys};
+use crate::settings::{AgentName, DEFAULT_SLACK_MINUTES, GatewayKeys};
 use crate::state::StateError;
 use crate::ticket::TicketId;
 use crate::work_item::new_session_id;
@@ -408,7 +408,6 @@ impl Runner {
         item.kind = label_kind(&found.labels).map(str::to_owned);
         item.tier = picked.and_then(|p| p.tier);
         item.slack = picked.and_then(|p| p.slack);
-        item.pm_light = picked.is_some_and(|p| p.light);
         item.review_plan = picked.and_then(|p| p.review.clone());
         next.work_items.push(item);
         self.save(next).map_err(AddError::State)?;
@@ -496,9 +495,9 @@ impl Runner {
     }
 
     // The minutes of slack a work item allows: its own, from the project
-    // manager's pick, else the project's `agents.slack`.
+    // manager's pick, else `DEFAULT_SLACK_MINUTES`.
     pub(super) fn slack(&self, own: Option<u32>) -> u32 {
-        own.unwrap_or(self.settings.agents.slack)
+        own.unwrap_or(DEFAULT_SLACK_MINUTES)
     }
 
     // What the agent board ranks for `ask`, best first, of the agents `ask`

@@ -36,6 +36,7 @@ mod diffs;
 mod maintainer;
 mod more;
 mod notes;
+mod peers;
 mod picked;
 mod prompt;
 mod question;

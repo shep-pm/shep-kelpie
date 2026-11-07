@@ -22,9 +22,9 @@ use crate::shepherd::{self, Connection, DOG, Socket};
 use crate::webhook::KelpieSettings;
 
 /// The keys migrate deletes: the loader refuses the first six by name and
-/// ignores the rest, the three the agent board replaced and `[pacing]`, which
-/// doctor names
-const GONE_KEYS: [&str; 10] = [
+/// ignores the rest, the four the agent board and the project manager replaced
+/// and `[pacing]`, which doctor names
+const GONE_KEYS: [&str; 11] = [
     "rulings.decide",
     "rulings.full_panel_paths",
     "agents.advisor",
@@ -34,6 +34,7 @@ const GONE_KEYS: [&str; 10] = [
     "agents.implementers",
     "agents.implementer_choice",
     "agents.fallback_after",
+    "agents.slack",
     "pacing",
 ];
 

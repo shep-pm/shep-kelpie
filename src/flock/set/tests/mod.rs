@@ -269,6 +269,7 @@ impl Scene {
         let tables = Tables {
             project: Some(self.table_of(name)),
             kelpie: self.shepherd.section(),
+            ..Tables::default()
         };
         let loaded = source::load(&tables, name, &home, &paths.folder).expect("a readable table");
         let book = Agents::load(&paths.agents).unwrap();

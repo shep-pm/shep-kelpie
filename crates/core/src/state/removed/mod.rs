@@ -1,11 +1,11 @@
 //! What removed features left in a state file saved before they went
 //!
-//! Such a file still loads. The run state goes, so a paused project runs once
-//! its runner starts. The fields of the relay, planning call, whole-issue check,
-//! review loop, deep round's later steps and shots, a work item's `retro` mark,
-//! a ruling's panel and each account's day start are dropped, the calls and
-//! time of the checks folded into a reviewer's session and review's or other's
-//! time. A review saved mid-loop resumes after its last reviewer. `deep` and
+//! Such a file still loads. The run state goes, so a paused project runs once its
+//! runner starts. The fields of the relay, planning call, whole-issue check, review
+//! loop, deep round's later steps and shots, a work item's `retro` mark and
+//! `pm_light` tag, a ruling's panel and each account's day start are dropped, and
+//! the checks' calls and time fold into a reviewer's session and review's or
+//! other's. A review saved mid-loop resumes after its last reviewer. `deep` and
 //! `claude` are `defect-hunter`, a bot round a pass of the listed bots. A pending
 //! ruling of a folded kind is `stuck`, of a removed kind refused, of `unlabelled` withdrawn.
 
@@ -173,6 +173,8 @@ pub(super) fn drop_removed_fields(value: &mut Value) {
         item.remove("shots");
         item.remove("shots_comment");
         item.remove("retro");
+        // The pick's light tag, which the review plan does the job of.
+        item.remove("pm_light");
         end_shots_run(item);
         fold_review_calls(item);
         for value in item.values_mut() {

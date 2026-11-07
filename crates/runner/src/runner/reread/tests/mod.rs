@@ -285,12 +285,7 @@ fn an_implementer_new_guard_hooks_fence_out_is_left_off_the_boards_ask() {
     let left = "implementer local is left out of the agent board's ask: implementer local runs \
                 on pi, which cannot run `worker.guard_hooks`";
     assert!(notes.iter().any(|n| n.starts_with(left)), "{notes:?}");
-    rig.edit_settings(|s| {
-        s.replace(
-            "[app.dogs.kelpie.agents]\n",
-            "[app.dogs.kelpie.agents]\nslack = 20\n",
-        )
-    });
+    rig.allow(&["opus-high", "sonnet-high", "local"]);
     (runner.lock().unwrap())
         .reread(rig.settings(), rig.kelpie_settings())
         .unwrap();
@@ -323,12 +318,7 @@ fn a_reviewer_whose_gateway_key_is_unset_is_noted_once_at_the_reread_that_leaves
                 which holds the gateway's key, is not set in kelpie's environment";
     assert_eq!(runner.take_notes(), [left]);
 
-    rig.edit_settings(|s| {
-        s.replace(
-            "[app.dogs.kelpie.agents]\n",
-            "[app.dogs.kelpie.agents]\nslack = 20\n",
-        )
-    });
+    rig.allow(&["sonnet-high", "local"]);
     runner
         .reread(rig.settings(), rig.kelpie_settings())
         .unwrap();
@@ -675,6 +665,7 @@ fn a_key_the_agent_board_replaced_alone_is_no_change() {
     let mut runner = runner.lock().unwrap();
     for old in [
         "fallback_after = 15",
+        "slack = 20",
         "implementers = [\"opus-high\"]",
         "implementer_choice = \"order\"",
     ] {
@@ -687,24 +678,4 @@ fn a_key_the_agent_board_replaced_alone_is_no_change() {
         let line = runner.reread(next, rig.kelpie_settings()).unwrap();
         assert_eq!(line, None, "nothing reads {old}");
     }
-}
-
-#[test]
-fn a_changed_agents_slack_takes_effect_at_once() {
-    let rig = Rig::new("shep");
-    let runner = rig.open().unwrap();
-    let next = settings_with(&rig, |s| {
-        s.replace(
-            "[app.dogs.kelpie.agents]\n",
-            "[app.dogs.kelpie.agents]\nslack = 20\n",
-        )
-    });
-    let mut runner = runner.lock().unwrap();
-    assert_eq!(runner.settings().agents.slack, 60);
-    let line = runner.reread(next, rig.kelpie_settings()).unwrap();
-    assert_eq!(
-        line.as_deref(),
-        Some("settings changed: agents now in effect")
-    );
-    assert_eq!(runner.settings().agents.slack, 20);
 }

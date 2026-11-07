@@ -127,9 +127,9 @@ impl Runner {
         if on && settings.agents.representative != self.settings.agents.representative {
             settings.representative(&book)?;
         }
-        // `allow` and `slack` are read live, so a change to either must replace the settings
+        // `allow` is read live, so a change to it must replace the settings
         let (was, now) = (&self.settings.agents, &settings.agents);
-        let picking = was.allow != now.allow || was.slack != now.slack;
+        let picking = was.allow != now.allow;
         if agents != self.agents || lineup != self.lineup || book != self.book || picking {
             changed.push("agents");
         }
