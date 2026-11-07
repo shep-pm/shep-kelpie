@@ -32,6 +32,21 @@ impl Runner {
             acceptance(&found.body)
         ))
     }
+
+    /// The note giving a round's reader the body of `pull_request`, if it has one
+    ///
+    /// # Errors
+    ///
+    /// The forge's message when the pull request cannot be read.
+    pub(super) fn body_note(&self, pull_request: Option<u64>) -> Result<String, String> {
+        let Some(number) = pull_request else {
+            return Ok(String::new());
+        };
+        let read = (self.ports.forge).reviewed(&self.remote, number);
+        let found = read
+            .map_err(|e| format!("cannot read pull request #{number} for the review round: {e}"))?;
+        Ok(super::prompts::body_note(&found.body))
+    }
 }
 
 /// The acceptance criteria section of `body`, or the whole body, cut to [`MOST`]

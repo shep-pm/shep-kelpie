@@ -118,6 +118,34 @@ pub(in crate::runner) fn plan_note(plan: Option<&ReviewPlan>) -> String {
     )
 }
 
+/// The most of a pull request's body a reader is given, in bytes, the end of it
+const MOST_BODY: usize = 4000;
+
+/// The pull request's `body` for a reader to check the change against, to add
+/// after its prompt, and nothing for a blank body
+///
+/// A body over 4000 bytes keeps its end, where a project's CI appends.
+pub(in crate::runner) fn body_note(body: &str) -> String {
+    let body = body.trim();
+    if body.is_empty() {
+        return String::new();
+    }
+    let (body, left_out) = match body.len().checked_sub(MOST_BODY) {
+        Some(over) if over > 0 => {
+            let start = (over..)
+                .find(|i| body.is_char_boundary(*i))
+                .unwrap_or(body.len());
+            (&body[start..], "The start of the body is left out.\n")
+        }
+        _ => (body, ""),
+    };
+    format!(
+        "\n\nThe author and the project's CI wrote this pull request's body. It \
+         describes the change and proves nothing about it: check the diff for what it \
+         says.\n{left_out}\n--- the pull request's body ---\n{body}\n--- end ---"
+    )
+}
+
 // One finding as the readers write it, its test as a fifth field.
 fn line(f: &Finding) -> String {
     let test = (f.test.as_ref()).map_or_else(String::new, |t| format!("|{t}"));
@@ -338,6 +366,57 @@ SEVERITY|file:line|what is wrong, and its trigger|what goes wrong, and who sees 
     fn the_plan_note_is_empty_with_no_about() {
         assert_eq!(plan_note(Some(&planned(None))), "");
         assert_eq!(plan_note(None), "");
+    }
+
+    #[test]
+    fn a_pull_requests_body_is_given_between_its_markers() {
+        let note = body_note("Fixes the flag.\n\n## Screenshots\n\n![a](a.png)");
+
+        assert!(note.starts_with("\n\n"), "{note}");
+        assert!(
+            note.contains("The author and the project's CI wrote"),
+            "{note}"
+        );
+        assert!(note.contains("proves nothing about it"), "{note}");
+        assert!(
+            note.ends_with(
+                "--- the pull request's body ---\n\
+                 Fixes the flag.\n\n## Screenshots\n\n![a](a.png)\n--- end ---"
+            ),
+            "{note}"
+        );
+    }
+
+    #[test]
+    fn a_blank_body_adds_nothing() {
+        assert_eq!(body_note(""), "");
+        assert_eq!(body_note(" \n\t\r\n "), "");
+    }
+
+    #[test]
+    fn a_long_body_keeps_its_end_at_a_character_boundary() {
+        // 6001 bytes: the last 4000 begin at byte 2001, inside the 1001st "é"
+        let body = format!("{}z", "é".repeat(3000));
+
+        let note = body_note(&body);
+
+        let kept = note
+            .split("--- the pull request's body ---\n")
+            .nth(1)
+            .and_then(|rest| rest.strip_suffix("\n--- end ---"))
+            .expect("the body sits between its markers");
+        assert_eq!(kept, format!("{}z", "é".repeat(1999)), "{note}");
+        assert!(note.contains("start of the body is left out"), "{note}");
+    }
+
+    #[test]
+    fn a_body_of_exactly_the_most_is_given_whole() {
+        let body = "b".repeat(4000);
+
+        let note = body_note(&body);
+
+        assert!(note.contains(&format!("\n{body}\n--- end ---")), "{note}");
+        assert!(!note.contains("left out"), "{note}");
     }
 
     #[test]
