@@ -11,6 +11,10 @@ shep kelpie issue check --draft issue.md --label "priority: P4"
 shep kelpie issue check 7
 ```
 
-The check reads structure, not quality: each part is there and well formed. It prints each part an issue lacks or holds malformed and exits 1, or exits 0 when it passes. An issue that passes is ready for an implementer. [Commands](commands.md) lists every part it reads.
+The check reads structure, not quality: each part is there and well formed. It prints each part an issue lacks or holds malformed and exits 1, or exits 0 when it passes. The one rule beyond structure: a `Touches:` path a worker cannot write fails, which is any harness's own file (`.claude/`, `.codex/`, `.agents/`, `.pi/`, `.goose/`, `.config/goose/`, or `.mcp.json` at the root).
+
+A ticket that needs such a file splits. The part a worker can build stays one issue. The fenced change becomes its own, labelled `ready-for-human`, which you make by hand; it fails the check by design, and kelpie triages, comments on and picks no `ready-for-human` issue. The worker's issue says `Blocked by:` that one where it needs the file first. `shep kelpie add` refuses a fenced issue too, and the board holds a `ready-for-agent` one with the check's failure.
+
+An issue that passes is ready for an implementer. [Commands](commands.md) lists every part it reads.
 
 The agent board picks the implementer an issue is built by ([Agents](agents.md)). Label it `agent:<name>!` to pin it to that implementer, listed or not, with no fallback: the board tries no other. A plain `agent:<name>` label does not choose. `shep kelpie issue "<request>"` and `issue --interactive` are gone, with the issue writer that ran them: the command says so and names the skill.
