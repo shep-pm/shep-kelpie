@@ -22,3 +22,19 @@ pub struct FollowUps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_refused: Option<Timestamp>,
 }
+
+impl FollowUps {
+    /// Takes a yes to the `follow-up` ruling: `triaged` and `unread` as the
+    /// answer gave them, and the findings at the places in `dropped`, each
+    /// from 1, left out of what is filed
+    pub fn say_yes(&mut self, triaged: bool, unread: bool, dropped: &[usize]) {
+        self.ruled |= triaged;
+        self.unread |= unread;
+        self.first_refused = None;
+        let mut at = 0;
+        self.findings.retain(|_| {
+            at += 1;
+            !dropped.contains(&at)
+        });
+    }
+}

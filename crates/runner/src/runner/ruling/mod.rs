@@ -427,15 +427,7 @@ impl Runner {
         if let Some(item) = next.work_items.iter_mut().find(|item| parked_on(item)) {
             if let (Some(filed), Some(pending)) = (follow_up, item.follow_ups.as_mut()) {
                 if filed {
-                    pending.ruled |= triaged;
-                    pending.unread |= unread;
-                    pending.first_refused = None;
-                    // Each by its place from 1, which the project manager's yes left out.
-                    let mut at = 0;
-                    pending.findings.retain(|_| {
-                        at += 1;
-                        !dropped.contains(&at)
-                    });
+                    pending.say_yes(triaged, unread, dropped);
                 } else {
                     pending.findings.clear();
                 }
