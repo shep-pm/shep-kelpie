@@ -147,6 +147,10 @@ impl Voice for PacedVoice {
         self.call(|v| v.create_label(repo, label))
     }
 
+    fn rename_label(&self, repo: &ForgeSlug, from: &str, to: &str) -> Result<(), ForgeError> {
+        self.call(|v| v.rename_label(repo, from, to))
+    }
+
     fn set_issue_label(
         &self,
         repo: &ForgeSlug,

@@ -24,6 +24,27 @@ async fn the_keys_the_agent_board_replaced_are_named_in_one_unsure_line_saying_u
 }
 
 #[tokio::test]
+async fn a_table_holding_pacing_is_named_read_by_nothing() {
+    let scene = Scene::new().await;
+    scene.runs("golbat", |t| {
+        t.insert(
+            "pacing".into(),
+            json!({ "enabled": true, "kickoff_hours": 8 }),
+        );
+    });
+    let report = scene.report().await;
+    let Verdict::Unsure { what, next } = verdict(&report, "golbat: old keys") else {
+        panic!("{:#?}", report.render());
+    };
+    assert_eq!(what, "`pacing` read by nothing now");
+    assert_eq!(
+        next,
+        "`shep kelpie upgrade` deletes them, as `shep kelpie settings migrate` does"
+    );
+    assert!(!subjects(&report).contains(&"koji: old keys"));
+}
+
+#[tokio::test]
 async fn an_implementer_no_turn_can_run_on_is_named_unsure_and_left_out_of_the_picks() {
     let scene = Scene::new().await;
     let local = "---\nrole: implementer\nharness: pi\nmodel: m\neffort: low\n\

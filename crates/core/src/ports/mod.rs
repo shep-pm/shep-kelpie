@@ -102,7 +102,7 @@ pub use revalidated::Revalidated;
 pub use reviewed::{MaintainerReview, ReviewComment, Reviewed};
 pub use reviewer::{Reviewer, ReviewerError, RoundEnd, RoundStage};
 pub use routed::Routed;
-pub use run::{BranchRun, FailedLogs, Workflow, WorkflowState};
+pub use run::{BranchRun, FailedLogs, HEAD_RUNS_LIMIT, HeadRun, LogPart, Workflow, WorkflowState};
 pub use sandbox::{Forward, Policy, Sandbox, SandboxError, Unreadable};
 pub use system_clock::SystemClock;
 pub use talk::{PAGE, Remark, Standing, Talk, TalkThread};
@@ -204,6 +204,14 @@ pub trait Forge: Send + Sync {
     ///
     /// [`ForgeError`] when the forge refuses, such as when `repo` already has it.
     fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError>;
+
+    /// Renames label `from` on `repo` to `to`, on every issue that carries it
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses, such as when `repo` has no `from`
+    /// or already has `to`.
+    fn rename_label(&self, repo: &ForgeSlug, from: &str, to: &str) -> Result<(), ForgeError>;
 
     /// Whether the account kelpie acts as may push to `repo`
     ///
@@ -424,6 +432,21 @@ pub trait Forge: Send + Sync {
     ///
     /// [`ForgeError`] when the forge cannot be asked or its answer read.
     fn run_log_tail(&self, repo: &ForgeSlug, run: u64) -> Result<String, ForgeError>;
+
+    /// Every CI run on `head`, up to [`HEAD_RUNS_LIMIT`], newest first
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked or its answer read.
+    fn head_runs(&self, repo: &ForgeSlug, head: &str) -> Result<Vec<HeadRun>, ForgeError>;
+
+    /// The `part` of CI run `run`'s log, with nothing cut
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge cannot be asked, or no longer holds the
+    /// log: GitHub drops one past its retention.
+    fn run_log(&self, repo: &ForgeSlug, run: u64, part: LogPart) -> Result<String, ForgeError>;
 
     /// Reruns the failed jobs of the CI runs that failed on `head`, as the
     /// login the forge acts as

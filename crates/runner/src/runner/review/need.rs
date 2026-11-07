@@ -1,4 +1,5 @@
-//! A pass runs the reads its item calls for, each round the agent board's pick
+//! A pass runs the reads its item's review plan calls for, each round the
+//! agent board's pick
 
 use std::sync::Mutex;
 
@@ -15,7 +16,7 @@ use crate::settings::{AgentName, LocalRound};
 use crate::test::{Rig, Scripted, Told, ticket};
 
 // `two_local`'s project, whose candidates are `mine`, `other` and `claude`, and
-// whose reads kelpie's own rule counts.
+// whose reads kelpie's own rule counts, its item carrying no review plan.
 fn three_candidates() -> Rig {
     let rig = two_local();
     rig.reviewers(&["mine", "other", "claude"]);
@@ -119,7 +120,8 @@ fn a_reviewer_whose_plan_is_held_is_skipped_for_the_next_pick() {
 }
 
 // Pull request 71 for issue 7 with the worker's first turn done, on a project
-// whose candidates are qwen, Claude and cubic, whose window is closed.
+// whose candidates are qwen, Claude and cubic, whose window is closed, and
+// whose pass runs `need` reads.
 fn cubic_closed(need: usize) -> (Rig, Mutex<Runner>) {
     let rig = with_bots("shep", &["cubic"]);
     rig.reviews_need(Some(need));

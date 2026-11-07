@@ -14,9 +14,9 @@ use std::sync::Arc;
 
 use super::{
     BranchRun, CheckRunId, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, GateCheck,
-    InstallationToken, LineComment, NewLabel, OpenPull, PostedComment, PullRequest, QueueStanding,
-    RateLimits, Rerun, Reviewed, Talk, ThreadComment, Tickets, Timestamp, Visibility, Voice,
-    Workflow,
+    HeadRun, InstallationToken, LineComment, LogPart, NewLabel, OpenPull, PostedComment,
+    PullRequest, QueueStanding, RateLimits, Rerun, Reviewed, Talk, ThreadComment, Tickets,
+    Timestamp, Visibility, Voice, Workflow,
 };
 use crate::board::OpenPullRequest;
 use crate::hooks::{Hooks, Role, SharedHooks};
@@ -190,6 +190,10 @@ impl Forge for Guarded {
         self.forge.create_label(repo, label)
     }
 
+    fn rename_label(&self, repo: &ForgeSlug, from: &str, to: &str) -> Result<(), ForgeError> {
+        self.forge.rename_label(repo, from, to)
+    }
+
     fn can_push(&self, repo: &ForgeSlug) -> Result<bool, ForgeError> {
         self.forge.can_push(repo)
     }
@@ -314,6 +318,14 @@ impl Forge for Guarded {
 
     fn run_log_tail(&self, repo: &ForgeSlug, run: u64) -> Result<String, ForgeError> {
         self.forge.run_log_tail(repo, run)
+    }
+
+    fn head_runs(&self, repo: &ForgeSlug, head: &str) -> Result<Vec<HeadRun>, ForgeError> {
+        self.forge.head_runs(repo, head)
+    }
+
+    fn run_log(&self, repo: &ForgeSlug, run: u64, part: LogPart) -> Result<String, ForgeError> {
+        self.forge.run_log(repo, run, part)
     }
 
     fn rerun_failed(&self, repo: &ForgeSlug, head: &str) -> Result<(), ForgeError> {
@@ -526,6 +538,10 @@ impl Voice for GuardedVoice {
     // A label's text is kelpie's own constants, which name no folder.
     fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError> {
         self.voice.create_label(repo, label)
+    }
+
+    fn rename_label(&self, repo: &ForgeSlug, from: &str, to: &str) -> Result<(), ForgeError> {
+        self.voice.rename_label(repo, from, to)
     }
 
     fn set_issue_label(

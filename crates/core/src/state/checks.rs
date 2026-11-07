@@ -6,6 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The last version whose checks kept no `ready_seen`
+const BEFORE_READY_SEEN: u32 = 101;
+
 /// What the issue check said of one open issue, at one edit
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -21,9 +24,24 @@ pub struct IssueCheck {
     /// Where the triager stands on this edit
     #[serde(default, skip_serializing_if = "CheckTriage::is_none")]
     pub triage: CheckTriage,
+    /// Whether the issue has carried `ready-for-agent`. One that has and does
+    /// not now had it taken off by the maintainer, and the check puts it back
+    /// for no edit.
+    ///
+    /// Left out while false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ready_seen: bool,
 }
 
 impl IssueCheck {
+    /// Seeds `ready_seen` in a file of version `found` that kept none: a passed
+    /// check had its label put on, or left on, by the check
+    pub(super) fn migrate(&mut self, found: u32) {
+        if found <= BEFORE_READY_SEEN {
+            self.ready_seen = self.passed();
+        }
+    }
+
     /// Whether the issue passed
     pub fn passed(&self) -> bool {
         self.failures.is_empty()

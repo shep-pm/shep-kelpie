@@ -644,3 +644,151 @@ fn a_job_listing_gh_cannot_answer_leaves_the_log_empty() {
     assert_eq!(read.text, "");
     assert!(!read.timed_out);
 }
+
+// `gh run list --commit <sha> --json databaseId,workflowName,conclusion,attempt`: a run
+// still going prints an empty `conclusion`
+const HEAD_RUNS: &[u8] = include_bytes!("../../../../../../fixtures/gh-run-list-commit.json");
+
+#[test]
+fn head_runs_lists_every_run_on_the_commit() {
+    let runs = parse_head_runs(HEAD_RUNS).unwrap();
+
+    let listed: Vec<(&str, u64)> = runs.iter().map(|r| (r.workflow.as_str(), r.run)).collect();
+    assert_eq!(
+        listed,
+        [
+            ("windows", 41_100_000_004),
+            ("commits", 41_100_000_003),
+            ("test", 41_100_000_002),
+            ("file-size", 41_100_000_001),
+        ]
+    );
+    let ended: Vec<Option<&str>> = runs.iter().map(|r| r.conclusion.as_deref()).collect();
+    assert_eq!(
+        &ended[1..],
+        [Some("cancelled"), Some("failure"), Some("success")]
+    );
+}
+
+#[test]
+fn head_runs_names_the_attempt_a_rerun_advanced() {
+    let runs = parse_head_runs(HEAD_RUNS).unwrap();
+
+    let attempts: Vec<u32> = runs.iter().map(|r| r.attempt).collect();
+    assert_eq!(attempts, [1, 1, 2, 1]);
+    let bare = br#"[{"conclusion":"failure","databaseId":7,"workflowName":"test"}]"#;
+    assert_eq!(parse_head_runs(bare).unwrap()[0].attempt, 1);
+}
+
+#[test]
+fn head_runs_shows_a_run_still_going_with_no_conclusion() {
+    let runs = parse_head_runs(HEAD_RUNS).unwrap();
+
+    assert_eq!(runs[0].conclusion, None);
+}
+
+#[test]
+fn a_head_run_list_gh_did_not_print_as_json_is_unreadable() {
+    assert!(matches!(
+        parse_head_runs(b"no runs found"),
+        Err(ForgeError::Unreadable(_))
+    ));
+}
+
+#[test]
+fn head_runs_asks_for_one_commit_and_the_most_github_answers() {
+    let repo = ForgeSlug::try_from("shep-pm/shep-kelpie".to_owned()).unwrap();
+    let mut asked = Vec::new();
+
+    let runs = list_head_runs(&repo, "abc123", &mut |args: &[&str]| {
+        asked.push(args.join(" "));
+        Ok(HEAD_RUNS.to_vec())
+    })
+    .unwrap();
+
+    assert_eq!(runs.len(), 4);
+    assert_eq!(
+        asked,
+        [
+            "run list --repo shep-pm/shep-kelpie --commit abc123 --limit 1000 \
+          --json databaseId,workflowName,conclusion,attempt"
+        ]
+    );
+}
+
+// The lines `gh run view --log-failed` prints: the job, the step, then the text
+fn failed_log() -> String {
+    let line = "test\tRun cargo test\t2026-10-13T10:00:00.0000000Z error: boom\n";
+    line.repeat(2000)
+}
+
+#[test]
+fn a_failed_runs_log_is_read_whole() {
+    let repo = ForgeSlug::try_from("shep-pm/shep-kelpie".to_owned()).unwrap();
+    let log = failed_log();
+    assert!(log.len() > LOG_BYTES * 10);
+    let mut asked = Vec::new();
+
+    let read = read_log(&repo, 7, LogPart::Failed, &mut |args: &[&str]| {
+        asked.push(args.join(" "));
+        Ok(log.clone().into_bytes())
+    })
+    .unwrap();
+
+    assert_eq!(read, log, "nothing is cut, timestamps and repeats included");
+    assert_eq!(
+        asked,
+        ["run view 7 --repo shep-pm/shep-kelpie --log-failed"]
+    );
+}
+
+#[test]
+fn a_green_runs_whole_log_is_read() {
+    let repo = ForgeSlug::try_from("shep-pm/shep-kelpie".to_owned()).unwrap();
+    let log = "build\tSet up job\t2026-10-13T10:00:00.0000000Z ok\n".repeat(500);
+    let mut asked = Vec::new();
+
+    let read = read_log(&repo, 8, LogPart::Whole, &mut |args: &[&str]| {
+        asked.push(args.join(" "));
+        Ok(log.clone().into_bytes())
+    })
+    .unwrap();
+
+    assert_eq!(read, log);
+    assert_eq!(asked, ["run view 8 --repo shep-pm/shep-kelpie --log"]);
+}
+
+#[test]
+fn a_cancelled_run_with_no_failed_step_reads_whole() {
+    let repo = ForgeSlug::try_from("shep-pm/shep-kelpie".to_owned()).unwrap();
+    let mut asked = Vec::new();
+
+    let read = read_log(&repo, 9, LogPart::Failed, &mut |args: &[&str]| {
+        asked.push(args.join(" "));
+        match args {
+            [.., "--log-failed"] => Ok(Vec::new()),
+            _ => Ok(JOB_LOG.as_bytes().to_vec()),
+        }
+    })
+    .unwrap();
+
+    assert_eq!(read, JOB_LOG);
+    assert_eq!(
+        asked,
+        [
+            "run view 9 --repo shep-pm/shep-kelpie --log-failed",
+            "run view 9 --repo shep-pm/shep-kelpie --log",
+        ]
+    );
+}
+
+#[test]
+fn a_log_gh_cannot_answer_is_the_error_it_gave() {
+    let repo = ForgeSlug::try_from("shep-pm/shep-kelpie".to_owned()).unwrap();
+
+    let read = read_log(&repo, 9, LogPart::Failed, &mut |_: &[&str]| {
+        Err(ForgeError::Failed("log has expired".to_owned()))
+    });
+
+    assert_eq!(read, Err(ForgeError::Failed("log has expired".to_owned())));
+}

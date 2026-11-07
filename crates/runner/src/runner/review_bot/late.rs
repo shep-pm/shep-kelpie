@@ -79,9 +79,9 @@ impl Runner {
     /// left threads above a nit open on the pull request
     ///
     /// A bot that reviews every push on its own can post before the pass
-    /// reaches its round, and the pass ends once the reads the item calls for
-    /// have run. Its threads would only be named in the merge ruling and
-    /// never reach the worker. `None` when no bot is in that case.
+    /// reaches its round, and the pass ends once its review plan's reads have
+    /// run. Its threads would only be named in the merge ruling and never
+    /// reach the worker. `None` when no bot is in that case.
     pub(in crate::runner) fn unsent_review(&mut self) -> Result<Option<Begin>, StateError> {
         let Some(item) = self.current() else {
             return Ok(Some(Begin::Idle));

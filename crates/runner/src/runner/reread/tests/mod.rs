@@ -32,21 +32,30 @@ fn a_changed_setting_takes_effect_at_once() {
         s.replace("merging = \"ask\"", "merging = \"auto\"")
             .replace("issues = \"ask\"", "issues = \"skip\"")
             .replace("fix_attempts = -1", "fix_attempts = 2")
-            .replace("kickoff_hours = 8", "kickoff_hours = 6")
             .replace("active_items = 1", "active_items = 2")
     });
     let mut runner = runner.lock().unwrap();
     let line = runner.reread(next, rig.kelpie_settings()).unwrap();
     assert_eq!(
         line.as_deref(),
-        Some("settings changed: git.merging, git.issues, ci, concurrency, pacing now in effect")
+        Some("settings changed: git.merging, git.issues, ci, concurrency now in effect")
     );
     assert_eq!(runner.settings().concurrency.active_items.get(), 2);
     assert_eq!(runner.settings().git.merging, Merging::Auto);
     assert_eq!(runner.settings().git.issues, Filing::Skip);
     assert_eq!(runner.settings().ci.fix_attempts.cap(), Some(2));
-    assert_eq!(runner.settings().pacing.kickoff_hours.get(), 6);
     assert_eq!(runner.status().merging, Merging::Auto);
+}
+
+#[test]
+fn a_change_to_the_pacing_table_alone_changes_nothing() {
+    let rig = Rig::new("shep");
+    let runner = rig.open().unwrap();
+    let next = settings_with(&rig, |s| {
+        s.replace("kickoff_hours = 8", "kickoff_hours = 6")
+    });
+    let mut runner = runner.lock().unwrap();
+    assert_eq!(runner.reread(next, rig.kelpie_settings()), Ok(None));
 }
 
 #[test]
@@ -131,14 +140,14 @@ fn the_checkout_and_the_remote_wait_for_the_next_start() {
             "remote = \"shep-pm/elsewhere\"",
         )
         .replace(&repo, "/srv/elsewhere")
-        .replace("kickoff_hours = 8", "kickoff_hours = 6")
+        .replace("active_items = 1", "active_items = 2")
     });
     let mut runner = runner.lock().unwrap();
     let line = runner.reread(next, rig.kelpie_settings()).unwrap();
     assert_eq!(
         line.as_deref(),
         Some(
-            "settings changed: pacing now in effect; git.checkout and git.remote from the \
+            "settings changed: concurrency now in effect; git.checkout and git.remote from the \
              runner's next start"
         )
     );

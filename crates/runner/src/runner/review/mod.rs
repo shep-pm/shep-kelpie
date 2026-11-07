@@ -284,9 +284,9 @@ impl Runner {
     }
 
     // The last reviewer is done, so the work item goes on to CI. A pass that
-    // ran fewer reads than the item calls for, because one was down or failing,
-    // marks the work item unreviewed, which the merge ruling names and `auto`
-    // will not merge. One the project's own list left short is only noted.
+    // ran fewer reads than its review plan calls for, because one was down or
+    // failing, marks the work item unreviewed, which the merge ruling names and
+    // `auto` will not merge. One the project's own list left short is only noted.
     fn pass_ended(&mut self, review: &Review, unranked: &[AgentName]) -> Result<Begin, StateError> {
         let since = self.ports.clock.now();
         let item = self.current().expect("a pass is a work item's");

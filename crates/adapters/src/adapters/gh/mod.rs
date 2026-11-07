@@ -32,10 +32,10 @@ use serde::Deserialize;
 
 use crate::board::OpenPullRequest;
 use crate::ports::{
-    BranchRun, Checks, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, InstallationToken,
-    Issue, NewLabel, Notification, Notifications, OpenPull, PullRequest, PullRequestState,
-    QueueStanding, Queued, RateLimits, Rerun, Reviewed, Talk, ThreadComment, Timestamp, Visibility,
-    Workflow, is_gate_check,
+    BranchRun, Checks, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, HeadRun,
+    InstallationToken, Issue, LogPart, NewLabel, Notification, Notifications, OpenPull,
+    PullRequest, PullRequestState, QueueStanding, Queued, RateLimits, Rerun, Reviewed, Talk,
+    ThreadComment, Timestamp, Visibility, Workflow, is_gate_check,
 };
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
@@ -121,6 +121,10 @@ impl Forge for Gh {
             label.description,
         ])
         .map(drop)
+    }
+
+    fn rename_label(&self, repo: &ForgeSlug, from: &str, to: &str) -> Result<(), ForgeError> {
+        gh(&["label", "edit", from, "--name", to, "--repo", repo.as_str()]).map(drop)
     }
 
     fn can_push(&self, repo: &ForgeSlug) -> Result<bool, ForgeError> {
@@ -249,6 +253,14 @@ impl Forge for Gh {
 
     fn run_log_tail(&self, repo: &ForgeSlug, run: u64) -> Result<String, ForgeError> {
         runs::run_log_tail(repo, run)
+    }
+
+    fn head_runs(&self, repo: &ForgeSlug, head: &str) -> Result<Vec<HeadRun>, ForgeError> {
+        runs::head_runs(repo, head)
+    }
+
+    fn run_log(&self, repo: &ForgeSlug, run: u64, part: LogPart) -> Result<String, ForgeError> {
+        runs::run_log(repo, run, part)
     }
 
     fn rerun_failed(&self, repo: &ForgeSlug, head: &str) -> Result<(), ForgeError> {
