@@ -969,7 +969,7 @@ So kelpie moves the control room's rules (gates, locks, rate windows) into code,
 
 ## Settings
 
-Every setting kelpie takes, and the file that reads it. None is read by nothing: a key that was is refused by name in `crates/core/src/settings/mod.rs`'s `REMOVED` list (or `crates/core/src/webhook.rs`'s, for the `[kelpie]` section), through `crates/core/src/settings/removed.rs`. Paths are in `src/`.
+Every setting kelpie takes, and the file that reads it. A key kelpie stops reading is refused by name in `crates/core/src/settings/mod.rs`'s `REMOVED` list (or `crates/core/src/webhook.rs`'s, for the `[kelpie]` section), through `crates/core/src/settings/removed.rs`, and a key still in its table is read by something, apart from `pacing.enabled` and `pacing.kickoff_hours`, which #1787 left parsed and unread and #1789 takes out. Paths are in `src/`.
 
 The project's `[app.dogs.kelpie]` table, `settings/mod.rs`, every setting in a table of its own (shep-pm/shep-kelpie#380), each table titled for lookout, which groups a sheep's rows by table (shep-pm/shep#713):
 
