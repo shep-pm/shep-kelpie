@@ -38,10 +38,6 @@ agent = "triager"
 [contributions]
 security_reviewer = "security-reviewer"
 
-[pacing]
-enabled = true
-kickoff_hours = 8
-
 [worker]
 allowed_domains = []
 build_env = {}

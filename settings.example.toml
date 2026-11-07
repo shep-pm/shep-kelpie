@@ -1,10 +1,10 @@
 # A project's runner, as its `[[app]]` entry in your shepherd's Flockfile. The project's
 # settings are the sheep's `[app.dogs.kelpie]` table: shep keeps it and hands
 # it to the runner, and lookout edits it in the sheep's pane. Every setting
-# sits in a table. `git.checkout`, `git.merging`, `ci.block` and
-# `pacing.kickoff_hours` are required, with the `[git]`, `[ci]` and
-# `[pacing]` tables that hold them. The `[worker]` table must be present too,
-# though every key in it has a default, as does every other key.
+# sits in a table. `git.checkout`, `git.merging` and `ci.block` are required,
+# with the `[git]` and `[ci]` tables that hold them. The `[worker]` table must
+# be present too, though every key in it has a default, as does every other
+# key.
 # This entry holds the first build's defaults, for shep.
 # `env` must hold `SHEP_HOME` as an absolute path, since a sheep starts
 # without it. An older entry's `kill_timeout = "10s"` still works and is no
@@ -183,13 +183,6 @@ per_item_usd = 10
 # Read by nothing: the agent board's handoff moves a work item, and
 # `shep kelpie upgrade` deletes it.
 # fallback_after = 15
-
-# Read by nothing since the day's allowance went. Only a spent 5-hour window
-# or week holds a turn or a new work item, and usage is read and shown
-# whatever these say.
-[app.dogs.kelpie.pacing]
-enabled = true
-kickoff_hours = 8
 
 # Domains a worker's sandbox may reach besides GitHub. A call that works an
 # item always reaches the registries of the package managers its worktree

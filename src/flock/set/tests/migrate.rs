@@ -230,6 +230,55 @@ async fn the_keys_the_agent_board_replaced_are_deleted_and_named_and_the_rest_is
     );
 }
 
+// `TABLE` with the pacing table an older build wrote put back in it
+fn with_pacing() -> String {
+    TABLE.replace(
+        "[worker]\n",
+        "[pacing]\nenabled = true\nkickoff_hours = 8\n\n[worker]\n",
+    )
+}
+
+#[tokio::test]
+async fn the_pacing_table_is_deleted_and_named_with_its_keys_and_the_table_loads() {
+    let scene = Scene::holding(&with_pacing()).await;
+
+    let said = scene.migrate().await.unwrap();
+
+    assert!(
+        said[1].contains("removed pacing = { enabled = true, kickoff_hours = 8 }"),
+        "{said:?}"
+    );
+    let table = scene.table();
+    assert!(table.get("pacing").is_none(), "{table:?}");
+    let home = scene.shepherd.scratch("home");
+    let name = ProjectName::try_from("koji").unwrap();
+    let paths = ProjectPaths::under(&home.join("kelpie"), scene.shepherd.home(), &name);
+    Settings::from_table(&table, "koji", &home, &paths.folder).expect("the migrated table loads");
+}
+
+#[tokio::test]
+async fn a_table_with_no_pacing_migrates_nothing_for_it() {
+    let mut scene = Scene::new().await;
+    let first = scene.migrate().await.unwrap();
+    assert!(
+        first.iter().all(|line| !line.contains("pacing")),
+        "{first:?}"
+    );
+    assert_eq!(scene.shepherd.writes().len(), 2, "one write per project");
+    let after = scene.table();
+    assert!(after.get("pacing").is_none(), "{after:?}");
+
+    let said = scene.migrate().await.unwrap();
+
+    assert_eq!(
+        said,
+        ["nothing to migrate"],
+        "a table with no pacing leaves migrate nothing to delete"
+    );
+    assert_eq!(scene.shepherd.writes(), []);
+    assert_eq!(scene.table(), after);
+}
+
 #[tokio::test]
 async fn the_issue_writers_unlabelled_kind_is_deleted_from_the_map_and_the_list() {
     let map = with_rulings("pm_decides = { unlabelled = true, rebase = false }");

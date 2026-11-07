@@ -1,8 +1,9 @@
 //! `shep kelpie settings migrate`: writes the keys each project's table is missing
 //!
 //! `rulings.pm_alone` becomes `rulings.pm_decides`, each kind the map lacks written
-//! at its default. The keys the agent board replaced ([`GONE_KEYS`]), the gone roles
-//! ([`GONE_ROLES`]) and the `unlabelled` kind are deleted, each named with its value.
+//! at its default. The keys the agent board replaced and `[pacing]`
+//! ([`GONE_KEYS`]), the gone roles ([`GONE_ROLES`]) and the `unlabelled` kind are
+//! deleted, each named with its value.
 //! `agents.reviewers` goes too: its names join a listed `agents.allow`, and
 //! `contributions.reviewers` where the project names none. An agent kelpie once
 //! named for a project that left it unset gets that name ([`DEFAULTS`]). Each table
@@ -19,8 +20,9 @@ use crate::shepherd::{self, Connection, Socket};
 use crate::webhook::KelpieSettings;
 
 /// The keys migrate deletes: the loader refuses the first six by name and
-/// ignores the rest, which doctor names
-const GONE_KEYS: [&str; 9] = [
+/// ignores the rest, the three the agent board replaced and `[pacing]`, which
+/// doctor names
+const GONE_KEYS: [&str; 10] = [
     "rulings.decide",
     "rulings.full_panel_paths",
     "agents.advisor",
@@ -30,6 +32,7 @@ const GONE_KEYS: [&str; 9] = [
     "agents.implementers",
     "agents.implementer_choice",
     "agents.fallback_after",
+    "pacing",
 ];
 
 /// The key whose names join a listed `agents.allow` before it is deleted
