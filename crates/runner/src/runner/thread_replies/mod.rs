@@ -35,6 +35,10 @@ const DECIDED: u64 = 24 * 60 * 60;
 /// forge was slow to list
 const SLACK: u64 = 5 * 60;
 
+/// How long, in seconds, a maintainer comment is kept for an issue listing the
+/// poll has not read yet, before it is left unheard and said
+const UNHELD_FOR: u64 = 15 * 60;
+
 /// A ruling's thread being watched for an answer
 #[derive(Debug, Clone)]
 struct Watch {
@@ -56,6 +60,9 @@ pub(super) struct Reading {
     first: Option<Timestamp>,
     /// The comments before this are not asked for again
     floor: Option<Timestamp>,
+    /// A maintainer comment read while the poll had listed no issues, by its
+    /// thread and when it was written, kept for the read that can decide it
+    unheld: Option<(u64, Timestamp)>,
     watching: BTreeMap<TicketId, Watch>,
     /// The comments read and left alone, a bot's or a login's without write
     /// access, by id and when written, until a read no longer reaches them
@@ -242,6 +249,9 @@ impl Runner {
         // Where this runner first asked, which is where the maintainer's words
         // on an issue are read from, and what an older comment is told apart by
         self.threads.first = Some(self.threads.first.unwrap_or(now));
+        // How far the read reaches back for a maintainer comment it could not
+        // decide, one kept too long being left unheard and said
+        let kept = self.unheld_back(now);
         let watches: Vec<Watch> = self.threads.watching.values().cloned().collect();
         let followed = &self.state.contributions;
         let heard = (watches
@@ -252,10 +262,15 @@ impl Runner {
         .min();
         let since = heard.into_iter().chain(self.threads.floor).max();
         // The maintainer's words on an issue are read from where the last read
-        // left off, so one the forge lists late is reached again.
-        let since = match (since, words.then_some(last).flatten()) {
-            (Some(since), Some(back)) => Some(since.min(back)),
-            (since, back) => since.or(back),
+        // left off, so one the forge lists late is reached again, and from where
+        // one kept for a later read was written.
+        let back = (words.then_some(last).flatten())
+            .into_iter()
+            .chain(kept)
+            .min();
+        let since = match (since, back) {
+            (Some(since), Some(at)) => Some(since.min(at)),
+            (since, at) => since.or(at),
         };
         let since = since.unwrap_or(now);
         let reviews = (followed.iter())

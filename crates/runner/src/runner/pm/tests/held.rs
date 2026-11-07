@@ -490,6 +490,59 @@ fn a_read_made_after_a_restart_does_not_hold_an_older_comment() {
 }
 
 #[test]
+fn a_comment_read_while_the_listing_failed_is_held_after_it_works() {
+    let (rig, runner) = issue_only("held-issue-listing-down");
+    rig.claude.script_for(Role::Pm, [Scripted::Say(NOTHING)]);
+
+    rig.writes_on(44, "octocat", "Why is the cache a map?");
+    rig.forge.set_issues_down(true);
+    // The read finds the comment and cannot tell the issue is open, and the
+    // poll that same pass makes fails
+    step(&runner).unwrap();
+    assert_eq!(
+        told(&runner),
+        Vec::<String>::new(),
+        "no listing to decide from"
+    );
+    rig.forge.set_issues_down(false);
+    carried_until(&rig, &runner, "Why is the cache a map?");
+
+    assert_eq!(rig.github.reactions().len(), 1, "a thumbs up");
+    assert_eq!(carried(&rig, "Why is the cache a map?"), 1, "held once");
+}
+
+#[test]
+fn a_comment_kept_for_a_listing_that_never_came_is_left_unheard_and_said() {
+    let (rig, runner) = issue_only("held-issue-listing-gone");
+    rig.claude.script_for(Role::Pm, [Scripted::Say(NOTHING)]);
+
+    rig.writes_on(44, "octocat", "Why is the cache a map?");
+    rig.forge.set_issues_down(true);
+    // The first read is made at the comment's own time, and each look after it
+    // is 5 min on, so the last one is past how long a comment is kept
+    step(&runner).unwrap();
+    for _ in 0..4 {
+        rig.next_look();
+        step(&runner).unwrap();
+    }
+
+    assert_eq!(told(&runner), Vec::<String>::new(), "nothing was held");
+    assert_eq!(
+        carried(&rig, "Why is the cache a map?"),
+        0,
+        "no wake with it"
+    );
+    assert_eq!(rig.github.reactions().len(), 0, "no thumbs up");
+    let notes = runner.lock().unwrap().take_notes();
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("#44") && n.contains("left unheard")),
+        "{notes:?}"
+    );
+}
+
+#[test]
 fn no_project_manager_means_no_read() {
     let rig = issue_listed("held-issue-none", false);
     let runner = rig.open().unwrap();

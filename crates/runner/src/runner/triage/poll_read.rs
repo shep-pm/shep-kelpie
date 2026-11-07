@@ -127,12 +127,14 @@ impl PollJob {
 }
 
 impl Runner {
-    // Whether the poll's listing has issue `number` open. It lists issues alone,
-    // so a pull request's number is never in it.
-    pub(in crate::runner) fn listed_issue(&self, number: u64) -> bool {
-        (self.triage_run.listing.iter())
-            .flat_map(|listing| listing.open.iter())
-            .any(|issue| issue.number == number)
+    // Whether the poll's listing has issue `number` open, or None where it has
+    // read none yet. It lists issues alone, so a pull request's number is never
+    // in it.
+    pub(in crate::runner) fn listed_issue(&self, number: u64) -> Option<bool> {
+        self.triage_run
+            .listing
+            .as_ref()
+            .map(|listing| (listing.open.iter()).any(|issue| issue.number == number))
     }
 
     // Whether `issue` carries `ready-for-agent` and is being worked on: it has
