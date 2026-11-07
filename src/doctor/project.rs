@@ -515,7 +515,7 @@ fn left_out(
 
 // The keys kelpie reads no longer that the project's table still holds, in one line.
 fn gone_keys(subject: String, settings: &Settings) -> Option<Line> {
-    let keys = settings.agents.gone_keys();
+    let keys = settings.gone_keys();
     (!keys.is_empty()).then(|| {
         let keys: Vec<String> = keys.iter().map(|key| format!("`{key}`")).collect();
         Line::unsure(
