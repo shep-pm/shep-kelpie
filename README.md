@@ -21,7 +21,7 @@ This is early. It changes without notice, and there is no release yet.
          red again on the same head is a ruling
                                  │ green
                                  v
- review: reviews.need reviewers, each the agent board's pick ──> one fix turn per reviewer
+ review: the plan's reviewers,  each the agent board's pick ──> one fix turn per reviewer
                                  │                          with any finding,
                                  │                          then back through CI
                                  v
@@ -35,7 +35,7 @@ This is early. It changes without notice, and there is no release yet.
 2. **Pick.** A `ready-for-agent` issue joins the board. The project manager's agent picks the next one, or, without one, the board takes the first in its order, which starts as priority, then age, and opens a work item for it (see [The board](docs/guide/board.md#the-board)).
 3. **Build.** A worker, one of the project's implementers, builds it inline, opens a draft pull request and ends its turn (see [Building](docs/guide/building.md#building)).
 4. **CI.** A head waits for green before each reviewer reads it, and after the last fix. A red run goes back to the worker. A second red run on a head the worker left alone asks you.
-5. **Review.** A pass runs `reviews.need` reviewers (2 by default), each the agent board's pick from the reviewer files `agents.allow` holds, apart from `contributions.security_reviewer`. Each reads the pull request once. One that finds anything, nits included, sends the worker all its findings for one fix turn, and the next reviewer reads the fix after CI passes. A light review, a docs-only change or a small one the project manager tagged light, runs `reviews.light` reviewers instead (`reviews.light_paths`, `reviews.full_paths`, `reviews.pm_lightens` and `reviews.light_max_lines` decide which). No loop, no judge (see [The review](docs/guide/review.md#the-review)).
+5. **Review.** A pass runs the reads the work item's review plan calls for (2 where no project manager planned any), each the agent board's pick from the reviewer files `agents.allow` holds, apart from `contributions.security_reviewer`. Each reads the pull request once. One that finds anything, nits included, sends the worker all its findings for one fix turn, and the next reviewer reads the fix after CI passes. kelpie weighs the diff and reports what it touches, `light (docs only)` for a change only in Markdown and `docs/`, and names what made it full, so the project manager can plan the reads from it. No loop, no judge (see [The review](docs/guide/review.md#the-review)).
 6. **Merge.** Under `ask` you get a ruling; under `auto` kelpie merges once every gate passes. Either way it is a merge commit of the head the gates passed (see [CI and the merge](docs/guide/ci-and-merge.md#ci-and-the-merge)).
 
 Pull requests from other people are followed too, when `contributions.pick` allows it. Kelpie reads each head for security, answers the contributor's comments, and, once the contributor has been quiet for `nudge_days`, asks them in one comment whether it may take the pull request from here. A yes, a thumbs up on that comment, or silence until `quiet_days` is a release, recorded as `released`; a no restarts the wait, and a second no followed by quiet is a `waiting` ruling for you: keep waiting, adopt anyway, or close with thanks (see [Contributions](docs/guide/contributions.md)). You rule every merge of such a pull request, `git.merging = "auto"` included, and a `no <note>` goes to the contributor in the representative's words. A release hands the pull request to kelpie: it opens a work item on its branch, files an issue from the pull request's title and body when it closes none, has the project's reviewers read it and a worker finish it. Your merge ruling answers `yes`, `no <note>` or `rework <note>`, and a `rework` takes it over at once without waiting for the contributor.
@@ -209,17 +209,7 @@ shep kelpie get -p '*' agents.allow
 
 `set` checks every matched project first: if one refuses the value, none is written and the error names each that refused. `get` prints `project <name>: <value>` for each, or `not set`.
 
-`agents.allow` limits both implementers and reviewers. Absent or empty, it allows every agent. The agent board picks each round's reviewer from the candidates that can run, until `reviews.need` have read or none remain. Set the number in the project's table:
-
-```toml
-[app.dogs.kelpie.reviews]
-need = 2
-light = 1                      # reviewers of a light review; need when absent
-light_paths = ["**/*.md", "docs/**"]  # a change only here is light; these when absent
-full_paths = []                # always get need; none when absent
-pm_lightens = false            # a small change the project manager tagged light is light too; off when absent
-light_max_lines = 10           # most lines, added plus deleted, of that change; 10 when absent
-```
+`agents.allow` limits both implementers and reviewers. Absent or empty, it allows every agent. The agent board picks each round's reviewer from the candidates that can run, until the work item's review plan has had its reads or none remain. The project manager sets that plan at its pick; where no project manager planned one, kelpie's own rule reads twice (see [The review](docs/guide/review.md#the-review)).
 
 ### 8. Start it, and label a first issue
 
@@ -229,7 +219,7 @@ shep kelpie start
 
 It starts the project's runner, and the project runs while it does: `shep start scratch` and lookout's start do the same, and `shep ls` shows it `online`. The runner reads the board from its first pass.
 
-Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria, or have an agent write it with kelpie's `issue` skill (see [Writing issues](docs/guide/issues.md#writing-issues)). The runner gives it to a worker, which opens a draft pull request. Then the review pass runs `reviews.need` reviewers, each the agent board's pick, once each, and each reads a head only after CI has passed on it. CI runs again on the last fix. Under `git.merging = "ask"`, you get a ruling before the merge; under `"auto"`, kelpie merges once every gate passes (see [CI and the merge](docs/guide/ci-and-merge.md#ci-and-the-merge) for the cases that still raise a ruling). `shep kelpie status` shows every project. [The board](docs/guide/board.md#the-board) says what decides whether, and when, an issue starts.
+Put `ready-for-agent` on an issue that says what done looks like, with acceptance criteria, or have an agent write it with kelpie's `issue` skill (see [Writing issues](docs/guide/issues.md#writing-issues)). The runner gives it to a worker, which opens a draft pull request. Then the review pass runs the reads the work item's review plan calls for, each the agent board's pick, once each, and each reads a head only after CI has passed on it. CI runs again on the last fix. Under `git.merging = "ask"`, you get a ruling before the merge; under `"auto"`, kelpie merges once every gate passes (see [CI and the merge](docs/guide/ci-and-merge.md#ci-and-the-merge) for the cases that still raise a ruling). `shep kelpie status` shows every project. [The board](docs/guide/board.md#the-board) says what decides whether, and when, an issue starts.
 
 ### 9. Answer a ruling
 
