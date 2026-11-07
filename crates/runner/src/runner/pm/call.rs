@@ -200,11 +200,7 @@ impl Runner {
         let _ = writeln!(out, "- Whose call: {call}");
         let _ = writeln!(out, "- How close: {}", phase_text(phase, now));
         let _ = writeln!(out, "- Open findings: {}", open_findings(phase, item));
-        let _ = writeln!(
-            out,
-            "- CI: {}",
-            item.map_or_else(|| ci(None), |i| ci(Some(i)))
-        );
+        let _ = writeln!(out, "- CI: {}", ci(phase, item));
         let touches = ruling
             .issue
             .map_or(String::new(), |t| self.touches(t, item));
@@ -361,12 +357,24 @@ fn open_findings(phase: &Phase, item: Option<&WorkItem>) -> String {
     )
 }
 
-// What CI says of the work item's head.
-fn ci(item: Option<&WorkItem>) -> String {
+// What CI says of the work item's head: the run a review round awaited, then the marks the
+// item keeps. A head awaited green settles an older red.
+fn ci(phase: &Phase, item: Option<&WorkItem>) -> String {
     let short = |head: &str| head.get(..7).unwrap_or(head).to_owned();
+    let awaited = match phase {
+        Phase::Review(review) => review.ci.as_deref(),
+        _ => None,
+    };
+    let green = awaited.is_some_and(|a| a.green);
     let mut says = Vec::new();
+    if let Some(a) = awaited {
+        says.push(match a.green {
+            true => format!("green at {}", short(&a.head)),
+            false => format!("checks awaited at {}", short(&a.head)),
+        });
+    }
     if let Some(item) = item {
-        if let Some(head) = &item.red_head {
+        if let Some(head) = item.red_head.as_ref().filter(|_| !green) {
             says.push(format!("red at {}, sent to the worker", short(head)));
         }
         if let Some(head) = &item.reran {

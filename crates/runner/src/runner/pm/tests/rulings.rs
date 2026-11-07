@@ -17,7 +17,7 @@ use crate::settings::{Merging, RulingName};
 use crate::state::{Ruling, RulingKind, Stuck};
 use crate::test::ticket;
 use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
-use crate::work_item::{Phase, Review, ReviewStage, Turn, WorkItem};
+use crate::work_item::{Awaited, Phase, Review, ReviewStage, Turn, WorkItem};
 
 /// A project whose project manager answers merge rulings, with CI green and
 /// the worker parked on merge ruling 71, which is judged under `merging`
@@ -866,6 +866,30 @@ fn the_wake_shows_the_phase_round_findings_and_ci_of_an_over_budget_item() {
     let findings = "- Open findings: 1 high, 0 medium, 2 low in the round; ";
     assert!(section.contains(findings), "{section}");
     assert!(section.contains("; 0 disputed\n"), "{section}");
+}
+
+#[test]
+fn the_wake_reads_the_run_a_round_awaited_before_an_older_red() {
+    let (rig, runner) = in_review_over("ob-green", |item| {
+        item.phase = Phase::Review(Review {
+            round: 2,
+            stage: ReviewStage::Found {
+                findings: vec![Finding::new(Severity::Low, "src/a.rs", 1, "one", "why")],
+                threads: Vec::new(),
+            },
+            ci: Some(Box::new(Awaited {
+                head: "fedcba9876".into(),
+                since: Timestamp(1),
+                green: true,
+            })),
+            ..Review::first()
+        });
+        item.red_head = Some("abcdef0123".into());
+    });
+
+    let board = wake_board(&rig, &runner);
+
+    assert!(board.contains("- CI: green at fedcba9\n"), "{board}");
 }
 
 #[test]
