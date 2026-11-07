@@ -34,9 +34,10 @@ pub struct Rulings {
 struct Written {
     /// Whether the project manager answers each kind of ruling, `true`, when
     /// it flags no `design` and does not abstain, or the maintainer does,
-    /// `false`. A kind it does not name
-    /// is the maintainer's. `merge`, `security`, `contribution-merge` and
-    /// `local-model-spilled` are refused as `true`.
+    /// `false`. A kind it does not name is the maintainer's. A `merge` set
+    /// `true` lets its yes merge a head that passed every gate (#1761, #1828).
+    /// `security`, `contribution-merge` and `local-model-spilled` are refused
+    /// as `true`.
     #[serde(default, deserialize_with = "named_map")]
     #[schemars(with = "BTreeMap<RulingName, bool>")]
     pm_decides: Option<BTreeMap<RulingName, bool>>,
@@ -105,7 +106,9 @@ fn named_list<'de, D: Deserializer<'de>>(
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum RulingName {
-    /// A merge: CI is green on a head and a yes merges it
+    /// A merge: CI is green on a head and a yes merges it. The project
+    /// manager answers it when the map sets `merge` `true`, and its yes then
+    /// merges a head that passed every gate (#1761, #1828).
     Merge,
     /// The worker's question
     Question,
@@ -191,10 +194,12 @@ impl RulingName {
     /// the project manager is refused and that is never written
     pub fn pm_default(self) -> Option<bool> {
         match self {
-            Self::Merge | Self::Security | Self::ContributionMerge | Self::LocalModelSpilled => {
-                None
-            }
-            Self::Question | Self::ForeignChange | Self::AgentFiles | Self::AgentFit => Some(false),
+            Self::Security | Self::ContributionMerge | Self::LocalModelSpilled => None,
+            Self::Merge
+            | Self::Question
+            | Self::ForeignChange
+            | Self::AgentFiles
+            | Self::AgentFit => Some(false),
             Self::FollowUp
             | Self::Rebase
             | Self::StillRed
@@ -216,7 +221,6 @@ impl RulingName {
     // Why the project manager never decides this kind, for the kinds it never does.
     fn refused_because(self) -> Option<&'static str> {
         match self {
-            Self::Merge => Some("a merge ruling is never decided by the project manager alone"),
             Self::Security => Some(
                 "a ruling on a contribution never goes to the project manager, since text from \
                  a stranger must not reach it",

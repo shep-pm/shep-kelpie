@@ -103,8 +103,11 @@ async fn a_second_run_has_nothing_to_migrate() {
 
 #[tokio::test]
 async fn a_table_that_would_not_load_is_not_written_and_the_others_are() {
-    let mut scene =
-        Scene::holding_each(&with_rulings("pm_alone = [\"merge\"]"), &with_rulings("")).await;
+    let mut scene = Scene::holding_each(
+        &with_rulings("pm_alone = [\"security\"]"),
+        &with_rulings(""),
+    )
+    .await;
     let before = scene.table();
 
     let refused = scene.migrate().await.unwrap_err();
@@ -324,7 +327,7 @@ async fn the_issue_writers_unlabelled_kind_is_deleted_from_the_map_and_the_list(
     for table in [scene.table_of("eevee"), scene.table()] {
         let map = map_of(&table);
         assert!(map.get("unlabelled").is_none(), "{map:?}");
-        assert_eq!(map.len(), RulingName::ALL.len() - 4, "{map:?}");
+        assert_eq!(map.len(), RulingName::ALL.len() - 3, "{map:?}");
     }
 }
 
