@@ -95,6 +95,31 @@ macro_rules! follow_ups {
     };
 }
 
+/// The `fix` key as the answer shows it, which a wake for a stuck item shows
+/// again to a session that has seen the answer without it
+macro_rules! fix_key {
+    () => {
+        "\"fix\": null or {\"item\": <a stuck work item's issue>, \"on\": <the open fix work \
+         item it waits on>, \"why\": \"<one sentence, at most 300 characters>\"} or a list of them"
+    };
+}
+
+/// How a stuck item is parked on an open fix, shown with the `fix` key
+macro_rules! fixes {
+    () => {
+        "`fix` keeps a stuck item parked where the cause is not the item: a turn kelpie \
+         could not set up, a fault in its settings, its own code or this machine, or a check \
+         nothing on the item can clear. Kelpie adds `The project manager parks this on \
+         #<n>` and your `why` to the item's ruling and posts it again to the maintainer, and \
+         the item stays parked until they answer it. `on` must name an open issue that is not \
+         the item itself, and the item must be parked on a ruling: kelpie drops and logs a \
+         `fix` naming a closed issue, the item itself, or an item that is not stuck. A `retry` \
+         is refused on a turn kelpie could not set up, since another try meets the same fault, \
+         so park it. One wake may park as many items as it carried, and any number of them on \
+         one fix."
+    };
+}
+
 /// The `red` key as the answer shows it, which a board with a workflow red on
 /// `main` shows again to a session that has seen the answer without it
 macro_rules! red_key {
@@ -234,6 +259,8 @@ const ANSWER: &str = concat!(
  \"hold\": [{\"issue\": <a ready issue that should wait>, \"until\": <the open work item whose closing ends the hold>}, ...] (one entry for every ready issue that should wait; [] holds none),
  \"unstick\": null or {\"item\": <a stuck work item's issue>, \"action\": \"retry\" | \"re-scope\" | \"ask\" | \"none\", \"why\": \"<one sentence, at most 300 characters>\"} or [{\"item\": <a stuck work item's issue>, \"action\": \"retry\" | \"re-scope\" | \"ask\" | \"none\", \"why\": \"<one sentence, at most 300 characters>\"}, ...],
  ",
+    fix_key!(),
+    ",\n ",
     answer_key!(),
     ",\n ",
     follow_up_key!(),
@@ -285,7 +312,8 @@ should stand; null, or leaving `hold` out, keeps them as they are, and [] clears
 
 `unstick` is one object for one stuck item, or a list of them where the wake \
 carried several: kelpie acts on each in turn. `retry` runs the item's turn \
-again as it is. `re-scope` and `ask` put it to \
+again as it is, and is refused on a turn kelpie could not set up, which `fix` parks. \
+`re-scope` and `ask` put it to \
 the maintainer, with your `why` as what you propose or ask. `none` leaves it to \
 resolve itself, as it does an item whose agent is out; any other action on that item is \
 dropped, since it takes a `pick`. Kelpie checks every answer against the board, and drops and \
@@ -293,6 +321,8 @@ logs any part that names an issue the board does not show as ready, or an item \
 that is not stuck.
 
 ",
+    fixes!(),
+    "\n\n",
     questions!(),
     "\n\n",
     follow_ups!(),
@@ -458,6 +488,14 @@ pub(super) fn wake(
                     "\nThe object takes this key as well:\n\n```\n{}\n```\n\n{}\n",
                     votes_key!(),
                     answering!()
+                );
+            }
+            if wakes.iter().any(|w| matches!(w, Wake::Stuck { .. })) {
+                let _ = write!(
+                    out,
+                    "\nThe object takes this key as well:\n\n```\n{}\n```\n\n{}\n",
+                    fix_key!(),
+                    fixes!()
                 );
             }
         }

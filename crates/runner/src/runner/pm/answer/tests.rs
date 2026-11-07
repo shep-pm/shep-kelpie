@@ -8,6 +8,7 @@ fn the_last_object_after_the_reasoning_is_the_answer() {
     let text = "I read the board. {\"pick\": 3} was my first thought.\n\n```json\n\
                 {\"pick\": 12, \"hold\": [4, \"#9\", {\"issue\": 5, \"until\": \"#3\"}], \"unstick\": {\"item\": 7, \
                 \"action\": \"re-scope\", \"why\": \"split the parser out\"}, \
+                \"fix\": [{\"item\": 8, \"on\": 12, \"why\": \"a machine fault\"}], \
                 \"reply\": null, \"why\": \"#12 touches nothing open.\"}\n```\n";
     let answer = read(text).unwrap();
     assert_eq!(
@@ -32,6 +33,11 @@ fn the_last_object_after_the_reasoning_is_the_answer() {
                 item: ticket(7),
                 action: Action::ReScope,
                 why: "split the parser out".into(),
+            }],
+            fix: vec![FixCall {
+                item: ticket(8),
+                on: ticket(12),
+                why: "a machine fault".into(),
             }],
             answer: None,
             follow_up: None,

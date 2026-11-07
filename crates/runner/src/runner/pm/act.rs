@@ -4,7 +4,8 @@
 //! A pick or a hold must name a ready issue the board shows, a pick's agent
 //! an implementer, and an unstick a work item that is stuck now: parked on a
 //! ruling a stuck item raises, or with a call the board reads as idle.
-//! Anything else is dropped, and named in the log. Each unstick in the answer
+//! A fix names a stuck item too, and the open fix it waits on. Anything else
+//! is dropped, and named in the log. Each unstick and each fix in the answer
 //! runs on its own, so one wake that carried several stuck items can settle
 //! each, and one naming the same item twice acts once.
 
@@ -15,7 +16,7 @@ use crate::board::briefing::ticket_ref;
 use crate::runner::thread_replies::Settler;
 use crate::runner::{Answer as Ruled, RuleError, Runner};
 use crate::settings::AgentName;
-use crate::state::{PmHeld, RulingKind, StateError};
+use crate::state::{PmHeld, RulingKind, StateError, Stuck};
 use crate::ticket::TicketId;
 use crate::work_item::Phase;
 
@@ -147,6 +148,19 @@ impl Runner {
                 Err(why) => dropped.push(why),
             }
         }
+        let mut parked: Vec<TicketId> = Vec::new();
+        for call in &answer.fix {
+            let named = ticket_ref(call.item);
+            if parked.contains(&call.item) {
+                dropped.push(format!("fix {named}: the answer names it twice"));
+                continue;
+            }
+            parked.push(call.item);
+            match self.settle_fix(call)? {
+                Ok(done) => acted.push(done),
+                Err(why) => dropped.push(why),
+            }
+        }
         if let Some(settle) = &answer.answer {
             match self.settle_question(settle)? {
                 Ok(done) => acted.push(done),
@@ -210,7 +224,7 @@ impl Runner {
             }
             (StuckState::Ruling { id, .. }, action) => {
                 self.pm.left_alone.remove(&ticket);
-                if let Err(e) = self.settle(ticket, *id, *action, why)? {
+                if let Err(e) = self.settle(ticket, *id, *action, why, None)? {
                     return Ok(Err(e));
                 }
                 match action {
@@ -282,7 +296,7 @@ impl Runner {
         let Some(StuckState::Ruling { id, .. }) = self.stuck(ticket) else {
             return Ok(());
         };
-        if let Err(e) = self.settle(ticket, id, action, &why)? {
+        if let Err(e) = self.settle(ticket, id, action, &why, None)? {
             self.notes.push(format!(
                 "the project manager could not act on {}: {e}",
                 ticket_ref(ticket)
@@ -293,13 +307,15 @@ impl Runner {
 
     // Retries the item parked on ruling `id` as a yes would, or for CI
     // still red sends the worker back; or puts it to the maintainer with
-    // the project manager's words added to the ruling, posted again.
-    fn settle(
+    // the project manager's words added to the ruling, posted again, naming
+    // `on` as the fix it waits on where one is named.
+    pub(super) fn settle(
         &mut self,
         ticket: TicketId,
         id: TicketId,
         action: Action,
         why: &str,
+        on: Option<TicketId>,
     ) -> Result<Result<(), String>, StateError> {
         let named = ticket_ref(ticket);
         let Some(ruling) = self.state.rulings.iter().find(|r| r.id == id) else {
@@ -307,6 +323,15 @@ impl Runner {
         };
         let why = plain(&self.shown(why.to_owned()), WORDS);
         if action == Action::Retry {
+            if matches!(
+                ruling.kind,
+                RulingKind::Stuck(Stuck::TurnFailed { setup: true, .. })
+            ) {
+                return Ok(Err(format!(
+                    "retry {named}: kelpie could not set up that turn, and the fix is on this \
+                     machine, so another try meets the same fault"
+                )));
+            }
             let (answer, said) = match ruling.kind {
                 RulingKind::Stuck(crate::state::Stuck::StillRed { .. }) => (
                     Ruled::No(format!(
@@ -327,9 +352,12 @@ impl Runner {
                 Err(e) => Ok(Err(format!("retry {named}: {e}"))),
             };
         }
-        let lead = match action {
-            Action::ReScope => "The project manager proposes re-scoping it",
-            _ => "The project manager asks you to decide",
+        let lead = match (action, on) {
+            (Action::ReScope, _) => "The project manager proposes re-scoping it".to_owned(),
+            (Action::Ask, Some(fix)) => {
+                format!("The project manager parks this on {}", ticket_ref(fix))
+            }
+            _ => "The project manager asks you to decide".to_owned(),
         };
         let mut next = self.state.clone();
         let ruling = (next.rulings.iter_mut().find(|r| r.id == id)).expect("found above");
@@ -343,7 +371,7 @@ impl Runner {
     }
 
     // How `ticket`'s work item is stuck now, if it is.
-    fn stuck(&self, ticket: TicketId) -> Option<StuckState> {
+    pub(super) fn stuck(&self, ticket: TicketId) -> Option<StuckState> {
         let item = self.state.item(ticket)?;
         if let Phase::Ruling { id } = item.phase {
             let ruling = self.state.rulings.iter().find(|r| r.id == id)?;
