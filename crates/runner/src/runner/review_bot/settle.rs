@@ -185,16 +185,24 @@ pub(in crate::runner) struct OpenThreads {
 // own level where it writes one
 fn open_thread(profile: &dyn Profile, thread: &Thread) -> OpenThread {
     let finding = profile.finding(thread);
-    let what = finding.what.trim();
-    let first = what.split_inclusive(". ").next().unwrap_or(what).trim();
     OpenThread {
         bot: profile.name().to_owned(),
         level: profile.level(thread),
         severity: finding.severity,
         file: finding.file,
         line: finding.line,
-        what: first.to_owned(),
+        what: first_sentence(&finding.what),
     }
+}
+
+// `text` to its first sentence
+pub(super) fn first_sentence(text: &str) -> String {
+    let text = text.trim();
+    text.split_inclusive(". ")
+        .next()
+        .unwrap_or(text)
+        .trim()
+        .to_owned()
 }
 
 /// A bot's open threads read as findings: those above a nit, and the nits
