@@ -519,6 +519,7 @@ impl Runner {
             most,
             settling.as_ref(),
             earlier.as_ref().map(|(rounds, _)| rounds.as_str()),
+            &self.implementer_files(),
         );
         let Some(ticket) = TicketId::from_issue(issue) else {
             self.triage_failed(issue, "no forge numbers an issue zero", true);

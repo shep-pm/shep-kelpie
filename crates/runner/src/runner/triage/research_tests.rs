@@ -1,6 +1,7 @@
 //! The research on an untouched issue, from its call to the comment and the
 //! labels after it, through the runner's stand-ins
 
+use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -8,10 +9,12 @@ use serde_json::{Value, json};
 
 use super::marker::MARKER;
 use super::pick_tests::{MAINTAINER, issue, list, rig_with, status};
+use super::research::read_reply;
 use crate::github::ApiError;
 use crate::ports::{AgentError, CLEAN, OpenIssue, Role, Timestamp, Tools};
+use crate::runner::claim::Notes;
 use crate::runner::{Pass, Runner, advance, step};
-use crate::settings::Harness;
+use crate::settings::{AuthorRole, Harness};
 use crate::state::StateStore;
 use crate::test::{
     CALL_PATIENCE, Hold, Rig, Scripted, Seen, assert_granted, git, installed_sources,
@@ -964,4 +967,64 @@ fn the_triager_reads_the_installed_dependency_sources_and_no_credential_of_them(
 
     let [seen] = calls(&rig, Role::Triager).try_into().unwrap();
     assert_granted(&seen, &source_folders(&cargo, &rustup), &secret);
+}
+
+#[test]
+fn a_reply_carries_its_split_drafts_in_order() {
+    let drafts = json!([
+        { "title": " feat(a): one ", "body": "B1", "priority": "p1", "kind": "FEAT", "agent": "opus-high" },
+        { "title": "fix(b): two", "body": "B2", "priority": "P0", "kind": "nonsense", "after": [0], "agent": " " },
+    ]);
+    let text = format!("Here it is: {}", json!({ "split": drafts }));
+
+    let found = read_reply(
+        &text,
+        30,
+        &[],
+        Path::new("."),
+        (3, AuthorRole::Maintainer),
+        &Notes::default(),
+    )
+    .unwrap();
+
+    let titles: Vec<&str> = found.split.iter().map(|d| d.title.as_str()).collect();
+    assert_eq!(titles, ["feat(a): one", "fix(b): two"]);
+    let first = &found.split[0];
+    assert_eq!((first.priority, first.kind), (Some("P1"), Some("feat")));
+    assert_eq!(first.agent.as_deref(), Some("opus-high"));
+    let second = &found.split[1];
+    assert_eq!(
+        (second.priority, second.kind),
+        (None, None),
+        "P0 is never kelpie's"
+    );
+    assert_eq!(
+        (second.after.as_slice(), second.agent.as_deref()),
+        (&[0][..], None)
+    );
+    let none = read_reply(
+        "{\"split\": null}",
+        30,
+        &[],
+        Path::new("."),
+        (3, AuthorRole::Maintainer),
+        &Notes::default(),
+    );
+    assert_eq!(none.unwrap().split, []);
+}
+
+#[test]
+fn the_prompt_lists_the_projects_implementers() {
+    let (rig, runner) = untouched();
+    rig.claude.script_for(Role::Triager, [reply(json!({}))]);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let prompt = calls(&rig, Role::Triager).remove(0).call.prompt;
+    assert!(
+        prompt.contains("The implementers of this project are opus-high, sonnet-high:"),
+        "{prompt}"
+    );
+    assert!(prompt.contains("\"split\": [{\"title\""), "{prompt}");
+    assert!(prompt.contains("Assumed:"), "{prompt}");
 }

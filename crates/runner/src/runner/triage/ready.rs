@@ -7,7 +7,8 @@
 //! go on, `ready-for-agent` last. Otherwise the body goes under the issue's
 //! text, and the issue ends `needs-triage`. The comment is worded first. It
 //! promises nothing the local guard would refuse, or while a hand-put triage
-//! label stands.
+//! label stands. A reply that splits the issue is read here too, and is made
+//! ready as a split or refused as one ([`super::split`]).
 
 use super::super::Runner;
 use super::super::contributions::post::{forge_is_busy, refused_text};
@@ -18,7 +19,7 @@ use crate::board::has_criteria;
 use crate::board::{READY, TRIAGE};
 use crate::local_paths::{Leak, Surface};
 use crate::ports::{ForgeError, NewLabel};
-use crate::state::{CheckTriage, StateError, TriageStep};
+use crate::state::{CheckTriage, SplitDraft, StateError, TriageStep};
 
 /// Made on a repo that lacks it before the first issue that passes the issue
 /// check is made ready
@@ -50,6 +51,16 @@ pub(in crate::runner) enum Ready {
     /// The maintainer's own issue, but the body names something of this
     /// machine, so kelpie will not write it
     Local(Leak),
+    /// The maintainer's own issue, which the research judged too big for one
+    /// work item: the body to write over the issue's, which never goes ready,
+    /// and the drafts to file as its sub-issues
+    Split {
+        body: String,
+        drafts: Vec<SplitDraft>,
+    },
+    /// The same, but the body or a draft fails: one line for each, and nothing
+    /// is filed
+    SplitRefused(Vec<String>),
 }
 
 /// Whether kelpie is going to rewrite `issue`, with `labels` the pass puts on,
@@ -65,15 +76,16 @@ pub(in crate::runner) fn readiness(
     found: &Found,
     labels: &[String],
 ) -> Ready {
+    if !found.open.is_empty() || !runner.own_author(author) {
+        return Ready::Not;
+    }
+    // A split from anyone else is dropped: #1847 files it once its author says so.
+    if !found.split.is_empty() {
+        return runner.judged_split(issue, found);
+    }
     let Some(body) = found.body.clone() else {
         return Ready::Not;
     };
-    if !found.open.is_empty() {
-        return Ready::Not;
-    }
-    if !runner.own_author(author) {
-        return Ready::Not;
-    }
     // The maintainer took the label off, now or while the pass ran, so it stays
     // off: the pass ends at `needs-triage`.
     let now = (runner.labels_now(issue)).unwrap_or_else(|_| runner.triage_seen(issue));

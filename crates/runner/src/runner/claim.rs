@@ -108,7 +108,7 @@ impl Runner {
         let wanted = ["P0", "P1", "P2", "P3", "P4"]
             .into_iter()
             .filter(|p| crate::board::repo_priority(&have, p).is_none())
-            .filter_map(super::triage::comment::priority_label);
+            .filter_map(super::triage::rewrite::priority_label);
         if let Err(e) = self.make_missing_labels(wanted) {
             self.notes.push(e);
         }

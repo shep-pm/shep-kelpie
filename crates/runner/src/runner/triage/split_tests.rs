@@ -6,10 +6,11 @@ use std::sync::Mutex;
 use serde_json::{Value, json};
 
 use super::pick_tests::{MAINTAINER, issue, list, rig_with};
-use super::research_tests::{APP, triage};
+use super::research_tests::{APP, WORDS, calls, facts, reply, triage};
+use crate::ports::Role;
 use crate::runner::{Runner, step};
 use crate::state::StateStore;
-use crate::test::Rig;
+use crate::test::{Rig, Scripted};
 
 const BODY: &str = "Touches:\n- `src/start.rs` (new)\n\n## What to build\n\n- Fix the \
     crash on start.\n\n## Acceptance criteria\n\n- [ ] `runner::start::it_starts`\n";
@@ -456,4 +457,186 @@ fn a_split_cut_short_by_triage_going_off_says_so_at_the_next_start() {
         "{told:?}"
     );
     assert_eq!(rig.github.issues_created(), 0);
+}
+
+// What the triager answers for an issue it judges too big: a parent body and
+// `drafts`
+fn judged(drafts: &[Value]) -> Value {
+    json!({ "type": "enhancement", "kind": "fix", "priority": "P2", "body": BODY, "split": drafts })
+}
+
+// The triager's draft with no labels of its own: kelpie gives them
+fn drawn(title: &str, body: &str, after: &[usize], agent: Value) -> Value {
+    json!({ "title": title, "body": body, "priority": "P2", "kind": "fix", "after": after, "agent": agent })
+}
+
+// A rig whose maintainer's issue 30 never asks to be split, and whose triager
+// answers `found`
+fn splitting(found: impl FnOnce(&Rig) -> Value, pick: &str, author: &str) -> (Rig, Mutex<Runner>) {
+    let rig = rig_with(&format!("pick = \"{pick}\""));
+    rig.forge.set_repo_labels(&[
+        "needs-triage",
+        "ready-for-agent",
+        "kind:fix",
+        "priority: P2",
+    ]);
+    let mut parent = issue(&rig, 30, author, 5);
+    parent.title = "Translate the guide".to_owned();
+    parent.body = "The guide is English only. Translate it into nine languages.".to_owned();
+    list(&rig, parent);
+    rig.claude
+        .script_for(Role::Representative, [Scripted::Say(WORDS)]);
+    rig.claude.script_for(Role::Triager, [reply(found(&rig))]);
+    let runner = rig.open().unwrap();
+    (rig, runner)
+}
+
+// The labels each filed issue was created with, in order
+fn filed_labels(rig: &Rig) -> Vec<Vec<String>> {
+    (rig.github.writes().into_iter())
+        .filter(|(_, call)| call.path == "/repos/shep-pm/shep/issues")
+        .filter_map(|(_, call)| {
+            let body: Value = serde_json::from_str(call.body.as_deref()?).ok()?;
+            let labels = body["labels"].as_array()?.iter();
+            Some(
+                labels
+                    .filter_map(|l| l.as_str().map(str::to_owned))
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn the_triager_splits_an_issue_that_never_asked() {
+    let two = [
+        drawn("fix(a): first", BODY, &[], Value::Null),
+        drawn("fix(b): second", BODY, &[0], Value::Null),
+    ];
+    let (rig, runner) = splitting(|_| judged(&two), "maintainer", MAINTAINER);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(rig.github.issues_created(), 2);
+    assert_eq!(rig.forge.sub_issues_of(30), [900, 901]);
+    assert_eq!(rig.forge.links_added(), [(901, 900)]);
+    let writes = app_writes(&rig, 0);
+    assert!(
+        writes.iter().all(|w| w != "label #30 ready-for-agent"),
+        "{writes:?}"
+    );
+    assert!(
+        writes.contains(&"label #900 ready-for-agent".to_owned()),
+        "{writes:?}"
+    );
+    assert_eq!(rig.github.issue_edits(), [(30, BODY.trim_end().to_owned())]);
+    let said = facts(&rig);
+    assert!(said.contains("1. fix(a): first"), "{said}");
+    assert!(said.contains("2. fix(b): second (after 1)"), "{said}");
+    assert!(!said.contains("Say the issue is ready"), "{said}");
+    assert_eq!(parent_record(&rig, &runner)["step"], "done");
+    assert_eq!(filed_labels(&rig)[0], ["kind:fix", "priority: P2"]);
+}
+
+#[test]
+fn a_named_implementer_gets_a_pinned_agent_label() {
+    let drafts = [
+        drawn("fix(a): first", BODY, &[], json!("opus-high")),
+        drawn("fix(b): second", BODY, &[0], json!("sonnet-high")),
+    ];
+    let (rig, runner) = splitting(|_| judged(&drafts), "maintainer", MAINTAINER);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let labels = filed_labels(&rig);
+    assert_eq!(labels[0], ["kind:fix", "priority: P2", "agent:opus-high!"]);
+    assert_eq!(
+        labels[1],
+        ["kind:fix", "priority: P2", "agent:sonnet-high!"]
+    );
+    let writes = app_writes(&rig, 0);
+    assert!(
+        writes.contains(&"make agent:opus-high!".to_owned()),
+        "{writes:?}"
+    );
+}
+
+#[test]
+fn an_unknown_implementer_is_refused_and_files_nothing() {
+    let drafts = [
+        drawn("fix(a): first", BODY, &[], json!("opus-high")),
+        drawn("fix(b): second", BODY, &[0], json!("gpt-9")),
+    ];
+    let (rig, runner) = splitting(|_| judged(&drafts), "maintainer", MAINTAINER);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(rig.github.issues_created(), 0, "not even the good draft");
+    let said = facts(&rig);
+    assert!(said.contains("draft 2"), "{said}");
+    assert!(said.contains("agent:gpt-9!"), "{said}");
+    assert!(said.contains("names no implementer"), "{said}");
+    assert!(!said.contains("draft 1"), "{said}");
+    assert_eq!(saved_split(&rig), Value::Null);
+    assert_eq!(rig.github.issue_edits(), []);
+    assert!(app_writes(&rig, 0).contains(&"label #30 needs-triage".to_owned()));
+}
+
+#[test]
+fn a_family_named_gives_one_agent_and_an_assumed_line() {
+    let said = "Assumed: opus-high, the strongest of the opus family. Say otherwise.";
+    let body = format!("{BODY}\n{said}\n");
+    let drafts = [drawn("fix(a): first", &body, &[], json!("opus-high"))];
+    let (rig, runner) = splitting(|_| judged(&drafts), "maintainer", MAINTAINER);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(filed_labels(&rig)[0][2], "agent:opus-high!");
+    assert!(
+        filed_bodies(&rig)[0].contains(said),
+        "{}",
+        filed_bodies(&rig)[0]
+    );
+    let asked = calls(&rig, Role::Triager).remove(0).call.prompt;
+    assert!(
+        asked.contains("names a family and no one agent, pick one"),
+        "{asked}"
+    );
+}
+
+#[test]
+fn a_split_on_someone_elses_issue_is_not_filed() {
+    let drafts = [drawn("fix(a): first", BODY, &[], Value::Null)];
+    let (rig, runner) = splitting(|_| judged(&drafts), "all", "newcomer");
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(rig.github.issues_created(), 0);
+    assert_eq!(rig.forge.sub_issues_of(30), Vec::<u64>::new());
+    assert_eq!(saved_split(&rig), Value::Null);
+    assert_eq!(rig.github.issue_edits(), []);
+    let said = facts(&rig);
+    assert!(!said.contains("fix(a): first"), "{said}");
+    assert!(app_writes(&rig, 0).contains(&"label #30 needs-triage".to_owned()));
+}
+
+#[test]
+fn a_draft_naming_a_local_path_is_refused() {
+    let leaking = |rig: &Rig| {
+        let private = rig.home.path().join("notes.md");
+        let body = format!("Touches:\n- `{}`\n\n{BODY}", private.display());
+        judged(&[
+            drawn("fix(a): first", BODY, &[], Value::Null),
+            drawn("fix(b): second", &body, &[0], Value::Null),
+        ])
+    };
+    let (rig, runner) = splitting(leaking, "maintainer", MAINTAINER);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(rig.github.issues_created(), 0, "not even the clean draft");
+    let said = facts(&rig);
+    assert!(said.contains("draft 2"), "{said}");
+    assert!(said.contains("a path on this machine"), "{said}");
+    assert_eq!(saved_split(&rig), Value::Null);
 }
