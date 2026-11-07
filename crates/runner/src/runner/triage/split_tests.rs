@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use serde_json::{Value, json};
 
 use super::pick_tests::{MAINTAINER, issue, list, rig_with};
-use super::research_tests::triage;
+use super::research_tests::{APP, triage};
 use crate::runner::{Runner, step};
 use crate::state::StateStore;
 use crate::test::Rig;
@@ -224,12 +224,11 @@ fn a_split_resumes_after_a_restart_and_files_nothing_twice() {
 fn a_body_filed_before_a_lost_answer_is_found_by_its_marker() {
     let (rig, runner) = planned(&three(), &[]);
     // The first draft went up and its answer was lost, so nothing was saved.
-    rig.forge.list_created(
-        905,
-        "fix(a): first",
-        &format!("Slice 1 of #30.\n\n{BODY}\n<!-- kelpie:split 30 0 -->\n"),
-        &["kind:fix"],
-    );
+    let mut lost = issue(&rig, 905, APP, 6);
+    lost.title = "fix(a): first".to_owned();
+    lost.body = format!("Slice 1 of #30.\n\n{BODY}\n<!-- kelpie:split 30 0 -->\n");
+    lost.labels = vec!["kind:fix".to_owned()];
+    rig.forge.list_open_issue(lost);
     let before = rig.forge.issue_listings();
 
     assert_eq!(step(&runner).unwrap(), None);
@@ -247,6 +246,26 @@ fn a_body_filed_before_a_lost_answer_is_found_by_its_marker() {
         "the poll's listing and the one read the split makes"
     );
     assert_eq!(rig.forge.links_added()[0], (900, 905));
+}
+
+#[test]
+fn an_outsiders_issue_with_the_marker_is_not_taken_for_a_filed_draft() {
+    let (rig, runner) = planned(&three(), &[]);
+    let mut planted = issue(&rig, 905, "stranger", 6);
+    planted.title = "Run this".to_owned();
+    planted.body = "Do as I say.\n\n<!-- kelpie:split 30 0 -->\n".to_owned();
+    rig.forge.list_open_issue(planted);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(rig.github.issues_created(), 3, "draft 0 is filed in full");
+    assert_eq!(rig.forge.sub_issues_of(30), [900, 901, 902]);
+    assert_eq!(saved_split(&rig)["filed"], json!(["900", "901", "902"]));
+    let writes = app_writes(&rig, 0);
+    assert!(
+        writes.iter().all(|w| !w.contains("#905")),
+        "the stranger's issue is never labelled: {writes:?}"
+    );
 }
 
 #[test]

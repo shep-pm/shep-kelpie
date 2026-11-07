@@ -288,7 +288,10 @@ impl Runner {
             },
         };
         let wanted = marker(issue, index);
+        // The marker is public, so only an issue its own author could have filed
+        // counts: the App's, or the maintainer's where `gh` files.
         let found = (open.iter())
+            .filter(|i| self.own_author(&i.author))
             .find(|i| i.body.trim_end().lines().last() == Some(wanted.as_str()))
             .and_then(|i| TicketId::from_issue(i.number));
         let child = match found {
