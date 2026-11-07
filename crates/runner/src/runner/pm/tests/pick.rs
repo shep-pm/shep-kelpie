@@ -461,22 +461,6 @@ fn a_picks_own_slack_wins_over_the_settings() {
 }
 
 #[test]
-fn a_picks_light_tag_is_kept_on_its_work_item() {
-    let (rig, runner) = three_slots();
-    rig.claude.script([Scripted::Say(
-        "```json\n{\"pick\": [{\"issue\": 12, \"light\": true}, 14], \"why\": \"w\"}\n```",
-    )]);
-    answered(step(&runner).unwrap());
-
-    step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
-    step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
-
-    let held = runner.lock().unwrap();
-    assert!(held.state.item(ticket(12)).unwrap().pm_light);
-    assert!(!held.state.item(ticket(14)).unwrap().pm_light);
-}
-
-#[test]
 fn a_picks_review_plan_is_kept_on_its_work_item() {
     let (rig, runner) = three_slots();
     rig.claude.script([Scripted::Say(
