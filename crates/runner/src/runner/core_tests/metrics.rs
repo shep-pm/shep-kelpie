@@ -145,20 +145,11 @@ fn a_turn_s_tokens_and_cost_are_counted_by_role_and_type() {
     assert_eq!(spent, [(String::new(), 0.25)]);
 }
 
-fn turn_on_the_code_graph(rig: &Rig, script: Option<&str>) {
-    let off = "[app.dogs.kelpie.code_graph]\nenabled = false\nworker = false";
-    rig.edit_settings(|s| {
-        assert!(s.contains(off), "the example's code graph moved");
-        s.replace(
-            off,
-            "[app.dogs.kelpie.code_graph]\nenabled = true\nworker = true",
-        )
-    });
-    if let Some(script) = script {
-        let binary = rig.paths().tools.code_graph();
-        std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
-        write_script(&binary, script);
-    }
+// The code graph's server, installed as `script`
+fn install_the_code_graph(rig: &Rig, script: &str) {
+    let binary = rig.paths().tools.code_graph();
+    std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+    write_script(&binary, script);
 }
 
 #[test]
@@ -334,10 +325,9 @@ fn a_finished_line_with_no_agent_or_kind_reads_unknown_and_none() {
 }
 
 #[test]
-fn an_enabled_code_graph_that_never_indexes_shows_as_on_with_no_ok_run() {
+fn an_installed_code_graph_that_never_indexes_shows_as_on_with_no_ok_run() {
     let failing = "#!/bin/sh\necho 'endpoint could not be created' >&2\nexit 1\n";
-    let (rig, _runner, _) =
-        Rig::parked_set("shep", |rig| turn_on_the_code_graph(rig, Some(failing)));
+    let (rig, _runner, _) = Rig::parked_set("shep", |rig| install_the_code_graph(rig, failing));
     let graph = [("feature", "code_graph")];
     assert_eq!(
         rig.samples.value("kelpie_feature_enabled", &graph),
@@ -355,17 +345,50 @@ fn an_enabled_code_graph_that_never_indexes_shows_as_on_with_no_ok_run() {
 }
 
 #[test]
-fn a_code_graph_whose_server_is_not_installed_counts_as_skipped() {
-    let (rig, _runner, _) = Rig::parked_set("shep", |rig| turn_on_the_code_graph(rig, None));
-    let skipped = [("feature", "code_graph"), ("outcome", "skipped")];
-    assert!(rig.samples.value("kelpie_feature_runs_total", &skipped) >= Some(1.0));
+fn a_code_graph_with_no_server_shows_as_off() {
+    let (rig, _runner, _) = Rig::parked_set("shep", |rig| {
+        // The key still loads, and nothing reads it.
+        let off = "[app.dogs.kelpie.code_graph]\nenabled = false";
+        rig.edit_settings(|s| s.replace(off, "[app.dogs.kelpie.code_graph]\nenabled = true"));
+    });
+    let graph = [("feature", "code_graph")];
+    assert_eq!(
+        rig.samples.value("kelpie_feature_enabled", &graph),
+        Some(0.0)
+    );
+    let any_run = rig.samples.sent().into_iter().any(|s| {
+        s.name == "kelpie_feature_runs_total"
+            && s.labels.contains(&("feature", "code_graph".into()))
+    });
+    assert!(!any_run, "no run of any outcome, `skipped` included");
+}
+
+#[test]
+fn the_code_graph_gauge_follows_the_server_as_it_is_installed_and_removed_between_calls() {
+    let rig = Rig::new("shep");
+    let runner = rig.open().unwrap();
+    let graph = [("feature", "code_graph")];
+    let gauge = || rig.samples.value("kelpie_feature_enabled", &graph);
+    assert_eq!(gauge(), Some(0.0), "no server when the runner opened");
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude
+        .script([Scripted::Push("work.txt", "work\n"), Scripted::Text(CLEAN)]);
+
+    install_the_code_graph(&rig, "#!/bin/sh\nexit 0\n");
+    step(&runner).unwrap(); // the worker's first turn
+    assert_eq!(gauge(), Some(1.0), "installed while the runner ran");
+
+    std::fs::remove_file(rig.paths().tools.code_graph()).unwrap();
+    step(&runner).unwrap(); // round 1, qwen: clean by default
+    step(&runner).unwrap(); // round 2, claude: scripted clean above
+    assert_eq!(gauge(), Some(0.0), "removed while the runner ran");
 }
 
 #[test]
 fn an_indexed_code_graph_counts_as_ok() {
     let indexer = "#!/bin/sh\nexit 0\n";
-    let (rig, _runner, _) =
-        Rig::parked_set("shep", |rig| turn_on_the_code_graph(rig, Some(indexer)));
+    let (rig, _runner, _) = Rig::parked_set("shep", |rig| install_the_code_graph(rig, indexer));
     let ok = [("feature", "code_graph"), ("outcome", "ok")];
     assert!(rig.samples.value("kelpie_feature_runs_total", &ok) >= Some(1.0));
 }
@@ -384,10 +407,11 @@ fn failed_call() -> String {
 }
 
 // Issue 7's worker turn and a Claude reviewer's round, with the code graph, each call writing its
-// transcript as given
+// transcript as given. The worker is given no server, so the reviewer's transcript is the one
+// that names it.
 fn worker_and_reviewer(worker: String, reviewer: String) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new("shep");
-    turn_on_the_code_graph(&rig, Some("#!/bin/sh\nexit 0\n"));
+    install_the_code_graph(&rig, "#!/bin/sh\nexit 0\n");
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
@@ -401,13 +425,38 @@ fn worker_and_reviewer(worker: String, reviewer: String) -> (Rig, Mutex<Runner>)
     (rig, runner)
 }
 
+// Issue 7's worker turn and two Claude reviewers' rounds, with the code graph, each reviewer's
+// call writing its transcript as given
+fn two_reviewers(first: String, second: String) -> (Rig, Mutex<Runner>) {
+    let rig = Rig::new("shep");
+    install_the_code_graph(&rig, "#!/bin/sh\nexit 0\n");
+    let claude = "---\nrole: reviewer\nharness: claude-code\nmodel: claude-opus-5-5\n\
+                  effort: high\n---\nRead it for defects.\n";
+    rig.write_agent("claude-one", claude);
+    rig.write_agent("claude-two", claude);
+    rig.reviewers(&["claude-one", "claude-two"]);
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude.script([
+        Scripted::Push("work.txt", "work\n"),
+        Scripted::Transcribed(first, Box::new(Scripted::Text(CLEAN))),
+        Scripted::Transcribed(second, Box::new(Scripted::Text(CLEAN))),
+    ]);
+    for _ in 0..4 {
+        step(&runner).unwrap();
+    }
+    (rig, runner)
+}
+
 #[test]
 fn a_server_that_failed_to_connect_is_counted_failed_and_noted_once_while_it_stands() {
     let (rig, runner) = worker_and_reviewer(failed_call(), failed_call());
     let failed = [("outcome", "failed"), ("server", "codebase-memory-mcp")];
     assert_eq!(
         rig.samples.value("kelpie_mcp_servers_total", &failed),
-        Some(2.0)
+        Some(1.0),
+        "the reviewer's call alone was given it"
     );
     let graph = [("server", "codebase-memory-mcp")];
     assert_eq!(
@@ -420,7 +469,7 @@ fn a_server_that_failed_to_connect_is_counted_failed_and_noted_once_while_it_sta
         .filter(|n| n.contains("`codebase-memory-mcp`"))
         .collect();
     assert_eq!(said.len(), 1, "{notes:#?}");
-    assert!(said[0].contains("issue #7's worker"), "{}", said[0]);
+    assert!(said[0].contains("issue #7's reviewer"), "{}", said[0]);
     assert!(said[0].contains("CONNECTION_CLOSED"), "{}", said[0]);
     let status = rig.ask(&runner, "status", None);
     assert_eq!(status["standing"], serde_json::json!([said[0]]));
@@ -428,7 +477,7 @@ fn a_server_that_failed_to_connect_is_counted_failed_and_noted_once_while_it_sta
 
 #[test]
 fn a_failed_server_that_connects_in_a_later_call_ends_its_standing_note() {
-    let (rig, runner) = worker_and_reviewer(failed_call(), FAILED.to_owned());
+    let (rig, runner) = two_reviewers(failed_call(), FAILED.to_owned());
     let outcome = |outcome| {
         let labels = [("outcome", outcome), ("server", "codebase-memory-mcp")];
         rig.samples.value("kelpie_mcp_servers_total", &labels)

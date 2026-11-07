@@ -160,9 +160,7 @@ pub(super) fn checks(
         lines.push(instructions(at("instructions"), &settings));
     }
     lines.extend(super::e2e::line(at("e2e"), &settings, probes.host));
-    if settings.code_graph.enabled {
-        lines.push(code_graph(at("code graph"), &paths));
-    }
+    lines.extend(code_graph(at("code graph"), &paths));
     if settings.browser.enabled {
         lines.push(browser(at("browser"), &paths, probes.host));
     }
@@ -603,23 +601,15 @@ fn checkout(subject: String, settings: &Settings) -> (Line, Option<ForgeSlug>) {
     }
 }
 
-// A runner whose server is missing goes on without a graph, but the project turned it on.
-fn code_graph(subject: String, paths: &ProjectPaths) -> Line {
-    let binary = paths.tools.code_graph();
-    match paths.tools.has_code_graph() {
-        true => Line::ok(
+// A machine without the server runs its calls without a graph, which is no fault.
+fn code_graph(subject: String, paths: &ProjectPaths) -> Option<Line> {
+    paths.tools.has_code_graph().then(|| {
+        let binary = paths.tools.code_graph();
+        Line::ok(
             subject,
             format!("the code graph server is at {}", binary.display()),
-        ),
-        false => Line::missing(
-            subject,
-            format!(
-                "the code graph server is not at {}, so the project's calls run without a code graph",
-                binary.display()
-            ),
-            "run `shep kelpie tools install`, or turn `code_graph.enabled` off",
-        ),
-    }
+        )
+    })
 }
 
 // A runner whose browser is missing goes on without one, but the project turned it on.

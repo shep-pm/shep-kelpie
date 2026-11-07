@@ -141,6 +141,33 @@ mod tests {
     }
 
     #[test]
+    fn a_fenced_path_in_the_skills_example_fails_and_the_skill_says_what_to_do_instead() {
+        let (title, body, labels) = example(TYPED);
+        let path = ".claude/skills/x/SKILL.md";
+        let body = body.replace("`docs/design/plugins.md`", &format!("`{path}`"));
+        let harness = "Claude Code";
+        let fenced = Failure::Fenced {
+            path: path.to_owned(),
+            harness,
+        };
+        assert_eq!(check(&title, &body, &labels), [fenced]);
+
+        let (format, checking) = TEXT.split_once("## Check it").unwrap();
+        let touches = format
+            .lines()
+            .find(|l| l.contains("**`Touches:`**"))
+            .unwrap();
+        for said in ["fence", "ready-for-human", "Blocked by:"] {
+            assert!(touches.contains(said), "{said}: {touches}");
+        }
+        let filing = checking
+            .lines()
+            .find(|l| l.contains("ready-for-human"))
+            .unwrap();
+        assert!(filing.contains("fence"), "{filing}");
+    }
+
+    #[test]
     fn the_skill_is_a_plugin_that_names_itself() {
         let dir = tempfile::tempdir().unwrap();
         let plugin = dir.path().join("plugin");
