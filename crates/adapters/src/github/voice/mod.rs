@@ -233,6 +233,11 @@ impl Voice for AppVoice {
         self.write(repo, &Call::label(repo, label)).map(drop)
     }
 
+    fn rename_label(&self, repo: &ForgeSlug, from: &str, to: &str) -> Result<(), ForgeError> {
+        self.write(repo, &Call::rename_label(repo, from, to))
+            .map(drop)
+    }
+
     fn set_issue_label(
         &self,
         repo: &ForgeSlug,

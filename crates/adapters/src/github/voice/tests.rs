@@ -278,6 +278,38 @@ fn a_label_is_made_and_put_on_and_taken_off_an_issue() {
 }
 
 #[test]
+fn a_label_is_renamed_by_its_old_name() {
+    let (voice, github, _home) = voiced();
+
+    voice
+        .rename_label(&slug("shep-pm/koji"), "agent:opus high", "agent:opus xhigh")
+        .unwrap();
+
+    let [(_, call)] = writes(&github).try_into().unwrap();
+    assert_eq!(
+        (call.verb, call.path.as_str(), call.body.as_deref()),
+        (
+            Verb::Patch,
+            "/repos/shep-pm/koji/labels/agent%3Aopus%20high",
+            Some(r#"{"new_name":"agent:opus xhigh"}"#)
+        )
+    );
+}
+
+#[test]
+fn a_refused_rename_is_an_error() {
+    let (voice, github, _home) = voiced();
+    let koji = slug("shep-pm/koji");
+    // The first rename mints the token; the second is refused as absent.
+    voice.rename_label(&koji, "a", "b").unwrap();
+    github.fail_next(ApiError::Refused(404));
+
+    let renamed = voice.rename_label(&koji, "gone", "new");
+
+    assert!(matches!(renamed, Err(ForgeError::App(_))), "{renamed:?}");
+}
+
+#[test]
 fn a_label_the_issue_lacks_is_as_good_as_taken_off() {
     let (voice, github, _home) = voiced();
     let koji = slug("shep-pm/koji");

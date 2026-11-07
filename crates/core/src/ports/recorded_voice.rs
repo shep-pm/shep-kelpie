@@ -140,6 +140,10 @@ impl Voice for RecordedVoice {
         self.call(Kind::AppCreateLabel, |v| v.create_label(repo, label))
     }
 
+    fn rename_label(&self, repo: &ForgeSlug, from: &str, to: &str) -> Result<(), ForgeError> {
+        self.call(Kind::AppCreateLabel, |v| v.rename_label(repo, from, to))
+    }
+
     fn set_issue_label(
         &self,
         repo: &ForgeSlug,
