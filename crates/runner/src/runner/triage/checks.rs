@@ -19,7 +19,7 @@ use super::{TRIAGE_LABELS, opened_by_us_or_people};
 use crate::board::{READY, ReadyIssue, Skip, TRIAGE, check};
 use crate::ports::{ForgeError, OpenIssue, OpenPull};
 use crate::settings::TriagePick;
-use crate::state::{CheckTriage, IssueCheck, TriageStep};
+use crate::state::{CheckTriage, IssueCheck, StateError, TriageStep};
 
 // What a check asks of the forge, once its result is new
 enum Act {
@@ -30,6 +30,9 @@ enum Act {
     // Nothing to write
     Kept,
 }
+
+/// The most closed issues whose `ready_seen` the check keeps
+pub(super) const CLOSED_KEPT: usize = 200;
 
 /// The most forge writes one poll's check makes; the rest wait for the next poll
 pub(super) const CHECK_WRITES: usize = 20;
@@ -71,8 +74,17 @@ impl Runner {
         pulls: Option<&Result<Vec<OpenPull>, ForgeError>>,
         busy: &BTreeSet<u64>,
     ) {
+        // A closed issue's result is kept while it holds `ready_seen`, the newest
+        // `CLOSED_KEPT` of them, so a reopened issue is not made ready again.
+        let is_open = |issue: u64| open.iter().any(|i| i.number == issue);
+        let mut closed: Vec<u64> = (self.state.checks.iter())
+            .filter(|c| c.ready_seen && !is_open(c.issue))
+            .map(|c| c.issue)
+            .collect();
+        closed.sort_unstable_by(|a, b| b.cmp(a));
+        closed.truncate(CLOSED_KEPT);
         let mut kept: Vec<IssueCheck> = (self.state.checks.iter())
-            .filter(|c| open.iter().any(|i| i.number == c.issue))
+            .filter(|c| is_open(c.issue) || closed.contains(&c.issue))
             .cloned()
             .collect();
         let mut poll = Poll {
@@ -96,6 +108,13 @@ impl Runner {
             let mut key = check::key(&issue.title, &issue.body, &labels);
             let at = kept.iter().position(|c| c.issue == issue.number);
             let ran = at.is_some_and(|at| kept[at].triage == CheckTriage::Ran);
+            // A listing that carries the label is the sight of it, whatever the
+            // edit. Nothing is read from the forge for it.
+            let mut ready_seen =
+                carries(&labels, READY) || at.is_some_and(|at| kept[at].ready_seen);
+            if let Some(at) = at {
+                kept[at].ready_seen = ready_seen;
+            }
             if at.is_some_and(|at| kept[at].key == key) && !ran {
                 continue;
             }
@@ -131,7 +150,7 @@ impl Runner {
                 (false, false) => (CheckTriage::Owed, Act::Kept),
             };
             let done = match act {
-                Act::Passed => self.check_passed(issue, &mut poll),
+                Act::Passed => self.check_passed(issue, &mut ready_seen, &mut poll),
                 Act::Refused => self.check_refused(issue, key, &failures, &mut poll),
                 Act::Kept => true,
             };
@@ -143,6 +162,7 @@ impl Runner {
                 key,
                 failures,
                 triage,
+                ready_seen,
             };
             match at {
                 Some(at) => kept[at] = result,
@@ -219,6 +239,38 @@ impl Runner {
         ((unfinished || unposted) && !given_up) || self.flights.triaging() == Some(issue)
     }
 
+    // Says that `issue`'s `ready-for-agent` is not seen, because kelpie is taking it
+    // back for triage and its coming off is not the maintainer's
+    pub(super) fn check_ready_unseen(&mut self, issue: u64) -> Result<(), StateError> {
+        let mut next = self.state.clone();
+        let Some(kept) = next.checks.iter_mut().find(|c| c.issue == issue) else {
+            return Ok(());
+        };
+        if !kept.ready_seen {
+            return Ok(());
+        }
+        kept.ready_seen = false;
+        self.save(next)
+    }
+
+    // Says that `issue` has carried `ready-for-agent`, which kelpie put on
+    pub(super) fn check_ready_seen(&mut self, issue: u64) -> Result<(), StateError> {
+        let mut next = self.state.clone();
+        let Some(kept) = next.checks.iter_mut().find(|c| c.issue == issue) else {
+            return Ok(());
+        };
+        if kept.ready_seen {
+            return Ok(());
+        }
+        kept.ready_seen = true;
+        self.save(next)
+    }
+
+    // Whether `issue` carried `ready-for-agent` once, by the check's last result
+    pub(super) fn check_ready_was_seen(&self, issue: u64) -> bool {
+        (self.state.checks.iter()).any(|c| c.issue == issue && c.ready_seen)
+    }
+
     // Whether `issue` failed its last check and the triager has not run on it since
     pub(super) fn check_owed(&self, issue: u64) -> bool {
         (self.state.checks.iter()).any(|c| {
@@ -260,11 +312,11 @@ impl Runner {
             .collect()
     }
 
-    // Makes the maintainer's passing issue ready and takes `needs-triage` off.
-    // Puts `needs-triage` on anyone else's. Another triage label stands. So does
-    // an issue with a work item, or one an open pull request closes. Whether
-    // nothing is left to write.
-    fn check_passed(&mut self, issue: &OpenIssue, poll: &mut Poll) -> bool {
+    // Makes the maintainer's passing issue ready, `needs-triage` off, and sets
+    // `ready_seen`. Puts `needs-triage` on anyone else's. Another triage label
+    // stands, and so does a work item, an open pull request that closes it, or
+    // the maintainer's take-off of a label it carried. Whether nothing is left.
+    fn check_passed(&mut self, issue: &OpenIssue, ready_seen: &mut bool, poll: &mut Poll) -> bool {
         let number = issue.number;
         let decided = (issue.labels.iter())
             .any(|l| l != READY && l != TRIAGE && TRIAGE_LABELS.contains(&l.as_str()));
@@ -275,11 +327,18 @@ impl Runner {
             return false;
         };
         let wanted: &[(&str, bool)] = match self.is_own(&issue.author, &maintainer) {
+            true if *ready_seen && !carries(&issue.labels, READY) => {
+                self.notes.push(format!(
+                    "check #{number}: the maintainer took `{READY}` off, so it stays off"
+                ));
+                &[]
+            }
             true => match poll.pulls {
                 Some(Ok(pulls)) if pulls.iter().any(|p| p.closes.contains(&number)) => {
                     return false;
                 }
-                Some(Ok(_)) => &[(READY, true), (TRIAGE, false)],
+                // `ready-for-agent` goes on last, so no write can fail after it
+                Some(Ok(_)) => &[(TRIAGE, false), (READY, true)],
                 _ => return false,
             },
             false if carries(&issue.labels, READY) => &[],
@@ -314,6 +373,7 @@ impl Runner {
                 return false;
             }
             if label == READY {
+                *ready_seen = true;
                 self.notes.push(format!(
                     "check #{number}: the maintainer's issue passes the issue check, so it is \
                      labelled `{READY}`"

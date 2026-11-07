@@ -191,6 +191,13 @@ impl Runner {
             self.triage_failed(issue, &format!("cannot make `{TRIAGE}`: {why}"), true);
             return false;
         }
+        // Kelpie's take-back is not the maintainer's, so the label is not seen
+        // when it comes off.
+        if off && let Err(e) = self.check_ready_unseen(issue) {
+            let why = format!("cannot save that `{READY}` is not seen: {e}");
+            self.triage_failed(issue, &why, true);
+            return false;
+        }
         if off && let Err(e) = self.label_issue(issue, READY, false) {
             let why = format!("cannot take `{READY}` off: {e}");
             self.triage_failed(issue, &why, !forge_is_busy(&e));
