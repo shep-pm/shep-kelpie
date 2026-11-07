@@ -985,3 +985,16 @@ fn a_passing_issue_whose_needs_triage_will_not_come_off_gets_no_ready_label_yet(
     assert_eq!(moves(&rig), ["label ready-for-agent"]);
     assert!(ready_seen(&rig), "{}", checks(&rig));
 }
+
+#[test]
+fn a_label_taken_off_stays_off_when_the_issue_is_closed_and_reopened() {
+    let (rig, runner) = taken_off("off");
+
+    rig.forge.unlist_open_issue(30);
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+    relisted(&rig, &edited(1), &PASSING_LABELS);
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(moves(&rig), ["label ready-for-agent"], "nothing put back");
+}

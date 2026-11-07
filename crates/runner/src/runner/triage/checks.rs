@@ -31,6 +31,9 @@ enum Act {
     Kept,
 }
 
+/// The most closed issues whose `ready_seen` the check keeps
+pub(super) const CLOSED_KEPT: usize = 200;
+
 /// The most forge writes one poll's check makes; the rest wait for the next poll
 pub(super) const CHECK_WRITES: usize = 20;
 
@@ -71,8 +74,17 @@ impl Runner {
         pulls: Option<&Result<Vec<OpenPull>, ForgeError>>,
         busy: &BTreeSet<u64>,
     ) {
+        // A closed issue's result is kept while it holds `ready_seen`, the newest
+        // `CLOSED_KEPT` of them, so a reopened issue is not made ready again.
+        let is_open = |issue: u64| open.iter().any(|i| i.number == issue);
+        let mut closed: Vec<u64> = (self.state.checks.iter())
+            .filter(|c| c.ready_seen && !is_open(c.issue))
+            .map(|c| c.issue)
+            .collect();
+        closed.sort_unstable_by(|a, b| b.cmp(a));
+        closed.truncate(CLOSED_KEPT);
         let mut kept: Vec<IssueCheck> = (self.state.checks.iter())
-            .filter(|c| open.iter().any(|i| i.number == c.issue))
+            .filter(|c| is_open(c.issue) || closed.contains(&c.issue))
             .cloned()
             .collect();
         let mut poll = Poll {
