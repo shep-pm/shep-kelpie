@@ -197,8 +197,10 @@ macro_rules! answering {
          says so on the ruling's thread, where the maintainer can reopen it. `design` is \
          true when the question changes an ADR, the glossary, a public interface or the \
          project's direction, and sends the ruling to the maintainer with your option as \
-         the one you recommend. A ruling you give no answer on goes to the maintainer as \
-         it stands."
+         the one you recommend. An over-budget ruling that `## Over-budget rulings` marks as \
+         the maintainer's takes your option as a recommendation: kelpie applies nothing, and \
+         the maintainer answers with your pick and why on its card. A ruling you give no \
+         answer on goes to the maintainer as it stands."
     };
 }
 

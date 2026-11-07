@@ -199,7 +199,8 @@ impl RulingName {
             | Self::Question
             | Self::ForeignChange
             | Self::AgentFiles
-            | Self::AgentFit => Some(false),
+            | Self::AgentFit
+            | Self::OverBudget => Some(false),
             Self::FollowUp
             | Self::Rebase
             | Self::StillRed
@@ -213,8 +214,7 @@ impl RulingName {
             | Self::PushRefused
             | Self::TurnTimeout
             | Self::TurnFailed
-            | Self::AdoptFailed
-            | Self::OverBudget => Some(true),
+            | Self::AdoptFailed => Some(true),
         }
     }
 

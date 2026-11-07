@@ -10,13 +10,21 @@
 //! and writes only by adding to its notes, which a hook enforces.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::path::Path;
 
+use crate::board::priority;
 use crate::hooks::Hooks;
-use crate::ports::{AgentCall, Fence, Guard, PM_NOTES, Reach, Role, Session, Tools};
+use crate::ports::{
+    AgentCall, Cost, Fence, Guard, PM_NOTES, Reach, Role, Session, Severity, Tools,
+};
 use crate::runner::Runner;
-use crate::settings::PmAgent;
+use crate::runner::briefing::phase_text;
+use crate::settings::{PmAgent, RulingName};
 use crate::skills::Step;
+use crate::state::{Ruling, RulingKind, Stuck};
+use crate::ticket::TicketId;
+use crate::work_item::{Phase, ReviewStage, WorkItem};
 
 /// `gh`'s config, its token with it, which a worker reads to open its pull
 /// request and the project manager never needs
@@ -135,7 +143,116 @@ impl Runner {
             }
         };
         text.push_str(&format!("\n{}", self.pm_diffs(&folder)));
+        text.push_str(&self.pm_over_budget());
         Ok(text)
+    }
+
+    /// The tickets of the work items parked on an over-budget ruling, whose
+    /// priority the wake reads through the ticket source with the lock let go
+    pub(super) fn over_budget_tickets(&self) -> Vec<TicketId> {
+        (self.state.rulings.iter())
+            .filter(|r| is_over_budget(r))
+            .filter_map(|r| r.issue)
+            .collect()
+    }
+
+    // The board's section on each over-budget ruling: whose call it is, and
+    // what the maintainer would weigh to raise the cap. Empty with none.
+    fn pm_over_budget(&self) -> String {
+        let rulings: Vec<&Ruling> = (self.state.rulings.iter())
+            .filter(|r| is_over_budget(r))
+            .collect();
+        if rulings.is_empty() {
+            return String::new();
+        }
+        let mut out = String::from(
+            "\n## Over-budget rulings\n\nEach work item over its spending cap, and what bears on \
+             raising it.\n",
+        );
+        for ruling in rulings {
+            out.push('\n');
+            out.push_str(&self.over_budget_block(ruling));
+        }
+        out
+    }
+
+    // One over-budget ruling's block.
+    fn over_budget_block(&self, ruling: &Ruling) -> String {
+        let RulingKind::Stuck(Stuck::OverBudget {
+            phase,
+            spent,
+            cap,
+            by_role,
+        }) = &ruling.kind
+        else {
+            return String::new();
+        };
+        let named = ruling
+            .issue
+            .map_or_else(|| "no work item".to_owned(), |t| t.shown());
+        let mut out = format!("### Ruling {} on {named}\n\n", ruling.id);
+        let call = match self.settings.rulings.pm_decides(RulingName::OverBudget) {
+            true => "yours: your option is applied, and the cap doubles",
+            false => "the maintainer's: your option is a recommendation, and nothing is applied",
+        };
+        let item = ruling.issue.and_then(|t| self.state.item(t));
+        let now = self.ports.clock.now();
+        let _ = writeln!(out, "- Whose call: {call}");
+        let _ = writeln!(out, "- How close: {}", phase_text(phase, now));
+        let _ = writeln!(out, "- Open findings: {}", open_findings(phase, item));
+        let _ = writeln!(out, "- CI: {}", ci(phase, item));
+        let touches = ruling
+            .issue
+            .map_or(String::new(), |t| self.touches(t, item));
+        let priority = ruling
+            .issue
+            .map_or_else(|| "priority not read".to_owned(), |t| self.priority_line(t));
+        let _ = writeln!(out, "- How critical: {priority}; {touches}");
+        let raises = item.map_or(0, |i| i.budget_raises);
+        let _ = writeln!(
+            out,
+            "- Spend: {} against a cap of {} (the worker {}, the reviewers {}), the cap raised \
+             {raises} time{} before",
+            dollars(*spent),
+            dollars(*cap),
+            dollars(by_role.worker),
+            dollars(by_role.reviewer),
+            if raises == 1 { "" } else { "s" }
+        );
+        out
+    }
+
+    // The priority `ticket`'s labels give it, as the wake's reads or a read now found.
+    fn priority_line(&self, ticket: TicketId) -> String {
+        let kept = self.pm.logs.as_ref().and_then(|logs| logs.found(ticket));
+        let issue =
+            (kept.cloned()).unwrap_or_else(|| self.ports.tickets.issue(&self.remote, ticket));
+        match issue {
+            Ok(issue) => match priority(&issue.labels) {
+                Some(p) => format!("priority {p}"),
+                None => "no priority label".to_owned(),
+            },
+            Err(_) => "priority not read".to_owned(),
+        }
+    }
+
+    // What the item touches and how heavy that is.
+    fn touches(&self, ticket: TicketId, item: Option<&WorkItem>) -> String {
+        let files = self.item_files(ticket);
+        let list = files.list();
+        let weight = item
+            .and_then(|i| i.weight.as_ref())
+            .map_or("not weighed".to_owned(), ToString::to_string);
+        if list.is_empty() {
+            return format!("touches no file the board knows, {weight}");
+        }
+        const SHOWN: usize = 12;
+        let mut names: Vec<&str> = list.iter().take(SHOWN).map(String::as_str).collect();
+        if list.len() > SHOWN {
+            names.push("...");
+        }
+        let names = self.shown(names.join(", "));
+        format!("touches {} file(s), {weight}: {names}", list.len())
     }
 
     // Its folder to read and write, the worktrees and checkout to read;
@@ -205,5 +322,70 @@ impl Runner {
             browser: None,
             mcp_servers: BTreeMap::new(),
         }
+    }
+}
+
+// Whether `ruling` is a work item's over-budget ruling.
+fn is_over_budget(ruling: &Ruling) -> bool {
+    matches!(ruling.kind, RulingKind::Stuck(Stuck::OverBudget { .. }))
+}
+
+// An amount as dollars and cents.
+fn dollars(cost: Cost) -> String {
+    format!("${:.2}", cost.usd())
+}
+
+// The findings still open when the work item was parked, by severity, then
+// the ones it holds and those its worker disputed.
+fn open_findings(phase: &Phase, item: Option<&WorkItem>) -> String {
+    let in_round = match phase {
+        Phase::Review(review) => match &review.stage {
+            ReviewStage::Found { findings, .. } => findings.as_slice(),
+            ReviewStage::Fixing { sent, .. } => sent.as_slice(),
+            ReviewStage::SecondLook { first } => first.as_slice(),
+            _ => &[],
+        },
+        _ => &[],
+    };
+    let count = |severity: Severity| in_round.iter().filter(|f| f.severity == severity).count();
+    let (held, disputed) = item.map_or((0, 0), |i| (i.held.len(), i.disputes.len()));
+    format!(
+        "{} high, {} medium, {} low in the round; {held} held; {disputed} disputed",
+        count(Severity::High),
+        count(Severity::Medium),
+        count(Severity::Low)
+    )
+}
+
+// What CI says of the work item's head: the run a review round awaited, then the marks the
+// item keeps. A head awaited green settles an older red.
+fn ci(phase: &Phase, item: Option<&WorkItem>) -> String {
+    let short = |head: &str| head.get(..7).unwrap_or(head).to_owned();
+    let awaited = match phase {
+        Phase::Review(review) => review.ci.as_deref(),
+        _ => None,
+    };
+    let green = awaited.is_some_and(|a| a.green);
+    let mut says = Vec::new();
+    if let Some(a) = awaited {
+        says.push(match a.green {
+            true => format!("green at {}", short(&a.head)),
+            false => format!("checks awaited at {}", short(&a.head)),
+        });
+    }
+    if let Some(item) = item {
+        if let Some(head) = item.red_head.as_ref().filter(|_| !green) {
+            says.push(format!("red at {}, sent to the worker", short(head)));
+        }
+        if let Some(head) = &item.reran {
+            says.push(format!("failed jobs rerun at {}", short(head)));
+        }
+        if let Some(head) = &item.unchecked {
+            says.push(format!("{} passed as skipped, with no checks", short(head)));
+        }
+    }
+    match says.is_empty() {
+        true => "not run on this head".to_owned(),
+        false => says.join("; "),
     }
 }

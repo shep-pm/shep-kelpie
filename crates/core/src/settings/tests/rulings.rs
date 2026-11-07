@@ -177,6 +177,21 @@ fn agent_fit_starts_false_in_the_map() {
     );
 }
 
+// No setting lifts an item's spend cap (ADR 0020), so the maintainer answers
+// and the project manager only recommends. A project that sets `true` keeps
+// the project manager answering.
+#[test]
+fn over_budget_starts_false() {
+    assert_eq!(RulingName::OverBudget.pm_default(), Some(false));
+    let map = rulings("pm_decides = { over-budget = true }");
+    assert!(
+        map.pm_decides(RulingName::OverBudget),
+        "true stays honoured"
+    );
+    assert_eq!(map.refusal(), None);
+    assert!(!rulings("").pm_decides(RulingName::OverBudget));
+}
+
 #[test]
 fn all_names_every_kind_once() {
     let walked: Vec<RulingName> =
