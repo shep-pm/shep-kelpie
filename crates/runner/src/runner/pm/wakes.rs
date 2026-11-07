@@ -545,11 +545,17 @@ impl Runner {
                     pull_request,
                     findings: findings.clone(),
                 },
-                (_, _, _, true) if self.pm_answers_ruling(ruling) => Wake::Answer {
-                    id,
-                    asked: brief(ruling).0,
-                    request: None,
-                },
+                // A ruling the map leaves to the maintainer may still be
+                // put to the project manager to recommend on.
+                (_, _, _, true)
+                    if self.pm_answers_ruling(ruling) || self.pm_recommends_ruling(ruling) =>
+                {
+                    Wake::Answer {
+                        id,
+                        asked: brief(ruling).0,
+                        request: None,
+                    }
+                }
                 _ => continue,
             };
             self.pm.asking.insert(id, at);

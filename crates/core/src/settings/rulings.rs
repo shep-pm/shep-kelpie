@@ -106,9 +106,9 @@ fn named_list<'de, D: Deserializer<'de>>(
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum RulingName {
-    /// A merge: CI is green on a head and a yes merges it. The project
-    /// manager answers it when the map sets `merge` `true`, and its yes then
-    /// merges a head that passed every gate (#1761, #1828).
+    /// A merge: CI is green on a head and a yes merges it. `true` merges a
+    /// head that passes every gate, project manager or not, while
+    /// `git.merging` is left out; `false` raises the ruling (#1761, #1828).
     Merge,
     /// The worker's question
     Question,
@@ -199,7 +199,8 @@ impl RulingName {
             | Self::Question
             | Self::ForeignChange
             | Self::AgentFiles
-            | Self::AgentFit => Some(false),
+            | Self::AgentFit
+            | Self::OverBudget => Some(false),
             Self::FollowUp
             | Self::Rebase
             | Self::StillRed
@@ -213,8 +214,7 @@ impl RulingName {
             | Self::PushRefused
             | Self::TurnTimeout
             | Self::TurnFailed
-            | Self::AdoptFailed
-            | Self::OverBudget => Some(true),
+            | Self::AdoptFailed => Some(true),
         }
     }
 

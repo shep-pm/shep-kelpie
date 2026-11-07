@@ -2,9 +2,9 @@
 //!
 //! Its runner sheep's `[app.dogs.kelpie]` table, every setting in a table of
 //! its own. Unknown keys are refused, so a misspelt or malformed setting
-//! stops the runner with a message naming it. `git.checkout`,
-//! `git.merging` and `ci.block` are required, with the tables that hold
-//! them and `[worker]`, and every other key has a default.
+//! stops the runner with a message naming it. `git.checkout` and
+//! `ci.block` are required, with the tables that hold them and
+//! `[worker]`, and every other key has a default.
 //! `settings.example.toml` beside this crate holds the defaults.
 
 use std::collections::BTreeMap;

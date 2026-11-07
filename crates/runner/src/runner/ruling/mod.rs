@@ -19,7 +19,6 @@ use super::{Names, Runner};
 use crate::board::HUMAN;
 use crate::ports::Timestamp;
 use crate::request::{RuleAction, RuleAnswer};
-use crate::settings::Merging;
 use crate::state::{Fix, Held, ProjectState, Resume, Ruling, RulingKind, StateError, Stuck};
 use crate::ticket::TicketId;
 use crate::work_item::{Known, Phase, Review, ReviewStage, Turn, WorkItem, foreign_change};
@@ -424,6 +423,7 @@ impl Runner {
         if let Some(did) = &did {
             next.record_event(now, format!("{asked}: {did}"));
         }
+        let merges_unasked = self.merges_unasked();
         if let Some(item) = next.work_items.iter_mut().find(|item| parked_on(item)) {
             if let (Some(filed), Some(pending)) = (follow_up, item.follow_ups.as_mut()) {
                 if filed {
@@ -452,12 +452,12 @@ impl Runner {
                 }
                 self.late_reads.remove(&item.issue);
             }
-            let regate = match (vouches, self.settings.git.merging) {
-                (true, Merging::Auto) => regate(&self.settings.git.checkout, item)?,
+            let regate = match (vouches, merges_unasked) {
+                (true, true) => regate(&self.settings.git.checkout, item)?,
                 // The round it returns to reads the worktree, so a fix the
                 // maintainer pushed is adopted before it, as under `auto`.
-                (true, Merging::Ask) if mid_review => regate(&self.settings.git.checkout, item)?,
-                (true, Merging::Ask) => {
+                (true, false) if mid_review => regate(&self.settings.git.checkout, item)?,
+                (true, false) => {
                     item.known.head = None;
                     false
                 }

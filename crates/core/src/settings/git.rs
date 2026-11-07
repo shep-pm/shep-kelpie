@@ -24,8 +24,10 @@ pub struct Git {
     /// items opened after it: each one in flight keeps the base it was cut for.
     #[serde(default)]
     pub base: Option<BaseBranch>,
-    /// Who merges a green, reviewed pull request
-    pub merging: Merging,
+    /// Who merges a green, reviewed pull request. While the table holds it,
+    /// it outranks `rulings.pm_decides.merge`.
+    #[serde(default)]
+    pub merging: Option<Merging>,
     /// Read by nothing: deferred findings always raise a follow-up ruling
     #[serde(default)]
     #[schemars(extend("deprecated" = true))]

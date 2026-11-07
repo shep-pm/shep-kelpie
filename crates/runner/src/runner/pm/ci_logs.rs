@@ -144,6 +144,8 @@ impl Runner {
         let parked: Vec<_> = parked.collect();
         let mut ends = self.pm_stand_reads();
         ends.extend(parked.iter().map(|p| p.ticket));
+        // An over-budget ruling's wake shows its issue's priority.
+        ends.extend(self.over_budget_tickets());
         ends.sort_unstable();
         ends.dedup();
         let mut pulls: Vec<u64> = parked.iter().filter_map(|p| p.pull).collect();
