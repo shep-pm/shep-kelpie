@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use super::{RepoPlugin, Servers, blobs, mcp, settings_on_default_branch};
-use crate::settings::{Part, RepoSetup};
+use crate::settings::Part;
 
 /// The plugin's name, which the repo's plugins never take: `kelpie-` names are refused
 pub(super) const NAME: &str = "kelpie-repo";
@@ -33,28 +33,20 @@ const FOLDERS: [Part; 3] = [Part::Skills, Part::Agents, Part::Commands];
 /// What the default branch's `.claude` holds, to be written into the plugin
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct Own {
-    /// The regular files of the folders that load, by path from the plugin
+    /// The regular files of `.claude`'s folders, by path from the plugin
     files: BTreeMap<PathBuf, Vec<u8>>,
-    /// The `hooks` of `.claude/settings.json`, where they load
+    /// The `hooks` of `.claude/settings.json`, where it has any
     hooks: Option<Value>,
-    /// The servers of `.mcp.json`, where they load
+    /// The servers of `.mcp.json`
     mcp: Servers,
 }
 
-/// The repo's own files as `setup` loads them, or none where it loads none or the repo has none
+/// The repo's own files, or none where the repo has none
 ///
 /// Reads `origin`'s default branch as the checkout last fetched it.
-pub(super) fn plan(
-    checkout: &Path,
-    base: &str,
-    into: &Path,
-    setup: &RepoSetup,
-) -> Option<RepoPlugin> {
-    if !setup.own {
-        return None;
-    }
+pub(super) fn plan(checkout: &Path, base: &str, into: &Path) -> Option<RepoPlugin> {
     super::default_head(checkout, base)?;
-    let read = read(checkout, base, setup);
+    let read = read(checkout, base);
     let own = match read {
         Ok(own) => own,
         Err(reason) => return Some(RepoPlugin::skipped(ID.to_owned(), reason)),
@@ -77,10 +69,9 @@ pub(super) fn plan(
     })
 }
 
-fn read(checkout: &Path, base: &str, setup: &RepoSetup) -> Result<Own, String> {
+fn read(checkout: &Path, base: &str) -> Result<Own, String> {
     let mut own = Own::default();
     let folders: Vec<(Part, PathBuf)> = (FOLDERS.into_iter())
-        .filter(|part| setup.loads(*part))
         .map(|part| (part, PathBuf::from(format!(".claude/{}", part.as_str()))))
         .collect();
     if !folders.is_empty() {
@@ -95,19 +86,15 @@ fn read(checkout: &Path, base: &str, setup: &RepoSetup) -> Result<Own, String> {
             }
         }
     }
-    if setup.loads(Part::Hooks) {
-        // The file was read for the repo's plugins already; a file that is not
-        // JSON is told there, and holds no hooks here.
-        if let Ok(Some((settings, _))) = settings_on_default_branch(checkout, base, false) {
-            own.hooks = settings["hooks"]
-                .as_object()
-                .filter(|hooks| !hooks.is_empty())
-                .map(|hooks| Value::Object(hooks.clone()));
-        }
+    // The file was read for the repo's plugins already; a file that is not
+    // JSON is told there, and holds no hooks here.
+    if let Ok(Some((settings, _))) = settings_on_default_branch(checkout, base, false) {
+        own.hooks = settings["hooks"]
+            .as_object()
+            .filter(|hooks| !hooks.is_empty())
+            .map(|hooks| Value::Object(hooks.clone()));
     }
-    if setup.loads(Part::Mcp) {
-        own.mcp = mcp_json(checkout, base);
-    }
+    own.mcp = mcp_json(checkout, base);
     Ok(own)
 }
 

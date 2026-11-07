@@ -4,18 +4,18 @@
 //! manager. Its comment waits for the answer, at most one wake. An answer
 //! that picks an option is applied at once. It is posted headed "Answered by
 //! the project manager", where a `no <note>` reopens it. An abstention, a
-//! `design` flag or a merge under `ask` goes to the maintainer. The card
-//! shows the project manager's pick.
+//! `design` flag or a yes on a merge ruling that warns of its head goes to
+//! the maintainer. The card shows the project manager's pick.
 
 use std::collections::BTreeMap;
 
 use super::act::{WORDS, plain};
 use crate::pm_answer::PmAnswer;
-use crate::runner::ruling;
+use crate::runner::ruling::{self, needs_pass};
 use crate::runner::thread_replies::Settler;
 use crate::runner::voice::{RECOMMENDS, SAYS, answer_for, brief, chosen, named, settled_comment};
 use crate::runner::{Answer, RuleError, Runner};
-use crate::settings::{Merging, RulingName};
+use crate::settings::RulingName;
 use crate::state::{Ruling, RulingKind, StateError, Stuck};
 use crate::ticket::TicketId;
 use crate::work_item::Phase;
@@ -132,17 +132,19 @@ impl Runner {
         if answer.design {
             return Err("it flagged design".into());
         }
-        // The settings file refuses `merge` as `true`, so this holds only a
-        // merge a hand-edited state brings.
-        let merge = matches!(ruling.kind, RulingKind::Merge { .. });
-        if merge && self.settings.git.merging == Merging::Ask {
-            return Err("a merge under `ask` is the maintainer's".into());
-        }
         let picked = named(&ruling.kind, key);
         let note = format!("Answered by the project manager: {}", answer.why);
         let Some(ruled) = answer_for(&ruling.kind, key, &note) else {
             return Err(format!("option {key} is not one it lists"));
         };
+        if matches!(ruled, Answer::Yes) && warned_head(ruling) {
+            return Err(
+                "a yes on a merge ruling that warns of an unread head, an unreviewed \
+                pass, open review bot threads, an unread fix or a borrowed head is the \
+                maintainer's"
+                    .into(),
+            );
+        }
         let by = Settler::Pm {
             answer: format!("{key}, {}", picked.unwrap_or_default()),
             why: answer.why.clone(),
@@ -287,6 +289,19 @@ impl Runner {
             )),
         }
     }
+}
+
+// Whether `ruling` is a merge ruling the gate raised with a warning on its
+// head: one only a new pass clears, or one that carries other pull requests'
+// commits. Only the maintainer's yes merges past it.
+fn warned_head(ruling: &Ruling) -> bool {
+    let RulingKind::Merge {
+        note_fix, late_fix, ..
+    } = &ruling.kind
+    else {
+        return false;
+    };
+    needs_pass(&ruling.kind) || *note_fix || *late_fix || ruling.borrowed
 }
 
 // Why a no to a ruling of `kind` sends the worker no note, where it does not:
