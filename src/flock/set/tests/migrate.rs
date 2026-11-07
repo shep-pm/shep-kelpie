@@ -90,15 +90,129 @@ async fn an_old_list_becomes_entries_in_the_map_and_is_removed() {
 #[tokio::test]
 async fn a_second_run_has_nothing_to_migrate() {
     let mut scene = Scene::holding(&with_slack(TABLE)).await;
+    scene.shepherd.holds_section(BOARD_SECTION);
     scene.migrate().await.unwrap();
-    let after = scene.table();
-    assert_eq!(scene.shepherd.writes().len(), 2);
+    let after = (scene.table(), scene.shepherd.section());
+    assert_eq!(scene.shepherd.writes().len(), 3);
 
     let said = scene.migrate().await.unwrap();
 
     assert_eq!(said, ["nothing to migrate"]);
     assert_eq!(scene.shepherd.writes(), []);
-    assert_eq!(scene.table(), after);
+    assert_eq!((scene.table(), scene.shepherd.section()), after);
+}
+
+// Kelpie's section with the agent board's list between two tables that stay.
+const BOARD_SECTION: &str = "[leases]\ncargo-test = 3\n[agent_board]\nprefer = [\"opus\", \"sonnet\"]\n\
+                             [gateways.paddock]\nurl = \"http://gpu-box:8700\"\nkey_env = \"KELPIE_TEST_KEY_NEVER_SET\"\n";
+
+fn sections_sent(shepherd: &mut FakeShepherd) -> Vec<String> {
+    let sent = shepherd.writes().into_iter();
+    sent.filter_map(|r| match r {
+        Request::SetDogConfig { toml, .. } => Some(toml.as_str().to_owned()),
+        _ => None,
+    })
+    .collect()
+}
+
+#[tokio::test]
+async fn the_agent_board_table_is_deleted_from_kelpies_section_and_named() {
+    let mut scene = Scene::new().await;
+    scene.shepherd.holds_section(BOARD_SECTION);
+
+    let said = scene.migrate().await.unwrap();
+
+    let gone = "[leases]\ncargo-test = 3\n[gateways.paddock]\nurl = \"http://gpu-box:8700\"\nkey_env = \"KELPIE_TEST_KEY_NEVER_SET\"\n";
+    assert_eq!(scene.shepherd.section(), gone);
+    assert_eq!(sections_sent(&mut scene.shepherd), [gone]);
+    assert_eq!(
+        said.last().unwrap(),
+        "kelpie: removed agent_board.prefer = [\"opus\", \"sonnet\"]",
+        "{said:?}"
+    );
+    assert!(
+        said[0].starts_with("project eevee: "),
+        "the projects come first: {said:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_secret_placeholder_and_a_comment_in_kelpies_section_survive_the_strip() {
+    let mut scene = Scene::new().await;
+    let before = "# who hears of a refusal\n[webhook]\nkind = \"ntfy\"\n\
+                  url = \"https://ntfy.example.net/kelpie\"\n\
+                  token = \"{{secret:ntfy}}\" # from the shepherd\ntrusted = true\n\
+                  \n# the maintainer's order\n[agent_board]\n# first most wanted\n\
+                  prefer = [\n  \"opus\",\n  # \"sonnet\",\n]\n\
+                  \n# how many suites at once\n[leases]\r\ncargo-test = 3\r\n";
+    scene.shepherd.holds_section(before);
+    scene.shepherd.holds_secret("ntfy", "tk_resolved");
+
+    scene.migrate().await.unwrap();
+
+    let after = "# who hears of a refusal\n[webhook]\nkind = \"ntfy\"\n\
+                 url = \"https://ntfy.example.net/kelpie\"\n\
+                 token = \"{{secret:ntfy}}\" # from the shepherd\ntrusted = true\n\
+                 \n# the maintainer's order\n\
+                 \n# how many suites at once\n[leases]\r\ncargo-test = 3\r\n";
+    let sent = sections_sent(&mut scene.shepherd);
+    assert_eq!(sent, [after]);
+    assert!(!sent[0].contains("tk_resolved"), "{}", sent[0]);
+}
+
+#[tokio::test]
+async fn a_section_with_no_agent_board_table_is_not_written() {
+    let mut scene = Scene::new().await;
+    let section = "[leases]\ncargo-test = 3\n";
+    scene.shepherd.holds_section(section);
+
+    let said = scene.migrate().await.unwrap();
+
+    assert!(said.iter().all(|l| !l.starts_with("kelpie")), "{said:?}");
+    assert_eq!(sections_sent(&mut scene.shepherd), Vec::<String>::new());
+    assert_eq!(scene.shepherd.section(), section);
+}
+
+#[tokio::test]
+async fn a_section_that_would_not_parse_after_the_strip_is_not_written() {
+    let mut scene = Scene::new().await;
+    scene.migrate().await.unwrap();
+    scene.shepherd.writes();
+    // A line of a string inside the table reads as the next table's header.
+    let section = "[agent_board]\nprefer = [\"opus\"]\nnote = \"\"\"\n[leases]\n\"\"\"\n";
+    scene.shepherd.holds_section(section);
+
+    let refused = scene.migrate().await.unwrap_err();
+
+    assert!(refused.contains("kelpie: not migrated"), "{refused}");
+    assert!(refused.contains("does not parse"), "{refused}");
+    assert_eq!(sections_sent(&mut scene.shepherd), Vec::<String>::new());
+    assert_eq!(scene.shepherd.section(), section);
+}
+
+// The list in a form no header block holds: a top-level dotted key, and an inline table.
+const INLINE_FORMS: [&str; 2] = [
+    "agent_board.prefer = [\"opus\"]\n[leases]\ncargo-test = 3\n",
+    "agent_board = { prefer = [\"opus\"] }\n[leases]\ncargo-test = 3\n",
+];
+
+#[tokio::test]
+async fn a_list_not_written_as_a_table_is_left_and_named_without_refusing() {
+    for section in INLINE_FORMS {
+        let mut scene = Scene::new().await;
+        scene.shepherd.holds_section(section);
+
+        let said = scene.migrate().await.unwrap();
+
+        let line = said.last().unwrap();
+        assert!(
+            line.starts_with("kelpie: left agent_board.prefer = [\"opus\"]"),
+            "{said:?}"
+        );
+        assert!(line.contains("by hand"), "{line}");
+        assert_eq!(sections_sent(&mut scene.shepherd), Vec::<String>::new());
+        assert_eq!(scene.shepherd.section(), section);
+    }
 }
 
 #[tokio::test]
