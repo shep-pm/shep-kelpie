@@ -401,12 +401,11 @@ compact_window = 200000
 # no review. `bots` are the logins whose pull requests are bumps, ignoring case
 # and a `[bot]` suffix. A bump that fails a check or its e2e run, or whose
 # checks are still pending or absent after `wait_hours` (above 0), is red:
-# `on_red = "close"` comments what failed, closes it and files an issue, and
-# `"leave"` logs it and leaves it open.
+# kelpie comments what failed, closes it and files an issue, and the project
+# manager decides from the issue what to do with it.
 # [app.dogs.kelpie.dependencies]
 # pick = "off"
 # bots = ["dependabot"]
-# on_red = "close"
 # web = ["web/", "package.json"]
 # wait_hours = 24
 

@@ -17,18 +17,7 @@ pub enum DependencyPick {
     On,
 }
 
-/// What kelpie does with a bump that is red
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum OnRed {
-    /// Comments with what failed, closes it and files an issue
-    #[default]
-    Close,
-    /// Logs it and does nothing more
-    Leave,
-}
-
-/// Whether kelpie merges the bumps bots open, and what it does with a red one
+/// Whether kelpie merges the bumps bots open
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Dependencies {
@@ -39,9 +28,6 @@ pub struct Dependencies {
     /// and a `[bot]` suffix. `["dependabot"]` when absent.
     #[serde(default = "default_bots")]
     pub bots: Vec<String>,
-    /// What a red bump gets: `close` or `leave`. `close` when absent.
-    #[serde(default)]
-    pub on_red: OnRed,
     /// Paths whose change makes a bump a web bump, which also needs a passing
     /// end-to-end run. A path ending in `/` is a folder. Empty when absent.
     #[serde(default)]
@@ -57,7 +43,6 @@ impl Default for Dependencies {
         Self {
             pick: DependencyPick::default(),
             bots: default_bots(),
-            on_red: OnRed::default(),
             web: Vec::new(),
             wait_hours: default_wait_hours(),
         }
