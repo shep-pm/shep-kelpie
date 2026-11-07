@@ -123,11 +123,10 @@ fn an_item_on_an_unlisted_implementer_paces_on_its_account_too() {
     );
 }
 
-// The `named("shep", AS_IS)` rig, reopened on a Codex day that began with `used` percent of
-// its week spent, with a ready issue 7 pinned to `codex`, which the project does not list.
-fn codex_day_began(used: u32) -> (Rig, Mutex<Runner>) {
+// The `named("shep", AS_IS)` rig with a ready issue 7 pinned to `codex`, which the project
+// does not list.
+fn codex_pinned_issue() -> (Rig, Mutex<Runner>) {
     let (rig, runner) = named("shep", AS_IS);
-    let runner = reopened(&rig, runner, || rig.codex_day_began(used));
     rig.forge.list_ready(7, false);
     rig.forge.label(7, "agent:codex!");
     (rig, runner)
@@ -136,7 +135,6 @@ fn codex_day_began(used: u32) -> (Rig, Mutex<Runner>) {
 #[test]
 fn a_first_pick_the_pacer_holds_gives_the_boards_second() {
     let (rig, runner) = named("shep", AS_IS);
-    let runner = reopened(&rig, runner, || rig.codex_day_began(0));
     rig.forge.list_ready(7, false);
     rig.agent_board.ranks(&["codex", "sonnet-high"]);
     rig.codex_meter.set(Rig::utilization(100, 0));
@@ -164,7 +162,6 @@ const ONLY_QWEN: Agents = (
 #[test]
 fn a_later_pick_whose_account_is_unread_is_read_before_the_walk_gives_up() {
     let (rig, runner) = named("shep", ONLY_QWEN);
-    let runner = reopened(&rig, runner, || rig.codex_day_began(0));
     rig.forge.list_ready(7, false);
     rig.agent_board.ranks(&["codex", "sonnet-high"]);
     rig.codex_meter.set(Rig::utilization(100, 0));
@@ -182,7 +179,7 @@ fn a_later_pick_whose_account_is_unread_is_read_before_the_walk_gives_up() {
 
 #[test]
 fn a_paced_pin_waits_and_opens_on_no_other_agent() {
-    let (rig, runner) = codex_day_began(0);
+    let (rig, runner) = codex_pinned_issue();
     rig.agent_board.ranks(&["codex", "sonnet-high"]);
     rig.codex_meter.set(Rig::utilization(100, 0));
 
@@ -202,7 +199,7 @@ fn a_paced_pin_waits_and_opens_on_no_other_agent() {
 
 #[test]
 fn a_ready_issue_on_an_unlisted_labelled_implementer_is_held_by_its_account() {
-    let (rig, runner) = codex_day_began(0);
+    let (rig, runner) = codex_pinned_issue();
     rig.codex_meter.set(Rig::utilization(100, 0));
 
     let (kind, reason) = held(step(&runner).unwrap());
@@ -219,7 +216,6 @@ fn a_ready_issue_on_an_unlisted_labelled_implementer_is_held_by_its_account() {
 #[test]
 fn a_pick_the_pacer_holds_gives_the_item_to_the_boards_next_agent() {
     let (rig, runner) = named("shep", (&["sonnet-high", "codex"], "pm = \"pm\"\n"));
-    let runner = reopened(&rig, runner, || rig.codex_day_began(0));
     rig.forge.list_ready(7, false);
     rig.forge.list_ready(9, false);
     rig.codex_meter.set(Rig::utilization(100, 0));
@@ -256,7 +252,7 @@ fn a_pick_the_pacer_holds_gives_the_item_to_the_boards_next_agent() {
 
 #[test]
 fn a_ready_issue_on_an_unlisted_labelled_implementer_dispatches_when_its_account_is_clear() {
-    let (rig, runner) = codex_day_began(0);
+    let (rig, runner) = codex_pinned_issue();
     rig.codex_meter.set(Rig::utilization(5, 0));
 
     assert!(dispatched(&step(&runner).unwrap()));
@@ -267,7 +263,7 @@ fn a_ready_issue_on_an_unlisted_labelled_implementer_dispatches_when_its_account
 
 #[test]
 fn an_issue_held_by_its_labelled_account_never_holds_a_ready_issue_behind_it() {
-    let (rig, runner) = codex_day_began(0);
+    let (rig, runner) = codex_pinned_issue();
     rig.codex_meter.set(Rig::utilization(100, 0));
     rig.forge.list_ready(8, false);
 
@@ -318,7 +314,6 @@ fn a_project_all_on_codex_paces_on_codexs_own_windows() {
 #[test]
 fn a_codex_week_at_100_holds_the_turn_until_the_week_resets() {
     let (rig, runner) = named("shep", AS_IS);
-    let runner = reopened(&rig, runner, || rig.codex_day_began(0));
     rig.forge.label(7, "agent:codex!");
     rig.ask(&runner, "add", Some("7"));
     rig.codex_meter.set(Rig::utilization(100, 19));
@@ -373,31 +368,20 @@ fn a_spent_week_holds() {
 }
 
 #[test]
-fn each_account_keeps_its_own_day() {
+fn a_new_day_saves_nothing() {
     let (rig, runner) = named("golbat", ALL_CODEX);
     rig.forge.list_ready(7, false);
-    rig.codex_meter.set(Rig::utilization(20, 0));
-    assert!(dispatched(&step(&runner).unwrap()));
-    let state = crate::state::StateStore::new(rig.paths().state)
-        .load()
-        .unwrap()
-        .unwrap();
-    assert_eq!(state.pacing, None);
-    assert_eq!(state.codex_pacing.map(|d| d.week_used_pct), Some(20));
-
-    // Codex's week is spent by the time the next item is picked.
     rig.codex_meter.set(Rig::utilization(100, 0));
-    let reading = rig.ask(&runner, "status", None)["pacer"]["codex"]["reading"].clone();
-    assert_eq!(
-        reading["week"]["used_pct"],
-        json!(20),
-        "read at dispatch only"
-    );
-    rig.ask(&runner, "drop", Some("7"));
-    rig.forge.list_ready(8, false);
-    let (kind, reason) = held(step(&runner).unwrap());
-    assert_eq!(kind, HoldKind::Window);
-    assert!(reason.starts_with("Codex's week is at 100%"), "{reason}");
+    let (kind, _) = held(step(&runner).unwrap());
+    assert_eq!((kind, rig.codex_meter.reads()), (HoldKind::Window, 1));
+    let saved = std::fs::read_to_string(rig.paths().state).unwrap();
+    assert!(!saved.contains("pacing"), "{saved}");
+
+    rig.clock.advance(Rig::DAY);
+    let (kind, _) = held(step(&runner).unwrap());
+    assert_eq!((kind, rig.codex_meter.reads()), (HoldKind::Window, 2));
+    let after = std::fs::read_to_string(rig.paths().state).unwrap();
+    assert_eq!(after, saved, "a reading on a new day wrote the file");
 }
 
 #[test]

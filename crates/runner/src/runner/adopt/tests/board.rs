@@ -24,7 +24,6 @@ fn a_waiting_pull_request_pinned_to_an_implementer_is_held_by_its_account() {
     opened_80(&rig);
     rig.write_codex_implementer();
     rig.forge.label(5, "agent:codex!");
-    rig.codex_day_began(0);
     rig.codex_meter.set(Rig::utilization(100, 0));
     let runner = running(&rig);
     rig.ask(&runner, "adopt", Some("80"));
@@ -49,7 +48,6 @@ fn an_adoption_whose_top_pick_has_spent_its_week_opens_on_the_next_the_pacer_let
     opened_80(&rig);
     rig.write_codex_implementer();
     rig.agent_board.ranks(&["codex", "sonnet-high"]);
-    rig.codex_day_began(0);
     rig.codex_meter.set(Rig::utilization(100, 0));
     let runner = running(&rig);
     rig.ask(&runner, "adopt", Some("80"));
@@ -67,7 +65,6 @@ fn a_pull_request_held_by_its_labelled_account_leaves_the_ones_behind_it_to_star
     rig.write_codex_implementer();
     rig.forge.label(5, "agent:codex!");
     rig.agent_board.ranks(&["sonnet-high", "codex"]);
-    rig.codex_day_began(0);
     rig.codex_meter.set(Rig::utilization(100, 0));
     let runner = running(&rig);
     rig.ask(&runner, "adopt", Some("80"));
