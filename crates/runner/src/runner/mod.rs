@@ -6,13 +6,12 @@
 //! Every change is saved before it takes effect in memory.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use crate::agents::{Agents, AgentsError};
+use crate::agents::Agents;
 use crate::board::Skip;
 use crate::forge_ledger::Ledger as ForgeLedger;
 use crate::home::{ProjectName, ProjectPaths};
@@ -21,8 +20,8 @@ use crate::local_paths::LocalPaths;
 use crate::local_tickets::{LocalTickets, Routed, SharedSource};
 use crate::pacer::Assessment;
 use crate::ports::{
-    ForgeError, ForgeHold, Guarded, GuardedVoice, KeychainBlocked, PacedVoice, Ports, RateHeld,
-    RecordedVoice, Say, Tickets, Timestamp,
+    ForgeHold, Guarded, GuardedVoice, KeychainBlocked, PacedVoice, Ports, RateHeld, RecordedVoice,
+    Say, Tickets, Timestamp,
 };
 use crate::review_bot::{Bot, Profile};
 use crate::settings::{
@@ -105,6 +104,7 @@ mod merge;
 mod off_lock;
 mod older_bots;
 mod open_checks;
+mod open_error;
 mod open_forge;
 #[cfg(test)]
 mod open_forge_tests;
@@ -178,6 +178,7 @@ pub use lineup::{Board, MoveError, Place};
 pub use looks::{BOARD_POLL, IDLE_POLL_MAX, MAIN_CI_POLL};
 pub use main_ci::RedStatus;
 pub use merge::DropError;
+pub use open_error::OpenError;
 pub use owner_template::{TemplateSource, source_of};
 pub use pace::PacerStatus;
 pub use pm::{PmAttaching, PmError, PmStatus};
@@ -202,56 +203,6 @@ pub use words::{Wants, read_answer};
 pub(crate) use gate::CHECKS_SETTLE;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use review_bot::SETTLE_LEAST;
-
-/// Why a runner could not start
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OpenError {
-    /// A setting is missing, malformed or does not hold
-    Settings(SettingsError),
-    /// An agent file cannot be read or used
-    Agents(AgentsError),
-    /// The forge could not be asked about the project's repo
-    Forge(ForgeError),
-    /// The state file could not be read
-    State(StateError),
-}
-
-impl fmt::Display for OpenError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Settings(e) => e.fmt(f),
-            Self::Agents(e) => e.fmt(f),
-            Self::Forge(e) => write!(f, "cannot check the repo on the forge: {e}"),
-            Self::State(e) => e.fmt(f),
-        }
-    }
-}
-
-impl core::error::Error for OpenError {}
-
-impl From<SettingsError> for OpenError {
-    fn from(e: SettingsError) -> Self {
-        Self::Settings(e)
-    }
-}
-
-impl From<AgentsError> for OpenError {
-    fn from(e: AgentsError) -> Self {
-        Self::Agents(e)
-    }
-}
-
-impl From<ForgeError> for OpenError {
-    fn from(e: ForgeError) -> Self {
-        Self::Forge(e)
-    }
-}
-
-impl From<StateError> for OpenError {
-    fn from(e: StateError) -> Self {
-        Self::State(e)
-    }
-}
 
 /// One project's runner
 #[derive(Debug)]

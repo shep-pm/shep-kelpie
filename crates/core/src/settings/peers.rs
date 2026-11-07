@@ -113,7 +113,14 @@ mod tests {
         for gone in ["/home/me", "ghp_x"] {
             assert!(!text.contains(gone), "{text}");
         }
-        let names = |value: &Value| value.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+        let names = |value: &Value| {
+            value
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
         assert_eq!(names(&shown["env"]), ["GH_TOKEN", "SHEP_HOME"]);
         assert_eq!(names(&shown["worker"]["build_env"]), ["CARGO_HOME"]);
     }
