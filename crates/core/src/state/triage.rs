@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ports::{Probability, Timestamp};
+use crate::ticket::TicketId;
 
 /// Where triaging stands
 // wire format: changing this is a breaking change to the state file
@@ -33,6 +34,14 @@ pub struct TriageState {
     /// Left out while zero.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub pruned_through: u64,
+    /// The splits kelpie is filing or has filed, one per issue. A plan lives here
+    /// so a split cut short resumes after a restart and files nothing twice. An
+    /// entry stays while its issue is listed open, and it is what keeps the
+    /// parent from `ready-for-agent`.
+    ///
+    /// Left out while empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub splits: Vec<TriageSplit>,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -148,6 +157,51 @@ impl TriageState {
             None => (String::new(), Vec::new()),
         }
     }
+}
+
+/// A plan to split an issue into sub-issues, and how far the filing has got
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TriageSplit {
+    /// The issue to split, the parent of every draft
+    pub issue: u64,
+    /// The drafts in the order they are filed
+    pub drafts: Vec<SplitDraft>,
+    /// The tickets filed so far: draft `n` is `filed[n]`, saved before the next
+    /// write, so a restart files no draft twice
+    ///
+    /// Left out while empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filed: Vec<TicketId>,
+    /// The comment holding the filing back for the issue's author to answer.
+    /// While it is set, nothing is filed.
+    ///
+    /// Left out unless the filing waits on an answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asked: Option<TriageQuestions>,
+}
+
+/// One sub-issue of a split, before it is filed
+// wire format: changing this is a breaking change to the state file
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SplitDraft {
+    /// Its title
+    pub title: String,
+    /// Its body, as the triager wrote it. Kelpie adds the slice line, the
+    /// blockers and a marker when it files it.
+    pub body: String,
+    /// The labels it is filed with, `ready-for-agent` aside, which goes on last
+    ///
+    /// Left out while empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+    /// The indices of the earlier drafts it is blocked by
+    ///
+    /// Left out while empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub after: Vec<usize>,
 }
 
 /// A triager call that ran on an issue with no record to carry it: the first

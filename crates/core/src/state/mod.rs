@@ -44,8 +44,8 @@ use std::io::Write;
 #[cfg(test)]
 use std::path::Path;
 pub use triage::{
-    TRIAGE_CALLS_KEPT, TRIAGED_KEPT, TriageAsked, TriageHeld, TriageLocal, TriageQuestions,
-    TriageState, TriageStep, Triaged,
+    SplitDraft, TRIAGE_CALLS_KEPT, TRIAGED_KEPT, TriageAsked, TriageHeld, TriageLocal,
+    TriageQuestions, TriageSplit, TriageState, TriageStep, Triaged,
 };
 #[cfg(test)]
 use write::temporary_path;
@@ -67,7 +67,7 @@ use crate::work_item::{Attached, Known, Phase, Priced, Review, Seconds, Tally, T
 pub const STATE_FILE: &str = "state.json";
 
 /// The state file's format version, bumped when the file gains a field or value an older kelpie refuses
-pub const VERSION: u32 = 102;
+pub const VERSION: u32 = 103;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads

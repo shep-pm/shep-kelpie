@@ -28,6 +28,7 @@ fn a_file_saved_before_this_version_loads_with_no_since() {
         issues: Vec::new(),
         unrecorded: Vec::new(),
         pruned_through: 0,
+        splits: Vec::new(),
     });
     store.save(&loaded).unwrap();
     let text = fs::read_to_string(dir.path().join(STATE_FILE)).unwrap();
@@ -189,6 +190,7 @@ fn the_oldest_finished_records_go_past_the_cap() {
         issues: vec![record(1, TriageStep::Commented)],
         unrecorded: Vec::new(),
         pruned_through: 0,
+        splits: Vec::new(),
     };
     let cap = TRIAGED_KEPT as u64;
     triage
@@ -241,6 +243,7 @@ fn a_prune_past_the_cap_lets_the_records_that_hold_no_call_go_first() {
             .collect(),
         unrecorded: Vec::new(),
         pruned_through: 0,
+        splits: Vec::new(),
     };
 
     triage.prune();
@@ -294,6 +297,7 @@ fn a_record_that_closed_a_duplicate_is_kept_past_the_cap() {
             .collect(),
         unrecorded: Vec::new(),
         pruned_through: 0,
+        splits: Vec::new(),
     };
 
     triage.prune();
@@ -635,6 +639,7 @@ fn a_taken_back_record_saves_as_taken_and_is_not_pruned() {
         issues: vec![record(1, TriageStep::Taken)],
         unrecorded: Vec::new(),
         pruned_through: 0,
+        splits: Vec::new(),
     };
     triage
         .issues
@@ -652,6 +657,65 @@ fn a_taken_back_record_saves_as_taken_and_is_not_pruned() {
             "issue": 1, "comment": 0, "at": 0, "author": "Boss", "step": "taken",
             "seen": ["needs-triage"]
         })
+    );
+    assert_eq!(store.load().unwrap(), Some(state));
+}
+
+// A split saves as its drafts and the children filed so far, and a file saved
+// before splits existed loads with none. An empty `filed` and `asked` are left
+// out.
+#[test]
+fn a_saved_split_survives_a_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path());
+    let mut old = serde_json::to_value(ProjectState::new()).unwrap();
+    old["version"] = 102.into();
+    old["triage"] = serde_json::json!({ "since": 7 });
+    fs::write(dir.path().join(STATE_FILE), old.to_string()).unwrap();
+    let loaded = store.load().unwrap().expect("a saved state");
+    assert_eq!(loaded.triage.map(|t| t.splits), Some(Vec::new()));
+
+    let mut state = ProjectState::new();
+    state.triage = Some(TriageState {
+        since: Timestamp(7),
+        issues: Vec::new(),
+        unrecorded: Vec::new(),
+        pruned_through: 0,
+        splits: vec![TriageSplit {
+            issue: 30,
+            drafts: vec![
+                SplitDraft {
+                    title: "feat(a): first".to_owned(),
+                    body: "Touches: `a.rs`".to_owned(),
+                    labels: vec!["kind:feat".to_owned()],
+                    after: Vec::new(),
+                },
+                SplitDraft {
+                    title: "feat(b): second".to_owned(),
+                    body: "Touches: `b.rs`".to_owned(),
+                    labels: Vec::new(),
+                    after: vec![0],
+                },
+            ],
+            filed: vec![crate::test::ticket(900)],
+            asked: None,
+        }],
+    });
+    store.save(&state).unwrap();
+
+    let text = fs::read_to_string(dir.path().join(STATE_FILE)).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(saved["version"], VERSION);
+    assert_eq!(
+        saved["triage"]["splits"],
+        serde_json::json!([{
+            "issue": 30,
+            "drafts": [
+                { "title": "feat(a): first", "body": "Touches: `a.rs`", "labels": ["kind:feat"] },
+                { "title": "feat(b): second", "body": "Touches: `b.rs`", "after": [0] }
+            ],
+            "filed": ["900"]
+        }])
     );
     assert_eq!(store.load().unwrap(), Some(state));
 }
