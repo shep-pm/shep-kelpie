@@ -39,8 +39,8 @@ remote = "shep-pm/shep"
 # kelpie has none. Under `auto` some pull requests still get the merge
 # ruling, which names why: one no reviewer read, one with a review bot's
 # thread above a nit open, a head no review round read, a fix after a
-# `no`, and a late bot round's fix. Left out, `rulings.pm_decides.merge` says:
-# `true` is `auto` and `false` is `ask`.
+# `no`, and a late bot round's fix. Kelpie reads `rulings.pm_decides.merge`
+# instead: `true` is `auto` and `false` is `ask`, and `settings migrate` writes it from this.
 merging = "ask"
 # Findings a worker deferred, once its pull request merges. `ask` raises a
 # ruling before filing them as issues, `file` files them at once, and
