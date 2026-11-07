@@ -2,11 +2,10 @@
 //!
 //! A new work item is paced on every account its roles spend. Its turns on
 //! the worker's account, a review round on its reviewer's. Each open item's
-//! own agent is included, listed or not. Each account keeps its own day and
-//! its own holds. An agent limited by a lease is never paced. A reading that
-//! finds a hold is trusted for [`RECHECK_SECS`] or until the hold ends. One
-//! that finds no hold is never reused past its step, which reads it with the
-//! lock let go. Only a spent window or week holds anything, and the reading
+//! own agent is included, listed or not. Each account keeps its own
+//! holds. An agent limited by a lease is never paced. A reading that finds a
+//! hold is trusted for [`RECHECK_SECS`] or until the hold ends. One that finds no
+//! hold is never reused past its step, which reads it with the lock let go. Only a spent window or week holds anything, and the reading
 //! runs for `status` too.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -154,7 +153,6 @@ impl Runner {
                 None => self.ports.meter_of(account).read(now),
             },
         };
-        let prior = self.state.day_start(account);
         // Only a spent window or week holds a turn or a dispatch. The agent
         // board's waits read the 50% mark themselves, from `pacer::window`.
         let limit = match &read {
@@ -162,7 +160,7 @@ impl Runner {
             Err(_) => None,
         };
         let mut assessment = match read {
-            Ok(usage) => assess(account, now, &usage, prior),
+            Ok(usage) => assess(account, now, &usage),
             Err(e) => {
                 let whose = named(account, "", "Codex ");
                 Assessment::unreadable(now, format!("cannot read {whose}usage: {e}"))
@@ -170,11 +168,6 @@ impl Runner {
         };
         if let Some(reading) = &assessment.reading {
             self.metrics.plan(account, reading);
-        }
-        if assessment.day_start.is_some() && assessment.day_start != prior {
-            let mut next = self.state.clone();
-            *next.day_start_mut(account) = assessment.day_start;
-            self.save(next)?;
         }
         assessment.window = limit;
         let hold = assessment.hold(scope).cloned();
@@ -408,25 +401,15 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::pacer::{DayStart, HoldKind};
+    use crate::pacer::HoldKind;
     use crate::ports::{Cost, MeterError, Usage};
     use crate::runner::step;
-    use crate::state::{ProjectState, StateStore};
     use crate::test::{Rig, Scripted};
 
     const DAY: u64 = Rig::DAY;
 
-    // A running project on a day that began with `used` percent of the week
-    // spent, as a runner restarted partway through the day finds it
-    fn running_since(project: &str, used: u32) -> (Rig, Mutex<Runner>) {
+    fn running(project: &str) -> (Rig, Mutex<Runner>) {
         let rig = Rig::new(project);
-        let mut state = ProjectState::new();
-        state.pacing = Some(DayStart {
-            week_resets_at: Timestamp(Rig::EPOCH + 7 * DAY),
-            day: 0,
-            week_used_pct: used,
-        });
-        StateStore::new(rig.paths().state).save(&state).unwrap();
         let runner = rig.open().unwrap();
         (rig, runner)
     }
@@ -456,7 +439,7 @@ mod tests {
 
     #[test]
     fn a_ready_issue_is_dispatched_after_one_read_of_usage() {
-        let (rig, runner) = running_since("shep", 0);
+        let (rig, runner) = running("shep");
         assert_eq!(step(&runner).unwrap(), None);
         assert_eq!(rig.meter.reads(), 0, "nothing to dispatch, nothing to read");
 
@@ -468,7 +451,7 @@ mod tests {
 
     #[test]
     fn status_says_why_a_spent_week_holds() {
-        let (rig, runner) = running_since("golbat", 0);
+        let (rig, runner) = running("golbat");
         rig.forge.list_ready(7, false);
         rig.meter.set(Rig::utilization(100, 3));
 
@@ -502,7 +485,7 @@ mod tests {
 
     #[test]
     fn the_reading_in_status_holds_the_two_windows_alone() {
-        let (rig, runner) = running_since("koji", 0);
+        let (rig, runner) = running("koji");
         rig.forge.list_ready(7, false);
         rig.meter.set(Rig::utilization(15, 3));
         assert!(dispatched(&step(&runner).unwrap()));
@@ -518,7 +501,7 @@ mod tests {
 
     #[test]
     fn a_spent_window_holds_a_new_work_item_too() {
-        let (rig, runner) = running_since("golbat", 0);
+        let (rig, runner) = running("golbat");
         rig.forge.list_ready(7, false);
         rig.meter.set(Rig::utilization(0, 100));
 
@@ -533,7 +516,7 @@ mod tests {
 
     #[test]
     fn a_pick_the_pacer_holds_shows_the_hold_in_skipped_and_on_the_board() {
-        let (rig, runner) = running_since("golbat", 0);
+        let (rig, runner) = running("golbat");
         rig.forge.list_ready(7, false);
         rig.meter.set(Rig::utilization(100, 3));
 
@@ -555,7 +538,7 @@ mod tests {
 
     #[test]
     fn a_hold_is_not_read_again_until_the_recheck() {
-        let (rig, runner) = running_since("reactmap", 0);
+        let (rig, runner) = running("reactmap");
         rig.forge.list_ready(7, false);
         rig.meter.set(Rig::utilization(100, 0));
         step(&runner).unwrap();
@@ -571,32 +554,9 @@ mod tests {
     }
 
     #[test]
-    fn the_day_start_survives_a_restart() {
-        let rig = Rig::new("rotom");
-        let runner = rig.open().unwrap();
-        rig.forge.list_ready(7, false);
-        step(&runner).unwrap();
-        drop(runner);
-
-        // Back with 40% spent since the read at 0% that began the day
-        rig.meter.set(Rig::utilization(40, 0));
-        let runner = rig.open().unwrap();
-        rig.claude.script([reply()]);
-        step(&runner).unwrap();
-        let state = StateStore::new(rig.paths().state).load().unwrap().unwrap();
-        assert_eq!(
-            state.pacing.map(|day| day.week_used_pct),
-            Some(0),
-            "the day still began where the first reading found it"
-        );
-        let reading = &rig.ask(&runner, "status", None)["pacer"]["claude"]["reading"];
-        assert_eq!(reading["week"]["used_pct"], 40);
-    }
-
-    #[test]
     fn a_turn_starts_below_a_spent_window_and_holds_at_100() {
         for (session, starts) in [(99, true), (100, false)] {
-            let (rig, runner) = running_since("koji", 0);
+            let (rig, runner) = running("koji");
             rig.ask(&runner, "add", Some("7"));
             rig.meter.set(Rig::utilization(0, session));
             rig.claude.script([reply()]);
@@ -608,7 +568,7 @@ mod tests {
 
     #[test]
     fn a_parked_worker_resumes_after_the_window_resets() {
-        let (rig, runner) = running_since("golbat", 0);
+        let (rig, runner) = running("golbat");
         rig.ask(&runner, "add", Some("7"));
         rig.meter.set(Rig::utilization(0, 100));
 
@@ -640,7 +600,7 @@ mod tests {
 
     #[test]
     fn a_window_that_reset_early_is_noticed_at_the_recheck() {
-        let (rig, runner) = running_since("reactmap", 0);
+        let (rig, runner) = running("reactmap");
         rig.ask(&runner, "add", Some("7"));
         rig.meter.set(Rig::utilization(0, 100));
         step(&runner).unwrap();
@@ -653,7 +613,7 @@ mod tests {
 
     #[test]
     fn a_turn_under_way_is_never_interrupted() {
-        let (rig, runner) = running_since("xilriws", 0);
+        let (rig, runner) = running("xilriws");
         rig.ask(&runner, "add", Some("7"));
         rig.meter.set(Rig::utilization(0, 10));
         // The turn itself spends the 5-hour window and the whole week.
@@ -669,7 +629,7 @@ mod tests {
 
     #[test]
     fn a_turn_cut_short_by_a_restart_carries_on_past_a_spent_window() {
-        let (rig, runner) = running_since("chelone", 0);
+        let (rig, runner) = running("chelone");
         rig.ask(&runner, "add", Some("7"));
         rig.claude.script([Scripted::Kill]);
         let _ = catch_unwind(AssertUnwindSafe(|| step(&runner)));
@@ -684,7 +644,7 @@ mod tests {
 
     #[test]
     fn usage_that_cannot_be_read_holds_nothing() {
-        let (rig, runner) = running_since("rotom", 0);
+        let (rig, runner) = running("rotom");
         rig.forge.list_ready(7, false);
         rig.meter.fail(MeterError::Spawn("no such file".into()));
 
@@ -707,7 +667,7 @@ mod tests {
 
     #[test]
     fn a_dispatch_goes_ahead_past_most_of_the_week_used() {
-        let (rig, runner) = running_since("shep", 0);
+        let (rig, runner) = running("shep");
         rig.forge.list_ready(7, false);
         rig.meter.set(Rig::utilization(60, 0));
 
@@ -722,7 +682,7 @@ mod tests {
 
     #[test]
     fn a_turn_starts_past_half_the_window() {
-        let (rig, runner) = running_since("koji", 0);
+        let (rig, runner) = running("koji");
         rig.ask(&runner, "add", Some("7"));
         rig.meter.set(Rig::utilization(0, 80));
         rig.claude.script([reply()]);
@@ -738,7 +698,7 @@ mod tests {
 
     #[test]
     fn a_used_window_holds_nothing_until_it_is_spent() {
-        let (rig, runner) = running_since("shep", 0);
+        let (rig, runner) = running("shep");
         rig.forge.list_ready(7, false);
         // 60% of the week used, and 80% of the 5-hour window, past the mark the agent board waits on
         rig.meter.set(Rig::utilization(60, 80));

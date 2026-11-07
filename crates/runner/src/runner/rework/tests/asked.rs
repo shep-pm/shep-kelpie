@@ -53,7 +53,6 @@ fn a_rework_pinned_to_an_implementer_is_held_by_its_account() {
     rig.forge.label_pull_request(71, HUMAN);
     rig.write_codex_implementer();
     rig.forge.label(7, "agent:codex!");
-    rig.codex_day_began(0);
     rig.codex_meter.set(Rig::utilization(100, 0));
     let runner = running(&rig);
 
@@ -74,7 +73,6 @@ fn a_rework_whose_top_pick_has_spent_its_week_opens_on_the_next_the_pacer_lets_s
     rig.forge.label_pull_request(71, READY);
     rig.write_codex_implementer();
     rig.agent_board.ranks(&["codex", "sonnet-high"]);
-    rig.codex_day_began(0);
     rig.codex_meter.set(Rig::utilization(100, 0));
     let runner = running(&rig);
 
@@ -106,7 +104,6 @@ fn a_rework_held_by_its_labelled_account_leaves_the_ones_after_it_to_start() {
     rig.write_codex_implementer();
     rig.forge.label(6, "agent:codex!");
     rig.agent_board.ranks(&["sonnet-high", "codex"]);
-    rig.codex_day_began(0);
     rig.codex_meter.set(Rig::utilization(100, 0));
     let runner = running(&rig);
 

@@ -124,11 +124,6 @@ fn the_file_format_is_pinned() {
             by_label: true,
         },
     ];
-    state.pacing = Some(DayStart {
-        week_resets_at: Timestamp(9),
-        day: 1,
-        week_used_pct: 10,
-    });
     state.replies = Replies {
         last: Some(LastRead {
             id: "W3EqiUm5rsNq".into(),
@@ -223,7 +218,6 @@ fn the_file_format_is_pinned() {
                 { "pull_request": 638, "by_label": true },
             ],
             "leases": [{ "resource": "coderabbit", "issue": "22", "since": 8 }],
-            "pacing": { "week_resets_at": 9, "day": 1, "week_used_pct": 10 },
             "notices": [{ "issue": "22", "pull_request": 30, "head": "c0ffee" }],
             "replies": { "last": { "id": "W3EqiUm5rsNq", "time": 5 } },
         })

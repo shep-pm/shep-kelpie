@@ -43,7 +43,6 @@ fn a_project_saved_paused_reads_the_board_on_its_first_pass() {
         "reworked": [],
         "adopted": [],
         "leases": [],
-        "pacing": null,
         "notices": [],
         "replies": { "last": null },
         "events": [

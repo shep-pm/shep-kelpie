@@ -141,16 +141,6 @@ fn a_saved_state_loads_back_whole() {
         issue: Some(ticket(7)),
         since: Timestamp(1_790_000_100),
     });
-    state.pacing = Some(DayStart {
-        week_resets_at: Timestamp(1_790_500_000),
-        day: 2,
-        week_used_pct: 31,
-    });
-    state.codex_pacing = Some(DayStart {
-        week_resets_at: Timestamp(1_790_600_000),
-        day: 3,
-        week_used_pct: 12,
-    });
     store.save(&state).unwrap();
     assert_eq!(store.load().unwrap(), Some(state));
 }
@@ -190,17 +180,6 @@ fn a_file_with_one_work_item_loads_as_a_list_of_one() {
     fs::write(dir.path().join(STATE_FILE), one.to_string()).unwrap();
     let state = store.load().unwrap().unwrap();
     assert_eq!((state.work_items, state.rulings[0].issue), (vec![], None));
-}
-
-#[test]
-fn a_file_saved_before_pacing_loads_with_none() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = store_in(dir.path());
-    let old =
-        r#"{"version":1,"run":"running","since":7,"work_item":null,"rulings":[],"leases":[]}"#;
-    fs::write(dir.path().join(STATE_FILE), old).unwrap();
-    let state = store.load().unwrap().unwrap();
-    assert_eq!(state.pacing, None);
 }
 
 #[test]
