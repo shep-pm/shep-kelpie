@@ -20,9 +20,10 @@ _Avoid_: harness (the working name before 2026-09-25), control room
    work item for it.
 3. **Build.** A worker implements it inline, opens a draft pull request and
    ends its turn.
-4. **Review.** The reads the item's review plan calls for, each the agent
-   board's pick for its round, read the pull request once, and one with any finding, nits
-   included, is followed by one fix turn. The pass ends where it ends: no loop, no judge. No
+4. **Review.** The reads the item's **review plan** calls for, each the agent
+   board's pick for its round, read the pull request once, and one with any
+   finding, nits included, is followed by one fix turn. The pass ends where it
+   ends: no loop, no judge. No
    reviewer reads a head until CI has passed on it, so the worker's push and
    each fix turn's head wait for green first, and a red run goes to the
    worker's CI fix turn before any reviewer reads.
@@ -220,9 +221,10 @@ _Avoid_: lint, validation, triage
 
 **Reviewer**:
 An agent file whose role is `reviewer`. Each round of a pass goes to the
-agent board's pick among the candidates the pass has not run, and
-the plan's reads of them read the pull request once, against the issue's
-acceptance criteria. Every reviewer file `agents.allow` holds is a candidate.
+agent board's pick among the candidates the pass has not run, and as many of
+them as the work item's **review plan** calls for read the pull request once,
+against the issue's acceptance criteria. Every reviewer file `agents.allow`
+holds is a candidate.
 It runs a fresh session on a harness, whose file's body is its
 prompt, or a command, or kelpie's own endpoint reviewer. One with a
 **second look** reads twice, the second time shown what it found the first
@@ -234,8 +236,9 @@ _Avoid_: judge, round guard, deep round, pull request reviewer
 **Review plan**:
 What the project manager sets with its pick: how many reads it wants for the
 work item and what it wants them for. A pass runs those reads, each once and
-each the agent board's pick. Where no project manager planned any, kelpie's
-own rule reads twice, and an adopted item too.
+each the agent board's pick. Where its pick planned none: twice for an adopted
+pull request, once on a project that names `agents.pm`, and kelpie's own two
+on a project with no project manager at all.
 _Avoid_: review count, reviewer count
 
 **Light weight**:
@@ -401,9 +404,8 @@ id that only grows. The PM's cursor names the last one it has read.
 
 **Pass**:
 One run of a work item's review: the reads its **review plan** calls for,
-each once, each
-round the agent board's pick. It ends sooner when the board ranks no
-candidate left. A pass starts again only on new code that needs the whole
+each once, each round the agent board's pick. It ends sooner when the board
+ranks no candidate left. A pass starts again only on new code that needs the whole
 review, such as a merge ruling's `rework`.
 
 **Finding**:

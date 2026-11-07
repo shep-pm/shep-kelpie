@@ -217,8 +217,8 @@ impl Runner {
         // A pass that ends in this poll is checked again from a listing made
         // after its end, which the next poll reads.
         let busy: BTreeSet<u64> = (open.iter())
+            .filter(|i| self.triage_busy(i.number, &i.body))
             .map(|i| i.number)
-            .filter(|&n| self.triage_busy(n))
             .collect();
         let Some((since, pruned_through)) =
             (self.state.triage.as_ref()).map(|t| (t.since, t.pruned_through))
@@ -236,6 +236,7 @@ impl Runner {
         // carries a triage label the maintainer put on by hand, before anything
         // the record owes is written.
         self.settle_triage_waits(&open)?;
+        self.settle_splits(&open)?;
         // An author who took `local` answers by rewriting the issue body, which is
         // what the next pass is made on.
         self.watch_local_waits(&local)?;

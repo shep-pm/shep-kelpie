@@ -46,6 +46,7 @@ pub(super) mod research;
 pub(super) mod rewrite;
 mod scrub;
 pub(super) mod spam;
+pub(super) mod split;
 
 use super::contributions::post::forge_is_busy;
 use super::flight::triage::{Job, Research};
@@ -155,11 +156,24 @@ pub(super) fn settle_since(state: &mut ProjectState, settings: &Settings, now: T
                 issues: Vec::new(),
                 unrecorded: Vec::new(),
                 pruned_through: 0,
+                splits: Vec::new(),
             })
         }
         _ => return false,
     }
     true
+}
+
+/// [`settle_since`] for a start: the notes on each split triage going off left
+/// part filed, where it changed
+pub(super) fn settle_stopped(
+    state: &mut ProjectState,
+    settings: &Settings,
+    now: Timestamp,
+) -> Option<Vec<String>> {
+    let was = state.triage.clone();
+    settle_since(state, settings, now)
+        .then(|| split::stopped(was.as_ref().filter(|_| state.triage.is_none())))
 }
 
 impl Runner {
@@ -743,5 +757,7 @@ mod roles_tests;
 mod scrub_tests;
 #[cfg(test)]
 mod spam_tests;
+#[cfg(test)]
+mod split_tests;
 #[cfg(test)]
 mod verb_tests;
