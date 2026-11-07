@@ -496,27 +496,17 @@ compact_window = 200000
 # reset = { kind = "kelpie" }
 # retro = { kind = "kelpie" }
 
-# Which plugins, and which of the repo's own files, reach which calls. Kelpie
-# loads each plugin the repo turns on in `.claude/settings.json` on its default
-# branch into every call, and the repo's own `.claude/skills/`,
-# `.claude/agents/`, `.claude/commands/` and the `hooks` of
-# `.claude/settings.json` as one more plugin; this table narrows that and adds
-# to it. Every key is optional. `plugins = false` loads none of the repo's
-# plugins. `own = false` leaves the repo's own files out and keeps its plugins.
-# A call in a worktree that matches the default branch loads those files from
-# it, and does not get them twice. `roles` lists the calls that get plugins and
-# the repo's own files, from `worker`, `reviewer` and `pm`,
-# all of them when absent. `parts` lists which parts load, from `skills`,
-# `agents`, `commands`, `hooks` and `mcp`, all of them when absent: a hook
-# runs beside kelpie's own and cannot replace them.
-# `mcp` adds the MCP servers of a plugin and of the repo's `.mcp.json` on its
-# default branch to those calls; the hosts they reach need `allowed_domains`.
-# `skip` lists plugins, as `name@marketplace`, left out though the repo turns
-# them on. `extra` lists plugins the repo does not turn on, each as
-# `name@marketplace` with its marketplace's source as one string:
-# `github:owner/name`, `git:<url>` or `directory:<folder inside the checkout>`,
-# with `#<branch or tag>` after a `github` or `git` address. `roles` narrows
-# `extra` too, and `plugins = false` does not.
+# What a project adds to the repo's plugins. Kelpie loads each plugin the repo
+# turns on in `.claude/settings.json` on its default branch, and the repo's own
+# `.claude/skills/`, `.claude/agents/`, `.claude/commands/`, the `hooks` of
+# `.claude/settings.json` and its `.mcp.json` as one more plugin, into the
+# worker's, the reviewers' and the project manager's calls. The repo's files
+# decide, so this table narrows nothing. `extra` lists plugins the repo does not
+# turn on, each as `name@marketplace` with its marketplace's source as one
+# string: `github:owner/name`, `git:<url>` or `directory:<folder inside the
+# checkout>`, with `#<branch or tag>` after a `github` or `git` address.
+# `plugins`, `own`, `roles`, `parts` and `skip` still load and nothing reads
+# them: delete them.
 # [app.dogs.kelpie.repo_setup]
 # plugins = true
 # own = true

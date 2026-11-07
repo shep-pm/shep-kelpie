@@ -1,6 +1,5 @@
-//! `[app.dogs.kelpie.repo_setup]` narrows the MCP servers of the repo's plugins and of its
-//! `.mcp.json` on the default branch, on the worker's and the reviewers' calls and the project
-//! manager's retro
+//! The MCP servers of the repo's plugins and of its `.mcp.json` on the default branch reach the
+//! worker's and the reviewers' calls, and the project manager's retro gets none
 
 use std::fs;
 
@@ -137,70 +136,22 @@ fn a_call_that_reads_only_gets_no_server_it_could_write_with() {
 }
 
 #[test]
-fn own_false_leaves_the_default_branchs_server_out_and_keeps_the_plugins() {
-    let rig = settled("own = false");
-    for role in [Role::Worker, Role::Reviewer] {
-        for call in seen(&rig, role) {
-            assert_eq!(servers(&call), ["plugin_style_search"], "{role:?}");
-            assert!(!allowed(&call).contains(&"mcp__docs".to_owned()));
-        }
-    }
-}
-
-#[test]
-fn plugins_false_leaves_the_plugins_server_out_and_keeps_the_default_branchs() {
-    let rig = settled("plugins = false");
-    for role in [Role::Worker, Role::Reviewer] {
-        for call in seen(&rig, role) {
-            assert_eq!(servers(&call), ["docs"], "{role:?}");
-        }
-    }
-}
-
-#[test]
-fn parts_without_mcp_leaves_both_out() {
-    let rig = settled("parts = [\"skills\", \"agents\", \"commands\", \"hooks\"]");
-    for role in [Role::Worker, Role::Reviewer] {
-        for call in seen(&rig, role) {
-            assert!(servers(&call).is_empty(), "{role:?}");
-            assert!(!allowed(&call).iter().any(|rule| rule.starts_with("mcp__")));
-        }
-    }
-    assert!(!rig.paths().skills.join("repo/style/mcp-root").exists());
-}
-
-#[test]
-fn a_reviewer_the_roles_leave_out_gets_neither_and_a_worker_gets_both() {
-    let rig = settled("roles = [\"worker\"]");
-    for call in seen(&rig, Role::Reviewer) {
-        assert!(servers(&call).is_empty());
-    }
-    let works: Vec<_> = (seen(&rig, Role::Worker).into_iter())
-        .filter(|c| c.call.tools == Tools::Work)
-        .collect();
-    assert!(!works.is_empty());
-    for call in works {
-        assert_eq!(servers(&call), ["docs", "plugin_style_search"]);
-    }
-}
-
-#[test]
-fn roles_worker_leaves_every_other_calls_without_the_plugins() {
-    let rig = settled("roles = [\"worker\"]");
+fn the_worker_reviewer_and_project_manager_get_the_plugins() {
+    // Keys that used to narrow are read by nothing now.
+    let rig = settled("roles = [\"worker\"]\nown = false\nplugins = false\nparts = [\"skills\"]");
     let plugin = rig.paths().skills.join("repo/style");
     for role in [Role::Worker, Role::Reviewer] {
         for call in seen(&rig, role) {
-            let gets = call.call.plugin_dirs.contains(&plugin);
-            assert_eq!(
-                gets,
-                role == Role::Worker,
+            assert!(
+                call.call.plugin_dirs.contains(&plugin),
                 "{role:?}: {:?}",
                 call.call.plugin_dirs
             );
+            assert_eq!(servers(&call), ["docs", "plugin_style_search"], "{role:?}");
         }
     }
     for retro in retros(&rig) {
-        assert!(!retro.call.plugin_dirs.contains(&plugin));
+        assert!(retro.call.plugin_dirs.contains(&plugin));
     }
 }
 

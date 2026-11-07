@@ -3,8 +3,8 @@
 //! A repo's `.claude/settings.json` names a marketplace in
 //! `extraKnownMarketplaces` and the plugin in `enabledPlugins`. A headless run
 //! installs none, so kelpie reads that file from the default branch (never a
-//! worker's) and copies each enabled plugin, less the parts `repo_setup.parts`
-//! leaves out, under the project's skills folder, given to every call with `--plugin-dir`.
+//! worker's) and copies each enabled plugin under the project's skills folder,
+//! given to the worker, the reviewers and the project manager with `--plugin-dir`.
 //!
 //! The repo's own `.claude` files load as one more plugin (`own`). MCP servers
 //! go to each call's MCP config ([`mcp`]). A plugin that cannot load is skipped.
@@ -33,7 +33,6 @@ pub const MARKETPLACES: &str = "marketplaces";
 const SETTINGS: &str = ".claude/settings.json";
 
 /// The parts of a plugin that are one folder each, which kelpie copies whole
-/// where `repo_setup.parts` loads them and leaves out where it does not
 const FOLDERS: [Part; 4] = [Part::Skills, Part::Agents, Part::Commands, Part::Hooks];
 
 /// The folder a plugin's manifest sits in, which the copy writes trimmed of its
@@ -123,9 +122,9 @@ impl RepoPlugins {
         let into = skills.join(FOLDER);
         let mut plugins: Vec<RepoPlugin> = resolve(checkout, base, kelpie_home, git, true, setup)
             .into_iter()
-            .map(|resolved| plan_one(resolved, &into, setup))
+            .map(|resolved| plan_one(resolved, &into))
             .collect();
-        plugins.extend(own::plan(checkout, base, &into, setup));
+        plugins.extend(own::plan(checkout, base, &into));
         Self { plugins }
     }
 
@@ -231,21 +230,16 @@ impl RepoPlugin {
     }
 }
 
-// A plugin that was found, read for the parts `setup` loads and aimed at its
-// folder under `into`, or the reason it cannot load.
-fn plan_one(resolved: Result<Found, Skipped>, into: &Path, setup: &RepoSetup) -> RepoPlugin {
+// A plugin that was found, read for the parts it holds and aimed at its folder
+// under `into`, or the reason it cannot load.
+fn plan_one(resolved: Result<Found, Skipped>, into: &Path) -> RepoPlugin {
     let mut found = match resolved {
         Ok(found) => found,
         Err(skipped) => return RepoPlugin::skipped(skipped.id, skipped.reason),
     };
-    let skills = if setup.loads(Part::Skills) {
-        skills_in(&found.folder)
-    } else {
-        Vec::new()
-    };
+    let skills = skills_in(&found.folder);
     found.parts = FOLDERS
         .into_iter()
-        .filter(|part| setup.loads(*part))
         .filter(|part| match part {
             Part::Skills => !skills.is_empty(),
             _ => is_folder(&found.folder.join(part.as_str())),
@@ -253,22 +247,13 @@ fn plan_one(resolved: Result<Found, Skipped>, into: &Path, setup: &RepoSetup) ->
         .collect();
     let dir = into.join(&found.name);
     // The plugin's files go whole beside its parts, for a server that runs one of them.
-    let servers = if setup.loads(Part::Mcp) {
-        mcp::plugin_servers(&found.folder)
-    } else {
-        Servers::new()
-    };
-    let mcp = mcp::of_plugin(&found.name, servers, &dir.join(mcp::ROOT));
+    let mcp = mcp::of_plugin(
+        &found.name,
+        mcp::plugin_servers(&found.folder),
+        &dir.join(mcp::ROOT),
+    );
     if !mcp.is_empty() {
         found.parts.push(Part::Mcp);
-    }
-    if found.parts.is_empty() {
-        let asked: Vec<&str> = setup.parts.iter().map(|part| part.as_str()).collect();
-        let reason = format!(
-            "it has none of the parts repo_setup.parts loads ({})",
-            asked.join(", ")
-        );
-        return RepoPlugin::skipped(found.id, reason);
     }
     let unreadable: Vec<String> = skills
         .iter()
@@ -303,7 +288,7 @@ pub(crate) struct Found {
     pub(crate) folder: PathBuf,
     /// Why the marketplace is the last good copy, where it could not be fetched
     pub(crate) stale: Option<String>,
-    /// The parts that load: those `repo_setup.parts` names that the plugin has
+    /// The parts that load: those the plugin has
     pub(crate) parts: Vec<Part>,
 }
 
@@ -319,8 +304,7 @@ pub(crate) struct Skipped {
 /// fetching the marketplaces that need it, in the order of the repo's list
 /// and `origin`'s default branch first where `refresh` is set
 ///
-/// What `setup` leaves out of the repo's plugins is not listed, and what it
-/// adds comes after them.
+/// What `setup` adds, its `extra`, comes after the repo's plugins.
 pub(crate) fn resolve(
     checkout: &Path,
     base: &str,
@@ -330,19 +314,16 @@ pub(crate) fn resolve(
     setup: &RepoSetup,
 ) -> Vec<Result<Found, Skipped>> {
     let mut resolved = Vec::new();
-    // The branch is read even where no plugin of the repo's loads, so the
-    // checkout is as fresh for the plugins `setup` adds.
     let read = settings_on_default_branch(checkout, base, refresh);
     let (settings, mut enabled) = match read {
-        Ok(Some(read)) if setup.plugins => read,
-        Err(reason) if setup.plugins => {
+        Ok(Some(read)) => read,
+        Err(reason) => {
             let id = SETTINGS.to_owned();
             resolved.push(Err(Skipped { id, reason }));
             (Value::Null, Vec::new())
         }
-        _ => (Value::Null, Vec::new()),
+        Ok(None) => (Value::Null, Vec::new()),
     };
-    enabled.retain(|(id, _)| !setup.skips(id));
     // A marketplace the project gives takes the place of the repo's of that name.
     let mut known = settings["extraKnownMarketplaces"]
         .as_object()
@@ -727,9 +708,9 @@ pub fn inspect(
 ) -> Vec<RepoPlugin> {
     let mut plugins: Vec<RepoPlugin> = resolve(checkout, base, kelpie_home, &Fetched, false, setup)
         .into_iter()
-        .map(|resolved| plan_one(resolved, Path::new(""), setup))
+        .map(|resolved| plan_one(resolved, Path::new("")))
         .collect();
-    plugins.extend(own::plan(checkout, base, Path::new(""), setup));
+    plugins.extend(own::plan(checkout, base, Path::new("")));
     plugins
 }
 

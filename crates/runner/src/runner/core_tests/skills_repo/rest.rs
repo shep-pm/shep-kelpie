@@ -7,8 +7,8 @@ use super::{directory, fetch, land_settings, marketplace};
 use crate::runner::step;
 use crate::test::{Rig, assert_reads};
 
-// A plugin whose `docs/` is none of the parts `repo_setup.parts` names, with a skill that names a
-// file under the plugin's root
+// A plugin whose `docs/` is none of its part folders, with a skill that names a file under the
+// plugin's root
 fn with_docs(rig: &Rig) {
     let dir = marketplace(rig, "house", &[("style", "style")]);
     rig.land(
