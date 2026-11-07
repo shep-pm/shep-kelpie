@@ -612,6 +612,7 @@ fn kept_after_triage(runner: &Mutex<Runner>, key: u64) {
         key,
         failures: vec!["no acceptance criteria".to_owned()],
         triage: CheckTriage::Ran,
+        ready_seen: false,
     }];
 }
 
@@ -719,6 +720,7 @@ fn an_issue_that_passed_the_old_version_is_held_once_the_version_rises() {
         key: check::fnv1a(old.as_bytes()),
         failures: vec![],
         triage: CheckTriage::None,
+        ready_seen: false,
     }];
 
     assert_eq!(step(&runner).unwrap(), None, "nothing starts");
@@ -774,4 +776,163 @@ fn a_local_ticket_naming_a_fenced_path_is_skipped_and_the_board_goes_on() {
     };
     assert_eq!(*issue, "k1".parse().unwrap());
     assert!(error.contains(".claude/skills/x/SKILL.md"), "{error}");
+}
+
+// A passing line more than `PASSING`, so the edit changes the key and still passes
+fn edited(n: u32) -> String {
+    format!("{PASSING}\nEdit {n}.\n")
+}
+
+// Issue 30 as the forge lists it with `body` and `labels`
+fn relisted(rig: &Rig, body: &str, labels: &[&str]) {
+    list(rig, filed(rig, MAINTAINER, body, labels));
+    rig.next_look();
+}
+
+// A rig whose passing issue the check made ready, which the maintainer then took
+// the label off
+fn taken_off(pick: &str) -> (Rig, Mutex<Runner>) {
+    let lines = format!("pick = \"{pick}\"");
+    let (rig, runner) = checking(&lines, MAINTAINER, PASSING, &PASSING_LABELS);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(moves(&rig), ["label ready-for-agent"]);
+    (rig, runner)
+}
+
+fn ready_seen(rig: &Rig) -> bool {
+    checks(rig)[0]["ready_seen"] == true
+}
+
+#[test]
+fn a_first_pass_still_labels() {
+    let (rig, runner) = checking("pick = \"off\"", MAINTAINER, PASSING, &PASSING_LABELS);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(moves(&rig), ["label ready-for-agent"]);
+    assert!(ready_seen(&rig), "{}", checks(&rig));
+}
+
+#[test]
+fn a_label_the_maintainer_took_off_stays_off_after_an_edit() {
+    let (rig, runner) = taken_off("off");
+
+    relisted(&rig, &edited(1), &PASSING_LABELS);
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(moves(&rig), ["label ready-for-agent"], "nothing put back");
+    assert!(ready_seen(&rig), "{}", checks(&rig));
+    relisted(&rig, &edited(2), &PASSING_LABELS);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(moves(&rig), ["label ready-for-agent"], "still off");
+}
+
+#[test]
+fn a_label_the_maintainer_took_off_stays_off_after_the_check_version_rises() {
+    let (rig, runner) = taken_off("off");
+    // A raised `check::VERSION` changes every key, so the kept one no longer matches
+    runner.lock().unwrap().state.checks[0].key = 0;
+
+    relisted(&rig, PASSING, &PASSING_LABELS);
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(moves(&rig), ["label ready-for-agent"], "nothing put back");
+    assert_ne!(checks(&rig)[0]["key"], 0, "it was checked again");
+    assert!(ready_seen(&rig), "{}", checks(&rig));
+}
+
+#[test]
+fn a_label_the_maintainer_took_off_stays_off_after_a_failing_edit_and_a_fix() {
+    let (rig, runner) = taken_off("off");
+
+    relisted(&rig, FAILING, &PASSING_LABELS);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert!(
+        ready_seen(&rig),
+        "a failing result keeps it: {}",
+        checks(&rig)
+    );
+    relisted(&rig, &edited(1), &PASSING_LABELS);
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(moves(&rig), ["label ready-for-agent"], "nothing put back");
+}
+
+#[test]
+fn a_label_put_back_by_hand_stands_and_can_come_off_again() {
+    // Unlabelled and failing, so its first result has no `ready_seen`
+    let (rig, runner) = checking("pick = \"off\"", MAINTAINER, FAILING, &PASSING_LABELS);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert!(!ready_seen(&rig), "{}", checks(&rig));
+
+    // The maintainer labels it by hand: the same text, so the same key
+    let mut labels = PASSING_LABELS.to_vec();
+    labels.push("ready-for-agent");
+    relisted(&rig, FAILING, &labels);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert!(ready_seen(&rig), "seen on the listing: {}", checks(&rig));
+
+    // Fixed, with the label on, it stands: nothing is written
+    relisted(&rig, &edited(1), &labels);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(moves(&rig), Vec::<String>::new());
+
+    // Taken off again, it stays off
+    relisted(&rig, &edited(2), &PASSING_LABELS);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(moves(&rig), Vec::<String>::new());
+}
+
+#[test]
+fn kelpies_own_take_back_is_not_the_maintainers() {
+    let (rig, runner) = checking(
+        "pick = \"maintainer\"\nhand_ready = true",
+        MAINTAINER,
+        FAILING,
+        &["ready-for-agent"],
+    );
+    rig.claude.script_for(Role::Triager, [reply(json!({}))]);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(
+        rig.github.label_takes(),
+        [(30, "ready-for-agent".to_owned())],
+        "kelpie took it back"
+    );
+    assert!(!ready_seen(&rig), "{}", checks(&rig));
+
+    // The edit passes: it is ready, as the first pass of any issue is
+    let mut labels = PASSING_LABELS.to_vec();
+    labels.push("needs-triage");
+    relisted(&rig, PASSING, &labels);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(moves(&rig).last().unwrap(), "label ready-for-agent");
+}
+
+#[test]
+fn a_triage_pass_leaves_it_off() {
+    let (rig, runner) = taken_off("maintainer");
+    // The edit fails, so the pass runs, and its rewrite would pass
+    let found = json!({ "type": "bug", "kind": "fix", "priority": "P2", "body": PASSING });
+    rig.claude.script_for(Role::Triager, [reply(found)]);
+    rig.claude
+        .script_for(Role::Representative, [Scripted::Say(WORDS)]);
+    relisted(&rig, FAILING, &PASSING_LABELS);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(calls(&rig, Role::Triager).len(), 1, "the pass ran");
+    assert_eq!(
+        rig.github.issue_edits(),
+        [],
+        "no rewrite is promised or written"
+    );
+    let moved = moves(&rig);
+    assert_eq!(moved[0], "label ready-for-agent");
+    assert!(
+        !moved[1..].contains(&"label ready-for-agent".to_owned()),
+        "{moved:?}"
+    );
+    assert_eq!(moved.last().unwrap(), "label needs-triage");
 }

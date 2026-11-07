@@ -74,6 +74,11 @@ pub(in crate::runner) fn readiness(
     if !runner.own_author(author) {
         return Ready::Not;
     }
+    // The maintainer took the label off, so it stays off: the pass ends at
+    // `needs-triage`.
+    if runner.check_ready_was_seen(issue) && !runner.triage_seen(issue).iter().any(|l| l == READY) {
+        return Ready::Not;
+    }
     match runner.local.find(&body, Surface::Prose) {
         Some(leak) => Ready::Local(leak),
         None if runner.passes_with(issue, &body, labels) => Ready::Body(body),
@@ -324,6 +329,7 @@ impl Runner {
             self.triage_failed(issue, &why, !forge_is_busy(&e));
             return Ok(ReadyLabels::Held);
         }
+        self.check_ready_seen(issue)?;
         Ok(ReadyLabels::On)
     }
 }
