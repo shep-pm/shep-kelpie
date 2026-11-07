@@ -24,7 +24,7 @@ Review passes and the review bots. Rulings are in rulings.md, and CI and the mer
 - Local reviewers (`command`, `endpoint`), their lock and the rounds kept for replay: `local-review.md`. #107, #145, #502, #849
 - One finding shape for every reviewer kind; each bot has a tested profile. #123
 - With `ci.test_command`, a reviewer on any harness may attach a failing test, held to `review-tests` in the build folder by `kelpie confine`: Claude Code `Write`, pi `write` (guard extension), goose `write` and Codex `apply_patch` (hooks; shells read only). The test runs before/after fix and is recorded. Still failing after the fix: worker gets one more fix turn on it (`sent_back` on the check), then `stuck` `test-still-fails`; yes = one more turn, no = check ends and pass goes on. A timeout or no run never acts. The public line names no output. #517, #518, #519
-- Deferred finding kelpie sent is filed after merge in kelpie's words (nits dropped); a disputed one never, even if also deferred. `git.issues`: `ask` (default, `follow-up` ruling), `file` (as `needs-triage`; auto-filed were often false), `skip`. #142, #380, #384, `runner/follow_up/`
+- Deferred finding kelpie sent is filed after merge in kelpie's words (nits dropped); a disputed one never, even if also deferred. Each pending finding raises a `follow-up` ruling on `Wake::FollowUp`: the project manager answers when `rulings.pm_decides.follow-up` allows it, otherwise the maintainer does, including with no `agents.pm`. A yes files `ready-for-agent`, or unread as `needs-triage` when the project manager asks for it; a no drops the findings. `git.issues` loads but decides nothing. ADR 0020, #1776, `runner/follow_up/`
 
 ## Bots
 

@@ -953,48 +953,17 @@ pub(in crate::runner) fn auto_merging_on(
 }
 
 #[test]
-fn issues_ask_raises_the_follow_up_ruling_under_auto_merging_too() {
-    let (rig, runner) = auto_merging_with_issues("ask");
-    let Some(StepReport::Ruling { question, .. }) = after_merge(&runner) else {
-        panic!("the maintainer was not asked about the findings");
-    };
-    assert_eq!(rig.forge.merges().len(), 1, "kelpie merged it itself");
-    assert!(question.contains("src/lib.rs:9 looks racy"), "{question}");
-    assert_eq!(rig.forge.created(), [], "nothing is filed before the yes");
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["rulings"][0]["kind"]["kind"], "follow-up");
-}
-
-#[test]
-fn issues_skip_files_nothing_asks_nothing_and_the_work_item_finishes() {
-    let (rig, runner) = auto_merging_with_issues("skip");
-    assert!(finished(after_merge(&runner)));
-    assert_eq!(rig.forge.merges().len(), 1);
-    assert_eq!(rig.forge.created(), []);
-    assert_eq!(rig.forge.comments(), []);
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["rulings"], json!([]));
-    assert_eq!(status["work_items"], json!([]));
-}
-
-#[test]
-fn issues_file_files_at_once_under_ask_merging_too() {
-    let rig = Rig::new("shep");
-    rig.issues("file");
-    let (rig, runner, head) = reviewed_in(rig, &[racy()], false);
-    defer(&rig, &lines(&[racy()]));
-    rig.forge.set_checks(&head, Checks::Passed);
-    assert!(matches!(
-        rig.verdict(&runner),
-        Some(StepReport::Ruling { id, .. }) if id == ticket(71)
-    ));
-    rig.ask(&runner, "rule", Some("71 yes"));
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::MarkedReady { .. })
-    ));
-    rig.clock.advance(CHECKS_SETTLE);
-    assert_eq!(step(&runner).unwrap(), filed(&[900], &[], 0));
-    assert_eq!(rig.forge.merges().len(), 1);
-    assert_eq!(rig.forge.created().len(), 1);
+fn a_deferred_finding_raises_a_follow_up_ruling_whatever_git_issues_holds() {
+    for filing in ["ask", "file", "skip"] {
+        let (rig, runner) = auto_merging_with_issues(filing);
+        let report = after_merge(&runner);
+        let Some(StepReport::Ruling { question, .. }) = report else {
+            panic!("git.issues = {filing}: expected a follow-up ruling, got {report:?}");
+        };
+        assert_eq!(rig.forge.merges().len(), 1, "kelpie merged it itself");
+        assert!(question.contains("src/lib.rs:9 looks racy"), "{question}");
+        assert_eq!(rig.forge.created(), [], "nothing is filed before the yes");
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["rulings"][0]["kind"]["kind"], "follow-up");
+    }
 }
