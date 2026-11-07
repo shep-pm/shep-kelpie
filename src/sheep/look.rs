@@ -584,7 +584,7 @@ mod tests {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
         let before = runner.lock().unwrap().settings().clone();
-        let (mut look, table, _home) = pm_alone(&rig, &["merge"]);
+        let (mut look, table, _home) = pm_alone(&rig, &["security"]);
 
         look.again(&runner);
         look.again(&runner);
@@ -593,21 +593,21 @@ mod tests {
         assert_eq!(alert.title, "kelpie: shep settings change refused");
         for said in [
             "rulings.pm_alone",
-            "a merge ruling is never decided by the project manager alone",
+            "a ruling on a contribution never goes to the project manager",
             "keeps its old settings until its table is fixed",
         ] {
             assert!(alert.text.contains(said), "{}", alert.text);
         }
 
         // Another reason is another alert.
-        set_pm_alone(&table, &["security"]);
+        set_pm_alone(&table, &["local-model-spilled"]);
         look.again(&runner);
         look.again(&runner);
         assert_eq!(runner.lock().unwrap().settings(), &before);
         let posts = rig.alerts.posts();
         assert_eq!(posts.len(), 2);
         assert!(
-            posts[1].1.text.contains("a contribution"),
+            posts[1].1.text.contains("no longer a kind of ruling"),
             "{}",
             posts[1].1.text
         );
@@ -643,7 +643,7 @@ mod tests {
     fn a_refused_reread_whose_post_fails_is_posted_again_at_the_next_wake() {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
-        let (mut look, _table, _home) = pm_alone(&rig, &["merge"]);
+        let (mut look, _table, _home) = pm_alone(&rig, &["security"]);
 
         rig.alerts.set_down(true);
         look.again(&runner);
@@ -657,7 +657,7 @@ mod tests {
     fn a_good_reread_after_a_refused_one_clears_the_refusal_from_status() {
         let rig = Rig::new("shep");
         let runner = rig.open().unwrap();
-        let (mut look, table, _home) = pm_alone(&rig, &["merge"]);
+        let (mut look, table, _home) = pm_alone(&rig, &["security"]);
         assert_eq!(
             rig.ask(&runner, "status", None).get("settings_refused"),
             None
@@ -668,7 +668,7 @@ mod tests {
         let refused = &rig.ask(&runner, "status", None)["settings_refused"];
         let reason = refused["reason"].as_str().unwrap();
         assert!(
-            reason.contains("never decided by the project manager alone"),
+            reason.contains("never goes to the project manager"),
             "{reason}"
         );
         assert_eq!(refused["at"], Rig::EPOCH + 90);

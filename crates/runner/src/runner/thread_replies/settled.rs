@@ -69,6 +69,15 @@ pub(in crate::runner) enum Settler {
         why: String,
         unread: bool,
     },
+    /// The project manager's yes to a follow-up ruling that drops some of its
+    /// findings, each by its place from 1, which come off the work item in the
+    /// save that settles the ruling, and the rest are filed
+    PmDropping {
+        answer: String,
+        why: String,
+        unread: bool,
+        dropped: Vec<usize>,
+    },
 }
 
 /// What came of a ruling that is gone from the state
@@ -101,7 +110,7 @@ impl Outcome {
                 line: None,
                 told: format!("is already answered in its own thread: {words}"),
             },
-            Settler::Pm { answer, why, .. } => {
+            Settler::Pm { answer, why, .. } | Settler::PmDropping { answer, why, .. } => {
                 let (answer, why) = (bare(answer), inert(&bare(why)));
                 let because = match why.is_empty() {
                     true => String::new(),
@@ -157,12 +166,18 @@ impl Runner {
     ) -> Result<(), RuleError> {
         let outcome = Outcome::answered(&by, &answer);
         let answerer = match by {
-            Settler::Pm { .. } => Answerer::Pm,
+            Settler::Pm { .. } | Settler::PmDropping { .. } => Answerer::Pm,
             _ => Answerer::Maintainer,
         };
-        let unread = matches!(by, Settler::Pm { unread: true, .. });
+        let (unread, dropped) = match &by {
+            Settler::Pm { unread, .. } => (*unread, Vec::new()),
+            Settler::PmDropping {
+                unread, dropped, ..
+            } => (*unread, dropped.clone()),
+            _ => (false, Vec::new()),
+        };
         let parked = self.parked_answer(id, &answer);
-        let outcome = match self.apply(id, answer, answerer, unread)? {
+        let outcome = match self.apply(id, answer, answerer, unread, &dropped)? {
             true => {
                 self.note_answer(parked);
                 outcome

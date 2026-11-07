@@ -1,16 +1,16 @@
 # Dependencies
 
-Whether kelpie merges the bumps bots open (Dependabot), and what it does with one that breaks. #855
+Whether kelpie merges the bumps bots open (Dependabot), and closes one that breaks. #855
 
 ## Settings
 
 - `[app.dogs.kelpie.dependencies]`, `#[serde(default)]`, `deny_unknown_fields`: an absent table is `pick = "off"`. `crates/core/src/settings/dependencies.rs`
 - `pick`: `off` (default; every bot's pull request is left alone) or `on`.
 - `bots`: logins whose pull requests are bumps, `["dependabot"]` when absent. Compared ignoring case and a `[bot]` suffix. Not the contributions' bot rule: a bump never waits on the maintainer's labels.
-- `on_red`: `close` (default) or `leave`. `fix` is not built.
+- No `on_red`: a red bump is always closed. `settings migrate` deletes the key.
 - `web`: paths that make a bump a web bump. A path ending `/` is a folder, any other is a file. Empty means no bump is one.
 - `wait_hours` (24): above 0. How long a head's checks may stay pending or never start before the bump is red.
-- A changed table takes effect at the next poll: `reread` lists `dependencies` as in effect, and the runner builds nothing from it at start. Turning `pick` on starts recording bumps, and turning it off forgets the records as a start with `pick` off does; `wait_hours` and `on_red` apply to a bump already recorded. `runner/reread/`
+- A changed table takes effect at the next poll: `reread` lists `dependencies` as in effect, and the runner builds nothing from it at start. Turning `pick` on starts recording bumps, and turning it off forgets the records as a start with `pick` off does; `wait_hours` applies to a bump already recorded. `runner/reread/`
 
 ## Detection
 
@@ -35,9 +35,9 @@ Whether kelpie merges the bumps bots open (Dependabot), and what it does with on
 
 ## Red
 
-- Under `close`, steps are saved one at a time in `Red.step`, so a restart repeats none: comment naming each failed check (the e2e output tail is not posted), close the pull request (`Forge::close_pull_request`), then open an issue labelled `needs-triage` and `dependencies`. A refused step is tried again at the next poll.
-- Under `leave` the reason is logged once and the bump stays open. A new head gives it another chance.
-- Out of scope: `on_red = "fix"`.
+- Steps are saved one at a time in `Red.step`, so a restart repeats none: comment naming each failed check (not the e2e output tail), close the pull request (`Forge::close_pull_request`), then open an issue labelled `needs-triage` and `dependencies`. A refused step is tried again at the next poll.
+- The issue puts the call before the project manager; the bot's next bump undoes a close.
+- `RedStep::Left` is a saved value no new bump gets; it stays open until a new head.
 
 ## Log and status
 

@@ -55,7 +55,7 @@ pub use builds::Builds;
 pub use ci::{Ci, Concurrency, FixAttempts, TestCommand};
 pub use code_graph::CodeGraph;
 pub use contributions::{Contributions, Pick};
-pub use dependencies::{Dependencies, DependencyPick, OnRed};
+pub use dependencies::{Dependencies, DependencyPick};
 pub use e2e::{E2e, RepoPath, ResultsDir, SshAlias};
 pub use gateway::{
     Gateway, GatewayKey, GatewayKind, GatewayName, Gateways, KeyVar, ModelHost, Route, Timing,
@@ -184,6 +184,8 @@ const PANEL: &str = "the ruling panel is gone: the project manager answers the k
                      `rulings.pm_decides` sets `true`, and the maintainer the rest";
 const WRITER: &str = "the issue writer is gone, and an issue is written with kelpie's \
                       `issue` skill, which every harness has";
+const RED_BUMP: &str = "a red bump is always closed with an issue filed, and the project manager \
+                        decides what to do with it from the issue";
 const MIGRATE: &str = "delete it, or run `shep kelpie settings migrate`, which does";
 
 // The keys removed features left behind
@@ -400,6 +402,11 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "agents.issue_writer",
         because: WRITER,
+        fix: MIGRATE,
+    },
+    Removed {
+        key: "dependencies.on_red",
+        because: RED_BUMP,
         fix: MIGRATE,
     },
     Removed {

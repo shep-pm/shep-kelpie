@@ -181,24 +181,61 @@ impl Runner {
         }
         let why = plain(&self.shown(decide.why.clone()), WORDS);
         let found = self.findings_of(id);
-        let count = match found.len() {
-            1 => "1 finding".to_owned(),
-            many => format!("{many} findings"),
+        if let Some((number, _)) = decide.dropped.iter().find(|(n, _)| *n > found.len()) {
+            return Ok(Err(format!(
+                "follow_up {named}: finding {number} is past the {} ruling {id} lists",
+                found.len()
+            )));
+        }
+        // Dropping every finding is a no, which the ruling's own answer says.
+        let every = !decide.dropped.is_empty() && decide.dropped.len() == found.len();
+        let call = if every { Call::Drop } else { decide.call };
+        let drops: Vec<String> = (decide.dropped.iter())
+            .map(|(n, why)| plain(&self.shown(format!("{} ({why})", found[n - 1])), WORDS))
+            .collect();
+        let (count, at) = match (call, drops.is_empty()) {
+            (Call::Drop, false) => (counted(found.len()), drops.join(", ")),
+            (_, false) => {
+                let kept = (found.iter().enumerate())
+                    .filter(|(i, _)| decide.dropped.iter().all(|(n, _)| n - 1 != *i))
+                    .map(|(_, place)| place.as_str());
+                let kept = plain(&self.shown(kept.collect::<Vec<_>>().join(", ")), WORDS);
+                let n = found.len() - drops.len();
+                let count = format!("{n} of {}", counted(found.len()));
+                (count, format!("{kept}; dropping {}", drops.join("; ")))
+            }
+            (_, true) => (
+                counted(found.len()),
+                plain(&self.shown(found.join(", ")), WORDS),
+            ),
         };
-        let at = plain(&self.shown(found.join(", ")), WORDS);
-        let (answer, verb, label) = match decide.call {
+        let (answer, verb, label) = match call {
             Call::File { unread: false } => (Ruled::Yes, "filing", Some(READY)),
             Call::File { unread: true } => (Ruled::Yes, "filing", Some(TRIAGE)),
             Call::Drop => (Ruled::No(why.clone()), "dropping", None),
         };
         let as_label = label.map_or_else(String::new, |l| format!(" as {l}"));
-        let by = Settler::Pm {
-            answer: format!(
+        let (answered, unread) = (
+            format!(
                 "{}, {verb} {count}{as_label}: {at}",
                 if label.is_some() { "yes" } else { "no" }
             ),
-            why: why.clone(),
-            unread: decide.call == Call::File { unread: true },
+            call == Call::File { unread: true },
+        );
+        // The findings a yes drops come off the work item in the save that
+        // settles the ruling, so a stop between the two saves cannot part them.
+        let by = match (label, drops.is_empty()) {
+            (Some(_), false) => Settler::PmDropping {
+                answer: answered,
+                why: why.clone(),
+                unread,
+                dropped: decide.dropped.iter().map(|(n, _)| *n).collect(),
+            },
+            _ => Settler::Pm {
+                answer: answered,
+                why: why.clone(),
+                unread,
+            },
         };
         match self.rule_by(id, answer, by) {
             Ok(()) => {}
@@ -337,6 +374,14 @@ impl Runner {
         // What it settled is what a later wake must remember.
         self.pm_note(&line);
         self.record(vec![line])
+    }
+}
+
+// `n` findings, in words
+fn counted(n: usize) -> String {
+    match n {
+        1 => "1 finding".to_owned(),
+        many => format!("{many} findings"),
     }
 }
 

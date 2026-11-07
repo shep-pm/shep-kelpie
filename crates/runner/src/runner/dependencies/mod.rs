@@ -7,7 +7,7 @@
 //! [`CHECKS_SETTLE`](super::CHECKS_SETTLE), is proved by its checks and, for a
 //! `dependencies.web` path, by an e2e run ([`flight::proving`](super::flight)),
 //! then merges with a merge commit. It is red when a check or the run failed,
-//! or no check reported after `dependencies.wait_hours`; `on_red` closes or leaves it.
+//! or no check reported after `dependencies.wait_hours`; it is then closed with an issue filed.
 
 use super::Runner;
 use super::dev_server::Browsed;
@@ -15,7 +15,6 @@ use super::flight::Verdict;
 use super::gate::{settled, short};
 use crate::board::{OpenPullRequest, is_bump};
 use crate::ports::{Checks, E2eOutcome, NewLabel, PullRequestState, Timestamp};
-use crate::settings::OnRed;
 use crate::state::{Bump, E2eResult, E2eState, Red, RedStep, StateError};
 use crate::worktree::Base;
 use acts::{Act, Done, Made};
@@ -529,24 +528,22 @@ impl Runner {
         self.save(next)
     }
 
-    // Marks bump `number` red at `head`, with what failed, and returns the write `on_red` says
-    // is next.
+    // Marks bump `number` red at `head`, with what failed, and returns the write that comes
+    // next: the comment, then the close, then the issue.
     fn go_red(
         &mut self,
         number: u64,
         head: &str,
         why: Vec<String>,
     ) -> Result<Option<Act>, StateError> {
-        let (step, then) = match self.settings.dependencies.on_red {
-            OnRed::Close => (RedStep::Comment, "closing it"),
-            OnRed::Leave => (RedStep::Left, "left open"),
-        };
-        self.notes
-            .push(format!("bump #{number}: red: {}; {then}", why.join("; ")));
+        self.notes.push(format!(
+            "bump #{number}: red: {}; closing it",
+            why.join("; ")
+        ));
         let red = Red {
             head: head.to_owned(),
             why,
-            step,
+            step: RedStep::Comment,
         };
         self.amend(number, |bump| bump.red = Some(red))?;
         self.finish_red(number)

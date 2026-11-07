@@ -43,7 +43,7 @@ fn a_reread_refused_by_another_check_leaves_the_file_as_it_was() {
     let runner = rig.open().unwrap();
     let next = settings_with(&rig, |s| {
         let s = s.replace("e2e-box", "other-box");
-        format!("{s}\n[app.dogs.kelpie.rulings]\npm_alone = [\"merge\"]\n")
+        format!("{s}\n[app.dogs.kelpie.rulings]\npm_alone = [\"security\"]\n")
     });
     let mut runner = runner.lock().unwrap();
     runner.reread(next, rig.kelpie_settings()).unwrap_err();

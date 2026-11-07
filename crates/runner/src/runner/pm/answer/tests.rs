@@ -205,6 +205,27 @@ fn a_follow_up_answer_is_a_yes_or_a_no_and_a_yes_may_name_its_label() {
 }
 
 #[test]
+fn a_yes_may_drop_findings_by_number_each_once() {
+    let drops = |text: &str| read(text).unwrap().follow_up.map(|d| d.dropped);
+    assert_eq!(
+        drops(
+            "{\"follow_up\": {\"item\": 7, \"decision\": \"yes\", \"drop\": \
+             [{\"finding\": 2, \"why\": \" stale \"}]}}"
+        ),
+        Some(vec![(2, "stale".to_owned())])
+    );
+    for bad in [
+        "{\"item\": 7, \"decision\": \"no\", \"drop\": [{\"finding\": 1}]}",
+        "{\"item\": 7, \"decision\": \"yes\", \"drop\": [{\"finding\": 0}]}",
+        "{\"item\": 7, \"decision\": \"yes\", \"drop\": [{\"finding\": 1}, {\"finding\": 1}]}",
+        "{\"item\": 7, \"decision\": \"yes\", \"drop\": 1}",
+    ] {
+        let read = read(&format!("{{\"follow_up\": {bad}}}")).unwrap();
+        assert_eq!((read.follow_up, read.unread.len()), (None, 1), "{bad}");
+    }
+}
+
+#[test]
 fn braces_inside_the_answers_text_are_not_an_answer_of_their_own() {
     let text = "{\"pick\": 12, \"why\": \"not {\\\"pick\\\": 3} as before\"} {unfinished";
     assert_eq!(read(text).unwrap().picks, [Picked::of(ticket(12))]);

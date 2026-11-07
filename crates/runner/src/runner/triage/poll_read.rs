@@ -252,6 +252,7 @@ impl Runner {
         // the record owes is written.
         self.settle_triage_waits(&open)?;
         self.settle_splits(&open)?;
+        self.drop_silent_splits()?;
         // An author who took `local` answers by rewriting the issue body, which is
         // what the next pass is made on.
         self.watch_local_waits(&local)?;

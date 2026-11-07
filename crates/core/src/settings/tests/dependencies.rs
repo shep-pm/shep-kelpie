@@ -4,7 +4,7 @@
 use std::num::NonZeroU32;
 
 use super::{EXAMPLE, parse, parse_err};
-use crate::settings::{DependencyPick, OnRed};
+use crate::settings::DependencyPick;
 
 const TABLE: &str = "[app.dogs.kelpie.dependencies]\n";
 
@@ -14,11 +14,10 @@ fn with(lines: &str) -> String {
 }
 
 #[test]
-fn an_absent_dependencies_table_means_pick_off_dependabot_close_no_web_24_hours() {
+fn an_absent_dependencies_table_means_pick_off_dependabot_no_web_24_hours() {
     let d = parse(EXAMPLE).unwrap().dependencies;
     assert_eq!(d.pick, DependencyPick::Off);
     assert_eq!(d.bots, ["dependabot"]);
-    assert_eq!(d.on_red, OnRed::Close);
     assert!(d.web.is_empty());
     assert_eq!(d.wait_hours, NonZeroU32::new(24).unwrap());
     assert_eq!(parse(&with("")).unwrap().dependencies, d, "an empty table");
@@ -27,13 +26,12 @@ fn an_absent_dependencies_table_means_pick_off_dependabot_close_no_web_24_hours(
 #[test]
 fn every_key_is_read() {
     let d = parse(&with(
-        "pick = \"on\"\nbots = [\"renovate[bot]\"]\non_red = \"leave\"\nweb = [\"web/\"]\nwait_hours = 6\n",
+        "pick = \"on\"\nbots = [\"renovate[bot]\"]\nweb = [\"web/\"]\nwait_hours = 6\n",
     ))
     .unwrap()
     .dependencies;
     assert_eq!(d.pick, DependencyPick::On);
     assert_eq!(d.bots, ["renovate[bot]"]);
-    assert_eq!(d.on_red, OnRed::Leave);
     assert_eq!(d.web, ["web/"]);
     assert_eq!(d.wait_hours, NonZeroU32::new(6).unwrap());
 }
@@ -46,9 +44,16 @@ fn an_unknown_key_in_dependencies_is_refused_naming_it() {
 
 #[test]
 fn on_red_and_pick_refuse_any_other_word() {
-    for (key, word) in [("on_red", "fix"), ("pick", "label")] {
-        let err = parse_err(&with(&format!("{key} = \"{word}\"\n")));
-        assert!(err.contains(key) && err.contains(word), "{err}");
+    let err = parse_err(&with("pick = \"label\"\n"));
+    assert!(err.contains("pick") && err.contains("label"), "{err}");
+}
+
+#[test]
+fn on_red_is_refused_by_name_and_says_migrate_deletes_it() {
+    for word in ["close", "leave"] {
+        let err = parse_err(&with(&format!("on_red = \"{word}\"\n")));
+        assert!(err.contains("dependencies.on_red"), "{err}");
+        assert!(err.contains("shep kelpie settings migrate"), "{err}");
     }
 }
 

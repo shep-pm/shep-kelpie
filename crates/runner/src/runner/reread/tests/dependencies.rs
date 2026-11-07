@@ -69,24 +69,6 @@ fn a_changed_wait_hours_applies_to_a_bump_already_recorded() {
 }
 
 #[test]
-fn a_changed_on_red_applies_to_a_bump_already_recorded() {
-    let (rig, runner) = bumping("wait_hours = 2\non_red = \"leave\"");
-    let head = bump(&rig, 40, "Cargo.lock");
-    rig.forge.set_checks(&head, Checks::Pending(Vec::new()));
-    settle(&rig, &runner);
-
-    rig.edit_settings(|s| s.replace("on_red = \"leave\"", "on_red = \"close\""));
-    (runner.lock().unwrap())
-        .reread(rig.settings(), rig.kelpie_settings())
-        .unwrap();
-    rig.clock.advance(2 * 3600);
-    assert_eq!(step(&runner).unwrap(), None);
-
-    assert_eq!(rig.forge.pull_request_closings(), [40]);
-    assert_eq!(rig.forge.created().len(), 1);
-}
-
-#[test]
 fn turning_pick_off_forgets_a_red_bump_with_its_close_steps_left_as_a_start_does() {
     let (rig, runner) = bumping("");
     let head = bump(&rig, 40, "Cargo.lock");
