@@ -12,7 +12,6 @@
 use super::super::Runner;
 use super::super::contributions::post::forge_is_busy;
 use super::super::representative::IssuePost;
-use super::WaitingLabel;
 use super::addressed::Cover;
 use super::ask::{self, Purpose};
 use super::facts::{Reader, Wording, duplicate_facts, facts};
@@ -112,6 +111,9 @@ pub(in crate::runner) struct Tries {
     // The drafts of the split the reply gave for the issue, kept until the
     // record carries them
     pub(super) split: Vec<SplitDraft>,
+    // That `split` is of someone else's issue, so the plan is saved held for
+    // the maintainer's yes and nothing is filed on it before
+    pub(super) split_held: bool,
     // The labels the issue carried when its pass began, so a triage label it
     // carries later came by hand and stands; kept once, whatever retry runs
     pub(in crate::runner) seen: Option<Vec<String>>,
@@ -445,7 +447,7 @@ impl Runner {
         let ready = ready::readiness(self, issue, author, found, &labels);
         // A rewrite the check still refuses is written as settled answers are,
         // and the issue ends `needs-triage`.
-        let (mut plan, mut refused) = (Vec::new(), Vec::new());
+        let (mut plan, mut refused, mut held) = (Vec::new(), Vec::new(), Vec::new());
         let (ready_body, rewrite) = match (stood.as_ref(), ready) {
             (Some(label), _) => {
                 self.notes.push(format!(
@@ -472,6 +474,10 @@ impl Runner {
                     "triage #{issue}: its split files nothing, since it fails the issue check"
                 ));
                 refused = why;
+                (None, None)
+            }
+            (None, ready::Ready::Ask(drafts)) => {
+                held = drafts;
                 (None, None)
             }
             (None, ready::Ready::Not) => (None, None),
@@ -600,7 +606,8 @@ impl Runner {
             None => labels,
         };
         tries.ready_body = ready_body;
-        tries.split = plan;
+        tries.split_held = !held.is_empty();
+        tries.split = if held.is_empty() { plan } else { held };
         tries.stood = stood;
         tries.duplicate = None;
         tries.ask = ask;
@@ -764,6 +771,11 @@ impl Runner {
         let labels = (self.triage_tries.get(&issue)).map_or_else(Vec::new, |t| t.labels.clone());
         let ready_body = (self.triage_tries.get(&issue)).and_then(|t| t.ready_body.clone());
         let split = (self.triage_tries.get(&issue)).map_or_else(Vec::new, |t| t.split.clone());
+        // A plan held for the maintainer starts held by this comment, which no
+        // reply can be to, so nothing is filed before its own ask goes up
+        let hold = (self.triage_tries.get(&issue))
+            .is_some_and(|t| t.split_held)
+            .then_some(TriageQuestions { comment, at });
         // The labels the pass began with go into the record with it: a pass
         // that resumes after a restart has no in-memory reading left, and
         // without these it takes kelpie's own `needs-triage` for the
@@ -826,7 +838,7 @@ impl Runner {
             record.add_call(at);
         }
         triage.issues.push(record);
-        super::split::plan(triage, issue, split);
+        super::split::plan(triage, issue, split, hold);
         // The triager ran on the issue as the check last read it, so its end
         // is checked again.
         if let Some(kept) = next.checks.iter_mut().find(|c| c.issue == issue) {
@@ -848,6 +860,7 @@ impl Runner {
             tries.duplicate = None;
             tries.ready_body = None;
             tries.split.clear();
+            tries.split_held = false;
             tries.stood = None;
             tries.ask = false;
             tries.local_seen = None;
@@ -949,40 +962,7 @@ impl Runner {
                     self.triage_tries.remove(&issue);
                     return Ok(());
                 }
-                TriageStep::Labelled => {
-                    // The labels before this one took time, so a triage label
-                    // put on by hand since the pass began stands, and
-                    // `needs-triage` goes on nothing over it. One already
-                    // there is this step's own, from a lost answer.
-                    match self.triage_labelled_by_hand_but(issue, TRIAGE) {
-                        Ok(Some(label)) => {
-                            self.notes.push(format!(
-                                "triage #{issue}: `{label}` went on by hand while its labels \
-                                 went on, so that stands: kelpie adds no `{TRIAGE}`"
-                            ));
-                            self.triage_stepped(issue, TriageStep::Done)?;
-                            self.triage_tries.remove(&issue);
-                            return Ok(());
-                        }
-                        Ok(None) => {}
-                        Err(e) => {
-                            let why = format!("cannot read its labels: {e}");
-                            self.triage_failed(issue, &why, !forge_is_busy(&e));
-                            return Ok(());
-                        }
-                    }
-                    if let Err(failed) = self.put_waiting_label(issue) {
-                        let counts = match &failed {
-                            WaitingLabel::Make(_) => true,
-                            WaitingLabel::Label(e) => !forge_is_busy(e),
-                        };
-                        self.triage_failed(issue, &failed.to_string(), counts);
-                        return Ok(());
-                    }
-                    self.triage_stepped(issue, TriageStep::Done)?;
-                    self.triage_tries.remove(&issue);
-                    return Ok(());
-                }
+                TriageStep::Labelled => return self.label_waiting_step(issue),
             }
         }
     }
