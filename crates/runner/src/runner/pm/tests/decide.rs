@@ -6,7 +6,7 @@ use super::super::asked::never_decided;
 use super::asked::{comments, merge_put, pending, replied};
 use super::{name_pm, pm_seen};
 use crate::ports::Role;
-use crate::runner::{Runner, StepReport, step};
+use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::settings::RulingName;
 use crate::state::{Held, Ruling, RulingKind, Stuck};
 use crate::test::ticket;
@@ -86,20 +86,37 @@ fn a_design_flag_on_pm_decide_leaves_the_ruling_the_maintainers_with_its_pick() 
     assert!(pending(&rig));
 }
 
+// `pm decide` hands over one ruling whatever the map says, and `merge` is a
+// kind the map may now give. The map starts it `false`, so this ruling came to
+// the maintainer in the first place, and their `pm decide` is what puts it to
+// the project manager. Its yes merges the head this rig cleared the gates on.
 #[test]
-fn pm_decide_on_a_merge_is_refused_naming_the_kind_and_wakes_nothing() {
+fn pm_decide_on_a_merge_wakes_the_project_manager() {
     let (rig, runner) = merge_put("asked-decide-merge", true);
+    rig.claude
+        .script_for(Role::Pm, [Scripted::Say(decided('A', false))]);
 
     let said = replied(&rig, &runner, "71 pm decide", |c| {
-        c.contains("was not put to the project manager")
+        c.starts_with("**Answered by the project manager")
     });
 
     assert!(
-        said.contains("the project manager never decides a `merge` ruling"),
+        said.starts_with("**Answered by the project manager: A, Merge**"),
         "{said}"
     );
-    assert_eq!(pm_seen(&rig).len(), 0);
-    assert!(pending(&rig));
+    assert!(
+        said.contains("Reply `71 no <note>` to reopen it."),
+        "{said}"
+    );
+    assert!(!pending(&rig), "its answer was applied");
+    // its yes merged the head, as a yes the project left to it would: the
+    // gate marks the draft ready, waits its settle time and reads CI again
+    for _ in 0..3 {
+        step(&runner).unwrap();
+        rig.clock.advance(CHECKS_SETTLE);
+    }
+    assert_eq!(rig.forge.merges().len(), 1, "its yes merged the head");
+    assert!(!pm_seen(&rig).is_empty(), "the project manager was woken");
 }
 
 #[test]
@@ -107,7 +124,13 @@ fn pm_decide_is_refused_on_every_kind_the_project_manager_never_decides() {
     let never: Vec<RulingName> = (RulingName::ALL.into_iter())
         .filter(|n| n.pm_default().is_none())
         .collect();
-    assert!(never.iter().any(|n| n.as_str() == "local-model-spilled"));
+    for name in ["security", "contribution-merge", "local-model-spilled"] {
+        assert!(never.iter().any(|n| n.as_str() == name), "{never:?}");
+    }
+    assert!(
+        !never.iter().any(|n| n.as_str() == "merge"),
+        "{never:?}: a merge is the project manager's to decide"
+    );
     for name in never {
         let refused = never_decided(name).unwrap_err();
         assert!(
