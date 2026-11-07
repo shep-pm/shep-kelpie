@@ -1,4 +1,4 @@
-//! The fake forge taking blocked-by links, which kelpie adds to an issue
+//! The fake forge taking blocked-by and sub-issue links, which kelpie adds to an issue
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,6 +22,20 @@ impl FakeForge {
     /// Makes adding a blocked-by link fail, or work again
     pub fn set_links_refused(&self, refused: bool) {
         self.links.refused.store(refused, Ordering::SeqCst);
+    }
+
+    /// Links `child` as a sub-issue of `parent`, which `sub_issues` then lists,
+    /// unless it already is
+    pub fn link_child(&self, parent: u64, child: u64) -> Result<(), ForgeError> {
+        self.ask()?;
+        if self.links.refused.load(Ordering::SeqCst) {
+            return Err(ForgeError::Failed("linking is refused".to_owned()));
+        }
+        if !self.sub_issues_of(parent).contains(&child) {
+            self.wrote(format!("sub-issue #{child} of #{parent}"));
+            self.link_sub_issue(parent, child);
+        }
+        Ok(())
     }
 
     /// Links `number` as blocked by `blocker`, which the issue and the board then show,

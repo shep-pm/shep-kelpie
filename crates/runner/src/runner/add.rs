@@ -8,7 +8,7 @@ use super::pace::{Started, Walked};
 use super::pm::Picked;
 use super::trigger::issue_list;
 use crate::agent_board::starts_within_slack;
-use crate::board::check::label_kind;
+use crate::board::check::{fenced, label_kind};
 use crate::board::{
     self, LabelError, OpenPullRequest, READY, ReadyIssue, Skip, agent_label, old_worker_label,
     pinned,
@@ -39,6 +39,9 @@ pub enum AddError {
     PassedOver(TicketId, Skip),
     /// The issue's `agent:` label cannot be used
     Label(LabelError),
+    /// The issue's `Touches:` names these paths, which a worker's fence refuses
+    /// to write, so a worker on it would stall
+    Fenced(TicketId, Vec<String>),
     /// The agent board named no agent to open it on
     Unpicked(Unpicked),
     /// `finish` holds the board back, so no new work item opens
@@ -169,6 +172,17 @@ impl fmt::Display for AddError {
                 ticket.shown(),
                 passed_over(skip, &|text| text).0
             ),
+            Self::Fenced(ticket, paths) => write!(
+                f,
+                "{} names {} in `Touches:`, which a worker's fence refuses to write on every \
+                 harness: split that change into a `ready-for-human` issue",
+                ticket.shown(),
+                paths
+                    .iter()
+                    .map(|path| format!("`{path}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Self::Label(e) => e.fmt(f),
             Self::Unpicked(e) => e.fmt(f),
             Self::Finishing => f.write_str(
@@ -182,6 +196,19 @@ impl fmt::Display for AddError {
 }
 
 impl core::error::Error for AddError {}
+
+// Refuses an issue whose `Touches:` names a path a worker's fence refuses, which an
+// opened work item and a queued one would both stall on.
+fn refuse_fenced(ticket: TicketId, body: &str) -> Result<(), AddError> {
+    let paths: Vec<String> = (fenced(body).into_iter())
+        .map(|(path, _)| path.to_owned())
+        .collect();
+    if paths.is_empty() {
+        Ok(())
+    } else {
+        Err(AddError::Fenced(ticket, paths))
+    }
+}
 
 impl Runner {
     /// Takes `ticket` back into kelpie's work: at once as [`Added::Opened`], on the
@@ -271,6 +298,7 @@ impl Runner {
         if !found.open {
             return Err(AddError::Closed(ticket));
         }
+        refuse_fenced(ticket, &found.body)?;
         (agent_label(&found.labels, &self.implementer_files())).map_err(AddError::Label)?;
         if !found.labels.iter().any(|l| l == READY) {
             return Err(AddError::NotReady(ticket));
@@ -367,6 +395,7 @@ impl Runner {
         if !found.open {
             return Err(AddError::Closed(ticket));
         }
+        refuse_fenced(ticket, &found.body)?;
         let opening = match opening {
             Some(opening) => opening,
             None => self.ranked(ticket, &found.labels, picked)?.first(),

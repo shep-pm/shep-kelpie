@@ -26,27 +26,6 @@ pub const SPENT_PCT: u32 = 100;
 /// `/usage` runs, so a hold is never trusted past its reset alone.
 pub const RECHECK_SECS: u64 = 600;
 
-const DAY_SECS: u64 = 86_400;
-const WEEK_DAYS: u8 = 7;
-
-// Reset times are printed to the minute and round either way (10:59pm on one
-// read, 11pm on the next), so a weekly reset that moved by less than this is
-// the same week.
-const SAME_WEEK_SECS: u64 = 3600;
-
-/// What the week had spent when today began, kept across a restart
-// wire format: changing this is a breaking change to the state file
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DayStart {
-    /// When the week this day belongs to resets
-    pub week_resets_at: Timestamp,
-    /// Which day of that week, from 0 on the first
-    pub day: u8,
-    /// Percent of the week used when the day began
-    pub week_used_pct: u32,
-}
-
 /// Which limit is holding
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -83,8 +62,6 @@ pub struct Reading {
 /// What one reading of usage decides
 #[derive(Debug, Clone, PartialEq)]
 pub struct Assessment {
-    /// When the day began, to keep. None when usage could not be read.
-    pub day_start: Option<DayStart>,
     /// The reading, when usage was read
     pub reading: Option<Reading>,
     /// Holds every turn, new work item or not
@@ -114,38 +91,14 @@ impl Assessment {
             until: Timestamp(now.0 + RECHECK_SECS),
         };
         Self {
-            day_start: None,
             reading: None,
             window: Some(hold),
         }
     }
 }
 
-/// Reads `account`'s `usage` at `now` against the day's start
-///
-/// A new day or a new week starts the day over from `usage`.
-pub fn assess(
-    account: Account,
-    now: Timestamp,
-    usage: &Utilization,
-    prior: Option<DayStart>,
-) -> Assessment {
-    let week_start = usage
-        .week
-        .resets_at
-        .0
-        .saturating_sub(u64::from(WEEK_DAYS) * DAY_SECS);
-    let day = (now.0.saturating_sub(week_start) / DAY_SECS).min(u64::from(WEEK_DAYS) - 1) as u8;
-    let day_start = prior
-        .filter(|p| {
-            p.day == day && p.week_resets_at.0.abs_diff(usage.week.resets_at.0) < SAME_WEEK_SECS
-        })
-        .unwrap_or(DayStart {
-            week_resets_at: usage.week.resets_at,
-            day,
-            week_used_pct: usage.week.used_pct,
-        });
-
+/// Reads `account`'s `usage` at `now`
+pub fn assess(account: Account, now: Timestamp, usage: &Utilization) -> Assessment {
     let reading = Reading {
         at: now,
         session: usage.session,
@@ -153,7 +106,6 @@ pub fn assess(
     };
 
     Assessment {
-        day_start: Some(day_start),
         reading: Some(reading),
         window: window(account, usage),
     }
@@ -228,6 +180,7 @@ mod tests {
     use super::*;
     use crate::test::EPOCH;
 
+    const DAY_SECS: u64 = 86_400;
     const RESETS: u64 = EPOCH + 7 * DAY_SECS;
 
     fn usage(week: u32, session: u32) -> Utilization {
@@ -248,64 +201,11 @@ mod tests {
     }
 
     #[test]
-    fn a_new_day_starts_over_from_what_the_week_has_used() {
-        let start = DayStart {
-            week_resets_at: Timestamp(RESETS),
-            day: 0,
-            week_used_pct: 0,
-        };
-        let a = assess(Account::Claude, at(1, 0), &usage(15, 0), Some(start));
-        assert_eq!(a.day_start.unwrap().day, 1);
-        assert_eq!(a.day_start.unwrap().week_used_pct, 15);
-        let reading = a.reading.unwrap();
-        assert_eq!((reading.at, reading.week.used_pct), (at(1, 0), 15));
-    }
-
-    #[test]
-    fn a_new_week_starts_over_even_when_the_day_number_repeats() {
-        let start = DayStart {
-            week_resets_at: Timestamp(RESETS),
-            day: 0,
-            week_used_pct: 60,
-        };
-        let next =
-            |usage: &mut Utilization| usage.week.resets_at = Timestamp(RESETS + 7 * DAY_SECS);
-        let mut after = usage(2, 0);
-        next(&mut after);
-        let a = assess(
-            Account::Claude,
-            Timestamp(RESETS + 3600),
-            &after,
-            Some(start),
-        );
-        assert_eq!(
-            a.day_start.unwrap(),
-            DayStart {
-                week_resets_at: Timestamp(RESETS + 7 * DAY_SECS),
-                day: 0,
-                week_used_pct: 2
-            }
-        );
-    }
-
-    #[test]
-    fn a_reset_time_that_rounds_the_other_way_is_the_same_week() {
-        let start = DayStart {
-            week_resets_at: Timestamp(RESETS - 60),
-            day: 0,
-            week_used_pct: 10,
-        };
-        let a = assess(Account::Claude, at(0, 2), &usage(12, 0), Some(start));
-        assert_eq!(a.day_start, Some(start));
-    }
-
-    #[test]
     fn the_last_day_holds_nothing_until_the_week_is_spent() {
-        let a = assess(Account::Claude, at(6, 3), &usage(88, 0), None);
+        let a = assess(Account::Claude, at(6, 3), &usage(88, 0));
         assert_eq!(a.window, None);
 
-        let start = a.day_start.unwrap();
-        let spent = assess(Account::Claude, at(6, 20), &usage(100, 0), Some(start));
+        let spent = assess(Account::Claude, at(6, 20), &usage(100, 0));
         let hold = spent.hold(Scope::Dispatch).unwrap();
         assert_eq!(
             (hold.kind, hold.until),
@@ -316,7 +216,7 @@ mod tests {
 
     #[test]
     fn a_week_with_nothing_left_holds_at_once() {
-        let a = assess(Account::Claude, at(3, 1), &usage(100, 0), None);
+        let a = assess(Account::Claude, at(3, 1), &usage(100, 0));
         let hold = a.hold(Scope::Dispatch).unwrap();
         assert_eq!(
             (hold.kind, hold.until),
@@ -326,10 +226,10 @@ mod tests {
 
     #[test]
     fn the_window_parks_every_turn_from_half_until_it_resets() {
-        let below = assess(Account::Claude, at(0, 1), &usage(0, 49), None);
+        let below = assess(Account::Claude, at(0, 1), &usage(0, 49));
         assert_eq!(below.hold(Scope::Turn), None);
 
-        let parked = assess(Account::Claude, at(0, 1), &usage(0, 50), None);
+        let parked = assess(Account::Claude, at(0, 1), &usage(0, 50));
         let hold = parked.hold(Scope::Turn).unwrap();
         assert_eq!(hold.kind, HoldKind::Window);
         assert_eq!(hold.until, at(0, 3));
@@ -342,7 +242,7 @@ mod tests {
 
     #[test]
     fn a_spent_week_holds_every_turn_until_the_week_resets_and_outlasts_the_window() {
-        let a = assess(Account::Codex, at(3, 1), &usage(100, 60), None);
+        let a = assess(Account::Codex, at(3, 1), &usage(100, 60));
         let hold = a.hold(Scope::Turn).unwrap();
         assert_eq!(
             (hold.kind, hold.until),
@@ -353,7 +253,7 @@ mod tests {
             "Codex's week is at 100%, so no turn starts until it resets"
         );
 
-        let almost = assess(Account::Codex, at(3, 1), &usage(99, 0), None);
+        let almost = assess(Account::Codex, at(3, 1), &usage(99, 0));
         assert_eq!(almost.hold(Scope::Turn), None);
     }
 
@@ -411,25 +311,20 @@ mod tests {
         let now = at(0, 1);
         let mut fresh = usage(0, 0);
         fresh.session.resets_at = Timestamp(now.0 + 5 * 3600);
-        let a = assess(Account::Claude, now, &fresh, None);
+        let a = assess(Account::Claude, now, &fresh);
         assert_eq!((a.hold(Scope::Dispatch), a.hold(Scope::Turn)), (None, None));
     }
 
     #[test]
     fn a_hold_is_the_same_for_a_new_item_and_a_turn() {
         // 20% of the week gone holds nothing
-        let start = DayStart {
-            week_resets_at: Timestamp(RESETS),
-            day: 0,
-            week_used_pct: 0,
-        };
-        let over = assess(Account::Claude, at(0, 1), &usage(20, 0), Some(start));
+        let over = assess(Account::Claude, at(0, 1), &usage(20, 0));
         assert_eq!(
             (over.hold(Scope::Dispatch), over.hold(Scope::Turn)),
             (None, None)
         );
 
-        let spent = assess(Account::Claude, at(0, 1), &usage(20, 100), Some(start));
+        let spent = assess(Account::Claude, at(0, 1), &usage(20, 100));
         let hold = spent.hold(Scope::Turn).unwrap();
         assert_eq!((hold.kind, hold.until), (HoldKind::Window, at(0, 3)));
         assert_eq!(spent.hold(Scope::Dispatch), Some(hold));
@@ -438,7 +333,6 @@ mod tests {
     #[test]
     fn an_unreadable_hold_covers_both_decisions_until_the_recheck() {
         let a = Assessment::unreadable(Timestamp(100), "cannot read usage".into());
-        assert_eq!(a.day_start, None);
         for scope in [Scope::Dispatch, Scope::Turn] {
             let hold = a.hold(scope).unwrap();
             assert_eq!(

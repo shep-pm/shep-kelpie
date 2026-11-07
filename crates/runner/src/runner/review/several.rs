@@ -34,6 +34,33 @@ pub(super) fn allow_reviewers(rig: &Rig, names: &[&str]) {
     rig.allow(&allowed);
 }
 
+// [`listing`]'s project naming `agents.pm`, so its diff is weighed and its
+// reads are the project manager's to plan. Kelpie's own rule counts them until
+// a test plans its item's.
+pub(super) fn pm_listing(list: &[&str]) -> Rig {
+    let rig = listing(list);
+    allow_reviewers(&rig, &[&["pm"][..], list].concat());
+    names_pm(&rig);
+    rig
+}
+
+// [`two_local`]'s candidates, `mine` and `other`, on a project that names
+// `agents.pm`, with `claude` allowed as a third.
+pub(super) fn pm_two_local() -> Rig {
+    let rig = two_local();
+    rig.reviewers(&["mine", "other", "claude"]);
+    allow_reviewers(&rig, &["sonnet-high", "pm", "mine", "other", "claude"]);
+    names_pm(&rig);
+    rig
+}
+
+// The project names `agents.pm`, and kelpie's own rule counts its reads until
+// a test plans an item's.
+fn names_pm(rig: &Rig) {
+    rig.pm("pm");
+    rig.reviews_need(None);
+}
+
 // Steps until the review is done, naming who reviewed each round by the
 // stand-in it reached: the local reviewer's command, or the Claude model.
 pub(super) fn reviewers_until_ci(rig: &Rig, runner: &Mutex<Runner>) -> Vec<&'static str> {

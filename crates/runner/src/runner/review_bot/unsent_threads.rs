@@ -13,8 +13,8 @@ use crate::test::{Rig, Scripted};
 
 const P1: &str = "P1: The build and the upload share a token, so a script can swap `gh`.";
 
-// qwen and Claude read, `reviews.need` is 2, and cubic, which nobody summoned,
-// reviewed the head on its own with a P1 thread open.
+// qwen and Claude read, kelpie's own rule reads twice, and cubic, which nobody
+// summoned, reviewed the head on its own with a P1 thread open.
 fn cubic_read_alone() -> (Rig, Mutex<Runner>, String) {
     let rig = listing("shep", &["cubic"]);
     rig.reviews_need(Some(2));

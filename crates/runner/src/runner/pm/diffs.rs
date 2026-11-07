@@ -42,13 +42,20 @@ impl Runner {
         // They do not depend on the diffs folder, so they are written first.
         let mut logs = self.pm_ci_logs(folder);
         let main_logs = self.pm_main_logs(folder);
+        let mut cases = self.pm_cases(folder);
         if let Err(e) = cleared {
             let why = format!("cannot clear {}: {}", diffs.display(), e.kind());
             self.notes
                 .push(format!("the project manager's diffs: {why}"));
             let _ = writeln!(out, "(no diffs: {why})");
             for (issue, log) in logs {
-                let _ = writeln!(out, "- #{issue}: {log}");
+                let case = cases
+                    .remove(&issue)
+                    .map_or(String::new(), |c| format!(", {c}"));
+                let _ = writeln!(out, "- #{issue}: {log}{case}");
+            }
+            for (issue, case) in cases {
+                let _ = writeln!(out, "- {}: {case}", issue.shown());
             }
             for log in main_logs {
                 let _ = writeln!(out, "- {log}");
@@ -90,6 +97,9 @@ impl Runner {
             );
             if let Some(log) = logs.remove(&ticket) {
                 let _ = write!(out, ", {log}");
+            }
+            if let Some(case) = cases.remove(&ticket) {
+                let _ = write!(out, ", {case}");
             }
             out.push('\n');
         }

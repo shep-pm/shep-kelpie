@@ -2,12 +2,12 @@
 //!
 //! Such a file still loads. The run state goes, so a paused project runs once
 //! its runner starts. The fields of the relay, planning call, whole-issue check,
-//! review loop, deep round's later steps and shots, a work item's `retro` mark
-//! and a ruling's panel are dropped, their calls and time folded into a
-//! reviewer's session and review's or other's time. A review saved mid-loop
-//! resumes after its last reviewer. `deep` and `claude` are `defect-hunter`, a
-//! bot round a pass of the listed bots. A pending ruling of a folded kind is
-//! `stuck`, of a removed kind refused, and of `unlabelled` withdrawn.
+//! review loop, deep round's later steps and shots, a work item's `retro` mark,
+//! a ruling's panel and each account's day start are dropped, the calls and
+//! time of the checks folded into a reviewer's session and review's or other's
+//! time. A review saved mid-loop resumes after its last reviewer. `deep` and
+//! `claude` are `defect-hunter`, a bot round a pass of the listed bots. A pending
+//! ruling of a folded kind is `stuck`, of a removed kind refused, of `unlabelled` withdrawn.
 
 use serde_json::{Map, Value, json};
 
@@ -134,6 +134,9 @@ pub(super) fn drop_removed_fields(value: &mut Value) {
     // A project runs whenever its runner does, so one saved paused runs.
     state.remove("run");
     state.remove("since");
+    // What each account's week had spent when the day began fed an allowance.
+    state.remove("pacing");
+    state.remove("codex_pacing");
     // Rulings are named by number, so no id is ever given twice.
     state.remove("last_ruling");
     for notice in objects(state.get_mut("notices")) {

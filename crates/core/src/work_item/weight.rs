@@ -1,38 +1,42 @@
-//! How much review a work item's change gets, which `reviews.light` sets
+//! What a work item's change weighs, which the review pass reports and the
+//! project manager decides from
+//!
+//! Kelpie weighs a diff that touches only docs light and any other full.
+//! `Lighter::Pm`, `Heavier::FullPaths` and `Heavier::High` are what a state file
+//! saved before the project manager took the review plan can hold: kelpie calls
+//! no change light for a tag, no file full for a glob and no finding a step-up.
 
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::agents::Tier;
-
-/// How much review a work item's pull request gets: the light count of
-/// reviewers, or the full `reviews.need`
+/// What a work item's change weighs: light for a diff that touches only docs,
+/// full for one that touches anything else
 // wire format: changing this is a breaking change to the state file
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ReviewWeight {
-    /// `reviews.light` reviewers read it
+    /// A change the weighing called light
     Light(Lighter),
-    /// `reviews.need` reviewers read it
+    /// A change the weighing called full
     Full(Heavier),
 }
 
-/// Why a change gets the light count
+/// Why a change weighs light
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Lighter {
-    /// Every changed file matches `reviews.light_paths`
+    /// Every changed file is one a docs-only change touches
     Docs,
-    /// The project manager tagged it light and it changes this many lines,
-    /// within `reviews.light_max_lines`
+    /// What a state file saved when the project manager's tag could lighten a
+    /// change, which changes this many lines
     Pm {
         /// The lines it adds plus the lines it deletes
         lines: u32,
     },
 }
 
-/// Why a change gets the full count
+/// Why a change weighs full
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Heavier {
@@ -46,27 +50,19 @@ pub enum Heavier {
     Dependencies,
     /// It changes a harness's own file
     AgentFiles,
-    /// It changes this file, which `reviews.full_paths` names
+    /// What a state file saved when a project setting could name a file full:
+    /// it changes this file
     FullPaths(String),
-    /// It changes this file, the first outside `reviews.light_paths`
+    /// It changes this file, the first outside what a docs-only change touches
     Touched(String),
-    /// A reviewer's HIGH finding was sent to the worker
+    /// What a state file saved when a HIGH finding stepped a light review up
     High,
 }
 
 impl ReviewWeight {
-    /// Whether it gets the light count
+    /// Whether it weighs light
     pub fn is_light(&self) -> bool {
         matches!(self, Self::Light(_))
-    }
-
-    /// The tier the agent board's pick for the review asks for: `light` for a
-    /// light change, and `own`, the work item's, otherwise
-    pub fn tier(&self, own: Option<Tier>) -> Option<Tier> {
-        match self.is_light() {
-            true => Some(Tier::Light),
-            false => own,
-        }
     }
 }
 
@@ -143,13 +139,9 @@ mod tests {
     }
 
     #[test]
-    fn only_a_light_weight_lowers_the_tier_to_light() {
+    fn only_a_light_weight_reads_as_light() {
         let light = ReviewWeight::Light(Lighter::Docs);
         let full = ReviewWeight::Full(Heavier::Empty);
         assert!(light.is_light() && !full.is_light());
-        assert_eq!(light.tier(Some(Tier::Heavy)), Some(Tier::Light));
-        assert_eq!(light.tier(None), Some(Tier::Light));
-        assert_eq!(full.tier(Some(Tier::Heavy)), Some(Tier::Heavy));
-        assert_eq!(full.tier(None), None);
     }
 }

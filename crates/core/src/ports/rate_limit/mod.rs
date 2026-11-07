@@ -344,6 +344,10 @@ impl Forge for RateHeld {
         self.call(Kind::CreateLabel, |f| f.create_label(repo, label))
     }
 
+    fn rename_label(&self, repo: &ForgeSlug, from: &str, to: &str) -> Result<(), ForgeError> {
+        self.call(Kind::CreateLabel, |f| f.rename_label(repo, from, to))
+    }
+
     fn can_push(&self, repo: &ForgeSlug) -> Result<bool, ForgeError> {
         self.call(Kind::CanPush, |f| f.can_push(repo))
     }

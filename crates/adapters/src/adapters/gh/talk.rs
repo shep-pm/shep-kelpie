@@ -13,7 +13,7 @@ const QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
     repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
     comments(last: 100) { nodes { databaseId body authorAssociation \
     author { login __typename } } } \
-    reviewThreads(first: 100) { nodes { id isResolved path line \
+    reviewThreads(first: 100) { nodes { id isResolved isOutdated path line \
     comments(first: 100) { nodes { databaseId body authorAssociation \
     author { login __typename } } } } } } } }";
 
@@ -62,6 +62,7 @@ struct Author {
 struct Thread {
     id: String,
     is_resolved: bool,
+    is_outdated: bool,
     path: String,
     line: Option<u32>,
     comments: Nodes<Comment>,
@@ -117,6 +118,7 @@ fn parse_talk(stdout: &[u8]) -> Result<Talk, ForgeError> {
                 path: t.path,
                 line: t.line,
                 resolved: t.is_resolved,
+                outdated: t.is_outdated,
                 remarks: t.comments.nodes.into_iter().map(Remark::from).collect(),
             })
             .collect(),
@@ -169,6 +171,13 @@ mod tests {
         assert_eq!(ids, [7001, 7002]);
         assert!(talk.threads[1].resolved);
         assert_eq!(talk.threads[1].line, None);
+    }
+
+    #[test]
+    fn a_threads_outdated_flag_is_read() {
+        let talk = parse_talk(TALK.as_bytes()).unwrap();
+        let flags: Vec<_> = talk.threads.iter().map(|t| t.outdated).collect();
+        assert_eq!(flags, [false, true]);
     }
 
     #[test]

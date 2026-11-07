@@ -190,6 +190,10 @@ impl Forge for Guarded {
         self.forge.create_label(repo, label)
     }
 
+    fn rename_label(&self, repo: &ForgeSlug, from: &str, to: &str) -> Result<(), ForgeError> {
+        self.forge.rename_label(repo, from, to)
+    }
+
     fn can_push(&self, repo: &ForgeSlug) -> Result<bool, ForgeError> {
         self.forge.can_push(repo)
     }
@@ -526,6 +530,10 @@ impl Voice for GuardedVoice {
     // A label's text is kelpie's own constants, which name no folder.
     fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError> {
         self.voice.create_label(repo, label)
+    }
+
+    fn rename_label(&self, repo: &ForgeSlug, from: &str, to: &str) -> Result<(), ForgeError> {
+        self.voice.rename_label(repo, from, to)
     }
 
     fn set_issue_label(

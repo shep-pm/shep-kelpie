@@ -88,6 +88,15 @@ impl Tickets for Gh {
         blocked::add_blocked_by(repo, number(ticket)?, number(blocker)?)
     }
 
+    fn add_sub_issue(
+        &self,
+        repo: &ForgeSlug,
+        parent: TicketId,
+        child: TicketId,
+    ) -> Result<(), ForgeError> {
+        blocked::add_sub_issue(repo, number(parent)?, number(child)?)
+    }
+
     fn set_issue_label(
         &self,
         repo: &ForgeSlug,

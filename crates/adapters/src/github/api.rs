@@ -289,6 +289,16 @@ impl Call {
         )
     }
 
+    /// Label `from` renamed `to`, on every issue that carries it,
+    /// `PATCH /repos/{owner}/{repo}/labels/{name}`
+    pub fn rename_label(repo: &ForgeSlug, from: &str, to: &str) -> Self {
+        Self {
+            verb: Verb::Patch,
+            path: format!("/repos/{}/labels/{}", repo.as_str(), path_segment(from)),
+            body: Some(serde_json::json!({ "new_name": to }).to_string()),
+        }
+    }
+
     /// `label` put on issue `number`,
     /// `POST /repos/{owner}/{repo}/issues/{number}/labels`
     pub fn put_label(repo: &ForgeSlug, number: u64, label: &str) -> Self {

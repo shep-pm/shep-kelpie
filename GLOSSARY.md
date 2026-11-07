@@ -20,8 +20,8 @@ _Avoid_: harness (the working name before 2026-09-25), control room
    work item for it.
 3. **Build.** A worker implements it inline, opens a draft pull request and
    ends its turn.
-4. **Review.** `reviews.need` reviewers, each the agent board's pick for
-   its round, read the pull request once, and one with any finding, nits
+4. **Review.** The reads the item's review plan calls for, each the agent
+   board's pick for its round, read the pull request once, and one with any finding, nits
    included, is followed by one fix turn. The pass ends where it ends: no loop, no judge. No
    reviewer reads a head until CI has passed on it, so the worker's push and
    each fix turn's head wait for green first, and a red run goes to the
@@ -48,12 +48,18 @@ code does all of that. The PM's agent, an agent file whose role is `pm`
 that a project names in `agents.pm`, picks work, holds it back, unsticks
 items and answers the maintainer. Code wakes it on a free slot with two or
 more ready issues, two open branches in conflict, a stuck work item, or a
-**tell** (`shep kelpie tell "<note>"`), and it reads only the board and its
-own notes, never running git or gh. Kelpie checks each answer against the
+**tell** (`shep kelpie tell "<note>"`), and it reads the board, its own
+notes and the case files kelpie writes, never running git or gh. Kelpie checks each answer against the
 board before acting on it. One session per project is resumed on each wake
 and compacted past 100k tokens of context. Without one, or while it is
 down, the board's rule picks and stuck items wait on their rulings.
 _Avoid_: lead, control room, control center
+
+**Case file**:
+The file `cases/<issue>.md` that kelpie writes in the PM's folder for each
+work item parked on a ruling: the ruling's card, the whole issue, and the
+pull request with its open threads, every line of outside text quoted as
+data. Rewritten at each wake, and gone with its ruling.
 
 **Pick**:
 The PM's choice of which ready issue the next free slot takes. With none named,
@@ -204,7 +210,9 @@ Kelpie's code check that an issue holds every part an implementer builds
 from: a `Touches:` line, what to build, acceptance criteria, harness reach
 when it touches one harness's adapter, blockers when it names any, one
 priority label, and a kind: its `kind:<type>` label, else its title's
-conventional prefix, one of nine conventional types. It reads structure, not quality.
+conventional prefix, one of nine conventional types. It reads structure, not
+quality, and refuses a `Touches:` path a worker's fence refuses, a harness's own
+file such as `.claude/`, since a worker cannot write it.
 `shep kelpie issue check <n>` runs it, and the issue skill holds the same
 format for the agent that writes an issue. The board runs it on every new or
 edited open issue, and the **triager** runs only on one that fails it.
@@ -213,7 +221,7 @@ _Avoid_: lint, validation, triage
 **Reviewer**:
 An agent file whose role is `reviewer`. Each round of a pass goes to the
 agent board's pick among the candidates the pass has not run, and
-`reviews.need` of them read the pull request once, against the issue's
+the plan's reads of them read the pull request once, against the issue's
 acceptance criteria. Every reviewer file `agents.allow` holds is a candidate.
 It runs a fresh session on a harness, whose file's body is its
 prompt, or a command, or kelpie's own endpoint reviewer. One with a
@@ -223,17 +231,22 @@ and asked only for what it missed, before its one fix turn. Kelpie ships
 endpoint, run on a model of the maintainer's own.
 _Avoid_: judge, round guard, deep round, pull request reviewer
 
-**Light review**:
-A review that runs `reviews.light` reviewers in place of `reviews.need`, for
-a work item whose change is small or only docs. It is light when no changed
-file is forced full (CI files, manifests and lockfiles, agent files,
-`reviews.full_paths`, an adopted pull request) and every file matches
-`reviews.light_paths`, or the project manager tagged the pick light, the
-project set `reviews.pm_lightens` and the change is at most
-`reviews.light_max_lines` lines. Its reviewer asks sit at tier `light`. The
-diff is weighed again each round, and a HIGH finding makes the review full for
-the rest of the item.
-_Avoid_: quick review, skip review, docs review
+**Review plan**:
+What the project manager sets with its pick: how many reads it wants for the
+work item and what it wants them for. A pass runs those reads, each once and
+each the agent board's pick. Where no project manager planned any, kelpie's
+own rule reads twice, and an adopted item too.
+_Avoid_: review count, reviewer count
+
+**Light weight**:
+What kelpie reports for a work item whose change is only docs: no changed
+file is forced full (CI files, manifests and lockfiles, agent files, an
+adopted pull request) and every file matches kelpie's own docs paths,
+`**/*.md` and `docs/**`. `status` shows it as `light (docs only)`. It
+reports and decides nothing: the item's **review plan** says how many
+reviewers read, and each reviewer ask takes the item's own **tier**. The
+diff is weighed again before each round.
+_Avoid_: light review, quick review, skip review, docs review
 
 **Review bot**:
 A reviewer on the `bot` harness: CodeRabbit, cubic or Codex, summoned on the
@@ -387,7 +400,8 @@ One change to the board, such as a turn ending or a ruling raised, with an
 id that only grows. The PM's cursor names the last one it has read.
 
 **Pass**:
-One run of a work item's review: `reviews.need` reviewers, each once, each
+One run of a work item's review: the reads its **review plan** calls for,
+each once, each
 round the agent board's pick. It ends sooner when the board ranks no
 candidate left. A pass starts again only on new code that needs the whole
 review, such as a merge ruling's `rework`.

@@ -678,3 +678,100 @@ fn a_hand_fixed_issue_whose_triage_ran_passes_its_check_and_replaces_the_kept_re
     assert_eq!(kept[0].get("failures"), None, "{kept}");
     assert_eq!(kept[0].get("triage"), None, "{kept}");
 }
+
+// `PASSING` with a file of Claude Code's own on its `Touches:` line
+fn fenced_body() -> String {
+    PASSING.replace(
+        "`src/start.rs`",
+        "`src/start.rs`, `.claude/skills/x/SKILL.md`",
+    )
+}
+
+#[test]
+fn a_ready_issue_naming_a_fenced_path_is_held_off_the_board() {
+    let rig = rig_with("pick = \"off\"");
+    ready_on_the_board(&rig, &fenced_body(), &PASSING_LABELS);
+    let runner = rig.open().unwrap();
+
+    assert_eq!(step(&runner).unwrap(), None, "nothing starts");
+
+    let skipped = rig.ask(&runner, "status", None)["skipped"].clone();
+    assert_eq!(skipped[0]["reason"], "check", "{skipped}");
+    let failures = skipped[0]["failures"].as_array().unwrap();
+    let said = failures[0].as_str().unwrap();
+    assert!(said.contains(".claude/skills/x/SKILL.md"), "{said}");
+    assert!(said.contains("Claude Code"), "{said}");
+    assert_eq!(failures.len(), 1, "{skipped}");
+}
+
+#[test]
+fn an_issue_that_passed_the_old_version_is_held_once_the_version_rises() {
+    let rig = rig_with("pick = \"off\"");
+    ready_on_the_board(&rig, &fenced_body(), &PASSING_LABELS);
+    let runner = rig.open().unwrap();
+    // The digest version 2 made of this issue's text, written out
+    let old = format!(
+        "v2\0Title of #30\0{}\0kind:fix\0priority: p2",
+        fenced_body().trim()
+    );
+    runner.lock().unwrap().state.checks = vec![IssueCheck {
+        issue: 30,
+        key: check::fnv1a(old.as_bytes()),
+        failures: vec![],
+        triage: CheckTriage::None,
+    }];
+
+    assert_eq!(step(&runner).unwrap(), None, "nothing starts");
+
+    let skipped = rig.ask(&runner, "status", None)["skipped"].clone();
+    assert_eq!(skipped[0]["reason"], "check", "{skipped}");
+    let kept = checks(&rig);
+    assert_eq!(kept.as_array().unwrap().len(), 1, "{kept}");
+    assert_eq!(kept[0]["triage"], "owed", "{kept}");
+    assert!(kept[0]["failures"][0].as_str().unwrap().contains(".claude"));
+}
+
+#[test]
+fn a_fenced_issue_labelled_ready_for_human_gets_no_triage_and_no_comment() {
+    let mut labels = PASSING_LABELS.to_vec();
+    labels.push("ready-for-human");
+    let (rig, runner) = checking("pick = \"all\"", MAINTAINER, &fenced_body(), &labels);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(calls(&rig, Role::Triager).len(), 0);
+    assert_eq!(rig.github.comments().len(), 0);
+    assert_eq!(moves(&rig), Vec::<String>::new());
+}
+
+#[test]
+fn add_refuses_an_issue_naming_a_fenced_path() {
+    let rig = rig_with("pick = \"off\"");
+    rig.forge.open_issue(30, "Fix the crash", &fenced_body());
+    let runner = rig.open().unwrap();
+
+    let added = rig.ask(&runner, "add", Some("30"));
+
+    let error = added["error"].as_str().unwrap();
+    assert!(error.contains("`.claude/skills/x/SKILL.md`"), "{added}");
+    assert_eq!(rig.ask(&runner, "status", None)["work_item"], json!(null));
+}
+
+#[test]
+fn a_local_ticket_naming_a_fenced_path_is_skipped_and_the_board_goes_on() {
+    let rig = Rig::new("koji");
+    rig.tickets_local();
+    for (title, body) in [("Fenced", fenced_body()), ("Plain", PASSING.to_owned())] {
+        rig.ticket_verb(&["new", title, "--body", &body, "--label", "ready-for-agent"]);
+    }
+    let runner = rig.open().unwrap();
+
+    let (started, skipped) = dispatched(step(&runner).unwrap());
+
+    assert_eq!(started, "k2".parse().unwrap());
+    let [Skip::Failed { issue, error }] = skipped.as_slice() else {
+        panic!("{skipped:?}");
+    };
+    assert_eq!(*issue, "k1".parse().unwrap());
+    assert!(error.contains(".claude/skills/x/SKILL.md"), "{error}");
+}

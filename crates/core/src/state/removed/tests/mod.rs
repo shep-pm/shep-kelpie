@@ -291,3 +291,29 @@ fn other_unknown_fields_are_still_refused() {
     let err = store.load().unwrap_err();
     assert!(err.to_string().contains("pigeon"), "{err}");
 }
+
+#[test]
+fn a_file_saved_with_a_day_start_loads_and_drops_it() {
+    for key in ["pacing", "codex_pacing"] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = saved_with(dir.path(), |value| {
+            value[key] = json!({
+                "week_resets_at": 604_800,
+                "day": 2,
+                "week_used_pct": 15,
+            });
+        });
+        let state = store.load().unwrap().unwrap();
+        store.save(&state).unwrap();
+        let saved = fs::read_to_string(dir.path().join(STATE_FILE)).unwrap();
+        assert!(!saved.contains(key), "{key}: {saved}");
+        assert_eq!(store.load().unwrap().unwrap(), state, "{key}");
+    }
+}
+
+#[test]
+fn a_saved_file_holds_no_day_start() {
+    let value = serde_json::to_value(ProjectState::new()).unwrap();
+    assert_eq!(value.get("pacing"), None);
+    assert_eq!(value.get("codex_pacing"), None);
+}

@@ -6,6 +6,7 @@ mod e2e;
 mod gateway_kind;
 mod registries;
 mod repo_setup;
+mod reviews;
 mod rulings;
 mod test_command;
 mod triage;
@@ -659,8 +660,7 @@ fn the_review_settings_reviewer_files_replace_are_refused_saying_what_replaces_e
             format!(
                 "the [app.dogs.kelpie] table on shep: `{key}` is no longer a setting, \
                  because reviewers are agent files in kelpie's home's `agents` folder: every \
-                 one `agents.allow` holds is a candidate, and `reviews.need` says how many \
-                 read a work item: {fix}"
+                 one `agents.allow` holds is a candidate: {fix}"
             )
         );
     }

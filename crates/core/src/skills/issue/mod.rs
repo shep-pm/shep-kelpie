@@ -45,8 +45,8 @@ pub(super) fn write(dir: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::board::check::{
-        BLOCKED_BY, CRITERIA, Failure, HARNESS_REACH, HARNESSES, KIND, TOUCHES, WHAT_TO_BUILD,
-        check, kinds,
+        BLOCKED_BY, CRITERIA, Failure, HARNESS_REACH, HARNESSES, KIND, NEEDS, TOUCHES,
+        WHAT_TO_BUILD, check, kinds,
     };
 
     // The skill's example issue, and the title and labels its line starting
@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn the_skill_names_every_part_and_label_the_check_reads() {
         let format = TEXT.split("## Check it").next().unwrap();
-        for part in [TOUCHES, HARNESS_REACH, BLOCKED_BY] {
+        for part in [TOUCHES, HARNESS_REACH, BLOCKED_BY, NEEDS] {
             assert!(format.contains(&format!("**`{part}`**")), "{part}");
         }
         for heading in [WHAT_TO_BUILD, CRITERIA] {
@@ -138,6 +138,33 @@ mod tests {
             TEXT.contains("shep kelpie issue check --draft <file>"),
             "{TEXT}"
         );
+    }
+
+    #[test]
+    fn a_fenced_path_in_the_skills_example_fails_and_the_skill_says_what_to_do_instead() {
+        let (title, body, labels) = example(TYPED);
+        let path = ".claude/skills/x/SKILL.md";
+        let body = body.replace("`docs/design/plugins.md`", &format!("`{path}`"));
+        let harness = "Claude Code";
+        let fenced = Failure::Fenced {
+            path: path.to_owned(),
+            harness,
+        };
+        assert_eq!(check(&title, &body, &labels), [fenced]);
+
+        let (format, checking) = TEXT.split_once("## Check it").unwrap();
+        let touches = format
+            .lines()
+            .find(|l| l.contains("**`Touches:`**"))
+            .unwrap();
+        for said in ["fence", "ready-for-human", "Blocked by:"] {
+            assert!(touches.contains(said), "{said}: {touches}");
+        }
+        let filing = checking
+            .lines()
+            .find(|l| l.contains("ready-for-human"))
+            .unwrap();
+        assert!(filing.contains("fence"), "{filing}");
     }
 
     #[test]

@@ -1,7 +1,8 @@
 //! The issue check: whether an issue holds every part an implementer builds from
 //!
 //! It reads structure, not quality: each part is there and well formed. The
-//! parts are what an issue body holds, as the triager writes one, the
+//! one exception is a path a worker's fence refuses, which it reads from
+//! [`crate::fence`] and fails. The parts are what an issue body holds, as the triager writes one, the
 //! blockers and harness reach `CLAUDE.md` asks for, and the labels the board
 //! and the triager set. The issue skill, `skills/kelpie/issue/SKILL.md`, gives
 //! the same format to the agent that writes an issue, and a test holds the
@@ -9,7 +10,10 @@
 
 use std::fmt;
 
+use std::path::Path;
+
 use super::is_priority_label;
+use crate::fence;
 use crate::guard::{CONVENTIONAL_TYPES, conventional_type};
 use crate::ticket::TicketId;
 
@@ -21,6 +25,10 @@ pub const WHAT_TO_BUILD: &str = "What to build";
 
 /// The heading of the section of `- [ ]` items a pull request is checked against
 pub const CRITERIA: &str = "Acceptance criteria";
+
+/// The line naming the published packages an issue needs, each as
+/// `<registry>:<name>@<version>` in backticks
+pub const NEEDS: &str = "Needs:";
 
 /// The line saying which harnesses a change to one harness's adapter reaches
 pub const HARNESS_REACH: &str = "Harness reach:";
@@ -64,6 +72,19 @@ pub enum Failure {
     /// `Touches:` names this path in one harness's adapter, and no
     /// `Harness reach:` line with text follows
     NoHarnessReach(String),
+    /// `Touches:` names this path, which a worker's fence refuses to write for
+    /// this harness
+    Fenced {
+        /// The path as written
+        path: String,
+        /// The harness whose own file it is
+        harness: &'static str,
+    },
+    /// The `Needs:` line holds this entry, which is no `<registry>:<name>@<version>`
+    Needs {
+        /// The entry as written, or the line's text where it holds no backticks
+        entry: String,
+    },
     /// No `What to build` heading, or nothing under it
     NoWhatToBuild,
     /// No `Acceptance criteria` heading
@@ -99,6 +120,17 @@ impl fmt::Display for Failure {
                 f,
                 "`{TOUCHES}` names `{path}`, one harness's adapter, and no `{HARNESS_REACH}` \
                  line says which harnesses the change reaches"
+            ),
+            Self::Fenced { path, harness } => write!(
+                f,
+                "`{TOUCHES}` names `{path}`, one of {harness}'s own files, and a worker's fence \
+                 refuses writes there on every harness: take the path out and give that change \
+                 to the maintainer in a `ready-for-human` issue"
+            ),
+            Self::Needs { entry } => write!(
+                f,
+                "`{NEEDS}` names `{entry}`, which is no package as \
+                 `<registry>:<name>@<version>`, with the registry `crates`, `npm` or `pypi`"
             ),
             Self::NoWhatToBuild => {
                 write!(f, "no `## {WHAT_TO_BUILD}` section, or nothing under it")
@@ -147,6 +179,14 @@ pub fn check(title: &str, body: &str, labels: &[String]) -> Vec<Failure> {
             if paths.is_empty() {
                 failures.push(Failure::TouchesNoPath);
             }
+            failures.extend(
+                fenced(body)
+                    .into_iter()
+                    .map(|(path, harness)| Failure::Fenced {
+                        path: path.to_owned(),
+                        harness,
+                    }),
+            );
             let reach = labelled_line(body, HARNESS_REACH).is_some_and(|r| !bare(r).is_empty());
             let adapter = paths.into_iter().find(|p| is_adapter(p));
             if let Some(path) = adapter.filter(|_| !reach) {
@@ -154,6 +194,11 @@ pub fn check(title: &str, body: &str, labels: &[String]) -> Vec<Failure> {
             }
         }
     }
+    failures.extend(
+        needs_entries(body)
+            .filter_map(Result::err)
+            .map(|entry| Failure::Needs { entry }),
+    );
     let built = section(body, WHAT_TO_BUILD);
     if !built.is_some_and(|lines| lines.iter().any(|l| !l.trim().is_empty())) {
         failures.push(Failure::NoWhatToBuild);
@@ -205,7 +250,7 @@ pub fn check(title: &str, body: &str, labels: &[String]) -> Vec<Failure> {
 ///
 /// Raise it with any change to what [`check`] refuses: every issue is then
 /// checked once more, and each that now fails is owed a new triage pass.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 4;
 
 /// A digest of what [`check`] reads of an issue, which an edit changes
 ///
@@ -256,6 +301,80 @@ pub fn touched(body: &str) -> Option<Vec<&str>> {
     let below = below.skip_while(|l| l.trim().is_empty());
     let list = below.take_while(|l| is_list_item(l));
     Some(list.flat_map(backticked).collect())
+}
+
+/// A registry a package is published to, as `package_managers` names them
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Registry {
+    /// crates.io
+    Crates,
+    /// The npm registry
+    Npm,
+    /// The Python package index
+    Pypi,
+}
+
+/// A published package an issue needs, from its `Needs:` line
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Needed {
+    /// Where it is published
+    pub registry: Registry,
+    /// Its name there, with its scope for an npm package such as `@types/node`
+    pub name: String,
+    /// The version the issue needs
+    pub version: String,
+}
+
+impl Needed {
+    // `<registry>:<name>@<version>`, the version after the last `@` so that an
+    // npm scope's own `@` stays in the name.
+    fn read(entry: &str) -> Option<Self> {
+        let (registry, rest) = entry.trim().split_once(':')?;
+        let registry = match registry {
+            "crates" => Registry::Crates,
+            "npm" => Registry::Npm,
+            "pypi" => Registry::Pypi,
+            _ => return None,
+        };
+        let (name, version) = rest.rsplit_once('@')?;
+        let ok = |s: &str| !s.is_empty() && !s.contains(char::is_whitespace);
+        (ok(name) && ok(version)).then(|| Self {
+            registry,
+            name: name.to_owned(),
+            version: version.to_owned(),
+        })
+    }
+}
+
+/// The packages the issue's `Needs:` line names, none without that line
+///
+/// An entry that does not read is left out, and [`check`] fails it.
+pub fn needs(body: &str) -> Vec<Needed> {
+    needs_entries(body).filter_map(Result::ok).collect()
+}
+
+// Each entry of the `Needs:` line, read or as written. A line with text and no
+// backticks is one entry, the text.
+fn needs_entries(body: &str) -> impl Iterator<Item = Result<Needed, String>> {
+    let text = labelled_line(body, NEEDS).unwrap_or_default();
+    let mut spans = backticked(text);
+    if spans.is_empty() && !bare(text).is_empty() {
+        spans.push(bare(text));
+    }
+    spans
+        .into_iter()
+        .map(|span| Needed::read(span).ok_or_else(|| span.trim().to_owned()))
+}
+
+/// The paths [`touched`] reads that a worker's fence refuses, each with the
+/// harness whose own file it is
+///
+/// [`fence::owner`] decides from the path alone, so this needs no settings.
+pub fn fenced(body: &str) -> Vec<(&str, &'static str)> {
+    let paths = touched(body).unwrap_or_default();
+    (paths.into_iter())
+        .filter_map(|path| Some((path, fence::owner(Path::new(path))?)))
+        .collect()
 }
 
 // Whether `line` is an item of a `-` or `*` list.

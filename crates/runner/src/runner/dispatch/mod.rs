@@ -317,7 +317,7 @@ impl Runner {
                         skipped,
                     }));
                 }
-                Err(e @ (AddError::Forge(_) | AddError::Label(_))) => {
+                Err(e @ (AddError::Forge(_) | AddError::Label(_) | AddError::Fenced(..))) => {
                     failed.push(Skip::Failed {
                         issue: ticket,
                         error: e.to_string(),

@@ -159,6 +159,24 @@ impl Tickets for Routed {
         self.of(ticket).add_blocked_by(repo, ticket, blocker)
     }
 
+    fn add_sub_issue(
+        &self,
+        repo: &ForgeSlug,
+        parent: TicketId,
+        child: TicketId,
+    ) -> Result<(), ForgeError> {
+        let same_source = matches!(
+            (parent, child),
+            (TicketId::Github(_), TicketId::Github(_)) | (TicketId::Local(_), TicketId::Local(_))
+        );
+        if !same_source {
+            return Err(ForgeError::Failed(format!(
+                "ticket {child} cannot be a sub-issue of {parent}: they are in different sources"
+            )));
+        }
+        self.of(child).add_sub_issue(repo, parent, child)
+    }
+
     fn set_issue_label(
         &self,
         repo: &ForgeSlug,

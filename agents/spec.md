@@ -10,7 +10,7 @@
 # the issue asks for but hunts for defects; this one reads the diff against
 # the requirements. Once bound, it is a candidate wherever `agents.allow`
 # holds it, with each round's reviewer the agent board's pick toward
-# `reviews.need`. It reads once, with no `second_look`,
+# the item's plan's reads. It reads once, with no `second_look`,
 # because a reviewer that always finds something must not loop (ADR 0007).
 # Its sessions read the worktree with Read, Grep and Glob, and run no
 # command. The body below is its prompt: kelpie puts the commit the change is

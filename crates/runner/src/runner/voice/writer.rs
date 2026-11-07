@@ -54,6 +54,15 @@ impl Writer {
         )
     }
 
+    /// Renames label `from` to `to`, as the App where one covers the repo
+    #[expect(dead_code, reason = "the label swap that calls it is a later slice")]
+    pub(in crate::runner) fn rename_label(&self, from: &str, to: &str) -> Result<(), ForgeError> {
+        match self.app {
+            true => self.voice.rename_label(&self.remote, from, to),
+            false => self.forge.rename_label(&self.remote, from, to),
+        }
+    }
+
     /// Opens an issue, as the App where one covers the repo
     pub(in crate::runner) fn open_issue(
         &self,
