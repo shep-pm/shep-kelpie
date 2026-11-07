@@ -123,6 +123,10 @@ impl Forge for Gh {
         .map(drop)
     }
 
+    fn rename_label(&self, repo: &ForgeSlug, from: &str, to: &str) -> Result<(), ForgeError> {
+        gh(&["label", "edit", from, "--name", to, "--repo", repo.as_str()]).map(drop)
+    }
+
     fn can_push(&self, repo: &ForgeSlug) -> Result<bool, ForgeError> {
         access::can_push(repo)
     }

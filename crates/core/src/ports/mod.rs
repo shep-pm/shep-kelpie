@@ -205,6 +205,14 @@ pub trait Forge: Send + Sync {
     /// [`ForgeError`] when the forge refuses, such as when `repo` already has it.
     fn create_label(&self, repo: &ForgeSlug, label: &NewLabel) -> Result<(), ForgeError>;
 
+    /// Renames label `from` on `repo` to `to`, on every issue that carries it
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the forge refuses, such as when `repo` has no `from`
+    /// or already has `to`.
+    fn rename_label(&self, repo: &ForgeSlug, from: &str, to: &str) -> Result<(), ForgeError>;
+
     /// Whether the account kelpie acts as may push to `repo`
     ///
     /// # Errors
