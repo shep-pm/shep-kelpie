@@ -448,6 +448,19 @@ mod tests {
         assert!(keys.is_subset(&known), "{:?}", keys.difference(&known));
     }
 
+    // `[pacing]` is read by nothing and `settings migrate` deletes it, so the
+    // schema names no table for it and the example documents no key for it. A
+    // table that still holds one loads, held as `Gone` (`settings::tests::pacing`).
+    #[test]
+    fn the_pacing_table_is_out_of_the_schema() {
+        let root = schema();
+        let project = resolve(&root, &root[SHEEP_SCHEMA_KEY]);
+        assert!(
+            project["properties"]["pacing"].is_null(),
+            "the project schema names a pacing table"
+        );
+    }
+
     #[test]
     fn only_the_webhooks_url_ca_cert_and_token_are_secrets() {
         let root = schema();

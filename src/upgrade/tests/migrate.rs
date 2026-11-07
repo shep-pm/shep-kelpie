@@ -210,6 +210,31 @@ async fn a_bare_upgrade_writes_the_missing_kinds_into_a_table_that_loads() {
 }
 
 #[tokio::test]
+async fn a_bare_upgrade_deletes_the_pacing_table_from_a_table_that_loads() {
+    let shepherd = FakeShepherd::on(crate::shepherd::SHEP_VERSION);
+    let table = loading(&shepherd);
+    let rig = Rig::holding_on(shepherd, false, table).await;
+    crate::agents::write_bound_stubs(
+        &rig.home.join("agents"),
+        "harness: claude-code\nmodel: claude-opus-5-5\neffort: high\n",
+    );
+    rig.cargo_installs("0.3.0", "0.24.2");
+
+    let (ran, said) = rig.upgrade(Action::Installed).await;
+
+    ran.unwrap();
+    assert!(said.iter().all(|l| !l.contains("not migrated")), "{said:?}");
+    assert!(
+        said.iter().any(|l| l.starts_with("project koji: ")
+            && l.contains("pacing = { enabled = true, kickoff_hours = 8 }")),
+        "{said:?}"
+    );
+    let (koji, _) = rig.shepherd.sheep("koji").unwrap();
+    let written = koji.dogs.get(crate::shepherd::DOG).unwrap().as_map();
+    assert!(written.get("pacing").is_none(), "{written:?}");
+}
+
+#[tokio::test]
 async fn a_bare_upgrade_writes_no_agents_allow_or_slack() {
     let shepherd = FakeShepherd::on(crate::shepherd::SHEP_VERSION);
     let table = loading(&shepherd);

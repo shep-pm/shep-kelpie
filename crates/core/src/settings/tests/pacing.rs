@@ -1,17 +1,13 @@
 use super::*;
 
-// The example's `[pacing]` table with its body replaced by `body`.
+// The example with a `[pacing]` table an older build wrote, its keys being
+// `body`, put back before the `[worker]` table it followed
 fn with_pacing(body: &str) -> String {
-    let at = EXAMPLE
-        .find("[app.dogs.kelpie.pacing]\n")
-        .expect("the example holds a pacing table");
-    let end = EXAMPLE[at..]
-        .find("\n\n")
-        .map_or(EXAMPLE.len(), |n| at + n + 1);
-    format!(
-        "{}[app.dogs.kelpie.pacing]\n{body}{}",
-        &EXAMPLE[..at],
-        &EXAMPLE[end..]
+    const WORKER: &str = "[app.dogs.kelpie.worker]\n";
+    assert!(EXAMPLE.contains(WORKER), "the example's worker table moved");
+    EXAMPLE.replace(
+        WORKER,
+        &format!("[app.dogs.kelpie.pacing]\n{body}\n{WORKER}"),
     )
 }
 
@@ -29,15 +25,11 @@ fn a_table_holding_pacing_loads_and_is_read_by_nothing() {
 
 #[test]
 fn a_table_with_no_pacing_loads() {
-    let text = EXAMPLE.replace(
-        "[app.dogs.kelpie.pacing]\nenabled = true\nkickoff_hours = 8\n",
-        "",
-    );
     assert!(
-        !text.contains("[app.dogs.kelpie.pacing]"),
-        "the example's pacing table moved"
+        !EXAMPLE.contains("[app.dogs.kelpie.pacing]"),
+        "the example writes no pacing table"
     );
-    assert_eq!(parse(&text).unwrap().pacing, None);
+    assert_eq!(parse(EXAMPLE).unwrap().pacing, None);
 }
 
 #[test]

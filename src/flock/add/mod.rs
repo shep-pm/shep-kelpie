@@ -91,10 +91,6 @@ per_item_usd = 10
 
 [agents]
 
-[pacing]
-enabled = true
-kickoff_hours = 8
-
 [worker]
 allowed_domains = []
 build_env = {}

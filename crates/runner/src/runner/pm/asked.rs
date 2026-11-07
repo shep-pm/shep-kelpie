@@ -435,6 +435,12 @@ impl Runner {
             })
             .cloned();
         let done = match (&ruling, call.call) {
+            // The maintainer's words on an issue with no work item: the answer
+            // is kelpie posting `why` there.
+            (None, SaidHow::Nothing) if !why.is_empty() && !self.item_on(thread) => {
+                self.pm_says_on(thread, &why);
+                Ok(format!("answered on #{thread}: {why}"))
+            }
             (_, SaidHow::Nothing) => Err("it made no call".to_owned()),
             (Some(ruling), SaidHow::SendBack) => self.pm_sent_back(ruling, &note, &why),
             (Some(ruling), SaidHow::Settle) => self.pm_settled(ruling, &why),
@@ -490,6 +496,15 @@ impl Runner {
         self.pm
             .released
             .retain(|comment, _| !comments.contains(comment));
+    }
+
+    /// Whether an open work item is on `thread`, as the issue it builds or the
+    /// pull request it opened. A finished or dropped one is not open.
+    pub(in crate::runner) fn item_on(&self, thread: u64) -> bool {
+        let open = |phase: &Phase| !matches!(phase, Phase::Done { .. });
+        let issue = TicketId::from_issue(thread);
+        (self.state.work_items.iter())
+            .any(|i| open(&i.phase) && (i.pull_request == Some(thread) || Some(i.issue) == issue))
     }
 
     // Hands the comments back to the next comment read, as `released` says,

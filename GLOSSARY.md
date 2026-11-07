@@ -40,7 +40,7 @@ its runner's sheep runs: you start it, or pause it, which waits for its
 calls and any merge in flight to end and then stops that sheep. A wait that
 runs out, an interrupt or a refused stop leaves it running. Or you finish
 it, and it stops itself once its open work items end. Its settings
-(merge authority, CI, agents, pacing) live on it, each in a table of its own.
+(merge authority, CI, agents) live on it, each in a table of its own.
 _Avoid_: shift
 
 **Project manager (PM)**:

@@ -1,13 +1,13 @@
 //! Answering rulings from replies in their thread
 //!
-//! A ruling posted through kelpie's App that mentions someone says to reply in
-//! its thread. Each board poll reads the repo's new comments once, and a reply
-//! counts when its author is the login the ruling mentions and has write
-//! access. The reply is read as `shep kelpie rule` reads an answer, with the
-//! ruling's id first (see [`read_answer`]): `99 yes`, `99 no <note>` or `99
-//! rework <note>`. A bare `yes` answers nothing, so a conversational one never
-//! merges. A 👍 or 👎 on the ruling's own comment, or a ticked box, answers it
-//! too (see [`marked`]). The first answer from any channel wins.
+//! A ruling posted through kelpie's App that mentions someone says to reply in its
+//! thread. Each board poll reads the repo's new comments once, and a reply counts
+//! when its author is the login the ruling mentions and has write access. It is
+//! read as `shep kelpie rule` reads an answer, the ruling's id first (see
+//! [`read_answer`]): `99 yes`, `99 no <note>` or `99 rework <note>`. A 👍 or 👎 on
+//! the ruling's own comment, or a ticked box, answers it too (see [`marked`]), and
+//! the first answer from any channel wins. With a project manager named, the same
+//! read holds the maintainer's comment on an unwatched issue ([`issue_words`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
@@ -35,6 +35,10 @@ const DECIDED: u64 = 24 * 60 * 60;
 /// forge was slow to list
 const SLACK: u64 = 5 * 60;
 
+/// How long, in seconds, a maintainer comment is kept for an issue listing the
+/// poll has not read yet, before it is left unheard and said
+const UNHELD_FOR: u64 = 15 * 60;
+
 /// A ruling's thread being watched for an answer
 #[derive(Debug, Clone)]
 struct Watch {
@@ -50,8 +54,15 @@ struct Watch {
 pub(super) struct Reading {
     /// When the comments were last asked for, however that went
     read: Option<Timestamp>,
+    /// When this runner first asked for them, which is where the maintainer's
+    /// words on an issue are read from: a comment written before it was read
+    /// by a run that is over, and is not held again
+    first: Option<Timestamp>,
     /// The comments before this are not asked for again
     floor: Option<Timestamp>,
+    /// A maintainer comment read while the poll had listed no issues, by its
+    /// thread and when it was written, kept for the read that can decide it
+    unheld: Option<(u64, Timestamp)>,
     watching: BTreeMap<TicketId, Watch>,
     /// The comments read and left alone, a bot's or a login's without write
     /// access, by id and when written, until a read no longer reaches them
@@ -210,9 +221,9 @@ impl ThreadJob {
 
 impl Runner {
     // Decides whether the threads are read now: at most once a board poll,
-    // where kelpie's App covers the repo and a ruling waits in its thread or a
-    // contribution is followed. One read of the repo's comments serves both.
-    // Returns the time and what the read needs.
+    // where kelpie's App covers the repo and a ruling waits, a contribution is
+    // followed, an issue waits on its author, or a project manager is named.
+    // Returns the time and what it needs; one read of the comments serves all.
     fn thread_job(&mut self) -> Option<(Timestamp, ThreadJob)> {
         let now = self.ports.clock.now();
         self.watch_threads(now);
@@ -220,7 +231,10 @@ impl Runner {
         // An issue whose triage waits on its author is read too: the wait holds
         // no slot and no call, but their word is what ends it.
         let waits = self.triage_waits();
-        if self.threads.watching.is_empty() && followed.is_empty() && waits.is_empty() {
+        // So is the maintainer's comment on an issue nothing else is watched
+        // on, where a project manager is named to answer it.
+        let words = self.agents.pm.is_some();
+        if self.threads.watching.is_empty() && followed.is_empty() && waits.is_empty() && !words {
             return None;
         }
         let poll = self.looks.poll().as_secs();
@@ -230,7 +244,14 @@ impl Runner {
         if !self.app_covers() {
             return None;
         }
+        let last = self.threads.read;
         self.threads.read = Some(now);
+        // Where this runner first asked, which is where the maintainer's words
+        // on an issue are read from, and what an older comment is told apart by
+        self.threads.first = Some(self.threads.first.unwrap_or(now));
+        // How far the read reaches back for a maintainer comment it could not
+        // decide, one kept too long being left unheard and said
+        let kept = self.unheld_back(now);
         let watches: Vec<Watch> = self.threads.watching.values().cloned().collect();
         let followed = &self.state.contributions;
         let heard = (watches
@@ -240,6 +261,17 @@ impl Runner {
             .chain(waits.iter().map(|(_, at)| *at)))
         .min();
         let since = heard.into_iter().chain(self.threads.floor).max();
+        // The maintainer's words on an issue are read from where the last read
+        // left off, so one the forge lists late is reached again, and from where
+        // one kept for a later read was written.
+        let back = (words.then_some(last).flatten())
+            .into_iter()
+            .chain(kept)
+            .min();
+        let since = match (since, back) {
+            (Some(since), Some(at)) => Some(since.min(at)),
+            (since, at) => since.or(at),
+        };
         let since = since.unwrap_or(now);
         let reviews = (followed.iter())
             .map(|c| (c.pull_request, c.reviews_since()))
@@ -282,7 +314,17 @@ impl Runner {
                 return Ok(());
             }
             let aimed = self.threads.aimed_by(comment);
-            if aimed.is_empty() || self.threads.judged.contains_key(&comment.id) {
+            if aimed.is_empty() {
+                // On an issue nothing is watched on, the maintainer's own
+                // comment is words for the project manager to answer.
+                if let Some(line) = self.issue_words(comment) {
+                    self.threads.judged.insert(comment.id, comment.created);
+                    self.hear(comment, Some(&line))?;
+                    self.react_held(comment);
+                }
+                continue;
+            }
+            if self.threads.judged.contains_key(&comment.id) {
                 continue;
             }
             // The maintainer's own login wrote it for kelpie, not as an answer.
@@ -943,6 +985,7 @@ fn watch_of(state: &ProjectState, ruling: &Ruling) -> Option<(TicketId, Watch)> 
     ))
 }
 
+mod issue_words;
 mod settled;
 
 #[cfg(test)]
