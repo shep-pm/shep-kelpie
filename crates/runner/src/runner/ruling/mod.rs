@@ -27,7 +27,7 @@ use crate::worktree::{self};
 
 mod act;
 mod history;
-pub(super) use history::{Answerer, Record, pm_answers, records};
+pub(super) use history::{Answerer, Record, pm_answers, records, try_records};
 mod post;
 pub(super) use post::PostJob;
 mod prompts;
