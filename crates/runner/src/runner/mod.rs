@@ -303,6 +303,8 @@ pub struct Runner {
     board_read: Option<board_read::BoardRead>,
     // The review's reviewers, in order, from the project's list
     lineup: Vec<ListedReviewer>,
+    // The reads kelpie's own rule gives a work item where no project manager plans one
+    rule_reads: u32,
     // The reviewers a contribution's pass walks, in order. None while the
     // project picks no contributions.
     contribution_lineup: Vec<ListedReviewer>,
@@ -533,9 +535,8 @@ impl Runner {
         // none; one whose key is missing is left out and logged.
         let lineup = settings.lineup_with_keys(&book, &gateways, home);
         check_gateways(&gateways, &book, &lineup)?;
-        // A reviewer the project named in `agents.allow` is held to what a
-        // round cannot work around. A candidate it never named is passed over
-        // at its round.
+        // A reviewer the project named in `agents.allow` is held to what a round
+        // cannot work around. A candidate it never named is passed over at its round.
         let named = left_in(settings.named_reviewers(&book, home), &lineup);
         gateways.check_triage_spam(&settings.triage.spam)?;
         let webhook = kelpie_settings.webhook;
@@ -623,8 +624,7 @@ impl Runner {
         );
         let plugins_head = crate::skills::default_head(checkout, settings.git.base());
         // Only a reviewer the project named in `agents.allow` is held to what a
-        // round cannot work around: a candidate it never named is passed over at
-        // its round, as down or by the repo's visibility.
+        // round cannot work around: one it never named is passed over, as down or by visibility.
         if !named.is_empty() {
             check_local(&named, &ports)?;
         }
@@ -688,6 +688,7 @@ impl Runner {
             unbuilt: parent::Unbuilt::new(),
             board_read: None,
             lineup,
+            rule_reads: review::RULE_READS,
             contribution_lineup,
             agents,
             book,

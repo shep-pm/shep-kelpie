@@ -119,12 +119,9 @@ url = "https://ntfy.sh/your-private-topic"
 # agent board picks each work item's implementer from the files below whose
 # role is `implementer`, and every reviewer file the project's `agents.allow`
 # holds, apart from `contributions.security_reviewer`, is a candidate for
-# each review round. Each round is the agent board's pick toward
-# `reviews.need`, once per reviewer, ending sooner when no candidate can run.
-# The count is a project setting, in its Flockfile, not this file:
-#
-#   [app.dogs.kelpie.reviews]
-#   need = 2
+# each review round. Each round is the agent board's pick, once per reviewer,
+# ending sooner when no candidate can run. How many read a work item is the
+# project manager's review plan, set at its pick.
 #
 # An issue's `agent:<name>!` label
 # runs it on the implementer it names. The

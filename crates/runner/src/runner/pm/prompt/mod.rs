@@ -237,7 +237,7 @@ const ANSWER: &str = concat!(
 
 A `pick` entry may be `{\"issue\": <a ready issue>, \"tier\": \"light\" | \"standard\" | \"heavy\", \
 \"agent\": \"<an implementer from the Agents section>\", \"slack\": <minutes>, \
-\"light\": <true | false>, \"review\": {\"reads\": <1 or more>, \"about\": \"<what the reads are for>\"}}`, \
+\"review\": {\"reads\": <1 or more>, \"about\": \"<what the reads are for>\"}}`, \
 each key but `issue` optional: `tier` is the least the work needs, `slack` the minutes past its quickest finish it \
 may take, and `agent` is the implementer tried first, over its `agent:` label. Name an `agent` on \
 every `pick` entry, an implementer from the Agents section that can start now; when you name \
@@ -247,13 +247,11 @@ maintainer's `agent:<name>!` label still pins. An issue that should wait for an 
 `hold`, as any issue that should wait does, rather than on a pick, with the open work item \
 running on that agent as its `until`: the hold ends when that item closes, not when the \
 agent's window reopens. An agent that is out until a time, with no open work item to wait \
-on, is not worth a hold, which kelpie clears when no work item is open; name another agent. `light: true` \
-is for a change small and low-risk enough to skim, such as a typo, a comment or a one-line \
-config value. Kelpie checks the diff itself and ignores the tag when the change is larger or the \
-project does not allow it. `review` plans the item's review: `reads` is how many reviewers read \
-its pull request, a whole number of at least 1, and `about`, which may be left out, says what \
-those reads are for, such as \"the migration's rollback path\". With no `review`, one reviewer \
-reads the item. An entry with any other key, \
+on, is not worth a hold, which kelpie clears when no work item is open; name another agent. \
+`review` plans the item's review, the only part of a pick that says how much review it gets: \
+`reads` is how many reviewers read its pull request, a whole number of at least 1, and `about`, \
+which may be left out, says what those reads are for, such as \"the migration's rollback path\". \
+With no `review`, one reviewer reads the item. An entry with any other key, \
 a `review` with a key but `reads` and `about`, or naming no implementer, is dropped.
 
 A stuck item whose agent is out waits for you: its wake names the agent and when it can start. \

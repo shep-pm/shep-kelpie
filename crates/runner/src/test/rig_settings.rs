@@ -235,30 +235,22 @@ impl Rig {
         });
     }
 
-    /// Ranks `names` after `sonnet-high` and sets `reviews.need` to their count
+    /// Ranks `names` after `sonnet-high` and holds the reads kelpie's own rule
+    /// gives an item at their count, for every runner this rig opens next
     pub fn reviewers(&self, names: &[&str]) {
         self.agent_board
             .ranks_first(&[&["sonnet-high"][..], names].concat());
-        // `reviews.need` is at least one.
+        // A work item is read at least once.
         self.reviews_need(Some(names.len().max(1)));
     }
 
-    /// Sets `reviews.need` to `need`, or leaves it out for the default when
-    /// `None`, read when a runner next opens
+    /// Holds the reads kelpie's own rule gives an item at `need`, for every
+    /// runner this rig opens next, or leaves them at kelpie's own count when
+    /// `None`. A test's stand-in for the plan a project manager sets: the
+    /// runner reads no setting for a count.
     pub fn reviews_need(&self, need: Option<usize>) {
-        const TABLE: &str = "\n[app.dogs.kelpie.reviews]\nneed = ";
-        self.edit_settings(|mut s| {
-            if let Some(at) = s.find(TABLE) {
-                let end = s[at + TABLE.len()..]
-                    .find('\n')
-                    .map_or(s.len(), |n| at + TABLE.len() + n + 1);
-                s.replace_range(at..end, "");
-            }
-            match need {
-                Some(need) => format!("{s}{TABLE}{need}\n"),
-                None => s,
-            }
-        });
+        let held = need.map(|need| u32::try_from(need).unwrap_or(u32::MAX).max(1));
+        *self.rule_reads.lock().unwrap() = held;
     }
 
     /// Gives the project an e2e host, `e2e-box`, read when a runner next opens
