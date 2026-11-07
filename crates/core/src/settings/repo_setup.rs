@@ -1,9 +1,12 @@
-//! What reaches each agent of the repo's plugins and own files, `[app.dogs.kelpie.repo_setup]`
+//! What a project adds to the repo's plugins, `[app.dogs.kelpie.repo_setup]`
 //!
 //! Kelpie loads every plugin the repo turns on in `.claude/settings.json`,
-//! and the repo's own `.claude` files, into every call (`crate::skills`). A project narrows that here, and adds
-//! a plugin the repo does not name. Every key is optional, and a value is a
-//! string, a list of strings or a table of strings, which lookout edits.
+//! and the repo's own `.claude` files, into the calls of the worker, the
+//! reviewers and the project manager (`crate::skills`). The repo's files say
+//! what loads, so a project narrows nothing here. It adds a plugin the repo
+//! does not name, in `extra`. The other keys still load and nothing reads them.
+//! Every key is optional, and a value is a string, a list of strings or a table
+//! of strings, which lookout edits.
 
 use std::collections::BTreeMap;
 
@@ -13,30 +16,27 @@ use serde_json::{Map, Value, json};
 
 use crate::ports::Role;
 
-/// Which of the repo's plugins reach which calls, and the plugins the repo
-/// does not turn on
+/// The plugins the repo does not turn on, which load too, and the keys that
+/// narrowed what the repo sets up
+///
+/// Every key but `extra` is read by nothing: the repo's `.claude` files decide.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(title = "Repo setup")]
 pub struct RepoSetup {
-    /// Whether the plugins the repo turns on in `.claude/settings.json` load.
-    /// `false` loads none of them, and `extra` still loads.
+    /// Read by nothing: the plugins `.claude/settings.json` turns on load
     #[serde(default = "yes")]
     pub plugins: bool,
-    /// Whether the repo's own `.claude/skills/`, `.claude/agents/`,
-    /// `.claude/commands/` and the `hooks` of `.claude/settings.json` load,
-    /// with no plugin. `false` leaves them out and keeps the plugins.
+    /// Read by nothing: the repo's own `.claude` files on the default branch load
     #[serde(default = "yes")]
     pub own: bool,
-    /// The calls that get the plugins and the repo's own files: `worker`, `reviewer` and `pm`.
-    /// All of them when absent.
+    /// Read by nothing: the worker, the reviewers and the project manager get what the repo sets up
     #[serde(default = "every_role")]
     pub roles: Vec<CallRole>,
-    /// The parts of a plugin, and of the repo's own files, that load: `skills`, `agents`, `commands`,
-    /// `hooks` and `mcp`. All of them when absent.
+    /// Read by nothing: every part a plugin holds loads
     #[serde(default = "every_part")]
     pub parts: Vec<Part>,
-    /// Plugins, as `name@marketplace`, left out though the repo turns them on
+    /// Read by nothing: a plugin the repo turns off is not loaded
     #[serde(default)]
     pub skip: Vec<PluginId>,
     /// Plugins the repo does not turn on, each as `name@marketplace` with
@@ -69,23 +69,6 @@ impl Default for RepoSetup {
             skip: Vec::new(),
             extra: BTreeMap::new(),
         }
-    }
-}
-
-impl RepoSetup {
-    /// Whether a call of `role` gets the plugins
-    pub fn reaches(&self, role: Role) -> bool {
-        self.roles.iter().any(|r| r.0 == role)
-    }
-
-    /// Whether `part` of a plugin loads
-    pub fn loads(&self, part: Part) -> bool {
-        self.parts.contains(&part)
-    }
-
-    /// Whether the repo's plugin `id` is left out
-    pub fn skips(&self, id: &str) -> bool {
-        self.skip.iter().any(|skipped| skipped.as_str() == id)
     }
 }
 
