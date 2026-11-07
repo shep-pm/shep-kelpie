@@ -1,25 +1,18 @@
-//! `[app.dogs.kelpie.code_graph]`: whether reviewers and, with `worker`, workers get a code graph
+//! `[app.dogs.kelpie.code_graph]`: keys that load and nothing reads, since the installed server decides
 
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-/// Whether the project's workers and reviewers are given a code graph
+/// Keys of a table nothing reads: the installed server gives reviewers a code graph
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(title = "Code graph")]
 pub struct CodeGraph {
-    /// Whether kelpie indexes each work item's worktree and gives the reviewers'
-    /// and the triager's calls the codebase-memory-mcp server over it, and the
-    /// worker's own working turns too with `worker`. `shep kelpie tools install`
-    /// fetches the server. Off when absent.
+    /// Read by nothing. The graph follows `shep kelpie tools install`.
     #[serde(default)]
     pub enabled: bool,
 
-    /// Whether the worker's own working turns get the server too, off when
-    /// absent. It adds the server's 17 tool definitions to every request of
-    /// every worker turn, and no worker session recorded so far, on Claude Code
-    /// or pi, has answered one of them (`docs/facts/mcp-servers.md`). Name the
-    /// key when your workers really read the graph.
+    /// Read by nothing. A worker never gets the graph.
     #[serde(default)]
     pub worker: bool,
 }

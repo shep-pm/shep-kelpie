@@ -659,7 +659,8 @@ impl Runner {
         }
         let spoken = points::Told::of(&state);
         let postings = Arc::new(posted::Posted::default());
-        metrics.features(&settings, dev_server::is_on(&settings));
+        let code_graph = paths.tools.has_code_graph();
+        metrics.features(&settings, dev_server::is_on(&settings), code_graph);
         metrics.work_items(&state);
         let mut runner = Self {
             project,
