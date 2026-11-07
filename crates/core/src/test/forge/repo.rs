@@ -71,6 +71,26 @@ impl FakeForge {
         self.repo_labels.lock().unwrap().clone()
     }
 
+    /// Renames label `from` to `to` on the repo and on every issue that carries it
+    pub(super) fn rename_repo_label(&self, from: &str, to: &str) -> Result<(), ForgeError> {
+        let mut repo_labels = self.repo_labels.lock().unwrap();
+        let Some(at) = repo_labels.iter().position(|l| l == from) else {
+            return Err(ForgeError::Failed("gh: Not Found (HTTP 404)".into()));
+        };
+        if repo_labels.iter().any(|l| l == to) {
+            return Err(ForgeError::Failed(format!(
+                "label with name \"{to}\" already exists"
+            )));
+        }
+        to.clone_into(&mut repo_labels[at]);
+        for on_issue in self.labels.lock().unwrap().values_mut() {
+            for label in on_issue.iter_mut().filter(|l| *l == from) {
+                to.clone_into(label);
+            }
+        }
+        Ok(())
+    }
+
     /// Sets the labels the repository holds
     pub fn set_repo_labels(&self, labels: &[&str]) {
         *self.repo_labels.lock().unwrap() = labels.iter().map(|&l| l.to_owned()).collect();

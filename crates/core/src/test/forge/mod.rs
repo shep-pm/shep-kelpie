@@ -496,6 +496,12 @@ impl Forge for FakeForge {
         Ok(())
     }
 
+    fn rename_label(&self, _repo: &ForgeSlug, from: &str, to: &str) -> Result<(), ForgeError> {
+        self.ask()?;
+        self.wrote(format!("label renamed: {from} to {to}"));
+        self.rename_repo_label(from, to)
+    }
+
     fn can_push(&self, _repo: &ForgeSlug) -> Result<bool, ForgeError> {
         self.ask()?;
         Ok(self.pushes.load(Ordering::SeqCst))
