@@ -16,7 +16,7 @@ use crate::state::{StateError, TriageHeld, TriageStep, Triaged};
 use super::super::Runner;
 use super::super::contributions::post::forge_is_busy;
 use super::DueStatus;
-use super::comment::NEEDS_TRIAGE;
+use super::WaitingLabel;
 
 /// The window both daily caps count, in seconds
 pub(in crate::runner) const DAY: u64 = 24 * 60 * 60;
@@ -286,13 +286,12 @@ impl Runner {
         author: &str,
         limit: TriageHeld,
     ) -> Result<(), StateError> {
-        if let Err(why) = self.make_missing_labels([NEEDS_TRIAGE]) {
-            self.triage_failed(issue, &format!("cannot make `{TRIAGE}`: {why}"), true);
-            return Ok(());
-        }
-        if let Err(e) = self.label_issue(issue, TRIAGE, true) {
-            let why = format!("cannot label it `{TRIAGE}`: {e}");
-            self.triage_failed(issue, &why, !forge_is_busy(&e));
+        if let Err(failed) = self.put_waiting_label(issue) {
+            let counts = match &failed {
+                WaitingLabel::Make(_) => true,
+                WaitingLabel::Label(e) => !forge_is_busy(e),
+            };
+            self.triage_failed(issue, &failed.to_string(), counts);
             return Ok(());
         }
         let mut next = self.state.clone();
