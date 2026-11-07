@@ -552,7 +552,10 @@ fn a_table_carrying_several_removed_keys_names_them_all_at_once() {
             "[app.dogs.kelpie.git]\n",
             "[app.dogs.kelpie]\ngenerated = [\"Cargo.lock\"]\n[app.dogs.kelpie.git]\n",
         )
-        .replace("# reviewers = [\"iq3", "reviewers = [\"iq3");
+        .replace(
+            "[app.dogs.kelpie.agents]\n",
+            "[app.dogs.kelpie.agents]\nreviewers = [\"iq3-xxs-review\", \"defect-hunter\"]\n",
+        );
     let text = format!(
         "{text}\n[app.dogs.kelpie.coderabbit]\nenabled = true\ndivisor = 1000\nrounds = 1\n"
     );
@@ -889,21 +892,29 @@ fn with_local_rounds(keys: &str) -> String {
 #[test]
 fn local_rounds_default_to_kept_for_30_days() {
     let rounds = parse(EXAMPLE).unwrap().local_rounds;
-    assert!(rounds.keep);
     assert_eq!(rounds.keep_days.get(), 30);
     assert_eq!(rounds.folder, None);
     let empty = parse(&with_local_rounds("")).unwrap().local_rounds;
-    assert_eq!((empty.keep, empty.keep_days.get()), (true, 30));
+    assert_eq!(empty.keep_days.get(), 30);
+}
+
+#[test]
+fn local_rounds_keep_is_refused_by_name_and_says_migrate_deletes_it() {
+    for value in ["true", "false"] {
+        let err = parse_err(&with_local_rounds(&format!("keep = {value}")));
+        assert!(err.contains("local_rounds.keep"), "{value}: {err}");
+        assert!(
+            err.contains("shep kelpie settings migrate"),
+            "{value}: {err}"
+        );
+    }
 }
 
 #[test]
 fn local_rounds_take_keep_days_and_a_folder() {
-    let set = parse(&with_local_rounds(
-        "keep = false\nkeep_days = 0\nfolder = \"~/rounds\"",
-    ))
-    .unwrap()
-    .local_rounds;
-    assert!(!set.keep);
+    let set = parse(&with_local_rounds("keep_days = 0\nfolder = \"~/rounds\""))
+        .unwrap()
+        .local_rounds;
     assert_eq!(set.keep_days.get(), 0);
     assert_eq!(
         set.folder.as_ref().map(|f| f.as_path()),

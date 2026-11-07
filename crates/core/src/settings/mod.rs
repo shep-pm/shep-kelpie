@@ -145,9 +145,8 @@ pub struct Settings {
     /// hosts it reaches, and whether it is headed. Off when absent.
     #[serde(default)]
     pub browser: Browser,
-    /// Whether each local round is kept after its work item ends, for how
-    /// long, and where. Kept for 30 days in `local-rounds` in the project's
-    /// folder when absent.
+    /// How long each local round is kept after its work item ends, and where.
+    /// Kept for 30 days in `local-rounds` in the project's folder when absent.
     #[serde(default)]
     pub local_rounds: LocalRounds,
     /// How much a work item's build folder may hold, and the free space the
@@ -407,6 +406,12 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "dependencies.on_red",
         because: RED_BUMP,
+        fix: MIGRATE,
+    },
+    Removed {
+        key: "local_rounds.keep",
+        because: "a kept round costs about 250 KB, and `keep_days` bounds how long one \
+                  stays, so kelpie keeps every local round",
         fix: MIGRATE,
     },
     Removed {

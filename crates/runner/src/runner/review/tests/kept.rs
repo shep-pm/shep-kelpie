@@ -148,19 +148,6 @@ fn a_failed_local_round_is_kept_with_its_reason() {
     assert!(kept_folder(&rig).join(&name).join("round-1.txt").is_file());
 }
 
-#[test]
-fn with_keep_off_no_round_is_kept() {
-    let (rig, runner) = at_round_1("shep");
-    rig.edit_settings(|s| s + "\n[app.dogs.kelpie.local_rounds]\nkeep = false\n");
-    drop(runner);
-    let runner = rig.open().unwrap();
-    rig.claude.script([Scripted::Text(CLEAN)]);
-    step(&runner).unwrap(); // round 1, qwen
-    assert_eq!(rig.reviewer.seen().len(), 1);
-    assert_eq!(kept_rounds(&rig), Vec::<String>::new());
-    assert!(!kept_folder(&rig).exists());
-}
-
 // Leaves a kept round named `name` in the rig's folder, holding one file
 fn leave_kept(rig: &Rig, name: &str) {
     leave_kept_of(rig, name, "shep");
