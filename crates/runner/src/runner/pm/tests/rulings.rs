@@ -24,7 +24,7 @@ pub(super) fn left_to_pm(project: &str, merging: Merging) -> (Rig, Mutex<Runner>
         rig.maintainer("octocat");
         name_pm(rig);
     });
-    // The settings file refuses `merge` as `true`, so a test sets it here.
+    // The map starts `merge` `false`, so a test sets it here.
     leave_merges(&runner);
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(

@@ -117,11 +117,11 @@ fn a_reread_with_a_bad_entry_keeps_the_running_settings() {
 }
 
 #[test]
-fn a_merge_kind_added_to_pm_alone_is_refused_and_the_settings_kept() {
+fn a_security_kind_added_to_pm_alone_is_refused_and_the_settings_kept() {
     let rig = Rig::new("shep");
     let runner = rig.open().unwrap();
     let next = settings_with(&rig, |s| {
-        format!("{s}\n[app.dogs.kelpie.rulings]\npm_alone = [\"merge\"]\n")
+        format!("{s}\n[app.dogs.kelpie.rulings]\npm_alone = [\"security\"]\n")
     });
     let mut runner = runner.lock().unwrap();
     let err = runner.reread(next, rig.kelpie_settings()).unwrap_err();

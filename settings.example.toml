@@ -266,12 +266,16 @@ compact_window = 200000
 # which you answer; a kind it leaves out is yours. A ruling left to it waits up
 # to one wake for its answer. An option it picks is applied and posted on the
 # ruling's thread, where `<id> no <note>` reopens it; an abstention, a `design`
-# flag, a merge under `git.merging = "ask"` or an option only you can carry
-# out comes to you with its pick. A question and a follow-up have wakes of
-# their own, whatever their value. `merge`, `security`, `contribution-merge`
-# and `local-model-spilled` are refused as `true`, and are never written.
+# flag or an option only you can carry out comes to you with its pick. A
+# question and a follow-up have wakes of their own, whatever their value.
+# `merge` is yours, and set `true` its yes merges a head that passed every
+# gate, still yours where the ruling warns of an unread head, an unread fix, an
+# unreviewed pass, open review bot threads or a borrowed head. `security`,
+# `contribution-merge` and `local-model-spilled` are refused as `true`, and are
+# never written.
 # `shep kelpie add`, `upgrade` and `shep kelpie settings migrate` write each
-# other kind it is missing, at the value below, and never change one it has.
+# kind it is missing, at the value below and `merge` at `false`, and never
+# change one it has.
 # The old `pm_alone` list still loads, as `true` for each kind it names, and
 # the migration turns it into the map. It also deletes the panel's `decide`,
 # `full_panel_paths`, `agents.advisor`, `agents.researcher` and `[researcher]`
