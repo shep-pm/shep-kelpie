@@ -364,6 +364,28 @@ fn a_code_graph_with_no_server_shows_as_off() {
 }
 
 #[test]
+fn the_code_graph_gauge_follows_the_server_as_it_is_installed_and_removed_between_calls() {
+    let rig = Rig::new("shep");
+    let runner = rig.open().unwrap();
+    let graph = [("feature", "code_graph")];
+    let gauge = || rig.samples.value("kelpie_feature_enabled", &graph);
+    assert_eq!(gauge(), Some(0.0), "no server when the runner opened");
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude
+        .script([Scripted::Push("work.txt", "work\n"), Scripted::Text(CLEAN)]);
+
+    install_the_code_graph(&rig, "#!/bin/sh\nexit 0\n");
+    step(&runner).unwrap(); // the worker's first turn
+    assert_eq!(gauge(), Some(1.0), "installed while the runner ran");
+
+    std::fs::remove_file(rig.paths().tools.code_graph()).unwrap();
+    step(&runner).unwrap(); // round 1, qwen: clean by default
+    step(&runner).unwrap(); // round 2, claude: scripted clean above
+    assert_eq!(gauge(), Some(0.0), "removed while the runner ran");
+}
+
+#[test]
 fn an_indexed_code_graph_counts_as_ok() {
     let indexer = "#!/bin/sh\nexit 0\n";
     let (rig, _runner, _) = Rig::parked_set("shep", |rig| install_the_code_graph(rig, indexer));

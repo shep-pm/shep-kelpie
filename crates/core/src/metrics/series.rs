@@ -200,6 +200,17 @@ impl Recorder {
         }
     }
 
+    /// Sets whether the code graph is on, which is whether its server is installed, as a call
+    /// finds it
+    pub fn code_graph(&self, installed: bool) {
+        let on = f64::from(u8::from(installed));
+        self.set(
+            &FEATURE_ENABLED,
+            vec![feature_label(Feature::CodeGraph)],
+            on,
+        );
+    }
+
     /// Counts one run of `feature` for a call, which went as `outcome`
     pub fn feature_ran(&self, feature: Feature, outcome: &'static str) {
         let labels = vec![feature_label(feature), ("outcome", outcome.to_owned())];

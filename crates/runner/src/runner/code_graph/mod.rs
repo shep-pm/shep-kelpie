@@ -38,7 +38,10 @@ impl Runner {
     /// A machine without the server runs its calls without, and says nothing.
     pub(super) fn with_code_graph(&self, call: &mut AgentCall) {
         let tools = &self.paths.tools;
-        if !reads_code(call) || !tools.has_code_graph() {
+        let installed = tools.has_code_graph();
+        // An install or a removal between calls shows at the next one.
+        self.metrics.code_graph(installed);
+        if !installed || !reads_code(call) {
             return;
         }
         // Only a call that works an issue reads code.
