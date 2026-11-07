@@ -20,6 +20,24 @@ pub(in crate::runner) fn new_kind_label(name: &str) -> NewLabel<'_> {
     }
 }
 
+// The label made for a priority on a repo that has no label for it, under
+// the name the board ranks by
+pub(in crate::runner) fn priority_label(priority: &str) -> Option<NewLabel<'static>> {
+    let (name, description) = match priority {
+        "P0" => ("priority: P0", "Drop everything"),
+        "P1" => ("priority: P1", "Next up"),
+        "P2" => ("priority: P2", "After P1"),
+        "P3" => ("priority: P3", "Wanted, once higher priorities are done"),
+        "P4" => ("priority: P4", "Wanted someday, after everything above it"),
+        _ => return None,
+    };
+    Some(NewLabel {
+        name,
+        color: "c5def5",
+        description,
+    })
+}
+
 /// What the issue check refuses in `body` under `title`, in its own words. The
 /// labels are not the draft's to mend, so a refusal that names one is left out.
 pub(in crate::runner) fn refusals(title: &str, body: &str) -> Vec<String> {
@@ -87,9 +105,9 @@ impl Runner {
         }
     }
 
-    // Whether the issue check passes `issue` with `body` written over it and
-    // the pass's `labels` put on
-    pub(super) fn passes_with(&self, issue: u64, body: &str, labels: &[String]) -> bool {
+    // The title the issue check reads for `issue`: the listed one, or the one
+    // the forge gives now
+    pub(super) fn title_now(&self, issue: u64) -> String {
         let listed = (self.triage_run.listing.as_ref())
             .and_then(|l| l.open.iter().find(|i| i.number == issue))
             .map(|i| i.title.clone());
@@ -97,8 +115,14 @@ impl Runner {
             let read = super::ticket(issue).and_then(|t| self.ports.tickets.issue(&self.remote, t));
             read.ok().map(|found| found.title)
         });
+        title.unwrap_or_default()
+    }
+
+    // Whether the issue check passes `issue` with `body` written over it and
+    // the pass's `labels` put on
+    pub(super) fn passes_with(&self, issue: u64, body: &str, labels: &[String]) -> bool {
         let mut after = self.triage_seen(issue);
         after.extend(labels.iter().cloned());
-        check::check(&title.unwrap_or_default(), body, &after).is_empty()
+        check::check(&self.title_now(issue), body, &after).is_empty()
     }
 }

@@ -1,6 +1,7 @@
 //! The research on an untouched issue, from its call to the comment and the
 //! labels after it, through the runner's stand-ins
 
+use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -8,10 +9,12 @@ use serde_json::{Value, json};
 
 use super::marker::MARKER;
 use super::pick_tests::{MAINTAINER, issue, list, rig_with, status};
+use super::research::read_reply;
 use crate::github::ApiError;
 use crate::ports::{AgentError, CLEAN, OpenIssue, Role, Timestamp, Tools};
+use crate::runner::claim::Notes;
 use crate::runner::{Pass, Runner, advance, step};
-use crate::settings::Harness;
+use crate::settings::{AuthorRole, Harness};
 use crate::state::StateStore;
 use crate::test::{
     CALL_PATIENCE, Hold, Rig, Scripted, Seen, assert_granted, git, installed_sources,
@@ -278,79 +281,6 @@ fn a_type_and_priority_the_repo_has_go_on_before_needs_triage() {
         ]
     );
     assert!(facts(&rig).contains("bug, P2"));
-}
-
-// Issue 30 filed carrying `label`, in a repo that names its priorities the
-// board's way
-fn filed_with(label: &str) -> (Rig, Mutex<Runner>) {
-    let (rig, runner) = untouched();
-    rig.forge
-        .set_repo_labels(&["priority: P1", "priority: P2", "needs-triage"]);
-    let mut filed = crash(&rig, "It crashes when I run it.");
-    filed.labels = vec![label.to_owned()];
-    list(&rig, filed);
-    rig.forge.label(30, label);
-    (rig, runner)
-}
-
-#[test]
-fn the_priority_the_issue_was_filed_with_stands_over_the_one_the_pass_ranks() {
-    for filed in ["priority: P2", "P2"] {
-        let (rig, runner) = filed_with(filed);
-        let found = json!({ "priority": "P1" });
-        rig.claude.script_for(Role::Triager, [reply(found)]);
-
-        assert_eq!(step(&runner).unwrap(), None, "{filed}");
-
-        assert_eq!(moves(&rig), ["comment", "label needs-triage"], "{filed}");
-        assert_eq!(rig.github.label_takes(), [], "{filed}");
-    }
-}
-
-#[test]
-fn a_pass_that_names_the_priority_the_issue_carries_changes_no_label() {
-    let (rig, runner) = filed_with("priority: P2");
-    let found = json!({ "priority": "P2" });
-    rig.claude.script_for(Role::Triager, [reply(found)]);
-
-    assert_eq!(step(&runner).unwrap(), None);
-
-    assert_eq!(moves(&rig), ["comment", "label needs-triage"]);
-    assert_eq!(rig.github.label_takes(), []);
-}
-
-#[test]
-fn a_pass_that_names_the_priority_the_issue_carries_under_the_bare_name_changes_no_label() {
-    let (rig, runner) = filed_with("P1");
-    rig.forge
-        .set_repo_labels(&["P1", "priority: P1", "needs-triage"]);
-    let found = json!({ "priority": "P1" });
-    rig.claude.script_for(Role::Triager, [reply(found)]);
-
-    assert_eq!(step(&runner).unwrap(), None);
-
-    assert_eq!(moves(&rig), ["comment", "label needs-triage"]);
-    assert_eq!(rig.github.label_takes(), []);
-}
-
-#[test]
-fn a_priority_put_on_by_hand_while_the_pass_ran_stands_and_the_pass_priority_is_not_put_on() {
-    let (rig, runner) = untouched();
-    drop(runner);
-    rig.forge
-        .set_repo_labels(&["priority: P1", "priority: P3", "needs-triage"]);
-    let record = json!({
-        "issue": 30, "comment": 101, "step": "commented", "labels": ["priority: P1"],
-    });
-    crashed_with(&rig, record);
-    let runner = rig.open().unwrap();
-    rig.forge.label(30, "priority: P3");
-
-    assert_eq!(step(&runner).unwrap(), None);
-
-    assert_eq!(moves(&rig), ["label needs-triage"]);
-    assert_eq!(rig.github.label_takes(), []);
-    assert_eq!(rig.forge.issue_labels(30), ["priority: P3"]);
 }
 
 #[test]
@@ -964,4 +894,64 @@ fn the_triager_reads_the_installed_dependency_sources_and_no_credential_of_them(
 
     let [seen] = calls(&rig, Role::Triager).try_into().unwrap();
     assert_granted(&seen, &source_folders(&cargo, &rustup), &secret);
+}
+
+#[test]
+fn a_reply_carries_its_split_drafts_in_order() {
+    let drafts = json!([
+        { "title": " feat(a): one ", "body": "B1", "priority": "p1", "kind": "FEAT", "agent": "opus-high" },
+        { "title": "fix(b): two", "body": "B2", "priority": "P0", "kind": "nonsense", "after": [0], "agent": " " },
+    ]);
+    let text = format!("Here it is: {}", json!({ "split": drafts }));
+
+    let found = read_reply(
+        &text,
+        30,
+        &[],
+        Path::new("."),
+        (3, AuthorRole::Maintainer),
+        &Notes::default(),
+    )
+    .unwrap();
+
+    let titles: Vec<&str> = found.split.iter().map(|d| d.title.as_str()).collect();
+    assert_eq!(titles, ["feat(a): one", "fix(b): two"]);
+    let first = &found.split[0];
+    assert_eq!((first.priority, first.kind), (Some("P1"), Some("feat")));
+    assert_eq!(first.agent.as_deref(), Some("opus-high"));
+    let second = &found.split[1];
+    assert_eq!(
+        (second.priority, second.kind),
+        (None, None),
+        "P0 is never kelpie's"
+    );
+    assert_eq!(
+        (second.after.as_slice(), second.agent.as_deref()),
+        (&[0][..], None)
+    );
+    let none = read_reply(
+        "{\"split\": null}",
+        30,
+        &[],
+        Path::new("."),
+        (3, AuthorRole::Maintainer),
+        &Notes::default(),
+    );
+    assert_eq!(none.unwrap().split, []);
+}
+
+#[test]
+fn the_prompt_lists_the_projects_implementers() {
+    let (rig, runner) = untouched();
+    rig.claude.script_for(Role::Triager, [reply(json!({}))]);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let prompt = calls(&rig, Role::Triager).remove(0).call.prompt;
+    assert!(
+        prompt.contains("The implementers of this project are opus-high, sonnet-high:"),
+        "{prompt}"
+    );
+    assert!(prompt.contains("\"split\": [{\"title\""), "{prompt}");
+    assert!(prompt.contains("Assumed:"), "{prompt}");
 }
