@@ -204,6 +204,7 @@ mod tests {
     // so each key is counted.
     fn examples_with_every_key() -> Vec<String> {
         let text = include_str!("../settings.example.toml")
+            .replace("issues = \"ask\"\n", "")
             .replace("build_env = {}", "build_env = { BUN = \"bun\" }")
             .replace(
                 "# instructions_file = \"~/.shep/kelpie/shep/worker-instructions.md\"",
@@ -379,6 +380,14 @@ mod tests {
         );
         assert_eq!(fix_attempts["maximum"], u32::MAX);
         assert!(defs["EndpointUrl"]["pattern"].is_string());
+    }
+
+    #[test]
+    fn git_issues_is_deprecated_and_takes_any_value() {
+        let root = schema();
+        let key = &root["$defs"]["Git"]["properties"]["issues"];
+        assert_eq!(key["deprecated"], true, "{key}");
+        assert!(resolve(&root, key).get("type").is_none(), "{key}");
     }
 
     // Lookout groups a sheep's rows by table, under each table's title.

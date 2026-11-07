@@ -11,11 +11,10 @@ use crate::ports::{Finding, Timestamp};
 pub struct FollowUps {
     /// The findings still to file
     pub findings: Vec<Finding>,
-    /// Whether the maintainer said yes to the `follow-up` ruling that asks
-    /// before filing them, which files them `ready-for-agent`
+    /// Whether a yes to a `follow-up` ruling allows filing
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ruled: bool,
-    /// Whether that yes asked for `needs-triage`, which files them unread
+    /// Whether the findings must be filed unread as `needs-triage`
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unread: bool,
     /// When the forge first refused to take them, since it last took one
@@ -28,8 +27,9 @@ impl FollowUps {
     /// answer gave them, and the findings at the places in `dropped`, each
     /// from 1, left out of what is filed
     pub fn say_yes(&mut self, triaged: bool, unread: bool, dropped: &[usize]) {
-        self.ruled |= triaged;
-        self.unread |= unread;
+        // A retry without prior triage keeps the findings unread.
+        self.unread |= unread || (!self.ruled && !triaged);
+        self.ruled = true;
         self.first_refused = None;
         let mut at = 0;
         self.findings.retain(|_| {

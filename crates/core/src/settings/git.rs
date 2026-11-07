@@ -5,10 +5,10 @@ use std::path::PathBuf;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::ForgeSlug;
+use super::{ForgeSlug, Gone};
 
 /// The project's repo: where it is checked out, where it lives on GitHub,
-/// who merges into it and what becomes of findings left for later
+/// and who merges into it
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(title = "Git")]
@@ -26,10 +26,10 @@ pub struct Git {
     pub base: Option<BaseBranch>,
     /// Who merges a green, reviewed pull request
     pub merging: Merging,
-    /// What becomes of the findings a worker deferred, once its pull
-    /// request merges. `ask` when absent.
+    /// Read by nothing: deferred findings always raise a follow-up ruling
     #[serde(default)]
-    pub issues: Filing,
+    #[schemars(extend("deprecated" = true))]
+    pub issues: Option<Gone>,
     /// The GitHub login kelpie mentions on a ruling it posts through its
     /// App, so GitHub notifies them. The login `gh` acts as (`gh api user`)
     /// when absent.
@@ -129,17 +129,4 @@ pub enum Merging {
     Ask,
     /// Kelpie merges once every gate passes, then posts a notice of the merge
     Auto,
-}
-
-/// What becomes of the findings a worker deferred, once its pull request merges
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum Filing {
-    /// Kelpie raises a ruling, and files them as issues on a yes
-    #[default]
-    Ask,
-    /// Kelpie files them as issues at once
-    File,
-    /// Kelpie files nothing, and the findings stay in the review
-    Skip,
 }

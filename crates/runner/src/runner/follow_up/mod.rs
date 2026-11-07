@@ -4,10 +4,9 @@
 //! of scope goes into the deferred findings file in its build folder. One it
 //! shows is wrong goes into the disputed findings file, which files nothing.
 //! On merge kelpie files only findings it sent the worker itself, in its own
-//! words. A line the worker invents files nothing. `git.issues` decides what
-//! follows. `file` files each as `needs-triage`, `ask` asks the maintainer
-//! first, and `skip` files nothing. A finding an open ticket holds gets a
-//! comment there instead.
+//! words. A line the worker invents files nothing. Deferred findings raise a
+//! follow-up ruling for the project manager or maintainer before filing.
+//! A finding an open ticket holds gets a comment there instead.
 
 use std::path::Path;
 
@@ -17,7 +16,7 @@ use super::review::findings;
 use crate::board::briefing::cut;
 use crate::board::{READY, TRIAGE};
 use crate::ports::{Finding, ForgeError, NewLabel, OpenTicket, Severity};
-use crate::settings::{Filing, TicketSource};
+use crate::settings::TicketSource;
 use crate::state::{RulingKind, StateError};
 use crate::work_item::{FollowUps, WorkItem};
 
@@ -58,10 +57,8 @@ impl Runner {
         let Some(number) = item.pull_request else {
             return Ok(None);
         };
-        let filing = self.settings.git.issues;
         let pending = match item.follow_ups.clone() {
             Some(pending) => pending,
-            None if filing == Filing::Skip => return Ok(None),
             None => {
                 let found = match read_deferred(item) {
                     Ok(found) => found,
@@ -79,17 +76,14 @@ impl Runner {
         if pending.findings.is_empty() {
             return Ok(None);
         }
-        match (pending.ruled, filing) {
-            (false, Filing::Ask) => {
-                let kind = RulingKind::FollowUp {
-                    findings: pending.findings,
-                    refused: None,
-                };
-                self.raise(number, kind).map(Some)
-            }
-            (false, Filing::Skip) => Ok(None),
-            (true, _) | (false, Filing::File) => self.file_follow_ups(number).map(Some),
+        if !pending.ruled {
+            let kind = RulingKind::FollowUp {
+                findings: pending.findings,
+                refused: None,
+            };
+            return self.raise(number, kind).map(Some);
         }
+        self.file_follow_ups(number).map(Some)
     }
 
     // One finding at a time, each taken off the work item once it is filed. A

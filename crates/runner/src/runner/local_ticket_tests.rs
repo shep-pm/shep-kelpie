@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::board::Skip;
 use crate::local_tickets::LocalTickets;
 use crate::ports::{AgentError, CLEAN, Checks};
-use crate::runner::follow_up::tests::{after_merge, lines, racy};
+use crate::runner::follow_up::tests::{after_yes, lines, racy};
 use crate::runner::slots_tests::dispatched;
 use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::settings::Harness;
@@ -267,13 +267,12 @@ fn a_queue_of_adoptions_saved_before_the_local_store_is_let_go_at_the_next_start
     assert_eq!(status["work_item"], json!(null));
 }
 
-// A local project under `issues = "file"` and `merging = "auto"`, whose ticket `k1`
+// A local project under `merging = "auto"`, whose ticket `k1`
 // has a pull request that merges with `racy()` deferred
 fn merged_with_a_deferred_finding() -> (Rig, Mutex<Runner>) {
     let rig = Rig::new("koji");
     rig.tickets_local();
     rig.merge_auto();
-    rig.issues("file");
     rig.ticket_verb(&["new", "Add a thing", "--label", "ready-for-agent"]);
     let runner = rig.open().unwrap();
     rig.forge.open_pull_request(71, "kelpie/k1", &[]);
@@ -304,7 +303,7 @@ fn merged_with_a_deferred_finding() -> (Rig, Mutex<Runner>) {
 fn a_follow_up_on_a_local_project_becomes_a_local_ticket() {
     let (rig, runner) = merged_with_a_deferred_finding();
 
-    let report = after_merge(&runner);
+    let report = after_yes(&runner);
     let Some(StepReport::FollowUpsFiled { opened, .. }) = report else {
         panic!("no follow-up was filed: {report:?}");
     };
@@ -328,7 +327,7 @@ fn a_finding_a_local_ticket_already_holds_is_a_comment_on_it() {
     let (rig, runner) = merged_with_a_deferred_finding();
     rig.ticket_verb(&["new", "Looks racy", "--body", "Seen in src/lib.rs by hand."]);
 
-    let report = after_merge(&runner);
+    let report = after_yes(&runner);
     let Some(StepReport::FollowUpsFiled {
         opened, commented, ..
     }) = report
