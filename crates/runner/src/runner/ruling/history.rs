@@ -41,11 +41,11 @@ pub(in crate::runner) struct Record {
     pub(in crate::runner) raised: Option<Timestamp>,
     pub(in crate::runner) issue: Option<TicketId>,
     pull_request: Option<u64>,
-    asked: String,
+    pub(in crate::runner) asked: String,
     pub(in crate::runner) answer: String,
     // Why a turn failed, for a failed turn
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    stem: Option<String>,
+    pub(in crate::runner) stem: Option<String>,
     // Whether the project manager answered for the maintainer
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     by_pm: bool,

@@ -715,7 +715,10 @@ fn all_a_claude_session_said_is_read() {
 #[test]
 fn all_a_codex_rollout_said_is_read() {
     let rig = Rig::new();
-    let rollout = rig.dir.path().join("rollout-2026-10-10T12-00-00-0199-thread.jsonl");
+    let rollout = rig
+        .dir
+        .path()
+        .join("rollout-2026-10-10T12-00-00-0199-thread.jsonl");
     rig.append(
         &rollout,
         &[
@@ -769,7 +772,10 @@ fn a_half_written_last_line_is_passed_over() {
     let rig = Rig::new();
     let file = rig.transcripts().join("w7.jsonl");
     rig.transcript("w7", &[&said("2026-10-10T12:00:02.000Z", "Whole.")]);
-    let mut open = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
+    let mut open = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&file)
+        .unwrap();
     // A whole line with no end yet, and a cut one: neither is read.
     write!(open, "{}", said("2026-10-10T12:00:03.000Z", "Not ended")).unwrap();
 

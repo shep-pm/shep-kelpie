@@ -9,12 +9,12 @@
 //! notes are written under it from what they found.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use super::case::ended_red;
+use super::case::{Files, Told, ended_red};
 use crate::ports::{
-    FailedLogs, Forge, ForgeError, HeadRun, Issue, LogPart, PullRequest, Talk, Tickets,
+    FailedLogs, Forge, ForgeError, HeadRun, Issue, LogPart, PullRequest, SessionId, Talk, Tickets,
 };
 use crate::runner::Runner;
 use crate::runner::trigger::lock;
@@ -157,6 +157,10 @@ impl Runner {
         if heads.is_empty() && runs.is_empty() && ends.is_empty() && pulls.is_empty() {
             return None;
         }
+        let told = parked
+            .iter()
+            .map(|p| (p.ticket, p.session.clone()))
+            .collect();
         Some(LogsJob {
             forge: Arc::clone(&self.ports.forge),
             tickets: Arc::clone(&self.ports.tickets),
@@ -166,6 +170,8 @@ impl Runner {
             ends,
             pulls,
             kept,
+            told,
+            steps: self.steps_file(),
         })
     }
 }
@@ -210,6 +216,10 @@ pub(super) struct LogsJob {
     pulls: Vec<u64>,
     // Each run attempt whose log a case already holds, which is not read again
     kept: BTreeSet<(u64, u32)>,
+    // Each parked item's worker session, whose transcript its case reads
+    told: Vec<(TicketId, SessionId)>,
+    // The steps file, which each case reads its log lines from
+    steps: PathBuf,
 }
 
 /// What a [`LogsJob`] read, errors as the inline call returns them
@@ -229,6 +239,8 @@ pub(super) struct Logs {
     head_runs: BTreeMap<String, Result<Vec<HeadRun>, ForgeError>>,
     // By run, its failed log in whole, for each failed run no case held yet
     run_logs: BTreeMap<(u64, u32), Result<String, ForgeError>>,
+    // By ticket, its log lines and what its worker said
+    told: BTreeMap<TicketId, Told>,
 }
 
 impl Logs {
@@ -252,6 +264,11 @@ impl Logs {
         self.run_logs.get(&(run, attempt))
     }
 
+    // What the read found of ticket `ticket`'s log lines and worker's words, or None when it read none
+    pub(super) fn told(&self, ticket: TicketId) -> Option<&Told> {
+        self.told.get(&ticket)
+    }
+
     // What the read found of the talk on pull request `number`, or None when it read none
     pub(super) fn talk(&self, number: u64) -> Option<&Result<Talk, ForgeError>> {
         self.talks.get(&number)
@@ -270,6 +287,8 @@ impl LogsJob {
             ends,
             pulls,
             kept,
+            told,
+            steps,
         } = self;
         // A `StillRed` ruling is raised only on a pull request's red run
         // (`ci_failed`), never on a merge queue removal, so not `merge_group`.
@@ -312,6 +331,12 @@ impl LogsJob {
             }
             head_runs.insert(head.to_owned(), listed);
         }
+        // The steps file is read once, and each parked item's transcript once
+        let sessions = told.iter().map(|(_, session)| session.0.clone()).collect();
+        let files = Files::read(&steps, &sessions);
+        let told = (told.iter())
+            .map(|(ticket, session)| (*ticket, files.told(*ticket, session)))
+            .collect();
         Logs {
             failed,
             tails,
@@ -320,6 +345,7 @@ impl LogsJob {
             talks,
             head_runs,
             run_logs,
+            told,
         }
     }
 }
