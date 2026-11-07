@@ -1,6 +1,7 @@
 //! The project manager's answer, read
 
 use super::*;
+use crate::runner::pm::threads::Decision;
 use crate::test::ticket;
 
 #[test]
@@ -43,6 +44,7 @@ fn the_last_object_after_the_reasoning_is_the_answer() {
             follow_up: None,
             red: Vec::new(),
             votes: Vec::new(),
+            threads: Vec::new(),
             said: Vec::new(),
             read: Vec::new(),
             standing: None,
@@ -466,5 +468,88 @@ fn a_standing_answer_is_the_whole_file_or_null_and_an_unknown_key_is_still_named
             "`merge_order` is not a field kelpie acts on",
             "`standing`: text or null, not 4",
         ]
+    );
+}
+
+fn call(thread: usize, decision: Decision, why: &str) -> ThreadCall {
+    ThreadCall {
+        item: ticket(12),
+        thread,
+        decision,
+        why: why.to_owned(),
+    }
+}
+
+#[test]
+fn a_threads_entry_is_fix_follow_up_or_close() {
+    let answer = read(
+        "{\"threads\": [\
+         {\"item\": 12, \"thread\": 1, \"decision\": \"fix\", \"why\": \" the guard is missing \"}, \
+         {\"item\": \"#12\", \"thread\": 2, \"decision\": \"follow-up\"}, \
+         {\"item\": 12, \"thread\": 3, \"decision\": \"close\", \"why\": \"the caller checks it\"}, \
+         {\"item\": 12, \"thread\": 4, \"decision\": \"push-back\", \"why\": \"it is your call\"}]}",
+    )
+    .unwrap();
+
+    assert_eq!(
+        answer.threads,
+        [
+            call(1, Decision::Fix, "the guard is missing"),
+            call(2, Decision::FollowUp, ""),
+            call(3, Decision::Close, "the caller checks it"),
+            call(4, Decision::PushBack, "it is your call"),
+        ]
+    );
+    assert_eq!(answer.unread, Vec::<String>::new());
+    assert_eq!(read("{\"threads\": null}").unwrap().threads, []);
+    assert_eq!(read("{\"threads\": []}").unwrap().threads, []);
+}
+
+#[test]
+fn a_close_with_no_why_is_named_and_dropped() {
+    let answer = read(
+        "{\"threads\": [{\"item\": 12, \"thread\": 1, \"decision\": \"close\"}, \
+         {\"item\": 12, \"thread\": 2, \"decision\": \"close\", \"why\": \"  \"}, \
+         {\"item\": 12, \"thread\": 3, \"decision\": \"push-back\"}, \
+         {\"item\": 12, \"thread\": 4, \"decision\": \"fix\"}]}",
+    )
+    .unwrap();
+
+    assert_eq!(answer.threads, [call(4, Decision::Fix, "")]);
+    let [one, two, three] = answer.unread.as_slice() else {
+        panic!("{:?}", answer.unread);
+    };
+    for (named, thread) in [(one, 1), (two, 2), (three, 3)] {
+        assert!(
+            named.starts_with("`threads`: an `item`, a `thread` number"),
+            "{named}"
+        );
+        assert!(named.contains(&format!("\"thread\":{thread}")), "{named}");
+    }
+}
+
+#[test]
+fn any_other_thread_decision_is_named_and_dropped() {
+    let answer = read(
+        "{\"threads\": [{\"item\": 12, \"thread\": 1, \"decision\": \"merge\", \"why\": \"x\"}, \
+         {\"item\": 12, \"thread\": 2, \"decision\": \"Fix\"}, \
+         {\"item\": 12, \"thread\": 0, \"decision\": \"fix\"}, \
+         {\"item\": 12, \"decision\": \"fix\"}, \
+         {\"thread\": 1, \"decision\": \"fix\"}, \
+         {\"item\": 12, \"thread\": 5, \"decision\": \"fix\", \"why\": 7}]}",
+    )
+    .unwrap();
+
+    assert_eq!(answer.threads, []);
+    assert_eq!(answer.unread.len(), 6, "{:?}", answer.unread);
+    assert!(
+        answer.unread[0].contains("\"decision\":\"merge\""),
+        "{:?}",
+        answer.unread
+    );
+    let answer = read("{\"threads\": {\"item\": 12}}").unwrap();
+    assert_eq!(
+        answer.unread,
+        ["`threads`: a list of threads, not {\"item\":12}"]
     );
 }

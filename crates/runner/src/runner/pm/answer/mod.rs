@@ -9,12 +9,13 @@ use serde_json::{Map, Value};
 use super::more::{MORE, ReadCall, read_call};
 use super::picked::{PICK, Picked, picked};
 use super::said::{SAID, SaidCall, said};
+use super::threads::{THREADS, ThreadCall, thread_call};
 use crate::board::{READY, TRIAGE};
 use crate::ticket::TicketId;
 
 /// The keys an answer takes, an object with none of them being none: `why`
 /// is left out, since an unstick inside an answer has one of its own
-const KEYS: [&str; 12] = [
+const KEYS: [&str; 13] = [
     "pick",
     "hold",
     "unstick",
@@ -24,6 +25,7 @@ const KEYS: [&str; 12] = [
     "red",
     "votes",
     "read",
+    "threads",
     "said",
     "standing",
     "reply",
@@ -68,6 +70,8 @@ pub(super) struct Answer {
     /// Whether each work item whose round sent a finding above a nit gets one
     /// more read
     pub(super) read: Vec<ReadCall>,
+    /// What becomes of each open review thread the wake carried
+    pub(super) threads: Vec<ThreadCall>,
     /// What to do about the maintainer's held words, thread by thread
     pub(super) said: Vec<SaidCall>,
     /// The whole of its standing notes, which replaces the file kelpie holds.
@@ -359,6 +363,20 @@ pub(super) fn read(text: &str) -> Option<Answer> {
                     Some(r) => answer.read.push(r),
                     None => answer.unread.push(unread(MORE)),
                 },
+            },
+            "threads" => match &value {
+                Value::Null => {}
+                Value::Array(items) => {
+                    for item in items {
+                        match thread_call(item) {
+                            Some(t) => answer.threads.push(t),
+                            None => answer
+                                .unread
+                                .push(format!("`threads`: {THREADS}, not {item}")),
+                        }
+                    }
+                }
+                _ => answer.unread.push(unread("a list of threads")),
             },
             "said" => match &value {
                 Value::Null => {}

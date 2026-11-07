@@ -34,5 +34,6 @@ async fn an_old_list_misses_every_kind_it_does_not_name() {
     let (what, _) = missing(&report, LINE);
     assert!(what.contains("still-red"), "{what}");
     assert!(!what.contains("rebase"), "{what}");
-    assert!(!what.contains("merge,"), "{what}");
+    // `merge` has a default now, so a map that leaves it out is named too.
+    assert!(what.contains("merge, question"), "{what}");
 }

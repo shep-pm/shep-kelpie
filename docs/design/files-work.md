@@ -11,6 +11,7 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | pm-retro.md | the project manager's batch retro and digest | `runner/retro/` |
 | pm-board.md | its board | `core/board/briefing/`, `runner/briefing/` |
 | pm-case.md | its case files: the ruling, issue, pull request, CI and past rulings | `runner/pm/case/`, `runner/pm/ci_logs.rs` |
+| pm-threads.md | the wake for an item's open review threads and its `threads` answer | `runner/pm/threads.rs` |
 | pm-notes.md | its notes files: the log, the archive, the standing notes and their ends | `runner/pm/notes.rs` |
 | workers.md | runner loop, turns | `runner/{turn,flight}/` |
 | runner-lock.md | lock, hold metric | `runner/{lock_hold,off_lock}.rs` |

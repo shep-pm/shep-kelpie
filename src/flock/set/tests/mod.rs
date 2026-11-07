@@ -424,7 +424,7 @@ async fn a_table_the_runner_would_refuse_to_run_is_refused_and_nothing_is_writte
     let mut scene = Scene::new().await;
     let before = scene.table();
     for (key, value, reason) in [
-        ("rulings.pm_alone", r#"["merge"]"#, "pm_alone"),
+        ("rulings.pm_alone", r#"["security"]"#, "pm_alone"),
         ("agents.pm", r#""no-such-agent""#, "no-such-agent"),
     ] {
         let refused = scene.set(key, value).await.unwrap_err();
