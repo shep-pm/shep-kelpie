@@ -1,5 +1,9 @@
 //! What people wrote on a pull request: its comments and its review threads
 
+/// How many comments, threads and replies `Forge::talk` asks the forge for in
+/// each list, the most one GraphQL page gives
+pub const PAGE: usize = 100;
+
 /// What the forge says an author may do on the repo
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Standing {
@@ -36,6 +40,9 @@ pub struct TalkThread {
     pub line: Option<u32>,
     /// Whether it is resolved
     pub resolved: bool,
+    /// Whether the lines it is on have changed since, so the forge no longer
+    /// shows it against the head
+    pub outdated: bool,
     /// Its comments, oldest first
     pub remarks: Vec<Remark>,
 }

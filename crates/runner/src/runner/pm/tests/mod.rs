@@ -19,6 +19,7 @@ use super::HOLD_FOR;
 
 mod asked;
 mod attach;
+mod case;
 mod code;
 mod conflicts;
 mod decide;
@@ -726,7 +727,10 @@ fn the_log_files_are_written_from_the_read_under_the_lock() {
     assert!(matches!(pass, Ok(Pass::Started)), "{pass:?}");
     assert_eq!(std::fs::read_to_string(pm.join("ci/7.log")).unwrap(), log);
     let board = std::fs::read_to_string(pm.join("board.md")).unwrap();
-    assert!(board.contains(", CI log `ci/7.log`\n"), "{board}");
+    assert!(
+        board.contains(", CI log `ci/7.log`, case `cases/7.md`\n"),
+        "{board}"
+    );
 }
 
 #[test]
