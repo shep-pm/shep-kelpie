@@ -346,7 +346,7 @@ pub(super) fn sub_issues(repo: &ForgeSlug, parent: u64) -> Result<Vec<SubIssue>,
     parse_sub_issues(&gh(&["api", &path])?)
 }
 
-fn parse_sub_issues(stdout: &[u8]) -> Result<Vec<SubIssue>, ForgeError> {
+pub(super) fn parse_sub_issues(stdout: &[u8]) -> Result<Vec<SubIssue>, ForgeError> {
     #[derive(Deserialize)]
     struct Listed {
         number: u64,

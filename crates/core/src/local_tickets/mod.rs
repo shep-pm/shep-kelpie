@@ -535,6 +535,16 @@ impl Tickets for LocalTickets {
         Ok(true)
     }
 
+    fn add_sub_issue(
+        &self,
+        _repo: &ForgeSlug,
+        parent: TicketId,
+        child: TicketId,
+    ) -> Result<(), ForgeError> {
+        self.update(child, |s| s.parent = Some(parent))?;
+        Ok(())
+    }
+
     fn set_issue_label(
         &self,
         _repo: &ForgeSlug,

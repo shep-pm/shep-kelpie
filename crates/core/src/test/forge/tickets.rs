@@ -243,6 +243,15 @@ impl Tickets for FakeForge {
         self.link(number(id), number(blocker))
     }
 
+    fn add_sub_issue(
+        &self,
+        _repo: &ForgeSlug,
+        parent: TicketId,
+        child: TicketId,
+    ) -> Result<(), ForgeError> {
+        self.link_child(number(parent), number(child))
+    }
+
     fn set_issue_label(
         &self,
         _repo: &ForgeSlug,

@@ -207,6 +207,24 @@ pub trait Tickets: Send + Sync {
         blocker: TicketId,
     ) -> Result<bool, ForgeError>;
 
+    /// Makes ticket `child` a sub-issue of ticket `parent`, so
+    /// [`Tickets::sub_issues`] lists it
+    ///
+    /// A link already there stays as it is, so a retry is safe. No link is
+    /// ever removed.
+    ///
+    /// # Errors
+    ///
+    /// [`ForgeError`] when the source refuses the link, as it does for a
+    /// ticket it does not hold or a child that is a pull request, or cannot be
+    /// asked.
+    fn add_sub_issue(
+        &self,
+        repo: &ForgeSlug,
+        parent: TicketId,
+        child: TicketId,
+    ) -> Result<(), ForgeError>;
+
     /// Adds `label` to ticket `ticket`, or takes it off
     ///
     /// # Errors

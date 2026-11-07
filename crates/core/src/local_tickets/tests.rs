@@ -350,3 +350,23 @@ fn a_blocked_by_link_is_stored_once_and_a_blocker_the_store_lacks_is_refused() {
     );
     assert!(tickets.add_blocked_by(&repo(), blocked, id("k9")).is_err());
 }
+
+#[test]
+fn a_linked_ticket_is_listed_under_its_parent() {
+    let (_home, tickets) = store();
+    let parent = file(&tickets, "Parent", &[]);
+    let child = file(&tickets, "Child", &[]);
+    for _ in 0..2 {
+        tickets.add_sub_issue(&repo(), parent, child).unwrap();
+    }
+    let subs = tickets.sub_issues(&repo(), parent).unwrap();
+    assert_eq!(
+        subs,
+        [SubIssue {
+            ticket: child,
+            state: SubIssueState::Open
+        }]
+    );
+    assert_eq!(tickets.issue(&repo(), child).unwrap().parent, Some(parent));
+    assert!(tickets.add_sub_issue(&repo(), id("k9"), child).is_err());
+}

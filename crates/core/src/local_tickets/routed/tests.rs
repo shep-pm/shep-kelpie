@@ -91,6 +91,16 @@ impl Tickets for Github {
         Ok(true)
     }
 
+    fn add_sub_issue(
+        &self,
+        _: &ForgeSlug,
+        parent: TicketId,
+        child: TicketId,
+    ) -> Result<(), ForgeError> {
+        self.called(format!("add_sub_issue {parent} {child}"));
+        Ok(())
+    }
+
     fn close_issue(&self, _: &ForgeSlug, ticket: TicketId) -> Result<(), ForgeError> {
         self.called(format!("close_issue {ticket}"));
         Ok(())
@@ -172,6 +182,30 @@ fn a_link_goes_to_the_source_of_the_ticket_it_blocks() {
         [id("k1")]
     );
     assert_eq!(*github.calls.lock().unwrap(), ["add_blocked_by 12 7"],);
+}
+
+#[test]
+fn a_sub_issue_link_goes_to_the_source_of_the_child() {
+    let (_home, github, routed, local) = stand_up(TicketSource::Local);
+    local.create("Parent", "", &[], Links::default()).unwrap();
+    local.create("Child", "", &[], Links::default()).unwrap();
+    routed.add_sub_issue(&repo(), id("k1"), id("k2")).unwrap();
+    routed.add_sub_issue(&repo(), id("12"), id("13")).unwrap();
+    assert_eq!(
+        routed.issue(&repo(), id("k2")).unwrap().parent,
+        Some(id("k1"))
+    );
+    assert_eq!(*github.calls.lock().unwrap(), ["add_sub_issue 12 13"]);
+}
+
+#[test]
+fn a_parent_and_child_in_different_sources_are_refused() {
+    let (_home, github, routed, local) = stand_up(TicketSource::Local);
+    local.create("Local", "", &[], Links::default()).unwrap();
+    assert!(routed.add_sub_issue(&repo(), id("12"), id("k1")).is_err());
+    assert!(routed.add_sub_issue(&repo(), id("k1"), id("12")).is_err());
+    assert_eq!(routed.issue(&repo(), id("k1")).unwrap().parent, None);
+    assert!(github.calls.lock().unwrap().is_empty());
 }
 
 #[test]
