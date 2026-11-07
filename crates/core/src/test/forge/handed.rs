@@ -4,7 +4,9 @@
 use std::collections::HashMap;
 
 use super::FakeForge;
-use crate::ports::{BranchRun, FailedLogs, PullRequestState, Rerun, Workflow, WorkflowState};
+use crate::ports::{
+    BranchRun, FailedLogs, HeadRun, LogPart, PullRequestState, Rerun, Workflow, WorkflowState,
+};
 
 /// A pull request on the fake forge. Its head is its branch on the rig's
 /// origin, so a push the runner makes moves it.
@@ -55,6 +57,16 @@ pub struct CiRuns {
     workflows_reads: usize,
     // The end of each run's failed log, by run id
     run_logs: HashMap<u64, String>,
+    // Every run on a head, by head
+    head_runs: HashMap<String, Vec<HeadRun>>,
+    // Why listing a head's runs fails
+    head_runs_error: Option<String>,
+    // How many times a head's runs were listed
+    head_runs_reads: usize,
+    // A run's log in whole, by run id and part
+    whole_logs: HashMap<(u64, bool), String>,
+    // How many times each run's log was read
+    whole_log_reads: HashMap<u64, usize>,
 }
 
 impl CiRuns {
@@ -201,6 +213,64 @@ impl FakeForge {
             .unwrap()
             .run_logs
             .insert(run, tail.to_owned());
+    }
+
+    /// Makes `head` list `runs`
+    pub fn set_head_runs(&self, head: &str, runs: Vec<HeadRun>) {
+        self.ci
+            .lock()
+            .unwrap()
+            .head_runs
+            .insert(head.to_owned(), runs);
+    }
+
+    /// Makes listing a head's runs fail with `error`, verbatim
+    pub fn set_head_runs_error(&self, error: &str) {
+        self.ci.lock().unwrap().head_runs_error = Some(error.to_owned());
+    }
+
+    /// How many times a head's runs were listed, failed lists included
+    pub fn head_runs_reads(&self) -> usize {
+        self.ci.lock().unwrap().head_runs_reads
+    }
+
+    /// The runs `head` lists: none for a head no test scripted
+    pub fn head_runs_of(&self, head: &str) -> Result<Vec<HeadRun>, String> {
+        let mut ci = self.ci.lock().unwrap();
+        ci.head_runs_reads += 1;
+        match &ci.head_runs_error {
+            Some(error) => Err(error.clone()),
+            None => Ok(ci.head_runs.get(head).cloned().unwrap_or_default()),
+        }
+    }
+
+    /// Makes `part` of run `run`'s log read `text`. A run with a whole log
+    /// and no failed one reads the whole where `Failed` is asked, as a run
+    /// with no failed step does.
+    pub fn set_run_log(&self, run: u64, part: LogPart, text: &str) {
+        let whole = part == LogPart::Whole;
+        let mut ci = self.ci.lock().unwrap();
+        ci.whole_logs.insert((run, whole), text.to_owned());
+    }
+
+    /// How many times run `run`'s log was read, failed reads included
+    pub fn run_log_reads(&self, run: u64) -> usize {
+        let ci = self.ci.lock().unwrap();
+        ci.whole_log_reads.get(&run).copied().unwrap_or(0)
+    }
+
+    /// `part` of run `run`'s log, or why none can be read: a log no test
+    /// scripted is one the forge dropped
+    pub fn run_log_of(&self, run: u64, part: LogPart) -> Result<String, String> {
+        let mut ci = self.ci.lock().unwrap();
+        *ci.whole_log_reads.entry(run).or_default() += 1;
+        let failed = ci.whole_logs.get(&(run, false)).cloned();
+        let whole = ci.whole_logs.get(&(run, true)).cloned();
+        let log = match part {
+            LogPart::Failed => failed.or(whole),
+            LogPart::Whole => whole,
+        };
+        log.ok_or_else(|| format!("log for run {run} not found"))
     }
 
     /// The runs `branch` lists: none for a branch no test scripted

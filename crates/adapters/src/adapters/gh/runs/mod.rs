@@ -11,7 +11,10 @@ use serde::Deserialize;
 
 use self::timeout::cancelled_job;
 use super::{gh, unreadable};
-use crate::ports::{BranchRun, FailedLogs, ForgeError, Rerun, Timestamp, Workflow, WorkflowState};
+use crate::ports::{
+    BranchRun, FailedLogs, ForgeError, HEAD_RUNS_LIMIT, HeadRun, LogPart, Rerun, Timestamp,
+    Workflow, WorkflowState,
+};
 use crate::settings::ForgeSlug;
 
 mod timeout;
@@ -45,6 +48,79 @@ pub(super) fn failed_run_logs(
 
 pub(super) fn run_log_tail(repo: &ForgeSlug, run: u64) -> Result<String, ForgeError> {
     read_run(repo, run, true, &mut gh).map(|read| read.text)
+}
+
+/// Every run on `head`, newest first, up to [`HEAD_RUNS_LIMIT`]
+///
+/// The shared `list` is cut at the repo's 50 newest runs, so a head's own are asked for.
+pub(super) fn head_runs(repo: &ForgeSlug, head: &str) -> Result<Vec<HeadRun>, ForgeError> {
+    list_head_runs(repo, head, &mut gh)
+}
+
+fn list_head_runs(
+    repo: &ForgeSlug,
+    head: &str,
+    ask: &mut impl FnMut(&[&str]) -> Result<Vec<u8>, ForgeError>,
+) -> Result<Vec<HeadRun>, ForgeError> {
+    let limit = HEAD_RUNS_LIMIT.to_string();
+    let listed = ask(&[
+        "run",
+        "list",
+        "--repo",
+        repo.as_str(),
+        "--commit",
+        head,
+        "--limit",
+        &limit,
+        "--json",
+        "databaseId,workflowName,conclusion",
+    ])?;
+    parse_head_runs(&listed)
+}
+
+// A run still going prints an empty `conclusion`
+fn parse_head_runs(listed: &[u8]) -> Result<Vec<HeadRun>, ForgeError> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Run {
+        database_id: u64,
+        workflow_name: String,
+        conclusion: String,
+    }
+    let runs: Vec<Run> = serde_json::from_slice(listed).map_err(|_| unreadable(listed))?;
+    Ok(runs
+        .into_iter()
+        .map(|r| HeadRun {
+            workflow: r.workflow_name,
+            run: r.database_id,
+            conclusion: Some(r.conclusion).filter(|c| !c.is_empty()),
+        })
+        .collect())
+}
+
+/// The `part` of run `run`'s log, with nothing cut
+pub(super) fn run_log(repo: &ForgeSlug, run: u64, part: LogPart) -> Result<String, ForgeError> {
+    read_log(repo, run, part, &mut gh)
+}
+
+// `Failed` is `--log-failed`; a run with no failed step to show answers nothing
+// there, as one cancelled or timed out does, and its whole log is read instead.
+fn read_log(
+    repo: &ForgeSlug,
+    run: u64,
+    part: LogPart,
+    ask: &mut impl FnMut(&[&str]) -> Result<Vec<u8>, ForgeError>,
+) -> Result<String, ForgeError> {
+    let id = run.to_string();
+    let view = |flag| ["run", "view", &id, "--repo", repo.as_str(), flag];
+    if part == LogPart::Failed {
+        let failed = ask(&view("--log-failed"))?;
+        let failed = String::from_utf8_lossy(&failed).into_owned();
+        if !failed.trim().is_empty() {
+            return Ok(failed);
+        }
+    }
+    ask(&view("--log")).map(|log| String::from_utf8_lossy(&log).into_owned())
 }
 
 /// What kelpie read of one run's log

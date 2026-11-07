@@ -66,3 +66,29 @@ pub struct FailedLogs {
     /// whose text opens with a line saying so
     pub timed_out: usize,
 }
+
+/// How many runs of one head are asked for, which GitHub's own list of one
+/// commit's runs never passes: a list this long may have been cut off
+pub const HEAD_RUNS_LIMIT: usize = 1000;
+
+/// One CI run on a head, as the forge lists it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadRun {
+    /// The workflow's name
+    pub workflow: String,
+    /// The forge's id for the run
+    pub run: u64,
+    /// How it ended, as the forge words it: `success`, `failure`, `cancelled`
+    /// and the rest. None while the run is still going.
+    pub conclusion: Option<String>,
+}
+
+/// Which part of a run's log to read, whole and with nothing cut
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogPart {
+    /// The failed steps' lines. A run with no failed step to show, such as one
+    /// cancelled or timed out, answers its whole log instead.
+    Failed,
+    /// Every step's lines
+    Whole,
+}
