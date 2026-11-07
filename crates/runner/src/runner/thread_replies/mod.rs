@@ -1,15 +1,13 @@
 //! Answering rulings from replies in their thread
 //!
-//! A ruling posted through kelpie's App that mentions someone says to reply in
-//! its thread. Each board poll reads the repo's new comments once, and a reply
-//! counts when its author is the login the ruling mentions and has write
-//! access. The reply is read as `shep kelpie rule` reads an answer, with the
-//! ruling's id first (see [`read_answer`]): `99 yes`, `99 no <note>` or `99
-//! rework <note>`. A bare `yes` answers nothing, so a conversational one never
-//! merges. A 👍 or 👎 on the ruling's own comment, or a ticked box, answers it
-//! too (see [`marked`]). The first answer from any channel wins. Where a
-//! project manager is named, the same read holds the maintainer's own comment
-//! on an issue nothing is watched on, for it to answer ([`issue_words`]).
+//! A ruling posted through kelpie's App that mentions someone says to reply in its
+//! thread. Each board poll reads the repo's new comments once, and a reply counts
+//! when its author is the login the ruling mentions and has write access. It is
+//! read as `shep kelpie rule` reads an answer, the ruling's id first (see
+//! [`read_answer`]): `99 yes`, `99 no <note>` or `99 rework <note>`. A 👍 or 👎 on
+//! the ruling's own comment, or a ticked box, answers it too (see [`marked`]), and
+//! the first answer from any channel wins. With a project manager named, the same
+//! read holds the maintainer's comment on an unwatched issue ([`issue_words`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
