@@ -40,7 +40,7 @@ fn a_changed_setting_takes_effect_at_once() {
         Some("settings changed: git.merging, ci, concurrency now in effect")
     );
     assert_eq!(runner.settings().concurrency.active_items.get(), 2);
-    assert_eq!(runner.settings().git.merging, Merging::Auto);
+    assert_eq!(runner.settings().git.merging, Some(Merging::Auto));
     assert_eq!(runner.settings().ci.fix_attempts.cap(), Some(2));
     assert_eq!(runner.status().merging, Merging::Auto);
 }

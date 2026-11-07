@@ -419,7 +419,7 @@ mod tests {
         look.again(&runner);
 
         let runner = runner.lock().unwrap();
-        assert_eq!(runner.settings().git.merging, Merging::Auto);
+        assert_eq!(runner.settings().git.merging, Some(Merging::Auto));
     }
 
     #[test]
