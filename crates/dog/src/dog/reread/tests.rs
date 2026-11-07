@@ -18,7 +18,7 @@ use crate::test::{
 use shep_client::RequestError;
 use shep_client::shep_core::protocol::{HelloAck, Request, RpcError, RpcErrorCode};
 
-const BASE: &str = "[leases]\ncargo-test = 3\n[agent_board]\nprefer = [\"opus\"]\n";
+const BASE: &str = "[leases]\ncargo-test = 3\n";
 
 // A dog that has started on `section`, with its reread, and the stand-ins it reads and posts through.
 struct Dog {
