@@ -21,6 +21,9 @@ impl Runner {
     // runner first asked for the comments. None for anyone else's comment, a
     // bot's, kelpie's own, and one on a pull request or a closed issue.
     pub(super) fn issue_words(&mut self, comment: &ThreadComment) -> Option<String> {
+        // A project with no project manager named reads the comments for its
+        // rulings' answers alone: nothing here could answer what it held
+        self.agents.pm.as_ref()?;
         // A comment written before this runner first asked is one a run that is
         // over read already, however far a saved watch reaches the read back.
         let first = self.threads.first?;

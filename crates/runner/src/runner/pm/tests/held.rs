@@ -272,12 +272,15 @@ fn listed(rig: &Rig, number: u64, title: &str, body: &str) {
 }
 
 /// [`merge_put`], with open issue 44 listed before its runner opens, so the
-/// poll that first lists it comes before the read that is made from it
-fn merge_put_listed(project: &str) -> (Rig, Mutex<Runner>) {
+/// poll that first lists it comes before the read that is made from it, and a
+/// project manager where `pm` says
+fn merge_put_listed(project: &str, pm: bool) -> (Rig, Mutex<Runner>) {
     let (rig, runner, head) = Rig::with_pull_request_set(project, |rig| {
         rig.with_app();
         rig.maintainer("octocat");
-        name_pm(rig);
+        if pm {
+            name_pm(rig);
+        }
         listed(
             rig,
             44,
@@ -469,7 +472,7 @@ fn a_comment_on_a_closed_issue_or_a_pull_request_is_not_held() {
 
 #[test]
 fn a_read_made_after_a_restart_does_not_hold_an_older_comment() {
-    let (rig, runner) = merge_put_listed("held-issue-restart");
+    let (rig, runner) = merge_put_listed("held-issue-restart", true);
     rig.claude.script_for(Role::Pm, [Scripted::Say(NOTHING)]);
 
     rig.writes_on(44, "octocat", "Why is the cache a map?");
@@ -554,5 +557,23 @@ fn no_project_manager_means_no_read() {
     }
 
     assert_eq!(rig.forge.threads.reads(), Vec::new(), "no read was made");
+    assert_eq!(pm_seen(&rig).len(), 0);
+}
+
+#[test]
+fn no_project_manager_holds_nothing_when_a_ruling_makes_the_read() {
+    // Ruling 71 waits on the maintainer, so the comments are read with no
+    // project manager named to answer them
+    let (rig, runner) = merge_put_listed("held-issue-no-pm", false);
+    // A read is made before the comment, so it is one this runner saw written
+    looked(&rig, &runner);
+
+    rig.writes_on(44, "octocat", "Why is the cache a map?");
+    looked(&rig, &runner);
+
+    let reads = rig.forge.threads.reads();
+    assert!(!reads.is_empty(), "the ruling's thread is watched");
+    assert_eq!(told(&runner), Vec::<String>::new(), "nothing was held");
+    assert_eq!(rig.github.reactions().len(), 0, "no thumbs up");
     assert_eq!(pm_seen(&rig).len(), 0);
 }
