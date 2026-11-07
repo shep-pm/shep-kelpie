@@ -67,6 +67,7 @@ pub struct FakeForge {
     comments: Arc<Mutex<Vec<(u64, String)>>>,
     comments_down: Arc<AtomicBool>,
     talk_down: Arc<AtomicBool>,
+    talk_unreadable: Arc<Mutex<Option<String>>>,
     thread_replies_down: Arc<AtomicBool>,
     merges_down: Arc<AtomicBool>,
     merge_answers_lost: Arc<AtomicBool>,
@@ -196,6 +197,7 @@ impl FakeForge {
             comments: Arc::default(),
             comments_down: Arc::default(),
             talk_down: Arc::default(),
+            talk_unreadable: Arc::default(),
             thread_replies_down: Arc::default(),
             merges_down: Arc::default(),
             merge_answers_lost: Arc::default(),
@@ -328,6 +330,13 @@ impl FakeForge {
     /// Makes reading what people wrote on a pull request fail, or work again
     pub fn set_talk_down(&self, down: bool) {
         self.talk_down.store(down, Ordering::SeqCst);
+    }
+
+    /// Makes reading what people wrote on a pull request answer with `output`
+    /// that is not what was asked for, as `gh` does when it returns a body
+    /// that does not parse
+    pub fn set_talk_unreadable(&self, output: &str) {
+        *self.talk_unreadable.lock().unwrap() = Some(output.to_owned());
     }
 
     /// Makes merging fail, or work again
@@ -601,6 +610,9 @@ impl Forge for FakeForge {
         self.wait_if_held(held::At::Talk);
         if self.talk_down.load(Ordering::SeqCst) {
             return Err(ForgeError::Failed("comments are down".into()));
+        }
+        if let Some(output) = self.talk_unreadable.lock().unwrap().clone() {
+            return Err(ForgeError::Unreadable(output));
         }
         self.opened(number)?;
         let mut talk = self.coderabbit.talk_of(number);

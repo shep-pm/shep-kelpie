@@ -660,3 +660,75 @@ fn a_fenced_path_named_only_under_what_to_build_passes() {
     );
     assert_eq!(of(&body), []);
 }
+
+fn needing(line: &str) -> String {
+    format!("{BODY}\n{line}\n")
+}
+
+fn package(registry: Registry, name: &str, version: &str) -> Needed {
+    Needed {
+        registry,
+        name: name.to_owned(),
+        version: version.to_owned(),
+    }
+}
+
+#[test]
+fn a_needs_line_reads_each_package() {
+    let body =
+        needing("Needs: `crates:shep-core@0.25.0`, `npm:left-pad@1.3.0`, `pypi:requests@2.32.3`");
+    assert_eq!(
+        needs(&body),
+        [
+            package(Registry::Crates, "shep-core", "0.25.0"),
+            package(Registry::Npm, "left-pad", "1.3.0"),
+            package(Registry::Pypi, "requests", "2.32.3"),
+        ]
+    );
+    assert_eq!(of(&body), []);
+    let scoped = needing("- **Needs:** `npm:@types/node@22.0.0`");
+    assert_eq!(
+        needs(&scoped),
+        [package(Registry::Npm, "@types/node", "22.0.0")]
+    );
+    assert_eq!(of(&scoped), []);
+}
+
+#[test]
+fn a_needs_entry_that_does_not_read_fails_naming_it() {
+    for entry in [
+        "gems:rack@3.0.0",
+        "crates:shep-core",
+        "npm:@types/node",
+        "left-pad@1.3.0",
+        "crates:@1.0.0",
+        "crates:x@",
+    ] {
+        let body = needing(&format!("Needs: `crates:shep-core@0.25.0`, `{entry}`"));
+        let failures = of(&body);
+        assert_eq!(
+            failures,
+            [Failure::Needs {
+                entry: entry.to_owned()
+            }],
+            "{entry}"
+        );
+        let said = failures[0].to_string();
+        assert!(said.contains(&format!("`{entry}`")), "{said}");
+        assert!(said.contains("<registry>:<name>@<version>"), "{said}");
+    }
+    let prose = of(&needing("Needs: the shep-core crate"));
+    assert_eq!(
+        prose,
+        [Failure::Needs {
+            entry: "the shep-core crate".to_owned()
+        }]
+    );
+}
+
+#[test]
+fn a_body_with_no_needs_line_passes() {
+    assert_eq!(needs(BODY), []);
+    assert_eq!(of(BODY), []);
+    assert_eq!(of(&needing("Needs:")), []);
+}

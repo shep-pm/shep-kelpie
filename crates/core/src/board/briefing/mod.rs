@@ -694,12 +694,17 @@ pub fn excerpt(body: &str) -> String {
             text.push('\n');
         }
     }
-    let cut = cut(text.trim_end(), EXCERPT);
-    let quoted = cut.lines().map(|line| match line {
+    quoted(&cut(text.trim_end(), EXCERPT))
+}
+
+/// `text` with `> ` opening each line, so a reader weighs it as data and none
+/// of it reads as the writer's own, and no line of it can end the quoting
+pub fn quoted(text: &str) -> String {
+    let lines = text.lines().map(|line| match line {
         "" => ">".to_owned(),
         line => format!("> {line}"),
     });
-    quoted.collect::<Vec<_>>().join("\n")
+    lines.collect::<Vec<_>>().join("\n")
 }
 
 /// A worker's closing message on one line, cut at a word past
