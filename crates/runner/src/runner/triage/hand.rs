@@ -11,8 +11,7 @@
 
 use super::super::Runner;
 use super::super::contributions::post::forge_is_busy;
-use super::comment::NEEDS_TRIAGE;
-use super::{TRIAGE_LABELS, is_app, ticket};
+use super::{decided, is_app, ticket};
 use crate::board::{READY, TRIAGE};
 use crate::ports::{ForgeError, OpenIssue, OpenPull, Timestamp};
 use crate::state::{StateError, TriageStep, Triaged};
@@ -28,9 +27,7 @@ fn maintainers_undecided(
     app: Option<&str>,
     taken: bool,
 ) -> bool {
-    let decided = (issue.labels.iter())
-        .any(|l| l != READY && l != TRIAGE && TRIAGE_LABELS.contains(&l.as_str()));
-    !decided
+    !decided(&issue.labels)
         && issue.number > pruned_through
         && (taken || carries(&issue.labels, READY) || issue.created > since)
         && (issue.author.eq_ignore_ascii_case(maintainer) || is_app(&issue.author, app))
@@ -187,7 +184,7 @@ impl Runner {
     fn swap_ready(&mut self, issue: u64, listed: &[String]) -> bool {
         let off = carries(listed, READY);
         let on = !carries(listed, TRIAGE);
-        if on && let Err(why) = self.make_missing_labels([NEEDS_TRIAGE]) {
+        if on && let Err(why) = self.make_waiting_label() {
             self.triage_failed(issue, &format!("cannot make `{TRIAGE}`: {why}"), true);
             return false;
         }
@@ -203,7 +200,7 @@ impl Runner {
             self.triage_failed(issue, &why, !forge_is_busy(&e));
             return false;
         }
-        if on && let Err(e) = self.label_issue(issue, TRIAGE, true) {
+        if on && let Err(e) = self.label_waiting(issue) {
             let why = format!("cannot label it `{TRIAGE}`: {e}");
             self.triage_failed(issue, &why, !forge_is_busy(&e));
             return false;

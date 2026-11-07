@@ -50,6 +50,7 @@ pub(super) mod split;
 
 use super::contributions::post::forge_is_busy;
 use super::flight::triage::{Job, Research};
+use comment::NEEDS_TRIAGE;
 use images::Pictures;
 use spam::POSSIBLE_SPAM;
 
@@ -58,13 +59,33 @@ use spam::POSSIBLE_SPAM;
 /// `possible-spam` is one of them: an issue its classifier read as spam is left
 /// alone until the maintainer says otherwise.
 pub(super) const TRIAGE_LABELS: [&str; 6] = [
-    "needs-triage",
+    TRIAGE,
     "needs-info",
     "ready-for-agent",
     "ready-for-human",
     "wontfix",
     POSSIBLE_SPAM,
 ];
+
+/// Which step of putting `needs-triage` on an issue failed
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WaitingLabel {
+    /// The repo's `needs-triage` label could not be made, with the forge's words
+    Make(String),
+    /// The issue could not be labelled `needs-triage`, with why the forge refused
+    Label(ForgeError),
+}
+
+impl core::fmt::Display for WaitingLabel {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Make(why) => write!(f, "cannot make `{TRIAGE}`: {why}"),
+            Self::Label(e) => write!(f, "cannot label it `{TRIAGE}`: {e}"),
+        }
+    }
+}
+
+impl core::error::Error for WaitingLabel {}
 
 /// The ticket of an issue triage is working on. Triage reads and writes only
 /// GitHub issues, whose numbers are ticket ids, so a number that is not one is
@@ -666,6 +687,25 @@ impl Runner {
         self.looks.triage_asked();
         Ok(())
     }
+
+    // Makes the repo's `needs-triage` label, the first step of [`Self::put_waiting_label`].
+    // `swap_ready` writes between the two steps, and `check_passed` skips this one
+    // once the poll has made the label.
+    fn make_waiting_label(&mut self) -> Result<(), String> {
+        self.make_missing_labels([NEEDS_TRIAGE])
+    }
+
+    // Labels `issue` `needs-triage`, the second step of [`Self::put_waiting_label`]
+    fn label_waiting(&self, issue: u64) -> Result<(), ForgeError> {
+        self.label_issue(issue, TRIAGE, true)
+    }
+
+    // Makes the repo's `needs-triage` label and labels `issue` with it. Which step
+    // failed, and why
+    fn put_waiting_label(&mut self, issue: u64) -> Result<(), WaitingLabel> {
+        self.make_waiting_label().map_err(WaitingLabel::Make)?;
+        self.label_waiting(issue).map_err(WaitingLabel::Label)
+    }
 }
 
 // Whether `login` is the App's own, as the App's login names it, with or without
@@ -678,6 +718,12 @@ fn is_app(login: &str, app: Option<&str>) -> bool {
 // work for the check or the triager
 pub(super) fn opened_by_us_or_people(issue: &OpenIssue, app: Option<&str>) -> bool {
     !issue.author_is_bot || is_app(&issue.author, app)
+}
+
+// Whether any of `labels` is a triage decision. `needs-triage` and `ready-for-agent`
+// are queue states, not decisions
+fn decided(labels: &[String]) -> bool {
+    (labels.iter()).any(|l| l != READY && l != TRIAGE && TRIAGE_LABELS.contains(&l.as_str()))
 }
 
 // Whether `issue` is untouched, `owed` the triager for a failed check, and opened by
