@@ -461,6 +461,49 @@ fn a_parked_stuck_card_names_the_fix_with_no_words_to_say() {
     assert!(!comment.contains("**Project manager**"), "{comment}");
 }
 
+/// What the project manager says when it recommends after parking the item
+const LATER: &str = "the item's own change is fine, so merge it";
+
+// The same item, with the project manager's pick written after its park line,
+// as `<id> pm recommend` writes it
+fn recommended_after_a_park(ruling: Ruling) -> Ruling {
+    let mut parked = parked_on_a_fix(ruling);
+    parked.question = format!("{}\n\n{RECOMMENDS} Yes\n{SAYS} {LATER}", parked.question);
+    parked
+}
+
+#[test]
+fn a_pick_written_after_a_park_is_the_words_the_card_shows() {
+    let asked = recommended_after_a_park(ruling(ticket(1), turn_failed("it crashed")));
+    let comment = rendered(&asked);
+
+    assert!(
+        comment.contains(&format!("**Project manager: Yes**. {LATER}")),
+        "{comment}"
+    );
+    assert!(
+        !comment.contains(PARKS),
+        "the park is history here: {comment}"
+    );
+}
+
+#[test]
+fn a_park_written_after_a_pick_is_the_words_the_card_shows() {
+    let mut asked = ruling(ticket(1), turn_failed("it crashed"));
+    asked.question = format!(
+        "{}\n\n{RECOMMENDS} Yes\n{SAYS} an earlier pick",
+        asked.question
+    );
+    asked.question = format!("{}\n\n{PARKS}#12.", asked.question);
+    let comment = rendered(&asked);
+
+    assert!(comment.contains(&format!("**{PARKS}#12.**")), "{comment}");
+    assert!(
+        !comment.contains("**Project manager"),
+        "the park is the latest word, and borrows no earlier why: {comment}"
+    );
+}
+
 #[test]
 fn a_still_red_ruling_offers_a_rerun_only_when_it_was_raised_with_one() {
     let offered = rendered(&ruling(ticket(1), still_red(true)));
