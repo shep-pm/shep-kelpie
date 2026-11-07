@@ -12,6 +12,8 @@ use crate::runner::{Answer, CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, ScriptedRound, ticket};
 use crate::ticket::TicketId;
 
+mod saved;
+
 fn finding(file: &str, what: &str) -> Finding {
     Finding::new(
         Severity::High,
