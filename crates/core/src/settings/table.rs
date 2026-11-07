@@ -64,7 +64,12 @@ pub fn table_of(text: &str) -> Result<Map<String, Value>, String> {
     }
 }
 
-fn toml_text(table: &Map<String, Value>) -> Result<String, String> {
+/// A table as TOML text
+///
+/// # Errors
+///
+/// The serializer's message when a value has no TOML form, such as a null.
+pub fn toml_text(table: &Map<String, Value>) -> Result<String, String> {
     let table: toml::Table =
         serde_json::from_value(Value::Object(table.clone())).map_err(|e| e.to_string())?;
     toml::to_string(&table).map_err(|e| e.to_string())

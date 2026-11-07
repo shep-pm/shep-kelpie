@@ -277,7 +277,7 @@ fn serve(project: &str, arrival: Option<Arrival<Carry>>) -> Result<(), Exit> {
     };
     // The start's paced forge calls wait for the loop, which makes them while a
     // trigger answers from the status `opened` posted.
-    let runner = Runner::opened(
+    let mut runner = Runner::opened(
         project,
         settings,
         kelpie_settings,
@@ -287,6 +287,7 @@ fn serve(project: &str, arrival: Option<Arrival<Carry>>) -> Result<(), Exit> {
         ports,
     )
     .map_err(|e| e.to_string())?;
+    runner.set_peer_tables(look.handing());
     for notice in runner.skill_notices() {
         eprintln!("{notice}");
     }

@@ -43,6 +43,7 @@ impl Runner {
         let mut logs = self.pm_ci_logs(folder);
         let main_logs = self.pm_main_logs(folder);
         let mut cases = self.pm_cases(folder);
+        let settings = self.pm_settings(folder);
         if let Err(e) = cleared {
             let why = format!("cannot clear {}: {}", diffs.display(), e.kind());
             self.notes
@@ -60,6 +61,7 @@ impl Runner {
             for log in main_logs {
                 let _ = writeln!(out, "- {log}");
             }
+            out.push_str(&settings);
             return out;
         }
         if self.state.work_items.is_empty() {
@@ -106,6 +108,7 @@ impl Runner {
         for log in main_logs {
             let _ = writeln!(out, "- {log}");
         }
+        out.push_str(&settings);
         out
     }
 

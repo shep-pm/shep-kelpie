@@ -330,6 +330,9 @@ pub struct Runner {
     checks: checks::Book,
     // The project manager's wakes and decisions, in memory only
     pm: pm::Desk,
+    // Every project's `[app.dogs.kelpie]` table on this shepherd, this one's too,
+    // as the last look read them, in memory only
+    peer_tables: BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
     // What the batch retro keeps between passes, in memory only
     retro_book: retro::Book,
     // What the loop posts for `status` and `drain`, and the drain flag they
@@ -672,6 +675,7 @@ impl Runner {
             told_points: spoken,
             checks: checks::Book::default(),
             pm: pm::Desk::default(),
+            peer_tables: BTreeMap::new(),
             retro_book: retro::Book::default(),
             postings,
             finish: finishing::Finish::default(),

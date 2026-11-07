@@ -19,7 +19,7 @@ use shep_client::dogs::dog_config;
 pub mod source;
 mod table;
 
-pub use table::table_of;
+pub use table::{table_of, toml_text};
 mod agents;
 mod browser;
 mod budget;
