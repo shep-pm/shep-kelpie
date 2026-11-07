@@ -67,13 +67,10 @@ impl Runner {
     }
 
     /// Copies the round that just ended, then removes the kept rounds past
-    /// their days, when the project keeps its rounds
+    /// their days
     ///
     /// A round that cannot be kept is a note, never a failed review.
     pub(in crate::runner) fn keep_round(&mut self, finished: &Finished<'_>) {
-        if !self.settings.local_rounds.keep {
-            return;
-        }
         let Some(item) = self.current() else {
             return;
         };
@@ -146,9 +143,6 @@ pub(in crate::runner) fn prune_at_start(
     project_folder: &Path,
     now: Timestamp,
 ) -> Option<String> {
-    if !rounds.keep {
-        return None;
-    }
     let folder = match &rounds.folder {
         Some(folder) => folder.as_path().to_owned(),
         None => project_folder.join("local-rounds"),
