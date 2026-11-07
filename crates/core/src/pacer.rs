@@ -78,8 +78,8 @@ pub enum Scope {
 }
 
 impl Assessment {
-    /// The hold that applies to `scope`, which is `window` for either
-    pub fn hold(&self, _scope: Scope) -> Option<&Hold> {
+    /// The hold on every turn and every new work item, which is `window`
+    pub fn hold(&self) -> Option<&Hold> {
         self.window.as_ref()
     }
 
@@ -206,7 +206,7 @@ mod tests {
         assert_eq!(a.window, None);
 
         let spent = assess(Account::Claude, at(6, 20), &usage(100, 0));
-        let hold = spent.hold(Scope::Dispatch).unwrap();
+        let hold = spent.hold().unwrap();
         assert_eq!(
             (hold.kind, hold.until),
             (HoldKind::Window, Timestamp(RESETS)),
@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn a_week_with_nothing_left_holds_at_once() {
         let a = assess(Account::Claude, at(3, 1), &usage(100, 0));
-        let hold = a.hold(Scope::Dispatch).unwrap();
+        let hold = a.hold().unwrap();
         assert_eq!(
             (hold.kind, hold.until),
             (HoldKind::Window, Timestamp(RESETS))
@@ -227,23 +227,18 @@ mod tests {
     #[test]
     fn the_window_parks_every_turn_from_half_until_it_resets() {
         let below = assess(Account::Claude, at(0, 1), &usage(0, 49));
-        assert_eq!(below.hold(Scope::Turn), None);
+        assert_eq!(below.hold(), None);
 
         let parked = assess(Account::Claude, at(0, 1), &usage(0, 50));
-        let hold = parked.hold(Scope::Turn).unwrap();
+        let hold = parked.hold().unwrap();
         assert_eq!(hold.kind, HoldKind::Window);
         assert_eq!(hold.until, at(0, 3));
-        let dispatch = parked.hold(Scope::Dispatch).unwrap();
-        assert_eq!(
-            (dispatch.kind, dispatch.until),
-            (HoldKind::Window, at(0, 3))
-        );
     }
 
     #[test]
     fn a_spent_week_holds_every_turn_until_the_week_resets_and_outlasts_the_window() {
         let a = assess(Account::Codex, at(3, 1), &usage(100, 60));
-        let hold = a.hold(Scope::Turn).unwrap();
+        let hold = a.hold().unwrap();
         assert_eq!(
             (hold.kind, hold.until),
             (HoldKind::Window, Timestamp(RESETS))
@@ -254,7 +249,7 @@ mod tests {
         );
 
         let almost = assess(Account::Codex, at(3, 1), &usage(99, 0));
-        assert_eq!(almost.hold(Scope::Turn), None);
+        assert_eq!(almost.hold(), None);
     }
 
     #[test]
@@ -312,33 +307,16 @@ mod tests {
         let mut fresh = usage(0, 0);
         fresh.session.resets_at = Timestamp(now.0 + 5 * 3600);
         let a = assess(Account::Claude, now, &fresh);
-        assert_eq!((a.hold(Scope::Dispatch), a.hold(Scope::Turn)), (None, None));
-    }
-
-    #[test]
-    fn a_hold_is_the_same_for_a_new_item_and_a_turn() {
-        // 20% of the week gone holds nothing
-        let over = assess(Account::Claude, at(0, 1), &usage(20, 0));
-        assert_eq!(
-            (over.hold(Scope::Dispatch), over.hold(Scope::Turn)),
-            (None, None)
-        );
-
-        let spent = assess(Account::Claude, at(0, 1), &usage(20, 100));
-        let hold = spent.hold(Scope::Turn).unwrap();
-        assert_eq!((hold.kind, hold.until), (HoldKind::Window, at(0, 3)));
-        assert_eq!(spent.hold(Scope::Dispatch), Some(hold));
+        assert_eq!(a.hold(), None);
     }
 
     #[test]
     fn an_unreadable_hold_covers_both_decisions_until_the_recheck() {
         let a = Assessment::unreadable(Timestamp(100), "cannot read usage".into());
-        for scope in [Scope::Dispatch, Scope::Turn] {
-            let hold = a.hold(scope).unwrap();
-            assert_eq!(
-                (hold.kind, hold.until),
-                (HoldKind::Unreadable, Timestamp(100 + RECHECK_SECS))
-            );
-        }
+        let hold = a.hold().unwrap();
+        assert_eq!(
+            (hold.kind, hold.until),
+            (HoldKind::Unreadable, Timestamp(100 + RECHECK_SECS))
+        );
     }
 }

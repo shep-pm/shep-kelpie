@@ -62,7 +62,6 @@ use super::retro::journal::Entry;
 use super::review_bot::Answered;
 use super::talk::At;
 use super::voice::Round;
-use crate::pacer::Scope;
 use crate::ports::{Finding, RoundEnd};
 use crate::settings::{AgentName, ListedReviewer};
 use crate::state::{Fix, StateError, Stuck};
@@ -218,7 +217,7 @@ impl Runner {
         if let Some(parked) = self.park_over_budget()? {
             return Ok(parked);
         }
-        if let Some(held) = self.pace(Scope::Turn, limit)?.holds() {
+        if let Some(held) = self.pace(limit)?.holds() {
             return Ok(held);
         }
         let item = self.current().expect("a review is a work item's");
