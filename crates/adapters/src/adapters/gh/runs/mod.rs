@@ -183,6 +183,9 @@ fn cancelled_log(
 }
 
 /// The latest completed run of each workflow and event among the 50 newest completed runs on `branch`
+///
+/// A run `cancelled` or `skipped` says nothing about the code, so it is kept only
+/// where every run of its workflow and event says nothing.
 pub(super) fn branch_runs(repo: &ForgeSlug, branch: &str) -> Result<Vec<BranchRun>, ForgeError> {
     let listed = gh(&[
         "run",
@@ -258,8 +261,14 @@ fn parse_workflows(listed: &[u8]) -> Result<Vec<Workflow>, ForgeError> {
         .collect()
 }
 
-// The newest run of each workflow and event in `listed`, in the order they
-// first appear; of two runs created in the same second the one listed first stays
+// A run whose conclusion says nothing about the code: GitHub stopped it, or its
+// workflow matched no commit at all
+const SAYS_NOTHING: [&str; 2] = ["cancelled", "skipped"];
+
+// The newest run of each workflow and event in `listed` whose conclusion says
+// something about the code, in the order the workflow and event first appear; of
+// two runs created in the same second the one listed first stays. A workflow and
+// event whose runs all say nothing keeps its newest.
 fn latest_runs(listed: &[u8]) -> Result<Vec<BranchRun>, ForgeError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -272,7 +281,7 @@ fn latest_runs(listed: &[u8]) -> Result<Vec<BranchRun>, ForgeError> {
         created_at: String,
     }
     let runs: Vec<Run> = serde_json::from_slice(listed).map_err(|_| unreadable(listed))?;
-    let mut latest: Vec<BranchRun> = Vec::new();
+    let mut latest: Vec<Latest> = Vec::new();
     for run in runs {
         let created = run
             .created_at
@@ -289,13 +298,53 @@ fn latest_runs(listed: &[u8]) -> Result<Vec<BranchRun>, ForgeError> {
             conclusion: run.conclusion,
             created,
         };
-        match (latest.iter_mut()).find(|r| r.workflow == run.workflow && r.event == run.event) {
-            Some(kept) if kept.created < run.created => *kept = run,
-            Some(_) => {}
-            None => latest.push(run),
+        match latest.iter_mut().find(|l| l.holds(&run)) {
+            Some(latest) => latest.keep(&run),
+            None => latest.push(Latest::new(&run)),
         }
     }
-    Ok(latest)
+    Ok(latest.into_iter().filter_map(Latest::run).collect())
+}
+
+/// A workflow and event's runs, of which kelpie keeps one
+struct Latest {
+    workflow: String,
+    event: String,
+    /// The newest run whose conclusion says something about the code
+    said: Option<BranchRun>,
+    /// The newest run that says nothing, kept only where `said` holds none
+    silent: Option<BranchRun>,
+}
+
+impl Latest {
+    fn new(run: &BranchRun) -> Self {
+        let mut latest = Self {
+            workflow: run.workflow.clone(),
+            event: run.event.clone(),
+            said: None,
+            silent: None,
+        };
+        latest.keep(run);
+        latest
+    }
+
+    fn holds(&self, run: &BranchRun) -> bool {
+        self.workflow == run.workflow && self.event == run.event
+    }
+
+    fn keep(&mut self, run: &BranchRun) {
+        let held = match SAYS_NOTHING.contains(&run.conclusion.as_str()) {
+            true => &mut self.silent,
+            false => &mut self.said,
+        };
+        if held.as_ref().is_none_or(|kept| kept.created < run.created) {
+            *held = Some(run.clone());
+        }
+    }
+
+    fn run(self) -> Option<BranchRun> {
+        self.said.or(self.silent)
+    }
 }
 
 /// Reruns the failed jobs of the failed runs of `head`
