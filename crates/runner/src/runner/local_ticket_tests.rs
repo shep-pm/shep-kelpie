@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use serde_json::{Value, json};
 
-use crate::board::Skip;
+use crate::board::{Skip, TRIAGE};
 use crate::local_tickets::LocalTickets;
 use crate::ports::{AgentError, CLEAN, Checks};
 use crate::runner::follow_up::tests::{after_yes, lines, racy};
@@ -314,7 +314,7 @@ fn a_follow_up_on_a_local_project_becomes_a_local_ticket() {
     );
     let listed = rig.ticket_verb(&["list"]);
     assert!(
-        listed.contains(&"k2  open  looks racy [needs-triage]".to_owned()),
+        listed.contains(&format!("k2  open  looks racy [{TRIAGE}]")),
         "{listed:?}"
     );
     let shown = rig.ticket_verb(&["show", "k2"]).join("\n");
