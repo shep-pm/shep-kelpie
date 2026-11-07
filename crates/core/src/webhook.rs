@@ -19,10 +19,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use shep_client::dogs::dog_config;
 
-use crate::agent_board::AgentBoardSettings;
 use crate::forwarder::Upstream;
 use crate::lease::counted::CARGO_TEST_CAPACITY;
-use crate::settings::{EndpointUrl, Gateway, GatewayName, Gateways, SettingsError};
+use crate::settings::{EndpointUrl, Gateway, GatewayName, Gateways, Gone, SettingsError};
 
 /// What every project shares
 #[dog_config]
@@ -51,10 +50,12 @@ pub struct KelpieSettings {
     /// a new key variable reaches it only from a fresh spawn.
     #[serde(default)]
     pub gateways: BTreeMap<GatewayName, Gateway>,
-    /// How the agent board orders the agents that finish in time, shared by
-    /// every project. The dog reads it again every 30 seconds.
+    /// Read by nothing: the project manager's pick names the agent, and
+    /// `shep kelpie upgrade` deletes the table. A section that still holds
+    /// one loads.
     #[serde(default)]
-    pub agent_board: AgentBoardSettings,
+    #[schemars(extend("deprecated" = true))]
+    pub agent_board: Option<Gone>,
 }
 
 /// The counted leases' capacities
@@ -279,7 +280,6 @@ const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntf
                      a `[leases]` table with a \
                      `cargo-test` count, a `gpu_metrics_url`, a `codex_home` path, \
                      `[gateways.<name>]` tables with `url` and `key_env`, \
-                     an `[agent_board]` table with a `prefer` list of agent names, \
                      and nothing else";
 
 /// Why `trusted` is refused without a `token`
@@ -899,26 +899,17 @@ mod tests {
     }
 
     #[test]
-    fn the_agent_board_list_reads_names_in_order_and_refuses_a_bad_name_and_an_unknown_key() {
-        let read =
-            KelpieSettings::parse("[agent_board]\nprefer = [\"opus\", \"sonnet\"]\n").unwrap();
-        let names: Vec<_> = read.agent_board.prefer.iter().map(|n| n.as_str()).collect();
-        assert_eq!(names, ["opus", "sonnet"], "in the list's order");
-        assert!(
-            KelpieSettings::parse("")
-                .unwrap()
-                .agent_board
-                .prefer
-                .is_empty()
-        );
-        for bad in [
+    fn an_old_agent_board_table_of_any_shape_still_loads() {
+        for old in [
+            "[agent_board]\nprefer = [\"opus\", \"sonnet\"]\n",
             "[agent_board]\nprefer = [\"Opus\"]\n",
-            "[agent_board]\nprefer = [\"a b\"]\n",
             "[agent_board]\nprefer = \"opus\"\n",
             "[agent_board]\nrank = [\"opus\"]\n",
+            "agent_board = 3\n",
         ] {
-            let err = parse_err(bad);
-            assert!(err.contains(SHAPE), "{err}");
+            let read = KelpieSettings::parse(old).unwrap_or_else(|e| panic!("{old}: {e}"));
+            assert_eq!(read.agent_board, Some(Gone), "{old}");
         }
+        assert_eq!(KelpieSettings::parse("").unwrap().agent_board, None);
     }
 }
