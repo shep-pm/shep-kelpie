@@ -38,6 +38,11 @@ fn three() -> Vec<Value> {
 // with `drafts` saved as its split and its triage at `body-written`, as a
 // restart leaves it. `filed` are the children saved as filed already.
 fn planned(drafts: &[Value], filed: &[&str]) -> (Rig, Mutex<Runner>) {
+    planned_asking(drafts, filed, Value::Null)
+}
+
+// [`planned`] with the author's questions held as `asked` says, or null
+fn planned_asking(drafts: &[Value], filed: &[&str], asked: Value) -> (Rig, Mutex<Runner>) {
     let rig = rig_with("pick = \"maintainer\"");
     rig.forge.set_repo_labels(&[
         "needs-triage",
@@ -53,7 +58,8 @@ fn planned(drafts: &[Value], filed: &[&str]) -> (Rig, Mutex<Runner>) {
     let store = StateStore::new(rig.paths().state);
     let mut saved = serde_json::to_value(store.load().unwrap().unwrap()).unwrap();
     saved["triage"]["issues"] = json!([{ "issue": 30, "comment": 101, "step": "body-written" }]);
-    saved["triage"]["splits"] = json!([{ "issue": 30, "drafts": drafts, "filed": filed }]);
+    saved["triage"]["splits"] =
+        json!([{ "issue": 30, "drafts": drafts, "filed": filed, "asked": asked }]);
     store.save(&serde_json::from_value(saved).unwrap()).unwrap();
     let runner = rig.open().unwrap();
     (rig, runner)
@@ -175,6 +181,53 @@ fn a_failing_draft_files_nothing_and_the_maintainer_is_told() {
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(rig.github.comments().len(), 1);
     assert_eq!(rig.github.issues_created(), 0);
+}
+
+#[test]
+fn a_refused_split_still_takes_ready_for_agent_off_the_parent() {
+    let mut drafts = three();
+    drafts[1] = draft("fix(b): second", "Touches: `src/b.rs`\n", &[0]);
+    let (rig, runner) = planned(&drafts, &[]);
+    rig.forge.label(30, "ready-for-agent");
+    let start = app_writes(&rig, 0).len();
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(rig.github.issues_created(), 0);
+    let writes = app_writes(&rig, start);
+    assert_eq!(writes[0], "unlabel #30 ready-for-agent", "{writes:?}");
+}
+
+#[test]
+fn a_held_split_still_takes_ready_for_agent_off_the_parent() {
+    let (rig, runner) = planned_asking(&three(), &[], json!({ "comment": 102, "at": 5 }));
+    rig.forge.label(30, "ready-for-agent");
+    let start = app_writes(&rig, 0).len();
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(
+        rig.github.issues_created(),
+        0,
+        "the questions hold the filing"
+    );
+    let writes = app_writes(&rig, start);
+    assert_eq!(writes, ["unlabel #30 ready-for-agent"]);
+}
+
+#[test]
+fn a_closed_parent_ends_its_pending_pass_and_is_never_made_ready() {
+    let (rig, runner) = planned(&three(), &[]);
+    rig.forge.unlist_open_issue(30);
+    let start = app_writes(&rig, 0).len();
+
+    assert_eq!(step(&runner).unwrap(), None);
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(saved_split(&rig), Value::Null);
+    assert_eq!(parent_record(&rig, &runner)["step"], "done");
+    assert_eq!(app_writes(&rig, start), Vec::<String>::new());
 }
 
 #[test]

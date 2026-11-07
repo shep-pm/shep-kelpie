@@ -177,7 +177,13 @@ impl Runner {
                 .is_some_and(|parent| self.split_of(parent).is_some() && unfinished(parent))
     }
 
-    // Drops the splits whose issue is no longer in `open`
+    // The issues a split is saved for
+    fn split_issues(&self) -> impl Iterator<Item = u64> + '_ {
+        (self.state.triage.iter()).flat_map(|t| t.splits.iter().map(|s| s.issue))
+    }
+
+    // Drops the splits whose issue is no longer in `open`, and ends the pass
+    // each left pending, which would otherwise label the issue ready
     pub(super) fn settle_splits(&mut self, open: &[OpenIssue]) -> Result<(), StateError> {
         let listed = |issue: u64| open.iter().any(|i| i.number == issue);
         let Some(triage) = self.state.triage.as_ref() else {
@@ -189,13 +195,24 @@ impl Runner {
         let mut next = self.state.clone();
         if let Some(triage) = next.triage.as_mut() {
             triage.splits.retain(|s| listed(s.issue));
+            let gone: Vec<u64> = (self.split_issues()).filter(|&n| !listed(n)).collect();
+            for held in triage.issues.iter_mut().filter(|t| gone.contains(&t.issue)) {
+                if !matches!(
+                    held.step,
+                    TriageStep::Done | TriageStep::Ready | TriageStep::Closed
+                ) {
+                    held.step = TriageStep::Done;
+                    held.labels.clear();
+                    held.ready_body = None;
+                }
+            }
         }
         self.save(next)
     }
 
     // Files the split saved for `issue`, which carries `carried`, or says why
     // it did not. The caller ruled out a hand triage label. The parent comes off
-    // `ready-for-agent` and `needs-triage` before the first draft goes.
+    // `ready-for-agent` first, and `needs-triage` before the first draft goes.
     pub(super) fn label_split(
         &mut self,
         issue: u64,
@@ -204,6 +221,12 @@ impl Runner {
         let Some(split) = self.split_of(issue).cloned() else {
             return Ok(ReadyLabels::Held);
         };
+        // A parent is never ready, whether its split files, is refused or waits.
+        if carried.iter().any(|l| l == READY)
+            && let Err(e) = self.label_issue(issue, READY, false)
+        {
+            return Ok(self.split_failed(issue, &format!("cannot take `{READY}` off"), &e));
+        }
         let refused = split_refusals(&split);
         if !refused.is_empty() {
             self.notes.push(format!(
@@ -228,13 +251,10 @@ impl Runner {
         if split.asked.is_some() {
             return Ok(ReadyLabels::Held);
         }
-        // A parent is never ready: its slices are what the board takes.
-        for label in [READY, TRIAGE] {
-            if carried.iter().any(|l| l == label)
-                && let Err(e) = self.label_issue(issue, label, false)
-            {
-                return Ok(self.split_failed(issue, &format!("cannot take `{label}` off"), &e));
-            }
+        if carried.iter().any(|l| l == TRIAGE)
+            && let Err(e) = self.label_issue(issue, TRIAGE, false)
+        {
+            return Ok(self.split_failed(issue, &format!("cannot take `{TRIAGE}` off"), &e));
         }
         let started = split.filed.len();
         let mut filed = split.filed.clone();
