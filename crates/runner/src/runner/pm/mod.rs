@@ -20,14 +20,12 @@ use super::trigger::lock;
 use crate::board::ReadyIssue;
 use crate::board::briefing::ticket_ref;
 use crate::pacer::Scope;
-use crate::ports::{
-    AgentError, AgentReply, COMPACT, Finding, PaddockHolder, Session, SessionId, Timestamp, Wait,
-};
-use crate::settings::{AgentName, PmAgent};
+use crate::ports::{AgentError, AgentReply, COMPACT, Session, SessionId, Timestamp};
+use crate::settings::PmAgent;
 use crate::state::StateError;
 use crate::ticket::TicketId;
 use crate::usage::CallKind;
-use crate::work_item::{ReviewWeight, new_session_id};
+use crate::work_item::new_session_id;
 
 mod act;
 mod answer;
@@ -59,7 +57,8 @@ pub(super) use said::{Released, SaidHow};
 
 use answer::Action;
 use ci_logs::Woke;
-use wakes::{AgentOut, LeftAlone, stuck_on};
+use wakes::{AgentOut, LeftAlone, held, stuck_on};
+pub(super) use wakes::{StuckState, Wake};
 
 /// The context, in tokens, past which the session is compacted after a wake
 ///
@@ -92,132 +91,6 @@ const DOWN_FOR: u64 = 10 * 60;
 /// that arrive inside the window go in the same call.
 pub(super) const HOLD_FOR: u64 = 3 * 60;
 
-/// What a work item is stuck on, which a new turn, phase or ruling is a
-/// different one of
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum StuckState {
-    /// Parked on this ruling, raised then. A ruling raised again on the same
-    /// item is a different one, whatever its number.
-    Ruling {
-        /// The ruling's number
-        id: TicketId,
-        /// When it was raised, `None` only in a state file from before
-        raised: Option<Timestamp>,
-    },
-    /// Its call in flight has shown nothing, on the turn that started then
-    Idle(Timestamp),
-    /// Its due turn waits for the next pick, since this agent is out
-    AgentOut(AgentName),
-}
-
-/// Why the project manager is woken
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum Wake {
-    /// Slots are free, and this many ready issues could fill them, then
-    /// this many slots are free
-    Pick(usize, usize),
-    /// The branches of two open work items conflict in these files
-    Conflict(TicketId, TicketId, Vec<String>),
-    /// A work item is stuck, as this says, on this
-    Stuck {
-        /// The work item's ticket
-        ticket: TicketId,
-        /// What it is stuck on, in words
-        what: String,
-        /// What it is stuck on, which a new turn, phase or ruling is another of
-        state: StuckState,
-    },
-    /// A call in flight has waited long for a lease on its model, which is not
-    /// the worker being stuck
-    LeaseWait {
-        /// The work item's ticket
-        ticket: TicketId,
-        /// Whether the call that waits is a worker's turn, not a review call
-        worker: bool,
-        /// What its call waits for
-        why: Wait,
-        /// How long it has waited, in words
-        waited: String,
-        /// Who holds the lease, as the gateway says it, when the gateway says
-        holder: Option<PaddockHolder>,
-    },
-    /// The maintainer told it something, which the state file holds
-    Told,
-    /// A worker asked a question, which ruling `id` holds for the maintainer
-    Question {
-        /// The work item's ticket
-        ticket: TicketId,
-        /// The ruling
-        id: TicketId,
-        /// The worker's question, verbatim
-        asked: String,
-    },
-    /// A pull request merged with confirmed findings left unfixed, which
-    /// ruling `id` holds for the maintainer to file or drop
-    FollowUp {
-        /// The work item's ticket, whose folder holds the merged diff
-        ticket: TicketId,
-        /// The ruling
-        id: TicketId,
-        /// The merged pull request
-        pull_request: u64,
-        /// The findings
-        findings: Vec<Finding>,
-    },
-    /// A workflow is red on `main` at this head after kelpie's rerun, which the
-    /// project manager fixes or asks about
-    Red {
-        /// The workflow's name
-        workflow: String,
-        /// The head that stayed red
-        head: String,
-    },
-    /// A round sent a finding above a nit and the plan's reads are all in, so
-    /// the project manager rules on one more read
-    Findings {
-        /// The work item's ticket
-        ticket: TicketId,
-        /// Its pull request
-        pull_request: u64,
-        /// The reads the pass has had
-        reads: u32,
-        /// The round's findings above a nit
-        findings: Vec<Finding>,
-        /// What the change touches, as weighed
-        weight: Option<ReviewWeight>,
-        /// The lines it changes, none when git cannot count them
-        lines: Option<u32>,
-    },
-    /// A ruling waits on the project manager's answer
-    Answer {
-        /// The ruling
-        id: TicketId,
-        /// What it asks and the options
-        asked: String,
-        /// What the maintainer asked of it, or none where the project
-        /// leaves the ruling to it
-        request: Option<requests::Request>,
-    },
-}
-
-impl Wake {
-    // Whether `other` is the same reason, whatever it says, so each is queued once.
-    fn same(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Pick(..), Self::Pick(..)) | (Self::Told, Self::Told) => true,
-            (Self::Conflict(a, b, _), Self::Conflict(c, d, _)) => (a, b) == (c, d),
-            (Self::Stuck { ticket: a, .. }, Self::Stuck { ticket: b, .. }) => a == b,
-            (Self::LeaseWait { ticket: a, .. }, Self::LeaseWait { ticket: b, .. }) => a == b,
-            (Self::Question { id: a, .. }, Self::Question { id: b, .. }) => a == b,
-            (Self::FollowUp { id: a, .. }, Self::FollowUp { id: b, .. }) => a == b,
-            (Self::Answer { id: a, .. }, Self::Answer { id: b, .. }) => a == b,
-            (Self::Red { workflow: a, .. }, Self::Red { workflow: b, .. }) => a == b,
-            (Self::Findings { ticket: a, .. }, Self::Findings { ticket: b, .. }) => a == b,
-            _ => false,
-        }
-    }
-}
-
 /// The project manager's last word on what the board starts next
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Pick {
@@ -244,20 +117,6 @@ pub(super) enum Choice {
 enum Kind {
     Wake,
     Compact,
-}
-
-/// Whether nobody waits on `wake`, so it can wait [`HOLD_FOR`] for the rest
-///
-/// A free slot, a `tell`, a worker's question, a follow-up ruling, a ruling to
-/// answer and a pick are each waited on: the board holds a slot, a ruling is
-/// held back from the maintainer, or the maintainer is asking. A stuck item, a
-/// conflict and a lease wait are each reasons the runner itself noticed, and no
-/// one is waiting on them.
-fn held(wake: &Wake) -> bool {
-    matches!(
-        wake,
-        Wake::Stuck { .. } | Wake::Conflict(..) | Wake::LeaseWait { .. }
-    )
 }
 
 /// The call in flight, as the runner needs it once it ends
