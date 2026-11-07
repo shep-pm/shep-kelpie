@@ -329,7 +329,7 @@ fn a_named_reviewer_on_a_gateway_added_with_an_unset_key_waits_for_the_next_star
     assert_eq!(
         line.unwrap().as_deref(),
         Some(
-            "settings changed: reviews, webhook now in effect; gateways and agents from the runner's next start"
+            "settings changed: webhook now in effect; gateways and agents from the runner's next start"
         )
     );
     let local = |r: &crate::settings::ListedReviewer| r.name.as_str() == "local";
@@ -355,9 +355,7 @@ fn agents_naming_a_gateway_added_with_them_wait_with_it_for_the_next_start() {
     let line = runner.reread(rig.settings(), rig.kelpie_settings());
     assert_eq!(
         line.unwrap().as_deref(),
-        Some(
-            "settings changed: reviews now in effect; gateways and agents from the runner's next start"
-        )
+        Some("settings changed; gateways and agents from the runner's next start")
     );
     assert!(
         runner

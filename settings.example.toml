@@ -136,7 +136,8 @@ per_item_usd = 10
 # file `allow` holds, which is every reviewer file in kelpie's `agents` folder
 # when `allow` names none, but never the one `contributions.security_reviewer`
 # names. The agent board picks each round's reviewer from them, the first it
-# ranks that the pacer lets start, and `reviews.need` of them read it. After
+# ranks that the pacer lets start, and the project manager's plan says how many
+# of them read it. After
 # each one that finds anything above a nit, the worker gets one turn to fix all
 # of that reviewer's findings; a round of nits, or of nothing, goes straight to
 # the next. After the last to read, the pull request goes to CI. A reviewer
@@ -182,34 +183,6 @@ per_item_usd = 10
 # Read by nothing: the agent board's handoff moves a work item, and
 # `shep kelpie upgrade` deletes it.
 # fallback_after = 15
-
-# How many reviewers read each work item. At least 1; 2 when absent. A pass
-# goes to CI once this many have read, or the agent board ranks no candidate
-# left. A review bot passed over or a reviewer that kept failing does not count,
-# so the next pick takes its place.
-# [app.dogs.kelpie.reviews]
-# need = 2
-# How many reviewers read a work item that changes only docs, never more than
-# `need`. `need` when absent, which weighs nothing. Below `need`, a pull
-# request whose every changed file matches `light_paths` gets this many, and
-# the agent board's pick for it asks for tier `light`.
-# light = 1
-# The files a docs-only change touches, globs as a reviewer's `paths` are.
-# `["**/*.md", "docs/**"]` when absent; `[]` never lightens a review.
-# light_paths = ["**/*.md", "docs/**"]
-# Globs of files that always get `need` reviewers, beside a docs-only change
-# too. A workflow, a lockfile or manifest, a harness's own file, an adopted
-# pull request and a diff that names no file always do. None when absent.
-# full_paths = ["docs/adr/**"]
-# Whether a change the project manager tagged `light: true` in its pick gets
-# the `light` count too, when it touches code and changes at most
-# `light_max_lines` lines. Never beside a file that always gets `need`. Does
-# nothing until `light` is below `need`. Off when absent.
-# pm_lightens = true
-# The most lines, added plus deleted over every file, a tagged change may alter
-# and still be lightened; a binary file is over any limit. At least 1; 10 when
-# absent.
-# light_max_lines = 10
 
 # `enabled` is what `status` reports as pacing. Only a spent 5-hour window
 # or week holds a turn or a new work item, on or off, and usage is read and

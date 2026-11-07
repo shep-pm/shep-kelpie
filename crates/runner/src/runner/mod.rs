@@ -303,6 +303,10 @@ pub struct Runner {
     board_read: Option<board_read::BoardRead>,
     // The review's reviewers, in order, from the project's list
     lineup: Vec<ListedReviewer>,
+    // The reads kelpie's own rule gives a work item, on a project that names no
+    // project manager to plan one. [`review::RULE_READS`] at open, and only the
+    // rig sets another.
+    rule_reads: u32,
     // The reviewers a contribution's pass walks, in order. None while the
     // project picks no contributions.
     contribution_lineup: Vec<ListedReviewer>,
@@ -687,6 +691,7 @@ impl Runner {
             unbuilt: parent::Unbuilt::new(),
             board_read: None,
             lineup,
+            rule_reads: review::RULE_READS,
             contribution_lineup,
             agents,
             book,

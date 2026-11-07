@@ -186,6 +186,9 @@ pub struct Rig {
     /// The agent board, which ranks `sonnet-high` first, then the project's other
     /// agents by name after the rig's reviewers, until a test sets it
     pub agent_board: FakeAgentBoard,
+    /// The reads kelpie's own rule gives a work item, held for every runner this
+    /// rig opens next. None leaves it at kelpie's own count.
+    rule_reads: Mutex<Option<u32>>,
     /// GitHub as kelpie's App sees it: the rig has registered no App until
     /// [`Rig::with_app`]
     pub github: FakeGithub,
@@ -531,6 +534,13 @@ impl Rig {
             Path::new(Self::KELPIE),
             ports,
         )
+        .map(|mut runner| {
+            // A test's stand-in for the plan a project manager has not made yet.
+            if let Some(reads) = *self.rule_reads.lock().unwrap() {
+                runner.set_rule_reads(reads);
+            }
+            runner
+        })
     }
 
     /// Sends a trigger the way `shep trigger <project> <action>` does

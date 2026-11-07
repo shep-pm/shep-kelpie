@@ -1,29 +1,34 @@
-//! How much review a work item's change gets
+//! How much review a work item's change reports, and how many reads it gets
 //!
-//! With `reviews.light` below `reviews.need`, a change that touches only
-//! `reviews.light_paths` runs the light count, and so does a small change the
-//! project manager tagged light under `reviews.pm_lightens`. Whatever else a
-//! change touches runs the full one, and so does an adopted pull request, a
-//! diff that names no file and an item that was sent a HIGH finding.
+//! `weigh` reads what a diff touches and reports it, so the project manager
+//! has it in front of it when it plans the reads. It decides nothing: the pass
+//! runs the plan the project manager set at its pick, and where a project
+//! names no project manager it runs kelpie's own rule, [`RULE_READS`] reads.
 
 use std::path::Path;
 
-use super::{changed_files, changed_lines, matches};
+use super::{changed_files, matches};
 use crate::fence;
 use crate::package_managers::MANAGERS;
-use crate::ports::Severity;
 use crate::runner::Runner;
-use crate::settings::NonBlank;
 use crate::work_item::{Heavier, Lighter, ReviewWeight, WorkItem};
 use crate::workflows::is_workflow_file;
 
 /// Where a repo's workflow files live
 const WORKFLOWS: &str = ".github/workflows/";
 
+/// The files a docs-only change touches, so a diff naming only these reports
+/// `light (docs only)`
+const LIGHT_PATHS: [&str; 2] = ["**/*.md", "docs/**"];
+
+/// The reads kelpie's own rule gives a work item, on a project that names no
+/// project manager to plan one
+pub(in crate::runner) const RULE_READS: u32 = 2;
+
 impl Runner {
     /// What `item`'s pull request touches, from what `worktree` changes since
-    /// `base`, or None when the project names no `agents.pm` and
-    /// `reviews.light` is not below `reviews.need`, and nothing is weighed
+    /// `base`, or None where the project names no `agents.pm` and nothing is
+    /// weighed
     ///
     /// # Errors
     ///
@@ -34,34 +39,24 @@ impl Runner {
         worktree: &Path,
         base: &str,
     ) -> Result<Option<ReviewWeight>, String> {
-        let reviews = &self.settings.reviews;
-        if self.agents.pm.is_none() && reviews.light_count() >= reviews.need {
+        if self.agents.pm.is_none() {
             return Ok(None);
         }
         let full = |why| Ok(Some(ReviewWeight::Full(why)));
         if item.adopted {
             return full(Heavier::Adopted);
         }
-        if item.held.iter().any(|f| f.severity == Severity::High) {
-            return full(Heavier::High);
-        }
         let changed = changed_files(&self.settings.git.checkout, worktree, base)?;
         if changed.is_empty() {
             return full(Heavier::Empty);
         }
-        if let Some(why) = changed.iter().find_map(|f| forced(f, &reviews.full_paths)) {
+        if let Some(why) = changed.iter().find_map(|f| forced(f)) {
             return full(why);
         }
-        let light = |file: &String| in_any(&reviews.light_paths, file);
+        let light = |file: &String| in_any(&LIGHT_PATHS, file);
         let Some(file) = changed.iter().find(|file| !light(file)) else {
             return Ok(Some(ReviewWeight::Light(Lighter::Docs)));
         };
-        if reviews.pm_lightens && item.pm_light {
-            let lines = changed_lines(&self.settings.git.checkout, worktree, base)?;
-            if let Some(lines) = lines.filter(|n| *n <= reviews.light_max_lines.get()) {
-                return Ok(Some(ReviewWeight::Light(Lighter::Pm { lines })));
-            }
-        }
         Ok(Some(ReviewWeight::Full(Heavier::Touched(file.clone()))))
     }
 
@@ -77,30 +72,26 @@ impl Runner {
     }
 
     /// How many reviewers must read `item`'s pull request: the plan's reads,
-    /// else `reviews.need` for an adopted item, else one where the project
-    /// names `agents.pm`, else the light count for a change weighed light and
-    /// `reviews.need` otherwise
+    /// else kelpie's own rule for an adopted item, since a stranger may have
+    /// written it, else one read on a project that names `agents.pm`, which
+    /// plans its reads, else kelpie's own rule
     pub(in crate::runner) fn need_of(&self, item: &WorkItem) -> u32 {
-        let reviews = &self.settings.reviews;
         if let Some(plan) = &item.review_plan {
             return plan.reads.get();
         }
         if item.adopted {
-            return reviews.need.get();
+            return self.rule_reads;
         }
-        if self.agents.pm.is_some() {
-            return 1;
-        }
-        match item.weight.as_ref().is_some_and(ReviewWeight::is_light) {
-            true => reviews.light_count().get(),
-            false => reviews.need.get(),
+        match self.agents.pm {
+            Some(_) => 1,
+            None => self.rule_reads,
         }
     }
 }
 
-// Why `file` always gets the full count, if it does: a workflow, a lockfile or
-// manifest at any depth, a harness's own file, or one `full_paths` names.
-fn forced(file: &str, full_paths: &[NonBlank]) -> Option<Heavier> {
+// Why `file` always reads full: a workflow, a lockfile or manifest at any
+// depth, or a harness's own file.
+fn forced(file: &str) -> Option<Heavier> {
     let path = Path::new(file);
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or(file);
     if file.starts_with(WORKFLOWS) && is_workflow_file(file) {
@@ -115,12 +106,21 @@ fn forced(file: &str, full_paths: &[NonBlank]) -> Option<Heavier> {
     if fence::owner(path).is_some() {
         return Some(Heavier::AgentFiles);
     }
-    in_any(full_paths, file).then(|| Heavier::FullPaths(file.to_owned()))
+    None
 }
 
 // Whether `file` matches any of `globs`, the way a reviewer's `paths` do.
-fn in_any(globs: &[NonBlank], file: &str) -> bool {
-    globs.iter().any(|glob| matches(glob.as_str(), file))
+fn in_any(globs: &[&str], file: &str) -> bool {
+    globs.iter().any(|glob| matches(glob, file))
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl Runner {
+    /// The reads kelpie's own rule gives a work item is set to `reads`, which
+    /// only the rig does
+    pub fn set_rule_reads(&mut self, reads: u32) {
+        self.rule_reads = reads;
+    }
 }
 
 #[cfg(test)]
@@ -128,29 +128,30 @@ mod tests {
     use std::sync::Mutex;
 
     use super::super::super::several::{
-        allow_reviewers, at_review, listing, reviewer_models, reviewers_until_ci, two_local,
+        at_review, pm_listing, pm_two_local, reviewer_models, reviewers_until_ci, two_local,
     };
-    use crate::agents::Tier;
     use crate::ports::{Finding, Severity};
-    use crate::runner::{Runner, step};
+    use crate::runner::Runner;
     use crate::settings::AgentName;
     use crate::test::{Rig, Scripted, ScriptedRound};
-    use crate::work_item::{Heavier, Lighter, Phase, Review, ReviewWeight};
+    use crate::work_item::{Heavier, Lighter, Phase, Review, ReviewPlan, ReviewWeight};
 
-    // `two_local`'s project over candidates `mine`, `other` and `claude`,
-    // with `reviews.need` 2 and `extra` after it in the `reviews` table.
-    fn project(extra: &str) -> Rig {
-        let rig = two_local();
-        rig.reviewers(&["mine", "other", "claude"]);
-        allow_reviewers(&rig, &["mine", "other", "claude"]);
-        rig.reviews_need(Some(2));
-        rig.edit_settings(|text| format!("{text}{extra}"));
-        rig
+    // A project that names `agents.pm`, whose candidates are `mine`, `other`
+    // and `claude`, and whose reads kelpie's own rule counts.
+    fn pm_project() -> Rig {
+        pm_two_local()
     }
 
     fn weight_of(runner: &Mutex<Runner>) -> Option<ReviewWeight> {
         let runner = runner.lock().unwrap();
         runner.current().unwrap().weight.clone()
+    }
+
+    // The current work item's plan of `reads` reads
+    fn plan(runner: &Mutex<Runner>, reads: u32) {
+        let mut runner = runner.lock().unwrap();
+        let reads = std::num::NonZeroU32::new(reads).expect("a plan reads at least once");
+        runner.state.work_items[0].review_plan = Some(ReviewPlan { reads, about: None });
     }
 
     // The weight of the pull request with `files` committed on top of what
@@ -160,20 +161,17 @@ mod tests {
         files: &[&str],
     ) -> Result<Option<ReviewWeight>, String> {
         let written: Vec<(&str, &[u8])> = files.iter().map(|f| (*f, &b"changed\n"[..])).collect();
-        weighed_writing(runner, false, &written)
+        weighed_writing(runner, &written)
     }
 
     // The weight of the pull request with each of `files` written on top of
-    // what the worker pushed, as the item stands with the project manager's
-    // light tag `tagged`.
+    // what the worker pushed.
     fn weighed_writing(
         runner: &Mutex<Runner>,
-        tagged: bool,
         files: &[(&str, &[u8])],
     ) -> Result<Option<ReviewWeight>, String> {
         let runner = runner.lock().unwrap();
-        let mut item = runner.current().unwrap().clone();
-        item.pm_light = tagged;
+        let item = runner.current().unwrap().clone();
         for (file, content) in files {
             let path = item.worktree.join(file);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -190,150 +188,54 @@ mod tests {
         weight
     }
 
-    // `n` lines of text, one file's worth.
-    fn lines(n: usize) -> Vec<u8> {
-        "line\n".repeat(n).into_bytes()
-    }
-
-    // The worker's push is one line of `src/lib.rs`, so a change is `extra`
-    // more lines beside it.
-    fn pm_project(extra: &str) -> (Rig, Mutex<Runner>) {
-        let rig = project(&format!("light = 1\n{extra}"));
-        let runner = at_review(&rig, "src/lib.rs");
-        (rig, runner)
-    }
-
-    fn pm_light(lines: u32) -> Option<ReviewWeight> {
-        Some(ReviewWeight::Light(Lighter::Pm { lines }))
-    }
-
     fn touched(file: &str) -> Option<ReviewWeight> {
         Some(ReviewWeight::Full(Heavier::Touched(file.into())))
     }
 
     #[test]
-    fn a_tagged_change_within_the_line_ceiling_runs_the_light_count() {
-        let (_rig, runner) = pm_project("pm_lightens = true\nlight_max_lines = 6\n");
+    fn a_project_with_no_project_manager_reads_twice_with_no_setting() {
+        let rig = two_local();
+        let runner = at_review(&rig, "work.txt");
 
-        let five_more = weighed_writing(&runner, true, &[("src/b.rs", &lines(5))]).unwrap();
-        let none_more = weighed_writing(&runner, true, &[]).unwrap();
+        reviewers_until_ci(&rig, &runner);
 
-        assert_eq!(five_more, pm_light(6), "6 lines is the ceiling");
-        assert_eq!(none_more, pm_light(1));
+        assert_eq!(rig.reviewer.seen().len(), 2, "mine and other read");
+        assert!(reviewer_models(&rig).is_empty(), "claude was not needed");
     }
 
     #[test]
-    fn a_tagged_change_counts_added_and_deleted_lines_of_every_file() {
-        let (_rig, runner) = pm_project("pm_lightens = true\nlight_max_lines = 5\n");
-        let a = &b"one\ntwo\nthree\n"[..];
-        let b = &b"x\ny\n"[..];
-        let two = weighed_writing(&runner, true, &[("a.rs", a), ("b.rs", b)]).unwrap();
-        // the worker's line, 3 added in a.rs and 2 in b.rs
-        assert_eq!(two, touched("a.rs"), "6 lines is over 5");
-
-        let a = &b"one\ntwo\n"[..];
-        let b = &b"x\n"[..];
-        let under = weighed_writing(&runner, true, &[("a.rs", a), ("b.rs", b)]).unwrap();
-        assert_eq!(under, pm_light(4));
-    }
-
-    #[test]
-    fn a_tag_is_ignored_when_pm_lightens_is_off_or_the_diff_is_over_the_ceiling_or_the_item_is_untagged()
-     {
-        let on = "pm_lightens = true\nlight_max_lines = 3\n";
-        let (_rig, runner) = pm_project(on);
-        let over = weighed_writing(&runner, true, &[("src/b.rs", &lines(3))]).unwrap();
-        let untagged = weighed_writing(&runner, false, &[("src/b.rs", &lines(1))]).unwrap();
-        assert_eq!(over, touched("src/b.rs"), "4 lines is over 3");
-        assert_eq!(untagged, touched("src/b.rs"), "no tag, no lightening");
-
-        let (_rig, runner) = pm_project("light_max_lines = 3\n");
-        let off = weighed_writing(&runner, true, &[("src/b.rs", &lines(1))]).unwrap();
-        assert_eq!(off, touched("src/b.rs"), "pm_lightens is false when absent");
-
-        let (_rig, runner) = pm_project("pm_lightens = false\n");
-        let off = weighed_writing(&runner, true, &[]).unwrap();
-        assert_eq!(off, touched("src/lib.rs"));
-    }
-
-    #[test]
-    fn a_forced_full_file_beats_the_project_managers_tag() {
-        let (_rig, runner) = pm_project("pm_lightens = true\nfull_paths = [\"legal/**\"]\n");
-        let cases = [
-            (".github/workflows/ci.yml", Heavier::Ci),
-            ("Cargo.lock", Heavier::Dependencies),
-            (".mcp.json", Heavier::AgentFiles),
-            (
-                "legal/terms.md",
-                Heavier::FullPaths("legal/terms.md".into()),
-            ),
-        ];
-        for (file, why) in cases {
-            let weight = weighed_writing(&runner, true, &[(file, &lines(1))]).unwrap();
-            assert_eq!(weight, Some(ReviewWeight::Full(why)), "{file}");
-        }
-    }
-
-    #[test]
-    fn a_forced_full_file_with_a_non_ascii_name_beats_the_project_managers_tag() {
-        let (_rig, runner) = pm_project("pm_lightens = true\nfull_paths = [\"legal/**\"]\n");
-
-        let weight = weighed_writing(&runner, true, &[("legal/café.md", &lines(1))]).unwrap();
-
-        let forced = Heavier::FullPaths("legal/café.md".into());
-        assert_eq!(weight, Some(ReviewWeight::Full(forced)));
-    }
-
-    #[test]
-    fn a_binary_file_counts_as_over_the_line_ceiling() {
-        let (_rig, runner) = pm_project("pm_lightens = true\nlight_max_lines = 1000\n");
-
-        let binary = weighed_writing(&runner, true, &[("logo.png", &[0, 159, 146, 150, 0])]);
-
-        assert_eq!(binary.unwrap(), touched("logo.png"));
-    }
-
-    #[test]
-    fn a_tagged_docs_only_change_reads_as_docs_whatever_the_ceiling() {
-        let (_rig, runner) = pm_project("pm_lightens = true\nlight_max_lines = 1\n");
-        let docs = weighed_writing(&runner, true, &[("docs/a.md", &lines(50))]);
-        // src/lib.rs from the worker keeps this one out of the docs case
-        assert_eq!(docs.unwrap(), touched("src/lib.rs"));
-
-        let rig = project("light = 1\npm_lightens = true\nlight_max_lines = 1\n");
-        let runner = at_review(&rig, "README.md");
-        let docs = weighed_writing(&runner, true, &[("docs/a.md", &lines(50))]);
-        assert_eq!(docs.unwrap(), Some(ReviewWeight::Light(Lighter::Docs)));
-    }
-
-    #[test]
-    fn a_docs_only_diff_runs_the_light_count_and_goes_to_ci() {
-        let rig = project("light = 1\n");
+    fn a_project_with_no_project_manager_weighs_nothing() {
+        let rig = two_local();
         let runner = at_review(&rig, "README.md");
 
         reviewers_until_ci(&rig, &runner);
 
-        assert_eq!(rig.reviewer.seen().len() + reviewer_models(&rig).len(), 1);
+        assert_eq!(weight_of(&runner), None, "nothing is weighed");
+        let shown = rig.ask(&runner, "status", None)["work_item"]["review"].clone();
+        assert_eq!(shown, serde_json::Value::Null, "{shown}");
+    }
+
+    #[test]
+    fn a_docs_only_diff_reports_light_and_runs_the_plans_reads() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "README.md");
+        plan(&runner, 2);
+
+        reviewers_until_ci(&rig, &runner);
+
+        assert_eq!(rig.reviewer.seen().len(), 2, "the plan's two reads ran");
+        assert_eq!(
+            weight_of(&runner),
+            Some(ReviewWeight::Light(Lighter::Docs)),
+            "the weight reports and decides nothing"
+        );
         let phase = rig.ask(&runner, "status", None)["work_item"]["phase"]["state"].clone();
         assert_eq!(phase, "ci");
-        assert_eq!(weight_of(&runner), Some(ReviewWeight::Light(Lighter::Docs)));
     }
 
     #[test]
-    fn a_diff_touching_src_runs_the_full_count() {
-        let rig = project("light = 1\n");
-        let runner = at_review(&rig, "src/lib.rs");
-
-        reviewers_until_ci(&rig, &runner);
-
-        assert_eq!(rig.reviewer.seen().len() + reviewer_models(&rig).len(), 2);
-        let touched = Heavier::Touched("src/lib.rs".into());
-        assert_eq!(weight_of(&runner), Some(ReviewWeight::Full(touched)));
-    }
-
-    #[test]
-    fn a_workflow_a_manifest_a_lockfile_an_agent_file_and_a_full_path_each_force_the_full_count() {
-        let rig = project("light = 1\nfull_paths = [\"legal/**\"]\n");
+    fn a_workflow_a_manifest_a_lockfile_and_an_agent_file_each_report_full() {
+        let rig = pm_project();
         let runner = at_review(&rig, "README.md");
         let cases = [
             (".github/workflows/ci.yml", Heavier::Ci),
@@ -343,49 +245,41 @@ mod tests {
             ("crates/a/Cargo.toml", Heavier::Dependencies),
             (".mcp.json", Heavier::AgentFiles),
             (".claude/skills/x.md", Heavier::AgentFiles),
-            (
-                "legal/terms.md",
-                Heavier::FullPaths("legal/terms.md".into()),
-            ),
         ];
         for (file, why) in cases {
             let weight = weighed_with(&runner, &[file]).unwrap();
             assert_eq!(weight, Some(ReviewWeight::Full(why)), "{file}");
         }
+
         let docs = weighed_with(&runner, &["docs/a/b.md", "notes.md"]).unwrap();
         assert_eq!(docs, Some(ReviewWeight::Light(Lighter::Docs)));
     }
 
     #[test]
-    fn a_full_path_beats_a_light_path() {
-        let rig = project("light = 1\nfull_paths = [\"docs/adr/**\"]\n");
+    fn a_change_beyond_the_docs_paths_reports_full() {
+        let rig = pm_project();
         let runner = at_review(&rig, "README.md");
 
-        let weight = weighed_with(&runner, &["docs/adr/0001.md", "docs/a.md"]).unwrap();
-
-        let forced = Heavier::FullPaths("docs/adr/0001.md".into());
-        assert_eq!(weight, Some(ReviewWeight::Full(forced)));
-    }
-
-    #[test]
-    fn light_paths_name_what_a_docs_only_diff_may_touch() {
-        let touched = |file: &str| Some(ReviewWeight::Full(Heavier::Touched(file.into())));
-        let rig = project("light = 1\nlight_paths = [\"**/*.rst\"]\n");
-        let runner = at_review(&rig, "guide.rst");
         let rst = weighed_with(&runner, &["a/b.rst"]).unwrap();
-        let md = weighed_with(&runner, &["README.md"]).unwrap();
-        assert_eq!(rst, Some(ReviewWeight::Light(Lighter::Docs)));
-        assert_eq!(md, touched("README.md"));
+        let docs = weighed_with(&runner, &["docs/a.md", "notes.md"]).unwrap();
 
-        let rig = project("light = 1\nlight_paths = []\n");
-        let runner = at_review(&rig, "README.md");
-        let none = weighed_with(&runner, &["docs/a.md"]).unwrap();
-        assert_eq!(none, touched("README.md"), "[] turns path lightening off");
+        assert_eq!(rst, touched("a/b.rst"));
+        assert_eq!(docs, Some(ReviewWeight::Light(Lighter::Docs)));
     }
 
     #[test]
-    fn an_adopted_item_and_an_empty_diff_run_the_full_count() {
-        let rig = project("light = 1\n");
+    fn a_changed_file_with_a_non_ascii_name_reports_as_it_is_named() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "README.md");
+
+        let weight = weighed_with(&runner, &[".claude/skills/café.md"]).unwrap();
+
+        assert_eq!(weight, Some(ReviewWeight::Full(Heavier::AgentFiles)));
+    }
+
+    #[test]
+    fn an_adopted_item_and_an_empty_diff_report_full() {
+        let rig = pm_project();
         let runner = at_review(&rig, "README.md");
         let guard = runner.lock().unwrap();
         let mut item = guard.current().unwrap().clone();
@@ -403,8 +297,32 @@ mod tests {
     }
 
     #[test]
+    fn a_high_finding_leaves_the_weight_as_the_diff_reads() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "README.md");
+        let guard = runner.lock().unwrap();
+        let mut item = guard.current().unwrap().clone();
+        item.held.push(Finding::new(
+            Severity::High,
+            "README.md",
+            1,
+            "wrong",
+            "it is",
+        ));
+        let base = item.review_base(guard.item_base(&item)).to_owned();
+
+        let docs = guard.weigh(&item, &item.worktree, &base).unwrap();
+
+        assert_eq!(
+            docs,
+            Some(ReviewWeight::Light(Lighter::Docs)),
+            "a finding steps no weight up"
+        );
+    }
+
+    #[test]
     fn a_diff_git_cannot_take_is_an_error_and_not_a_weight() {
-        let rig = project("light = 1\n");
+        let rig = pm_project();
         let runner = at_review(&rig, "README.md");
         let guard = runner.lock().unwrap();
         let item = guard.current().unwrap().clone();
@@ -417,67 +335,29 @@ mod tests {
     }
 
     #[test]
-    fn a_light_equal_to_need_weighs_nothing() {
-        for extra in ["light = 2\n", "light = 5\n", ""] {
-            let rig = project(extra);
-            let runner = at_review(&rig, "README.md");
-
-            reviewers_until_ci(&rig, &runner);
-
-            assert_eq!(rig.reviewer.seen().len() + reviewer_models(&rig).len(), 2);
-            assert_eq!(weight_of(&runner), None, "{extra:?}");
-        }
-    }
-
-    #[test]
-    fn a_light_items_pick_asks_at_tier_light_and_a_full_items_asks_its_own() {
-        for (file, tier) in [("README.md", Tier::Light), ("src/lib.rs", Tier::Heavy)] {
-            let rig = project("light = 1\n");
-            let runner = at_review(&rig, file);
-            runner.lock().unwrap().state.work_items[0].tier = Some(Tier::Heavy);
-
-            step(&runner).unwrap();
-
-            let ask = rig.agent_board.asks().pop().unwrap();
-            assert_eq!(ask.tier, Some(tier), "{file}");
-        }
-    }
-
-    // A light item whose first reviewer finds `severity` in the README and
-    // whose fix pushes `fix`, run until the pass is over.
-    fn found_then_fixed(
-        severity: Severity,
-        fix: (&'static str, &'static str),
-    ) -> (Rig, Mutex<Runner>) {
-        let rig = project("light = 1\n");
+    fn a_fix_that_pulls_the_diff_into_src_reweighs_full() {
+        let rig = pm_project();
         let runner = at_review(&rig, "README.md");
+        plan(&runner, 2);
         rig.agent_board.ranks(&["mine", "other", "claude"]);
-        let finding = Finding::new(severity, "README.md", 1, "wrong", "it is");
+        let finding = Finding::new(Severity::Medium, "README.md", 1, "wrong", "it is");
         rig.reviewer
             .script([ScriptedRound::Findings(vec![finding])]);
-        rig.claude.script([Scripted::Push(fix.0, fix.1)]);
-        reviewers_until_ci(&rig, &runner);
-        (rig, runner)
-    }
+        rig.claude.script([Scripted::Push("src/lib.rs", "fixed\n")]);
 
-    #[test]
-    fn a_fix_that_touches_src_sends_a_light_pass_on_to_the_full_count() {
-        let (rig, runner) = found_then_fixed(Severity::Medium, ("src/lib.rs", "fixed\n"));
+        reviewers_until_ci(&rig, &runner);
 
         assert_eq!(
             rig.reviewer.seen().len(),
             2,
             "the fix is read by a second reviewer"
         );
-        let touched = Heavier::Touched("src/lib.rs".into());
-        assert_eq!(weight_of(&runner), Some(ReviewWeight::Full(touched)));
+        assert_eq!(weight_of(&runner), touched("src/lib.rs"));
     }
 
     #[test]
     fn a_fix_that_ends_the_pass_at_ci_saves_the_weight_it_reread() {
-        let rig = listing(&["mine"]);
-        rig.reviews_need(Some(2));
-        rig.edit_settings(|text| format!("{text}light = 1\n"));
+        let rig = pm_listing(&["mine"]);
         let runner = at_review(&rig, "README.md");
         let finding = Finding::new(Severity::Medium, "README.md", 1, "wrong", "it is");
         rig.reviewer
@@ -488,54 +368,12 @@ mod tests {
 
         let phase = rig.ask(&runner, "status", None)["work_item"]["phase"]["state"].clone();
         assert_eq!(phase, "ci", "no reviewer is left to read the fix");
-        let touched = Heavier::Touched("src/lib.rs".into());
-        assert_eq!(weight_of(&runner), Some(ReviewWeight::Full(touched)));
+        assert_eq!(weight_of(&runner), touched("src/lib.rs"));
     }
 
     #[test]
-    fn a_high_finding_from_the_light_reviewer_sends_the_pass_on_to_the_full_count() {
-        let (rig, runner) = found_then_fixed(Severity::High, ("README.md", "fixed\n"));
-
-        assert_eq!(
-            rig.reviewer.seen().len(),
-            2,
-            "a docs-only fix is still read twice after a HIGH"
-        );
-        assert_eq!(weight_of(&runner), Some(ReviewWeight::Full(Heavier::High)));
-    }
-
-    #[test]
-    fn a_medium_finding_and_a_docs_only_fix_keep_the_pass_light() {
-        let (rig, runner) = found_then_fixed(Severity::Medium, ("README.md", "fixed\n"));
-
-        assert_eq!(rig.reviewer.seen().len(), 1);
-        assert_eq!(weight_of(&runner), Some(ReviewWeight::Light(Lighter::Docs)));
-    }
-
-    #[test]
-    fn a_pass_stepped_up_asks_its_next_reviewer_at_the_items_own_tier() {
-        let rig = project("light = 1\n");
-        let runner = at_review(&rig, "README.md");
-        runner.lock().unwrap().state.work_items[0].tier = Some(Tier::Heavy);
-        rig.agent_board.ranks(&["mine", "other", "claude"]);
-        let finding = Finding::new(Severity::High, "README.md", 1, "wrong", "it is");
-        rig.reviewer
-            .script([ScriptedRound::Findings(vec![finding])]);
-        rig.claude.script([Scripted::Push("README.md", "fixed\n")]);
-
-        reviewers_until_ci(&rig, &runner);
-
-        let tiers: Vec<_> = rig.agent_board.asks().iter().map(|a| a.tier).collect();
-        let first = tiers.iter().position(|t| *t == Some(Tier::Light));
-        let after = first.map(|at| tiers[at + 1..].to_vec());
-        assert!(first.is_some(), "{tiers:?}");
-        let heavy = Some(Tier::Heavy);
-        assert!(after.unwrap().iter().all(|t| *t == heavy), "{tiers:?}");
-    }
-
-    #[test]
-    fn a_light_pass_whose_diff_git_cannot_take_goes_on_to_a_round_that_reports_it() {
-        let rig = project("light = 1\n");
+    fn a_light_weight_whose_diff_git_cannot_take_goes_on_to_a_round_that_reports_it() {
+        let rig = pm_project();
         let runner = at_review(&rig, "README.md");
         let guard = runner.lock().unwrap();
         let mut item = guard.current().unwrap().clone();

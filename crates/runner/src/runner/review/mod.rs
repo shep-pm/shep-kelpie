@@ -33,6 +33,7 @@ mod foreign;
 mod green;
 mod lineup;
 use lineup::Chosen;
+pub(in crate::runner) use lineup::RULE_READS;
 pub(super) use lineup::{RoundNext, changed_files, touches};
 #[cfg(test)]
 mod local;

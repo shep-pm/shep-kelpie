@@ -6,8 +6,9 @@
 //! its `rounds`. It takes the first ranked one the pacer lets start and, for a
 //! bot, whose window is open now. A bot left out as one the repo cannot run is
 //! in the ask's leave-out for a week, and no candidate a pass that read nothing
-//! names as refused. The pass ends at `reviews.need` reads or when the board
-//! ranks none left. A kept reviewer resumes its round.
+//! names as refused. The pass ends at the reads the item's plan calls for, or
+//! kelpie's own rule where it has none, or when the board ranks none left. A
+//! kept reviewer resumes its round.
 
 use std::path::Path;
 use std::process::Stdio;
@@ -24,6 +25,8 @@ use crate::state::StateError;
 use crate::work_item::{BotSkipped, Phase, Review, ReviewWeight, WorkItem};
 
 mod weight;
+
+pub(in crate::runner) use weight::RULE_READS;
 
 /// What a round's step does about who reads it
 pub(super) enum Chosen {
@@ -106,11 +109,9 @@ impl Runner {
         let left_out = self.left_out_of(review);
         let ask = PickAsk {
             kind: item.kind.clone(),
-            tier: match self.agents.pm {
-                // The project manager's tier stands, whatever the change weighs.
-                Some(_) => item.tier,
-                None => (item.weight.as_ref()).map_or(item.tier, |w| w.tier(item.tier)),
-            },
+            // The item's own tier, whatever the change weighs: the weighing
+            // reports what a diff touches and decides nothing.
+            tier: item.tier,
             pin: None,
             slack: Some(self.slack(item.slack)),
             agents: due.iter().map(|r| r.name.clone()).collect(),
@@ -196,7 +197,7 @@ impl Runner {
         Ok(self.lineup.iter().filter(due).cloned().collect())
     }
 
-    // Whether `reviews.need` reviewers have read in `review`'s pass.
+    // Whether the reads the item calls for have run in `review`'s pass.
     fn enough_read(&self, review: &Review) -> bool {
         let enough = |item: &WorkItem| self.reads(review) >= self.need_of(item);
         self.current().is_some_and(enough)
@@ -228,7 +229,8 @@ impl Runner {
     /// Why `review`'s pass ends, when `pass_ended` is to hold the work item
     /// for a ruling: `Some(None)` when the project's own list left it no
     /// reader, `Some(Some(reason))` when a reviewer was down or passed over,
-    /// the agent board ranked none of `unranked`, or too few read for `reviews.need`
+    /// the agent board ranked none of `unranked`, or too few read for what the
+    /// item calls for
     pub(super) fn pass_unread(
         &self,
         item: &WorkItem,
@@ -291,7 +293,7 @@ impl Runner {
     }
 
     /// Where the review goes once `review`'s reviewer is done: the next
-    /// round, or CI at `now` once `reviews.need` reviewers have read or no
+    /// round, or CI at `now` once the reads the item calls for have run or no
     /// candidate is left to run
     ///
     /// A pass with a bot it went on without ends in a round step of its own,
@@ -333,7 +335,7 @@ impl Runner {
     /// reviewer just done counted as passed over, if it was
     ///
     /// The caller saves the weight it carries, read again from the worktree,
-    /// with the phase. A pass that ends short of `reviews.need` for want of a
+    /// with the phase. A pass that ends short of what the item calls for for want of a
     /// reviewer goes on to a round step of its own, which marks the work item
     /// unreviewed.
     pub(in crate::runner) fn after_round_in(
