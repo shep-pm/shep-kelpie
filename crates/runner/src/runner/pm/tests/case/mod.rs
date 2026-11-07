@@ -2,6 +2,8 @@
 //! card, the whole issue, and the pull request with its open threads, written
 //! into its folder before it wakes
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt as _;
 use std::sync::Mutex;
 
 mod rig;
@@ -922,4 +924,58 @@ fn a_session_with_no_transcript_says_so_and_the_wake_goes_on() {
         "{lines}"
     );
     assert_eq!(pm_seen(&rig).len(), 2, "the wake happened");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_transcript_that_cannot_be_read_is_not_a_worker_that_said_nothing() {
+    let (rig, runner, _) = red("case-bad-transcript", "A title", BODY);
+    worker_said(&rig, &runner, &["SAID-ONCE"]);
+    let session = runner.lock().unwrap().state.work_items[0].session.0.clone();
+    let file = rig
+        .paths()
+        .folder
+        .join(format!("transcripts/{session}.jsonl"));
+    // Found by its steps, and shut to the runner's user
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let seen = wake(&rig, &runner);
+
+    let said = part(&rig, "## What the worker said");
+    assert!(
+        said.contains("(kelpie could not read its transcript"),
+        "{said}"
+    );
+    assert!(!said.contains("It has said nothing"), "{said}");
+    assert!(seen.call.prompt.contains("cases/7.md"));
+    let board = board_of(&rig);
+    assert!(
+        board.contains(
+            ", but what the worker said is missing: kelpie could not read its transcript"
+        ),
+        "{board}"
+    );
+}
+
+#[test]
+fn rulings_that_cannot_be_read_are_not_an_item_with_no_rulings() {
+    let (rig, runner, _) = red("case-bad-rulings", "A title", BODY);
+    let rulings = rig.paths().rulings;
+    let _ = std::fs::remove_file(&rulings);
+    std::fs::create_dir(&rulings).unwrap();
+
+    wake(&rig, &runner);
+
+    let past = part(&rig, "## Past rulings");
+    assert!(
+        past.contains("(kelpie could not read rulings.jsonl"),
+        "{past}"
+    );
+    assert!(!past.contains("No ruling on this item"), "{past}");
+    assert!(!past.contains("1st"), "{past}");
+    let board = board_of(&rig);
+    assert!(
+        board.contains(", but the past rulings is missing: kelpie could not read rulings.jsonl"),
+        "{board}"
+    );
 }

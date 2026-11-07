@@ -26,36 +26,36 @@ impl Tail {
     ///
     /// A line still being written waits for its end. A file that shrank
     /// was replaced, and is read from its start. A bad byte costs only its
-    /// own line.
+    /// own line. A file that cannot be read gives none, as for a file that
+    /// has grown by nothing.
     pub fn lines(&mut self) -> Vec<String> {
-        let Ok(mut file) = std::fs::File::open(&self.path) else {
-            return Vec::new();
-        };
-        let Ok(len) = file.metadata().map(|m| m.len()) else {
-            return Vec::new();
-        };
+        self.read_lines().unwrap_or_default()
+    }
+
+    /// The whole lines written since the last call, or why the file could not be read
+    ///
+    /// As [`Tail::lines`], but a file that cannot be opened or read is an
+    /// error and not a file with nothing new.
+    pub fn read_lines(&mut self) -> std::io::Result<Vec<String>> {
+        let mut file = std::fs::File::open(&self.path)?;
+        let len = file.metadata()?.len();
         if len < self.offset {
             self.offset = 0;
         }
-        if len == self.offset || file.seek(SeekFrom::Start(self.offset)).is_err() {
-            return Vec::new();
+        if len == self.offset {
+            return Ok(Vec::new());
         }
+        file.seek(SeekFrom::Start(self.offset))?;
         let mut bytes = Vec::new();
-        if file
-            .take(len - self.offset)
-            .read_to_end(&mut bytes)
-            .is_err()
-        {
-            return Vec::new();
-        }
+        file.take(len - self.offset).read_to_end(&mut bytes)?;
         let Some(end) = bytes.iter().rposition(|&b| b == b'\n') else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
         self.offset += end as u64 + 1;
-        String::from_utf8_lossy(&bytes[..end])
+        Ok(String::from_utf8_lossy(&bytes[..end])
             .split('\n')
             .map(|line| line.trim_end_matches('\r').to_owned())
             .filter(|line| !line.is_empty())
-            .collect()
+            .collect())
     }
 }

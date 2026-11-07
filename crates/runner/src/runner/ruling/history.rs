@@ -170,12 +170,24 @@ fn clip(text: &str, most: usize) -> String {
 /// does not read is skipped, and so is one the panel decided, since neither
 /// the maintainer nor the project manager answered it
 pub(in crate::runner) fn records(file: &Path) -> Vec<Record> {
-    let text = std::fs::read_to_string(file).unwrap_or_default();
-    (text.lines())
+    try_records(file).unwrap_or_default()
+}
+
+/// [`records`], or why the file could not be read
+///
+/// # Errors
+///
+/// When the file exists and cannot be read. A file not there yet holds no ruling.
+pub(in crate::runner) fn try_records(file: &Path) -> std::io::Result<Vec<Record>> {
+    let text = match std::fs::read_to_string(file) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        read => read?,
+    };
+    Ok((text.lines())
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
         .filter(|line| line.get("by_panel") != Some(&serde_json::Value::Bool(true)))
         .filter_map(|line| serde_json::from_value(line).ok())
-        .collect()
+        .collect())
 }
 
 /// How many of `records` the project manager answered, by kind, for `status`

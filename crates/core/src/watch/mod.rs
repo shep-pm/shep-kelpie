@@ -81,20 +81,26 @@ pub fn transcripts_of(
 /// Only the whole lines of the file count, so one still being written is
 /// passed over. A `Format::Goose` file gives none: its stdout file holds no
 /// whole session, as [`transcripts_of`] leaves it out.
-pub fn said(format: Format, file: &Path) -> Vec<String> {
+///
+/// # Errors
+///
+/// When `file` cannot be opened or read, which is not the same as a session
+/// that said nothing.
+pub fn said(format: Format, file: &Path) -> std::io::Result<Vec<String>> {
     let events = match format {
         Format::Claude => claude::events,
         Format::Codex => codex::events,
         Format::Pi => pi::events,
         // parity: harness.transcript-said
-        Format::Goose => return Vec::new(),
+        Format::Goose => return Ok(Vec::new()),
     };
-    let lines = Tail::from_start(file.to_owned()).lines();
+    let lines = Tail::from_start(file.to_owned()).read_lines()?;
     let said = lines.iter().flat_map(|line| events(line));
-    said.filter(|event| event.kind == Kind::Said)
+    Ok(said
+        .filter(|event| event.kind == Kind::Said)
         .map(|event| event.text)
         .filter(|text| !text.trim().is_empty())
-        .collect()
+        .collect())
 }
 
 /// Every step of the steps file `steps` that names `ticket`, one line each

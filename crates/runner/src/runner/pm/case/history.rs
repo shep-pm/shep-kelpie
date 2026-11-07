@@ -16,7 +16,7 @@ use crate::board::briefing::date_time;
 use crate::home::STEPS_FILE;
 use crate::ports::SessionId;
 use crate::runner::Runner;
-use crate::runner::ruling::{Answerer, records};
+use crate::runner::ruling::{Answerer, try_records};
 use crate::settings::RulingName;
 use crate::ticket::TicketId;
 use crate::watch::{self, Format};
@@ -27,7 +27,21 @@ pub(in crate::runner::pm) struct Told {
     // The steps naming the item, or why the steps file could not be read
     steps: Result<Vec<String>, String>,
     // Everything its worker said, or why that is not known
-    said: Result<Vec<String>, String>,
+    said: Result<Vec<String>, Unsaid>,
+}
+
+// Why what a worker said is not known, and whether a read that failed is why
+#[derive(Debug, Clone)]
+struct Unsaid {
+    why: String,
+    failed: bool,
+}
+
+impl Unsaid {
+    // There is nothing to read: a harness with no transcript, or none yet
+    fn none(why: String) -> Self {
+        Self { why, failed: false }
+    }
 }
 
 /// The steps file read once, and where each wanted session's transcript is
@@ -56,16 +70,19 @@ impl Files {
     /// What the case of `ticket`, whose worker's session is `session`, reads of them
     pub(in crate::runner::pm) fn told(&self, ticket: TicketId, session: &SessionId) -> Told {
         let said = match (&self.steps, self.found.get(&session.0)) {
-            (_, Some((format, file))) => Ok(watch::said(*format, file)),
-            (Ok(_), None) => Err(
+            (_, Some((format, file))) => watch::said(*format, file).map_err(|e| Unsaid {
+                why: format!("kelpie could not read its transcript ({})", e.kind()),
+                failed: true,
+            }),
+            (Ok(_), None) => Err(Unsaid::none(
                 "kelpie found no transcript of its session, so what it said is \
-                                  not here (a session whose harness keeps none, or one that has \
-                                  written none yet)"
+                 not here (a session whose harness keeps none, or one that has \
+                 written none yet)"
                     .to_owned(),
-            ),
-            (Err(_), None) => Err(format!(
-                "its transcript is looked for in {STEPS_FILE}, which could not be read"
             )),
+            (Err(_), None) => Err(Unsaid::none(format!(
+                "its transcript is looked for in {STEPS_FILE}, which could not be read"
+            ))),
         };
         let steps = match &self.steps {
             Ok(text) => Ok(watch::steps_of(text, ticket)),
@@ -98,9 +115,11 @@ impl Runner {
         parked: &Parked,
         told: &Told,
     ) -> Vec<(&'static str, String)> {
-        self.past_rulings_part(out, parked);
-        self.spend_part(out, parked.ticket);
         let mut gaps = Vec::new();
+        if let Some(why) = self.past_rulings_part(out, parked) {
+            gaps.push(("the past rulings", why));
+        }
+        self.spend_part(out, parked.ticket);
         out.push_str("## What the worker said\n\n");
         match &told.said {
             Ok(said) if said.is_empty() => out.push_str("It has said nothing.\n\n"),
@@ -115,8 +134,11 @@ impl Runner {
                     );
                 }
             }
-            Err(why) => {
-                let _ = write!(out, "({why})\n\n");
+            Err(unsaid) => {
+                let _ = write!(out, "({})\n\n", unsaid.why);
+                if unsaid.failed {
+                    gaps.push(("what the worker said", unsaid.why.clone()));
+                }
             }
         }
         out.push_str("## Log lines\n\n");
@@ -136,12 +158,19 @@ impl Runner {
     }
 
     // The rulings answered on the item, newest first, headed by how many of
-    // this ruling's kind it has had
-    fn past_rulings_part(&self, out: &mut String, parked: &Parked) {
-        let mut past = records(&self.paths.rulings);
+    // this ruling's kind it has had. Says why when the file could not be read.
+    fn past_rulings_part(&self, out: &mut String, parked: &Parked) -> Option<String> {
+        out.push_str("## Past rulings\n\n");
+        let mut past = match try_records(&self.paths.rulings) {
+            Ok(past) => past,
+            Err(e) => {
+                let why = format!("kelpie could not read rulings.jsonl ({})", e.kind());
+                let _ = write!(out, "({why})\n\n");
+                return Some(why);
+            }
+        };
         past.retain(|r| r.issue == Some(parked.ticket));
         past.reverse();
-        out.push_str("## Past rulings\n\n");
         if let Some(ruling) = &parked.ruling {
             let kind = RulingName::of(&ruling.kind);
             let before = past.iter().filter(|r| r.kind == Some(kind)).count();
@@ -172,6 +201,7 @@ impl Runner {
                 let _ = write!(out, "Stem:\n\n{}\n\n", self.data(stem));
             }
         }
+        None
     }
 
     // What the item's priced calls cost against its cap, as the board shows it

@@ -707,7 +707,7 @@ fn all_a_claude_session_said_is_read() {
 
     let file = rig.transcripts().join("w7.jsonl");
     assert_eq!(
-        super::said(Format::Claude, &file),
+        super::said(Format::Claude, &file).unwrap(),
         ["Reading the issue.", "Done, but the test hangs."]
     );
 }
@@ -730,7 +730,10 @@ fn all_a_codex_rollout_said_is_read() {
         ],
     );
 
-    assert_eq!(super::said(Format::Codex, &rollout), ["Looking.", "Done"]);
+    assert_eq!(
+        super::said(Format::Codex, &rollout).unwrap(),
+        ["Looking.", "Done"]
+    );
 }
 
 #[test]
@@ -748,7 +751,7 @@ fn all_a_pi_session_said_is_read() {
     );
 
     assert_eq!(
-        super::said(Format::Pi, &file),
+        super::said(Format::Pi, &file).unwrap(),
         ["Reading the diff.", "CLEAN"]
     );
 }
@@ -764,7 +767,7 @@ fn a_goose_session_reads_as_nothing_said() {
         ],
     );
 
-    assert!(super::said(Format::Goose, &stdout).is_empty());
+    assert!(super::said(Format::Goose, &stdout).unwrap().is_empty());
 }
 
 #[test]
@@ -779,13 +782,27 @@ fn a_half_written_last_line_is_passed_over() {
     // A whole line with no end yet, and a cut one: neither is read.
     write!(open, "{}", said("2026-10-10T12:00:03.000Z", "Not ended")).unwrap();
 
-    assert_eq!(super::said(Format::Claude, &file), ["Whole."]);
+    assert_eq!(super::said(Format::Claude, &file).unwrap(), ["Whole."]);
 
     writeln!(open).unwrap();
     write!(open, r#"{{"type":"assistant","message":{{"role":"assist"#).unwrap();
 
-    assert_eq!(super::said(Format::Claude, &file), ["Whole.", "Not ended"]);
-    assert!(super::said(Format::Claude, &rig.transcripts().join("none.jsonl")).is_empty());
+    assert_eq!(
+        super::said(Format::Claude, &file).unwrap(),
+        ["Whole.", "Not ended"]
+    );
+}
+
+#[test]
+fn a_transcript_that_cannot_be_read_is_an_error_and_not_nothing_said() {
+    let rig = Rig::new();
+    let gone = rig.transcripts().join("none.jsonl");
+    assert!(super::said(Format::Claude, &gone).is_err());
+
+    // A folder opens, and fails on the read
+    let folder = rig.transcripts().join("folder.jsonl");
+    std::fs::create_dir_all(&folder).unwrap();
+    assert!(super::said(Format::Claude, &folder).is_err());
 }
 
 #[test]
