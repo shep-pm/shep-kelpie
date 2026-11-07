@@ -431,8 +431,8 @@ fn skipped(reason: &str) -> Option<StepReport> {
     })
 }
 
-// The step after a bot is passed over with reads short of `reviews.need`: the
-// pass ends, marked unreviewed.
+// The step after a bot is passed over with reads short of what the item calls
+// for: the pass ends, marked unreviewed.
 pub(super) fn ends_short(runner: &Mutex<Runner>) {
     let report = step(runner).unwrap();
     assert!(

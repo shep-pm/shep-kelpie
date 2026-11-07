@@ -303,9 +303,7 @@ pub struct Runner {
     board_read: Option<board_read::BoardRead>,
     // The review's reviewers, in order, from the project's list
     lineup: Vec<ListedReviewer>,
-    // The reads kelpie's own rule gives a work item, on a project that names no
-    // project manager to plan one. [`review::RULE_READS`] at open, and only the
-    // rig sets another.
+    // The reads kelpie's own rule gives a work item where no project manager plans one
     rule_reads: u32,
     // The reviewers a contribution's pass walks, in order. None while the
     // project picks no contributions.
@@ -537,9 +535,8 @@ impl Runner {
         // none; one whose key is missing is left out and logged.
         let lineup = settings.lineup_with_keys(&book, &gateways, home);
         check_gateways(&gateways, &book, &lineup)?;
-        // A reviewer the project named in `agents.allow` is held to what a
-        // round cannot work around. A candidate it never named is passed over
-        // at its round.
+        // A reviewer the project named in `agents.allow` is held to what a round
+        // cannot work around. A candidate it never named is passed over at its round.
         let named = left_in(settings.named_reviewers(&book, home), &lineup);
         gateways.check_triage_spam(&settings.triage.spam)?;
         let webhook = kelpie_settings.webhook;

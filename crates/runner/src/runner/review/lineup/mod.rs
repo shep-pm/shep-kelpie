@@ -6,9 +6,8 @@
 //! its `rounds`. It takes the first ranked one the pacer lets start and, for a
 //! bot, whose window is open now. A bot left out as one the repo cannot run is
 //! in the ask's leave-out for a week, and no candidate a pass that read nothing
-//! names as refused. The pass ends at the reads the item's plan calls for, or
-//! kelpie's own rule where it has none, or when the board ranks none left. A
-//! kept reviewer resumes its round.
+//! names as refused. The pass ends at the plan's reads, or kelpie's own rule where
+//! it has none, or when the board ranks none left. A kept reviewer resumes its round.
 
 use std::path::Path;
 use std::process::Stdio;

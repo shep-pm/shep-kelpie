@@ -1,4 +1,4 @@
-//! A pass that ends with some reads but fewer than `reviews.need`: marked
+//! A pass that ends with some reads but fewer than the item calls for: marked
 //! unreviewed when a reviewer was down or passed over, so `auto` will not
 //! merge it, and left alone when the project's own list gave it too few
 

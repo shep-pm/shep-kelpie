@@ -149,9 +149,9 @@ pub struct WorkItem {
     /// The review the project manager's pick planned for its pull request
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_plan: Option<ReviewPlan>,
-    /// How much review its pull request gets, once a round has weighed its
-    /// change. None until then, and for a project whose `reviews.light` is
-    /// not below `reviews.need`.
+    /// What its pull request weighs, once a round has weighed its change, for
+    /// the project manager to decide from. None until then, and for a project
+    /// that names no `agents.pm` to report to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weight: Option<ReviewWeight>,
     /// The implementers it was handed off from, oldest first, which the
@@ -229,7 +229,7 @@ pub struct WorkItem {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reviewers_skipped: Vec<AgentName>,
     /// The local reviewers whose round in this pass reviewed no file, which
-    /// read nothing and do not count toward `reviews.need`
+    /// read nothing and do not count toward the reads the item calls for
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reviewers_blank: Vec<AgentName>,
     /// Why the last review pass ended with no reviewer having read the pull
