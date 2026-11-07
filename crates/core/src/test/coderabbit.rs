@@ -276,6 +276,7 @@ impl FakeCodeRabbit {
                 path: path.to_owned(),
                 line: Some(3),
                 resolved: false,
+                outdated: false,
                 remarks: vec![remark],
             });
         id

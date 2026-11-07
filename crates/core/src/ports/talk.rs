@@ -36,6 +36,9 @@ pub struct TalkThread {
     pub line: Option<u32>,
     /// Whether it is resolved
     pub resolved: bool,
+    /// Whether the lines it is on have changed since, so the forge no longer
+    /// shows it against the head
+    pub outdated: bool,
     /// Its comments, oldest first
     pub remarks: Vec<Remark>,
 }
