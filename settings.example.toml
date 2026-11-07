@@ -274,8 +274,9 @@ compact_window = 200000
 # `contribution-merge` and `local-model-spilled` are refused as `true`, and are
 # never written.
 # `shep kelpie add`, `upgrade` and `shep kelpie settings migrate` write each
-# kind it is missing, at the value below and `merge` at `false`, and never
-# change one it has.
+# kind it is missing, at the value below, and never change one it has.
+# `over-budget` is `false`: no setting lifts the spend cap, so you answer, and
+# the project manager's recommendation is on the card. `true` has it answer.
 # The old `pm_alone` list still loads, as `true` for each kind it names, and
 # the migration turns it into the map. It also deletes the panel's `decide`,
 # `full_panel_paths`, `agents.advisor`, `agents.researcher` and `[researcher]`
@@ -300,7 +301,7 @@ compact_window = 200000
 # turn-timeout = true
 # turn-failed = true
 # adopt-failed = true
-# over-budget = true
+# over-budget = false
 
 # Whether kelpie picks up other people's pull requests. `pick` is `off` (its
 # own pull requests only), `label` (those the maintainer labels for it) or

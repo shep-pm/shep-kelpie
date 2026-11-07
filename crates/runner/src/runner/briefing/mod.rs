@@ -788,7 +788,7 @@ fn still(
 }
 
 // A phase as the board's line for a work item says it
-fn phase_text(phase: &Phase, now: Timestamp) -> String {
+pub(super) fn phase_text(phase: &Phase, now: Timestamp) -> String {
     match phase {
         Phase::Implement => "implementing".into(),
         Phase::Review(review) => {
