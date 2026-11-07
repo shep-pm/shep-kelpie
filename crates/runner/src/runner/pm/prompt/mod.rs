@@ -181,6 +181,9 @@ macro_rules! saying {
          `park` stops the work item for the maintainer: the ruling stays, or a question \
          is raised, and your `why` is posted there. `settle` accepts the review bot \
          threads that hold a merge ruling and has CI looked at again. `none` makes no call. \
+         On an issue with no open work item, `none` posts your `why` there as your \
+         answer to the maintainer, and `send-back`, `park` and `settle` are refused, \
+         since no worker and no ruling waits there. \
          A merge is not a call: the maintainer's `yes` names it. Kelpie tells the \
          maintainer in the thread what it cannot carry out, and the item waits for them. \
          Name each thread once, and give no call on a thread you were told nothing on."

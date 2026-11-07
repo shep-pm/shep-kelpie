@@ -217,7 +217,7 @@ impl Runner {
     }
 
     // The login of the App that covers the repo, as its comments name it
-    pub(super) fn app_login(&self) -> Option<String> {
+    pub(in crate::runner) fn app_login(&self) -> Option<String> {
         self.ports.app_reads.as_ref()?.login(&self.remote)
     }
 

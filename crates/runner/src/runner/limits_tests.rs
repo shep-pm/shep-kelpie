@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::pacer::{HoldKind, RECHECK_SECS, Scope};
+use crate::pacer::{HoldKind, RECHECK_SECS};
 use crate::ports::{CLEAN, Cost, MeterError, Role, Timestamp, Usage};
 use crate::runner::pace::Pace;
 use crate::runner::{Runner, StepReport, step};
@@ -466,10 +466,8 @@ fn an_api_agent_is_never_held_by_the_plan_windows() {
     let (rig, runner) = named("shep", AS_IS);
     // The Claude week is spent and its 5-hour window is full.
     rig.meter.set(Rig::utilization(100, 100));
-    for scope in [Scope::Dispatch, Scope::Turn] {
-        let pace = runner.lock().unwrap().pace(scope, &Limit::Api).unwrap();
-        assert!(matches!(pace, Pace::Clear), "{scope:?} was held");
-    }
+    let pace = runner.lock().unwrap().pace(&Limit::Api).unwrap();
+    assert!(matches!(pace, Pace::Clear), "an API agent was held");
     assert_eq!((rig.meter.reads(), rig.codex_meter.reads()), (0, 0));
 }
 
