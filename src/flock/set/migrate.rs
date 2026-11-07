@@ -166,14 +166,16 @@ async fn kelpie(client: &dyn Connection) -> Result<Option<String>, String> {
     let Some(stripped) = agent_board::strip(held.as_str())? else {
         return Ok(None);
     };
-    let write = Request::SetDogConfig {
-        name: DOG.into(),
-        toml: stripped.text.into(),
-    };
-    send(client, write, |r| {
-        matches!(r, Response::DogConfigSet { .. })
-    })
-    .await?;
+    if let Some(text) = stripped.text {
+        let write = Request::SetDogConfig {
+            name: DOG.into(),
+            toml: text.into(),
+        };
+        send(client, write, |r| {
+            matches!(r, Response::DogConfigSet { .. })
+        })
+        .await?;
+    }
     Ok(Some(format!("kelpie: {}", stripped.said)))
 }
 

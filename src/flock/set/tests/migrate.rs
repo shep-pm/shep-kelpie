@@ -185,6 +185,31 @@ async fn a_section_that_would_not_parse_after_the_strip_is_not_written() {
     assert_eq!(scene.shepherd.section(), section);
 }
 
+// The list in a form no header block holds: a top-level dotted key, and an inline table.
+const INLINE_FORMS: [&str; 2] = [
+    "agent_board.prefer = [\"opus\"]\n[leases]\ncargo-test = 3\n",
+    "agent_board = { prefer = [\"opus\"] }\n[leases]\ncargo-test = 3\n",
+];
+
+#[tokio::test]
+async fn a_list_not_written_as_a_table_is_left_and_named_without_refusing() {
+    for section in INLINE_FORMS {
+        let mut scene = Scene::new().await;
+        scene.shepherd.holds_section(section);
+
+        let said = scene.migrate().await.unwrap();
+
+        let line = said.last().unwrap();
+        assert!(
+            line.starts_with("kelpie: left agent_board.prefer = [\"opus\"]"),
+            "{said:?}"
+        );
+        assert!(line.contains("by hand"), "{line}");
+        assert_eq!(sections_sent(&mut scene.shepherd), Vec::<String>::new());
+        assert_eq!(scene.shepherd.section(), section);
+    }
+}
+
 #[tokio::test]
 async fn a_table_that_would_not_load_is_not_written_and_the_others_are() {
     let mut scene =

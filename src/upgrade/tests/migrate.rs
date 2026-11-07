@@ -373,3 +373,28 @@ async fn a_bare_upgrade_deletes_the_agent_board_table_and_names_it() {
     assert_eq!(rig.shepherd.section(), "[leases]\ncargo-test = 3\n");
     assert_eq!(rig.restarts(), ["kelpie", "koji"]);
 }
+
+#[tokio::test]
+async fn a_bare_upgrade_restarts_though_the_agent_board_list_is_written_inline() {
+    let section = "agent_board = { prefer = [\"opus\"] }\n[leases]\ncargo-test = 3\n";
+    let shepherd = FakeShepherd::on(crate::shepherd::SHEP_VERSION);
+    shepherd.holds_section(section);
+    let table = loading(&shepherd);
+    let mut rig = Rig::holding_on(shepherd, false, table).await;
+    crate::agents::write_bound_stubs(
+        &rig.home.join("agents"),
+        "harness: claude-code\nmodel: claude-opus-5-5\neffort: high\n",
+    );
+    rig.cargo_installs("0.3.0", "0.24.2");
+
+    let (ran, said) = rig.upgrade(Action::Installed).await;
+
+    ran.unwrap();
+    assert!(
+        said.iter()
+            .any(|l| l.starts_with("kelpie: left agent_board.prefer")),
+        "{said:?}"
+    );
+    assert_eq!(rig.shepherd.section(), section);
+    assert_eq!(rig.restarts(), ["kelpie", "koji"]);
+}

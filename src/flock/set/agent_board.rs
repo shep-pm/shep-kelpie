@@ -3,12 +3,13 @@
 /// The table the dog no longer reads
 const TABLE: &str = "agent_board";
 
-/// A section without its `[agent_board]` table, and what was in it
+/// What became of the `[agent_board]` table a section held
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Stripped {
-    /// Every line but the table's, as the maintainer wrote them
-    pub text: String,
-    /// What it removed: the list with its value, or the bare table when it held none
+    /// The section without the table, every other line as the maintainer wrote it, or
+    /// None when the table is not one whose lines can be taken out alone
+    pub text: Option<String>,
+    /// What it removed or left: the list with its value, or the bare table when it held none
     pub said: String,
 }
 
@@ -21,8 +22,8 @@ pub(super) struct Stripped {
 /// # Errors
 ///
 /// A message when the section does not parse, or when what is left does not
-/// parse or is not the section less the table (a header-looking line inside a
-/// string, or the table written inline).
+/// parse (a header-looking line inside a string). A table written inline or as
+/// a dotted key is left where it is and named, as nothing reads it.
 pub(super) fn strip(section: &str) -> Result<Option<Stripped>, String> {
     let before: toml::Table =
         (section.parse()).map_err(|e| format!("the section does not parse: {e}"))?;
@@ -38,16 +39,19 @@ pub(super) fn strip(section: &str) -> Result<Option<Stripped>, String> {
     })?;
     let mut expected = before.clone();
     expected.remove(TABLE);
-    if left != expected {
-        return Err(format!(
-            "`[{TABLE}]` is not a table whose lines can be taken out alone, so the section is left as it is"
-        ));
-    }
-    let said = match held.get("prefer") {
-        Some(prefer) => format!("removed {TABLE}.prefer = {prefer}"),
-        None => format!("removed {TABLE}"),
+    let name = match held.get("prefer") {
+        Some(prefer) => format!("{TABLE}.prefer = {prefer}"),
+        None => TABLE.to_owned(),
     };
-    Ok(Some(Stripped { text, said }))
+    if left != expected {
+        let said = format!("left {name}: it is not a `[{TABLE}]` table, so take it out by hand");
+        return Ok(Some(Stripped { text: None, said }));
+    }
+    let said = format!("removed {name}");
+    Ok(Some(Stripped {
+        text: Some(text),
+        said,
+    }))
 }
 
 // The lines outside the table, with the idle lines before the next header put back.
