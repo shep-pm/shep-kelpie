@@ -165,12 +165,14 @@ pub fn check(title: &str, body: &str, labels: &[String]) -> Vec<Failure> {
             if paths.is_empty() {
                 failures.push(Failure::TouchesNoPath);
             }
-            failures.extend(fenced(body).into_iter().map(|(path, harness)| {
-                Failure::Fenced {
-                    path: path.to_owned(),
-                    harness,
-                }
-            }));
+            failures.extend(
+                fenced(body)
+                    .into_iter()
+                    .map(|(path, harness)| Failure::Fenced {
+                        path: path.to_owned(),
+                        harness,
+                    }),
+            );
             let reach = labelled_line(body, HARNESS_REACH).is_some_and(|r| !bare(r).is_empty());
             let adapter = paths.into_iter().find(|p| is_adapter(p));
             if let Some(path) = adapter.filter(|_| !reach) {

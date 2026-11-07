@@ -654,6 +654,9 @@ fn each_fenced_path_is_named_on_its_own() {
 
 #[test]
 fn a_fenced_path_named_only_under_what_to_build_passes() {
-    let body = BODY.replace("- A thing", "- Move `.claude/skills/x/SKILL.md` and `.mcp.json`");
+    let body = BODY.replace(
+        "- A thing",
+        "- Move `.claude/skills/x/SKILL.md` and `.mcp.json`",
+    );
     assert_eq!(of(&body), []);
 }
