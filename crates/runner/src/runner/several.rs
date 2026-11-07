@@ -664,6 +664,24 @@ fn add_refuses_a_dropped_issue_the_board_would_pass_over_as_blocked() {
 }
 
 #[test]
+fn add_refuses_a_dropped_issue_naming_a_fenced_path_instead_of_queueing_it() {
+    let (rig, runner) = seven_dropped_two_slots_held("lunatone");
+    let body = "Touches: `.claude/skills/x/SKILL.md`\n\n## What to build\n\n- A thing\n";
+    rig.forge.open_issue(7, "Title of #7", body);
+
+    let error = rig.ask(&runner, "add", Some("7"))["error"].to_string();
+
+    assert!(error.contains("`.claude/skills/x/SKILL.md`"), "{error}");
+    assert_eq!(rig.dropped(), [7], "#7 stays dropped");
+    assert_eq!(open_items(&rig, &runner), [8, 9]);
+    let queued = said(&runner)
+        .iter()
+        .filter(|line| line.starts_with("#7 skip-cleared"))
+        .count();
+    assert_eq!(queued, 0, "no skip is cleared");
+}
+
+#[test]
 fn an_adoption_for_an_issue_in_flight_waits_for_it_to_end() {
     let (rig, runner) = two_free_slots("rotom");
     rig.push_by_hand("fix/seven", "work.txt");

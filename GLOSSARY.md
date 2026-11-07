@@ -210,7 +210,9 @@ Kelpie's code check that an issue holds every part an implementer builds
 from: a `Touches:` line, what to build, acceptance criteria, harness reach
 when it touches one harness's adapter, blockers when it names any, one
 priority label, and a kind: its `kind:<type>` label, else its title's
-conventional prefix, one of nine conventional types. It reads structure, not quality.
+conventional prefix, one of nine conventional types. It reads structure, not
+quality, and refuses a `Touches:` path a worker's fence refuses, a harness's own
+file such as `.claude/`, since a worker cannot write it.
 `shep kelpie issue check <n>` runs it, and the issue skill holds the same
 format for the agent that writes an issue. The board runs it on every new or
 edited open issue, and the **triager** runs only on one that fails it.

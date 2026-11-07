@@ -231,6 +231,31 @@ fn a_fix_body_the_issue_check_refuses_is_asked_of_the_maintainer_and_never_filed
 }
 
 #[test]
+fn a_fix_naming_a_fenced_path_is_asked_of_the_maintainer_and_never_filed() {
+    let (rig, runner) = red_again();
+    let fenced: &'static str = Box::leak(
+        FIX.replace("`tests/e2e/checkout.rs`", "`.codex/config.toml`")
+            .into_boxed_str(),
+    );
+
+    let report = answers(&rig, &runner, fenced);
+
+    let StepReport::PmAnswered { acted, reply, .. } = report else {
+        panic!("not an answer: {report:?}");
+    };
+    assert_eq!(
+        acted,
+        [
+            "asked the maintainer about test red on main, since the fix I drafted fails the issue check"
+        ]
+    );
+    let reply = reply.expect("the question went to the maintainer");
+    assert!(reply.contains("`.codex/config.toml`"), "{reply}");
+    assert!(reply.contains("ready-for-human"), "{reply}");
+    assert!(rig.forge.created().is_empty());
+}
+
+#[test]
 fn status_shows_what_is_being_done_about_each_red_workflow() {
     let (rig, runner) = rerun();
     let doing = || ask(&rig, &runner, "red_workflows")[0]["doing"].clone();
