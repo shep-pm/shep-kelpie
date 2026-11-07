@@ -17,7 +17,6 @@ use super::talk::At;
 use super::turn::KEEP_BODY_TRUE;
 use crate::board::{HUMAN, READY};
 use crate::ports::{Checks, PullRequestState, Timestamp};
-use crate::settings::Merging;
 use crate::skills::Step;
 use crate::state::{RulingKind, StateError, Stuck};
 use crate::work_item::{Phase, Review, Turn, WorkItem, foreign_change};
@@ -113,7 +112,7 @@ impl Runner {
             return Ok(parked);
         }
         if known.head.is_none() {
-            if self.settings.git.merging == Merging::Auto {
+            if self.merges_unasked() {
                 return self.regate_unknown(number, &pr.head);
             }
             let head = Some(pr.head.clone());
@@ -225,7 +224,7 @@ impl Runner {
             && !late_fix
             && rivals.is_empty()
             && borrowed.is_none();
-        if self.settings.git.merging == Merging::Auto && vouched {
+        if self.merges_unasked() && vouched {
             self.update(|item| {
                 item.phase = Phase::Merge {
                     head,

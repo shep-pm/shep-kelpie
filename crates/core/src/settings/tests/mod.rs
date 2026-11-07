@@ -46,7 +46,7 @@ fn the_example_holds_the_first_build_defaults() {
     let s = parse(EXAMPLE).unwrap();
     assert_eq!(s.git.checkout, Path::new("/home/me/GitHub/shep"));
     assert_eq!(s.git.remote.unwrap().as_str(), "shep-pm/shep");
-    assert_eq!(s.git.merging, Merging::Ask);
+    assert_eq!(s.git.merging, Some(Merging::Ask));
     assert!(s.ci.block);
     assert_eq!(s.ci.fix_attempts.cap(), None);
     assert_eq!(s.concurrency.active_items.get(), 1);
@@ -98,10 +98,17 @@ fn the_instructions_file_expands_the_home_folder_and_defaults_to_none() {
 
 #[test]
 fn a_missing_setting_is_named() {
-    let text = EXAMPLE.replace("merging = \"ask\"\n", "");
+    let text = EXAMPLE.replace("block = true\n", "");
     let err = parse_err(&text);
-    assert!(err.contains("missing field `merging`"), "{err}");
-    assert!(err.contains("`git`"), "{err}");
+    assert!(err.contains("missing field `block`"), "{err}");
+    assert!(err.contains("`ci`"), "{err}");
+}
+
+#[test]
+fn git_merging_may_be_left_out() {
+    assert_eq!(parse(EXAMPLE).unwrap().git.merging, Some(Merging::Ask));
+    let text = EXAMPLE.replace("merging = \"ask\"\n", "");
+    assert_eq!(parse(&text).unwrap().git.merging, None);
 }
 
 #[test]
@@ -465,7 +472,7 @@ fn a_misspelt_setting_is_named() {
 #[test]
 fn merging_auto_is_accepted() {
     let text = EXAMPLE.replace("merging = \"ask\"", "merging = \"auto\"");
-    assert_eq!(parse(&text).unwrap().git.merging, Merging::Auto);
+    assert_eq!(parse(&text).unwrap().git.merging, Some(Merging::Auto));
 }
 
 #[test]

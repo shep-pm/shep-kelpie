@@ -32,7 +32,7 @@ pub(super) fn left_to_pm(project: &str, merging: Merging) -> (Rig, Mutex<Runner>
         Some(StepReport::Ruling { id, .. }) if id == ticket(71)
     ));
     // The ruling was raised under `ask`, and is judged under `merging`.
-    runner.lock().unwrap().settings.git.merging = merging;
+    runner.lock().unwrap().settings.git.merging = Some(merging);
     (rig, runner)
 }
 
