@@ -93,9 +93,12 @@ pub struct Settings {
     /// may use, from kelpie's agent files
     #[serde(default)]
     pub agents: RoleAgentNames,
-    /// Read by nothing: `shep kelpie upgrade` deletes the table
+    /// Read by nothing: `shep kelpie settings migrate`, which `shep kelpie upgrade`
+    /// runs, deletes the table. Out of the schema as `rulings`'s `pm_alone` is,
+    /// so lookout shows no row for it and the example documents no key for it;
+    /// a table that still holds one loads, until migrate reaches it.
     #[serde(default)]
-    #[schemars(extend("deprecated" = true, "type" = "object"))]
+    #[schemars(skip)]
     pub pacing: Option<Gone>,
     /// What every worker is started with
     pub worker: Worker,

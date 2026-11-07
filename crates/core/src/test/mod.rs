@@ -198,9 +198,9 @@ fn a_path_in_toml_reads_back_with_backslashes_and_quotes_intact() {
 /// A runner entry like `settings.example.toml` with `tables` added to its
 /// kelpie table, such as an older `[app.dogs.kelpie.review]`
 pub fn with_tables(entry: &str, tables: &str) -> String {
-    const PACING: &str = "\n[app.dogs.kelpie.pacing]\n";
-    assert!(entry.contains(PACING), "the example's pacing table moved");
-    entry.replace(PACING, &format!("\n{tables}{PACING}"))
+    const WORKER: &str = "[app.dogs.kelpie.worker]\n";
+    assert!(entry.contains(WORKER), "the example's worker table moved");
+    entry.replace(WORKER, &format!("{tables}{WORKER}"))
 }
 
 /// A meter that reports what a test sets, and counts its reads
