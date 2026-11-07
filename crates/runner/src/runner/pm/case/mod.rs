@@ -8,12 +8,15 @@
 //! it never opened. What a stranger wrote goes in nowhere. The reads run with
 //! the runner's lock let go, in the logs job.
 
+mod ci;
 mod threads;
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
+use self::ci::CiReads;
+pub(super) use self::ci::ended_red;
 use crate::board::briefing::quoted;
 use crate::ports::{
     Checks, ForgeError, Issue, PAGE, PullRequest, PullRequestState, Standing, Talk,
@@ -48,6 +51,7 @@ struct Reads {
     issue: Result<Issue, ForgeError>,
     pull: Option<Result<PullRequest, ForgeError>>,
     talk: Option<Result<Talk, ForgeError>>,
+    ci: Option<CiReads>,
 }
 
 impl Runner {
@@ -57,6 +61,10 @@ impl Runner {
     /// A case that could not be read or written is noted there and in the log.
     pub(super) fn pm_cases(&mut self, folder: &Path) -> BTreeMap<TicketId, String> {
         let dir = folder.join(CASES);
+        let open: Vec<TicketId> = self.state.work_items.iter().map(|i| i.issue).collect();
+        self.pm
+            .run_logs
+            .retain(|(ticket, ..), _| open.contains(ticket));
         let cleared = match std::fs::remove_dir_all(&dir) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
@@ -71,8 +79,12 @@ impl Runner {
                 continue;
             }
             let file = format!("{CASES}/{ticket}.md");
-            let reads = self.case_reads(&parked);
-            let (text, gaps) = self.case_text(&parked, reads);
+            let mut reads = self.case_reads(&parked);
+            let ci = reads.ci.take();
+            let (text, gaps) = self.case_text(&parked, reads, ci.as_ref());
+            if let Some(ci) = ci {
+                self.keep_run_logs(ticket, ci);
+            }
             let written = match &cleared {
                 Err(e) => Err(format!(
                     "cannot clear {}: {}, so any case left there is stale",
@@ -139,11 +151,25 @@ impl Runner {
             (kept.and_then(|l| l.talk(number)).cloned())
                 .unwrap_or_else(|| self.ports.forge.talk(&self.remote, number))
         });
-        Reads { issue, pull, talk }
+        let ci = match &pull {
+            Some(Ok(pull)) => Some(self.ci_reads(parked.ticket, &pull.head)),
+            _ => None,
+        };
+        Reads {
+            issue,
+            pull,
+            talk,
+            ci,
+        }
     }
 
     // The case's text, and each part that could not be read with why
-    fn case_text(&self, parked: &Parked, reads: Reads) -> (String, Vec<(&'static str, String)>) {
+    fn case_text(
+        &self,
+        parked: &Parked,
+        reads: Reads,
+        ci: Option<&CiReads>,
+    ) -> (String, Vec<(&'static str, String)>) {
         let mut gaps = Vec::new();
         let mut out = format!("{OPENING}\n\n# Case for {}\n\n", parked.ticket.shown());
         if let Some(ruling) = &parked.ruling {
@@ -185,6 +211,10 @@ impl Runner {
                 let _ = write!(out, "### Open review threads and comments\n\n({why})\n");
                 gaps.push(("the threads", why));
             }
+        }
+        out.push('\n');
+        if let Some(why) = self.ci_part(&mut out, parked.ticket, ci) {
+            gaps.push(("the CI", why));
         }
         (out, gaps)
     }
