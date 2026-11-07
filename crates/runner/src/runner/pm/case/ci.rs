@@ -1,7 +1,7 @@
 //! A case's CI part: every run on the pull request's head, then the whole log of each that failed
 //!
 //! A completed run's log does not change, so the runner keeps each one it read
-//! in memory, by item and run, and a wake reads only the logs it lacks. The
+//! in memory, by item, run and attempt, and a wake reads only the logs it lacks. The
 //! list is read at every wake, since runs start and end. A green run's log is
 //! not read: the project manager asks for it when it needs it.
 
@@ -28,7 +28,7 @@ pub(in crate::runner::pm) fn ended_red(run: &HeadRun) -> bool {
 pub(super) struct CiReads {
     head: String,
     runs: Result<Vec<HeadRun>, ForgeError>,
-    fresh: BTreeMap<u64, Result<String, ForgeError>>,
+    fresh: BTreeMap<(u64, u32), Result<String, ForgeError>>,
 }
 
 impl Runner {
@@ -39,15 +39,17 @@ impl Runner {
             .unwrap_or_else(|| self.ports.forge.head_runs(&self.remote, head));
         let mut fresh = BTreeMap::new();
         for run in runs.iter().flatten().filter(|r| ended_red(r)) {
-            if self.pm.run_logs.contains_key(&(ticket, run.run)) {
+            let key = (run.run, run.attempt);
+            if self.pm.run_logs.contains_key(&(ticket, key.0, key.1)) {
                 continue;
             }
-            let read = (found.and_then(|l| l.run_log(run.run)).cloned()).unwrap_or_else(|| {
-                self.ports
-                    .forge
-                    .run_log(&self.remote, run.run, LogPart::Failed)
-            });
-            fresh.insert(run.run, read);
+            let read = (found.and_then(|l| l.run_log(run.run, run.attempt)).cloned())
+                .unwrap_or_else(|| {
+                    self.ports
+                        .forge
+                        .run_log(&self.remote, run.run, LogPart::Failed)
+                });
+            fresh.insert(key, read);
         }
         CiReads {
             head: head.to_owned(),
@@ -59,9 +61,9 @@ impl Runner {
     // Keeps each log `ci` read, so a later wake does not read it again. A log
     // that could not be read is asked for again.
     pub(super) fn keep_run_logs(&mut self, ticket: TicketId, ci: CiReads) {
-        for (run, read) in ci.fresh {
+        for ((run, attempt), read) in ci.fresh {
             if let Ok(text) = read {
-                self.pm.run_logs.insert((ticket, run), text);
+                self.pm.run_logs.insert((ticket, run, attempt), text);
             }
         }
     }
@@ -119,14 +121,18 @@ impl Runner {
                 plain(&run.workflow),
                 run.run
             );
-            self.run_log_part(out, ticket, run.run, ci);
+            self.run_log_part(out, ticket, (run.run, run.attempt), ci);
         }
         None
     }
 
     // One failed run's log, quoted, or what became of it
-    fn run_log_part(&self, out: &mut String, ticket: TicketId, run: u64, ci: &CiReads) {
-        let read = match (self.pm.run_logs.get(&(ticket, run)), ci.fresh.get(&run)) {
+    fn run_log_part(&self, out: &mut String, ticket: TicketId, key: (u64, u32), ci: &CiReads) {
+        let run = key.0;
+        let read = match (
+            self.pm.run_logs.get(&(ticket, key.0, key.1)),
+            ci.fresh.get(&key),
+        ) {
             (Some(kept), _) => Ok(kept),
             (None, Some(Ok(fresh))) => Ok(fresh),
             (None, Some(Err(e))) => Err(e),

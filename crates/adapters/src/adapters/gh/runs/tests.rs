@@ -645,7 +645,7 @@ fn a_job_listing_gh_cannot_answer_leaves_the_log_empty() {
     assert!(!read.timed_out);
 }
 
-// `gh run list --commit <sha> --json databaseId,workflowName,conclusion`: a run
+// `gh run list --commit <sha> --json databaseId,workflowName,conclusion,attempt`: a run
 // still going prints an empty `conclusion`
 const HEAD_RUNS: &[u8] = include_bytes!("../../../../../../fixtures/gh-run-list-commit.json");
 
@@ -668,6 +668,16 @@ fn head_runs_lists_every_run_on_the_commit() {
         &ended[1..],
         [Some("cancelled"), Some("failure"), Some("success")]
     );
+}
+
+#[test]
+fn head_runs_names_the_attempt_a_rerun_advanced() {
+    let runs = parse_head_runs(HEAD_RUNS).unwrap();
+
+    let attempts: Vec<u32> = runs.iter().map(|r| r.attempt).collect();
+    assert_eq!(attempts, [1, 1, 2, 1]);
+    let bare = br#"[{"conclusion":"failure","databaseId":7,"workflowName":"test"}]"#;
+    assert_eq!(parse_head_runs(bare).unwrap()[0].attempt, 1);
 }
 
 #[test]
@@ -701,7 +711,7 @@ fn head_runs_asks_for_one_commit_and_the_most_github_answers() {
         asked,
         [
             "run list --repo shep-pm/shep-kelpie --commit abc123 --limit 1000 \
-          --json databaseId,workflowName,conclusion"
+          --json databaseId,workflowName,conclusion,attempt"
         ]
     );
 }

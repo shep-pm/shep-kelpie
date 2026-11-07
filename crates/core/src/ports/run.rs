@@ -78,6 +78,9 @@ pub struct HeadRun {
     pub workflow: String,
     /// The forge's id for the run
     pub run: u64,
+    /// Which attempt of the run this is, from 1: a rerun keeps the run's id and
+    /// advances this, and its log is a new one
+    pub attempt: u32,
     /// How it ended, as the forge words it: `success`, `failure`, `cancelled`
     /// and the rest. None while the run is still going.
     pub conclusion: Option<String>,

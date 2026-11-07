@@ -151,8 +151,8 @@ impl Runner {
         pulls.dedup();
         let open: BTreeSet<TicketId> = parked.iter().map(|p| p.ticket).collect();
         let kept = (self.pm.run_logs.keys())
-            .filter(|(ticket, _)| open.contains(ticket))
-            .map(|&(_, run)| run)
+            .filter(|(ticket, ..)| open.contains(ticket))
+            .map(|&(_, run, attempt)| (run, attempt))
             .collect();
         if heads.is_empty() && runs.is_empty() && ends.is_empty() && pulls.is_empty() {
             return None;
@@ -208,8 +208,8 @@ pub(super) struct LogsJob {
     ends: Vec<TicketId>,
     // Each parked item's pull request, whose state and talk its case holds
     pulls: Vec<u64>,
-    // Each run whose log a case already holds, which is not read again
-    kept: BTreeSet<u64>,
+    // Each run attempt whose log a case already holds, which is not read again
+    kept: BTreeSet<(u64, u32)>,
 }
 
 /// What a [`LogsJob`] read, errors as the inline call returns them
@@ -228,7 +228,7 @@ pub(super) struct Logs {
     // By head, every run on it
     head_runs: BTreeMap<String, Result<Vec<HeadRun>, ForgeError>>,
     // By run, its failed log in whole, for each failed run no case held yet
-    run_logs: BTreeMap<u64, Result<String, ForgeError>>,
+    run_logs: BTreeMap<(u64, u32), Result<String, ForgeError>>,
 }
 
 impl Logs {
@@ -247,9 +247,9 @@ impl Logs {
         self.head_runs.get(head)
     }
 
-    // What the read found of run `run`'s log, or None when it read none
-    pub(super) fn run_log(&self, run: u64) -> Option<&Result<String, ForgeError>> {
-        self.run_logs.get(&run)
+    // What the read found of attempt `attempt` of run `run`'s log, or None when it read none
+    pub(super) fn run_log(&self, run: u64, attempt: u32) -> Option<&Result<String, ForgeError>> {
+        self.run_logs.get(&(run, attempt))
     }
 
     // What the read found of the talk on pull request `number`, or None when it read none
@@ -304,9 +304,10 @@ impl LogsJob {
         for head in heads {
             let listed = forge.head_runs(&remote, head);
             for run in listed.iter().flatten().filter(|r| ended_red(r)) {
-                if !kept.contains(&run.run) && !run_logs.contains_key(&run.run) {
+                let key = (run.run, run.attempt);
+                if !kept.contains(&key) && !run_logs.contains_key(&key) {
                     let read = forge.run_log(&remote, run.run, LogPart::Failed);
-                    run_logs.insert(run.run, read);
+                    run_logs.insert(key, read);
                 }
             }
             head_runs.insert(head.to_owned(), listed);

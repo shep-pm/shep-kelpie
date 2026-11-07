@@ -73,12 +73,13 @@ fn list_head_runs(
         "--limit",
         &limit,
         "--json",
-        "databaseId,workflowName,conclusion",
+        "databaseId,workflowName,conclusion,attempt",
     ])?;
     parse_head_runs(&listed)
 }
 
-// A run still going prints an empty `conclusion`
+// A run still going prints an empty `conclusion`. A run `gh` prints no attempt
+// for is on its first.
 fn parse_head_runs(listed: &[u8]) -> Result<Vec<HeadRun>, ForgeError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -86,6 +87,7 @@ fn parse_head_runs(listed: &[u8]) -> Result<Vec<HeadRun>, ForgeError> {
         database_id: u64,
         workflow_name: String,
         conclusion: String,
+        attempt: Option<u32>,
     }
     let runs: Vec<Run> = serde_json::from_slice(listed).map_err(|_| unreadable(listed))?;
     Ok(runs
@@ -93,6 +95,7 @@ fn parse_head_runs(listed: &[u8]) -> Result<Vec<HeadRun>, ForgeError> {
         .map(|r| HeadRun {
             workflow: r.workflow_name,
             run: r.database_id,
+            attempt: r.attempt.unwrap_or(1),
             conclusion: Some(r.conclusion).filter(|c| !c.is_empty()),
         })
         .collect())

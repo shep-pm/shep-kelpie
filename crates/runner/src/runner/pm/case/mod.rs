@@ -64,7 +64,7 @@ impl Runner {
         let open: Vec<TicketId> = self.state.work_items.iter().map(|i| i.issue).collect();
         self.pm
             .run_logs
-            .retain(|(ticket, _), _| open.contains(ticket));
+            .retain(|(ticket, ..), _| open.contains(ticket));
         let cleared = match std::fs::remove_dir_all(&dir) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),

@@ -538,6 +538,7 @@ fn head_run(workflow: &str, run: u64, conclusion: Option<&str>) -> HeadRun {
     HeadRun {
         workflow: workflow.to_owned(),
         run,
+        attempt: 1,
         conclusion: conclusion.map(str::to_owned),
     }
 }
@@ -692,6 +693,31 @@ fn a_failed_log_is_read_once() {
         case.contains("> FIRST-LOG") && case.contains("> SECOND-LOG"),
         "{case}"
     );
+}
+
+#[test]
+fn a_rerun_that_fails_again_is_read_again_under_the_same_run() {
+    let (rig, runner, head) = red("case-ci-rerun", "A title", BODY);
+    rig.forge
+        .set_head_runs(&head, vec![head_run("test", 901, Some("failure"))]);
+    rig.forge.set_run_log(901, LogPart::Failed, "FIRST-ATTEMPT");
+    wake(&rig, &runner);
+    assert!(case(&rig, 7).unwrap().contains("> FIRST-ATTEMPT"));
+
+    let mut again = head_run("test", 901, Some("failure"));
+    again.attempt = 2;
+    rig.forge.set_head_runs(&head, vec![again]);
+    rig.forge
+        .set_run_log(901, LogPart::Failed, "SECOND-ATTEMPT");
+    wake(&rig, &runner);
+
+    let case = case(&rig, 7).unwrap();
+    assert!(case.contains("> SECOND-ATTEMPT"), "{case}");
+    assert!(!case.contains("FIRST-ATTEMPT"), "{case}");
+    assert_eq!(rig.forge.run_log_reads(901), 2);
+
+    wake(&rig, &runner);
+    assert_eq!(rig.forge.run_log_reads(901), 2, "the second is kept too");
 }
 
 #[test]
