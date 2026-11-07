@@ -50,6 +50,10 @@ pub struct Ruling {
     /// answer is owed, so a runner that restarts asks again
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asked: Option<PmAsked>,
+    /// Whether its head carries commits of other open pull requests, which
+    /// a yes merges too. Only the maintainer's yes passes it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub borrowed: bool,
 }
 
 /// What the agent board says about one agent and one kind of work, as the
@@ -129,6 +133,7 @@ impl Ruling {
             raised: None,
             approaches: Vec::new(),
             asked: None,
+            borrowed: false,
         }
     }
 

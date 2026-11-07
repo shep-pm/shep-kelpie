@@ -80,6 +80,23 @@ fn a_head_carrying_another_open_pull_requests_commits_gets_a_merge_ruling_naming
 }
 
 #[test]
+fn a_borrowing_heads_ruling_is_saved_as_borrowed_and_another_is_not() {
+    let saved = |rig: &Rig| -> serde_json::Value {
+        let text = std::fs::read_to_string(rig.paths().state).unwrap();
+        serde_json::from_str(&text).unwrap()
+    };
+    let (rig, runner, head) = borrowing("shep", |_| {});
+    rig.forge.set_checks(&head, Checks::Passed);
+    rig.verdict(&runner);
+    assert_eq!(saved(&rig)["rulings"][0]["borrowed"], true);
+
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge.set_checks(&head, Checks::Passed);
+    rig.verdict(&runner);
+    assert_eq!(saved(&rig)["rulings"][0].get("borrowed"), None);
+}
+
+#[test]
 fn a_borrowed_pull_request_no_work_item_holds_says_kelpie_has_no_record_of_it() {
     let (rig, runner, head) = borrowing("shep", |_| {});
     rig.forge.set_checks(&head, Checks::Passed);
