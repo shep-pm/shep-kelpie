@@ -456,8 +456,12 @@ fn a_full_page_of_threads_says_older_text_may_be_missing() {
 
     assert!(!case99.contains("may be missing"), "99 is not a full page");
     let case = case(&rig, 7).unwrap();
-    assert!(case.contains("full at 100"), "{case}");
-    assert!(case.contains("older text may be missing"), "{case}");
+    assert!(case.contains("the newest threads may be missing"), "{case}");
+    assert!(
+        !case.contains("older"),
+        "threads keep the oldest 100: {case}"
+    );
+    assert!(case.contains("Read the rest on the pull request"), "{case}");
     assert!(case.contains("> thread 99"), "what came back is all there");
 }
 
@@ -482,4 +486,33 @@ fn the_wakes_prompt_names_the_case_and_carries_none_of_it() {
         assert!(!board_of(&rig).contains(text), "{text} is on the board");
     }
     assert!(case(&rig, 7).unwrap().contains("> UNIQUE-ISSUE-TEXT"));
+}
+
+#[test]
+fn a_full_list_of_replies_or_comments_names_which_end_may_be_missing() {
+    let (rig, runner, _) = red("case-full-ends", "A title", BODY);
+    let says = &rig.forge.coderabbit;
+    let thread = says.person_opens(71, "a.rs", "octocat", Standing::Writer, "thread");
+    for i in 1..100 {
+        says.person_replies(&thread, "octocat", Standing::Writer, &format!("reply {i}"));
+    }
+    wake(&rig, &runner);
+    let replies = case(&rig, 7).unwrap();
+
+    for i in 0..100 {
+        says.person_says(71, "octocat", Standing::Writer, &format!("comment {i}"));
+    }
+    wake(&rig, &runner);
+    let both = case(&rig, 7).unwrap();
+
+    assert!(
+        replies.contains("its newest replies may be missing"),
+        "{replies}"
+    );
+    assert!(!replies.contains("comments may be missing"), "{replies}");
+    assert!(both.contains("its older comments may be missing"), "{both}");
+    assert!(
+        !both.contains("newest threads"),
+        "one thread is not a full page"
+    );
 }

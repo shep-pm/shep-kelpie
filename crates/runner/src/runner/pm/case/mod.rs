@@ -225,13 +225,25 @@ impl Runner {
             let _ = write!(out, "{}\n\n{}\n\n", said(remark), self.data(&remark.body));
         }
         let full = |n: usize| n >= PAGE;
-        let replies = talk.threads.iter().any(|t| full(t.remarks.len()));
-        if full(talk.comments.len()) || full(talk.threads.len()) || replies {
-            let _ = writeln!(
-                out,
-                "A list of these came back full at {PAGE}, the most GitHub gives in one page, so \
-                 older text may be missing. Read the rest on the pull request on GitHub."
-            );
+        let gaps = [
+            (
+                full(talk.comments.len()),
+                "The conversation came back full: its older comments may be missing.",
+            ),
+            (
+                full(talk.threads.len()),
+                "The review threads came back full: the newest threads may be missing.",
+            ),
+            (
+                talk.threads.iter().any(|t| full(t.remarks.len())),
+                "A thread came back with a full list of replies: its newest replies may be missing.",
+            ),
+        ];
+        for (_, said) in gaps.iter().filter(|(is, _)| *is) {
+            let _ = writeln!(out, "{said} GitHub gives {PAGE} of each in one page.");
+        }
+        if gaps.iter().any(|(is, _)| *is) {
+            out.push_str("Read the rest on the pull request on GitHub.\n");
         }
     }
 
