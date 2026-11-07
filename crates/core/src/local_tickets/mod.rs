@@ -541,8 +541,17 @@ impl Tickets for LocalTickets {
         parent: TicketId,
         child: TicketId,
     ) -> Result<(), ForgeError> {
-        self.update(child, |s| s.parent = Some(parent))?;
-        Ok(())
+        let mut held_by = None;
+        self.update(child, |s| match s.parent {
+            Some(other) if other != parent => held_by = Some(other),
+            _ => s.parent = Some(parent),
+        })?;
+        match held_by {
+            Some(other) => Err(ForgeError::Failed(format!(
+                "ticket {child} is already a sub-issue of {other}"
+            ))),
+            None => Ok(()),
+        }
     }
 
     fn set_issue_label(

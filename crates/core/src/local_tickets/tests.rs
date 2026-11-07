@@ -370,3 +370,16 @@ fn a_linked_ticket_is_listed_under_its_parent() {
     assert_eq!(tickets.issue(&repo(), child).unwrap().parent, Some(parent));
     assert!(tickets.add_sub_issue(&repo(), id("k9"), child).is_err());
 }
+
+#[test]
+fn a_child_with_a_parent_is_not_moved_to_another() {
+    let (_home, tickets) = store();
+    let first = file(&tickets, "First", &[]);
+    let second = file(&tickets, "Second", &[]);
+    let child = file(&tickets, "Child", &[]);
+    tickets.add_sub_issue(&repo(), first, child).unwrap();
+    assert!(tickets.add_sub_issue(&repo(), second, child).is_err());
+    assert_eq!(tickets.issue(&repo(), child).unwrap().parent, Some(first));
+    assert_eq!(tickets.sub_issues(&repo(), first).unwrap().len(), 1);
+    assert!(tickets.sub_issues(&repo(), second).unwrap().is_empty());
+}

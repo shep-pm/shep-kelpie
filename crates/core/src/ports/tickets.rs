@@ -216,8 +216,8 @@ pub trait Tickets: Send + Sync {
     /// # Errors
     ///
     /// [`ForgeError`] when the source refuses the link, as it does for a
-    /// ticket it does not hold or a child that is a pull request, or cannot be
-    /// asked.
+    /// ticket it does not hold, a child that already has another parent or a
+    /// child that is a pull request, or cannot be asked.
     fn add_sub_issue(
         &self,
         repo: &ForgeSlug,
