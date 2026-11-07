@@ -185,6 +185,8 @@ impl Scene {
             &repo,
             &["remote", "add", "origin", "https://github.com/o/r.git"],
         );
+        // A table `settings migrate` has reached holds no pacing.
+        table.remove("pacing");
         table["git"]["checkout"] = json!(repo);
         table["git"]["remote"] = json!(format!("shep-pm/{name}"));
         // A private project that names the models its owner runs: the reviewers

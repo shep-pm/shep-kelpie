@@ -84,6 +84,10 @@ pub enum Kind {
     Workflows,
     /// The end of one CI run's failed log
     RunLogTail,
+    /// Every CI run on a head, listed
+    HeadRuns,
+    /// One CI run's log, read whole
+    RunLog,
     /// The failed jobs of a head's CI runs rerun
     RerunFailed,
     /// The failed jobs of one CI run rerun
@@ -185,6 +189,8 @@ impl Kind {
                 | Self::BranchRuns
                 | Self::Workflows
                 | Self::RunLogTail
+                | Self::HeadRuns
+                | Self::RunLog
                 | Self::ReviewBot
                 | Self::MergeQueue
                 | Self::RateLimitReset
@@ -259,6 +265,8 @@ impl Kind {
             | Self::BranchRuns
             | Self::Workflows
             | Self::RunLogTail
+            | Self::HeadRuns
+            | Self::RunLog
             | Self::RerunFailed
             | Self::RerunRun
             | Self::ApproveWorkflowRuns

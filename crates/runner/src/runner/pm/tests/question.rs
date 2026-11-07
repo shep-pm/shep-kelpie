@@ -483,7 +483,7 @@ fn a_recommendation_naming_this_machine_is_withheld_from_the_post() {
 }
 
 // Issue 7's worker asking `ASKS` on its pull request 71
-fn asking_on_a_pull_request(project: &str) -> (Rig, Mutex<Runner>) {
+pub(super) fn asking_on_a_pull_request(project: &str) -> (Rig, Mutex<Runner>) {
     let (rig, runner) = with_pm(project);
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);

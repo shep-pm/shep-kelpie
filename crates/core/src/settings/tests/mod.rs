@@ -4,6 +4,7 @@ mod builds;
 mod dependencies;
 mod e2e;
 mod gateway_kind;
+mod pacing;
 mod registries;
 mod repo_setup;
 mod reviews;
@@ -53,8 +54,6 @@ fn the_example_holds_the_first_build_defaults() {
     assert_eq!(s.concurrency.pending_rulings, 2);
     assert_eq!(s.agents.gone_keys(), Vec::<&str>::new());
     assert_eq!(s.agents.reviewers, None, "the example sets no gone key");
-    assert!(s.pacing.enabled);
-    assert_eq!(s.pacing.kickoff_hours.get(), 8);
     assert_eq!(s.worker.turn_timeout.get(), 60);
     assert_eq!(s.worker.compact_window, 200_000);
     assert!(
@@ -182,14 +181,6 @@ fn fix_attempts_is_a_cap_from_0_or_minus_1_for_none_and_none_when_absent() {
 }
 
 #[test]
-fn a_missing_nested_setting_is_named_with_its_table() {
-    let text = EXAMPLE.replace("kickoff_hours = 8\n", "");
-    let err = parse_err(&text);
-    assert!(err.contains("missing field `kickoff_hours`"), "{err}");
-    assert!(err.contains("`pacing`"), "{err}");
-}
-
-#[test]
 fn ci_block_must_be_said_either_way() {
     let err = parse_err(&EXAMPLE.replace("block = true\n", ""));
     assert!(err.contains("missing field `block`"), "{err}");
@@ -292,22 +283,6 @@ fn the_ci_table_is_not_taken_for_the_old_ci_key() {
         "{}",
         parse_err(&text)
     );
-}
-
-#[test]
-fn pacing_is_on_when_the_table_does_not_say() {
-    let before = EXAMPLE.replace("enabled = true\nkickoff_hours", "kickoff_hours");
-    assert!(!before.contains("[app.dogs.kelpie.pacing]\nenabled"));
-    assert!(parse(&before).unwrap().pacing.enabled);
-}
-
-#[test]
-fn pacing_can_be_turned_off() {
-    let off = EXAMPLE.replace(
-        "[app.dogs.kelpie.pacing]\nenabled = true",
-        "[app.dogs.kelpie.pacing]\nenabled = false",
-    );
-    assert!(!parse(&off).unwrap().pacing.enabled);
 }
 
 #[test]
@@ -670,16 +645,6 @@ fn the_review_settings_reviewer_files_replace_are_refused_saying_what_replaces_e
          agents are files in kelpie's home's `agents` folder, which hold each model and \
          effort: delete it"
     );
-}
-
-#[test]
-fn kickoff_hours_outside_a_day_are_refused() {
-    for hours in ["0", "25", "300", "-1"] {
-        let line = format!("kickoff_hours = {hours}");
-        let err = parse_err(&EXAMPLE.replace("kickoff_hours = 8", &line));
-        assert!(err.contains(&format!("`pacing.{line}`")), "{err}");
-        assert!(err.contains("must be from 1 to 24"), "{err}");
-    }
 }
 
 #[test]
