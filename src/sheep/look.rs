@@ -9,8 +9,11 @@
 //! on the runner for `status` and posted once to the webhook. A refused change
 //! is offered again each wake, so it lands once what refused it is fixed.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
+
+use serde_json::{Map, Value};
 
 use crate::agents;
 use crate::flock::share::{self, Taken};
@@ -38,8 +41,17 @@ pub(super) struct Look {
     agents: PathBuf,
     home: PathBuf,
     last: Option<Read>,
+    // The other projects' tables as the last read held them, this project's own
+    // table as that read held it and as the runner last took it, and what was
+    // last handed over
+    others: Peers,
+    seen: Option<Map<String, Value>>,
+    accepted: Option<Map<String, Value>>,
+    handed: Peers,
     failed: Option<String>,
 }
+
+type Peers = BTreeMap<String, Map<String, Value>>;
 
 /// The folders a runner's settings and agents are read from
 pub(super) struct Sources {
@@ -65,15 +77,47 @@ impl Look {
             agents: sources.agents,
             home,
             last: None,
+            others: Peers::new(),
+            seen: None,
+            accepted: None,
+            handed: Peers::new(),
             failed: None,
+        }
+    }
+
+    // Every project's table as the last read held them, and this project's
+    // own as the runner last took it. Kelpie's own section is not among them.
+    fn peers(&self) -> Peers {
+        let mut peers = self.others.clone();
+        peers.extend(self.accepted.clone().map(|own| (self.sheep.clone(), own)));
+        peers
+    }
+
+    /// Hands a runner that has just opened the tables the last read held
+    pub(super) fn hand_first(&mut self, runner: &mut Runner) {
+        self.handed = self.peers();
+        runner.set_peer_tables(self.handed.clone());
+    }
+
+    // Hands `runner` the tables if they changed since the last time.
+    fn hand(&mut self, runner: &Mutex<Runner>) {
+        let peers = self.peers();
+        if peers != self.handed {
+            self.handed.clone_from(&peers);
+            (runner.lock())
+                .unwrap_or_else(PoisonError::into_inner)
+                .set_peer_tables(peers);
         }
     }
 
     /// Reads the tables, and remembers them
     pub(super) fn read(&mut self) -> Result<Loaded, String> {
-        self.fetch().map_err(|e| match e {
+        let loaded = self.fetch().map_err(|e| match e {
             Unread::Shepherd(why) | Unread::Table(why) => why,
-        })
+        })?;
+        // The runner starts on what this read holds.
+        self.accepted.clone_from(&self.seen);
+        Ok(loaded)
     }
 
     fn fetch(&mut self) -> Result<Loaded, Unread> {
@@ -83,6 +127,8 @@ impl Look {
             &self.sheep,
         ))
         .map_err(Unread::Shepherd)?;
+        self.others = tables.others.clone();
+        self.seen.clone_from(&tables.project);
         let loaded = source::load(&tables, &self.sheep, &self.home, &self.folder)
             .map_err(|e| Unread::Table(e.to_string()))?;
         let agents = agents::snapshot(&self.agents);
@@ -151,6 +197,11 @@ impl Look {
 
     /// Reads again, and hands `runner` whatever changed since the last read
     pub(super) fn again(&mut self, runner: &Mutex<Runner>) {
+        self.reread_settings(runner);
+        self.hand(runner);
+    }
+
+    fn reread_settings(&mut self, runner: &Mutex<Runner>) {
         const KEPT: &str = "cannot read the settings again, so they stay as they are";
         const WAIT: &str = "a git settings change waits, so they stay as they are";
         const BAD: &str = "the settings table does not load, so they stay as they are";
@@ -163,6 +214,7 @@ impl Look {
         };
         if before == self.last {
             self.failed = None;
+            self.accepted.clone_from(&self.seen);
             // The repo's plugins come from its default branch, which no
             // setting of kelpie's announces.
             let mut runner = runner.lock().unwrap_or_else(PoisonError::into_inner);
@@ -189,6 +241,7 @@ impl Look {
         match runner.reread(loaded.settings, loaded.kelpie) {
             Ok(line) => {
                 self.failed = None;
+                self.accepted.clone_from(&self.seen);
                 runner.accept();
                 if let Some(line) = line {
                     eprintln!("{line}");
@@ -232,13 +285,28 @@ mod tests {
 
     // A shepherd in memory, holding whatever `table` holds when asked.
     fn shepherd(home: &std::path::Path, table: Arc<Mutex<Map<String, Value>>>) -> Arc<dyn Dial> {
+        shepherd_of(home, table, Arc::default())
+    }
+
+    // ... and whatever `others` holds, for the sheep beside it.
+    fn shepherd_of(
+        home: &std::path::Path,
+        table: Arc<Mutex<Map<String, Value>>>,
+        others: Arc<Mutex<Peers>>,
+    ) -> Arc<dyn Dial> {
         let (shepherd, _sent) =
             Memory::answering(home, SHEP_VERSION, move |request| match request {
                 Request::DogSheepSettings { .. } => Response::DogSheepSettings {
-                    tables: BTreeMap::from([(
-                        "shep".to_owned(),
-                        DogTable::from(table.lock().unwrap().clone()),
-                    )]),
+                    tables: others
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .map(|(name, table)| (name.clone(), DogTable::from(table.clone())))
+                        .chain([(
+                            "shep".to_owned(),
+                            DogTable::from(table.lock().unwrap().clone()),
+                        )])
+                        .collect(),
                 },
                 Request::DogConfigResolved { .. } => Response::DogSection {
                     toml: SECTION.to_owned().into(),
@@ -352,6 +420,93 @@ mod tests {
 
         let runner = runner.lock().unwrap();
         assert_eq!(runner.settings().git.merging, Merging::Auto);
+    }
+
+    #[test]
+    fn a_change_to_another_projects_table_reaches_the_runner_on_its_next_look() {
+        let rig = Rig::new("shep");
+        let runner = rig.open().unwrap();
+        let entry = std::fs::read_to_string(rig.settings_file()).unwrap();
+        let own = project_table(&entry);
+        let koji = |merging: &str| {
+            let mut table = Map::new();
+            table.insert("git".into(), serde_json::json!({ "merging": merging }));
+            table
+        };
+        let others = Arc::new(Mutex::new(Peers::from([("koji".to_owned(), koji("ask"))])));
+        let shep_home = tempfile::tempdir().unwrap();
+        let dial = shepherd_of(
+            shep_home.path(),
+            Arc::new(Mutex::new(own.clone())),
+            Arc::clone(&others),
+        );
+        let paths = rig.paths();
+        let mut look = Look::new(
+            dial,
+            shep_home.path().to_owned(),
+            "shep".into(),
+            Sources {
+                folder: paths.folder.clone(),
+                agents: paths.agents.clone(),
+            },
+            rig.home.path().to_owned(),
+        );
+        look.read().unwrap();
+        look.again(&runner);
+        let held = runner.lock().unwrap().peer_tables().clone();
+        assert_eq!(held.keys().collect::<Vec<_>>(), ["koji", "shep"]);
+        assert_eq!(held["koji"], koji("ask"));
+        assert_eq!(held["shep"], own);
+
+        others
+            .lock()
+            .unwrap()
+            .insert("koji".to_owned(), koji("auto"));
+        look.again(&runner);
+        assert_eq!(runner.lock().unwrap().peer_tables()["koji"], koji("auto"));
+    }
+
+    #[test]
+    fn a_table_that_does_not_load_keeps_its_own_copy_while_the_others_move_on() {
+        let rig = Rig::new("shep");
+        let runner = rig.open().unwrap();
+        let entry = std::fs::read_to_string(rig.settings_file()).unwrap();
+        let own = Arc::new(Mutex::new(project_table(&entry)));
+        let koji = |merging: &str| {
+            let mut table = Map::new();
+            table.insert("git".into(), serde_json::json!({ "merging": merging }));
+            table
+        };
+        let others = Arc::new(Mutex::new(Peers::from([("koji".to_owned(), koji("ask"))])));
+        let shep_home = tempfile::tempdir().unwrap();
+        let dial = shepherd_of(shep_home.path(), Arc::clone(&own), Arc::clone(&others));
+        let paths = rig.paths();
+        let mut look = Look::new(
+            dial,
+            shep_home.path().to_owned(),
+            "shep".into(),
+            Sources {
+                folder: paths.folder.clone(),
+                agents: paths.agents.clone(),
+            },
+            rig.home.path().to_owned(),
+        );
+        look.read().unwrap();
+        look.again(&runner);
+        let good = runner.lock().unwrap().peer_tables()["shep"].clone();
+
+        own.lock()
+            .unwrap()
+            .insert("bogus".into(), Value::Bool(true));
+        others
+            .lock()
+            .unwrap()
+            .insert("koji".to_owned(), koji("auto"));
+        look.again(&runner);
+
+        let held = runner.lock().unwrap().peer_tables().clone();
+        assert_eq!(held["koji"], koji("auto"));
+        assert_eq!(held["shep"], good);
     }
 
     #[test]

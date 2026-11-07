@@ -8,6 +8,7 @@
 //! below the shepherd's oldest protocol. An earlier shepherd is refused,
 //! since kelpie leans on what its pinned version shipped.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde_json::{Map, Value};
@@ -165,13 +166,15 @@ fn digits(text: &str) -> usize {
         .unwrap_or(text.len())
 }
 
-/// Kelpie's two tables, as the shepherd holds them
+/// Kelpie's tables, as the shepherd holds them
 ///
 /// `Debug` does not leak either table: `[kelpie]` holds the webhook's URL.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct Tables {
     /// The runner sheep's `[app.dogs.kelpie]` table, if it has one
     pub project: Option<Map<String, Value>>,
+    /// Every other sheep's `[app.dogs.kelpie]` table, by sheep
+    pub others: BTreeMap<String, Map<String, Value>>,
     /// Kelpie's `[kelpie]` section of `dogs.toml` as TOML text, empty when unset
     pub kelpie: String,
 }
@@ -207,18 +210,27 @@ pub async fn read_tables_with(client: &dyn Connection, sheep: &str) -> Result<Ta
     let asked = |what: &str, e: &dyn core::fmt::Display| {
         format!("kelpie's shepherd did not answer with {what}: {e}")
     };
-    let project = match client
+    let (project, others) = match client
         .request(Request::DogSheepSettings { dog: DOG.into() })
         .await
         .map_err(|e| asked("the sheep's tables", &e))?
     {
         Response::DogSheepSettings { mut tables } => {
-            tables.remove(sheep).map(|t| t.as_map().clone())
+            let project = tables.remove(sheep).map(|t| t.as_map().clone());
+            let others = tables
+                .into_iter()
+                .map(|(name, table)| (name, table.as_map().clone()))
+                .collect();
+            (project, others)
         }
         other => return Err(asked("the sheep's tables", &format!("{other:?}"))),
     };
     let kelpie = read_section(client).await?;
-    Ok(Tables { project, kelpie })
+    Ok(Tables {
+        project,
+        others,
+        kelpie,
+    })
 }
 
 /// Kelpie's `[kelpie]` section of `dogs.toml` as TOML text, empty when unset
@@ -236,8 +248,6 @@ pub async fn read_section(client: &dyn Connection) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use shep_client::shep_core::config::DogTable;
     use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -291,6 +301,19 @@ mod tests {
             tables.kelpie,
             "[webhook]\nkind = \"ntfy\"\ntoken = \"tk_resolved\"\n"
         );
+    }
+
+    #[tokio::test]
+    async fn every_other_sheeps_table_is_kept_beside_the_projects() {
+        let (home, dial, _sent) = shepherd(SHEP_VERSION);
+        let tables = read_in_time(&dial, home.path(), "koji").await.unwrap();
+        assert_eq!(
+            tables.others,
+            BTreeMap::from([("shep".to_owned(), table("shep-pm/shep"))])
+        );
+        let tables = read_in_time(&dial, home.path(), "absent").await.unwrap();
+        assert_eq!(tables.project, None);
+        assert_eq!(tables.others.len(), 2);
     }
 
     #[tokio::test]
@@ -393,6 +416,7 @@ mod tests {
     fn debug_does_not_leak_either_table() {
         let tables = Tables {
             project: Some(Map::new()),
+            others: BTreeMap::new(),
             kelpie: "[webhook]\nurl = \"https://s3cr3t\"\n".into(),
         };
         assert_eq!(

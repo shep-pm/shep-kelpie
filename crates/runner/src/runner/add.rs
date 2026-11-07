@@ -408,7 +408,6 @@ impl Runner {
         item.kind = label_kind(&found.labels).map(str::to_owned);
         item.tier = picked.and_then(|p| p.tier);
         item.slack = picked.and_then(|p| p.slack);
-        item.pm_light = picked.is_some_and(|p| p.light);
         item.review_plan = picked.and_then(|p| p.review.clone());
         next.work_items.push(item);
         self.save(next).map_err(AddError::State)?;

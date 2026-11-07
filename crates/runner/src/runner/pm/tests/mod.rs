@@ -31,6 +31,7 @@ mod inert;
 mod lease;
 mod main_red;
 mod notes;
+mod peers;
 mod pick;
 mod question;
 mod quiet;
