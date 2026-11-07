@@ -47,13 +47,18 @@ _Avoid_: shift
 The role that owns a project's merge queue, git state and gates. Kelpie's
 code does all of that. The PM's agent, an agent file whose role is `pm`
 that a project names in `agents.pm`, picks work, holds it back, unsticks
-items and answers the maintainer. Code wakes it on a free slot with two or
-more ready issues, two open branches in conflict, a stuck work item, or a
-**tell** (`shep kelpie tell "<note>"`), and it reads the board, its own
-notes and the case files kelpie writes, never running git or gh. Kelpie checks each answer against the
-board before acting on it. One session per project is resumed on each wake
-and compacted past 100k tokens of context. Without one, or while it is
-down, the board's rule picks and stuck items wait on their rulings.
+items, answers a worker's **question** where its case, the code and the
+docs give it an argument, and answers the maintainer. It escalates a
+question only where a public interface, the project's direction or a cost
+past what the item was given is at stake, and it never changes kelpie's
+settings, agent files, code or the machine. Code wakes it on a free slot
+with two or more ready issues, two open branches in conflict, a stuck work
+item, or a **tell** (`shep kelpie tell "<note>"`), and it reads the board,
+its own notes and the case files kelpie writes, never running git or gh.
+Kelpie checks each answer against the board before acting on it. One
+session per project is resumed on each wake and compacted past 100k tokens
+of context. Without one, or while it is down, the board's rule picks and
+stuck items wait on their rulings.
 _Avoid_: lead, control room, control center
 
 **Case file**:
@@ -516,7 +521,8 @@ turn, new work items included, until it resets.
 A decision kelpie cannot make on its own, one of seven kinds: `merge`,
 `question`, `stuck` (with its reason), `agent-files`, `agent-fit`,
 `foreign-change` and `follow-up`. The maintainer answers it, or the project
-manager for the kinds `rulings.pm_decides` sets `true` (ADR 0018, ADR 0020).
+manager for the kinds `rulings.pm_decides` sets `true` and for a `question`
+it can argue (ADR 0018, ADR 0020).
 A `stuck` ruling's reason is one of `rebase`, `still-red`,
 `merge-refused`, `closed`, `fix-not-pushed`,
 `unpushed`, `turn-timeout` and `turn-failed`. A worker waiting on one is

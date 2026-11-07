@@ -20,11 +20,16 @@ macro_rules! answer_key {
 /// How a worker's question is answered, shown with the `answer` key
 macro_rules! questions {
     () => {
-        "A worker's question waits on you for one wake at most. Answer it with `text` \
-         only where the issue, the docs or an ADR settle it: kelpie sends the worker \
-         `PM answered: ` and your text as its next turn, and the maintainer is not \
-         asked. For a decision only the maintainer can make, give `escalate` with the \
-         choice you recommend, which is added to the question as `PM recommends: \
+        "A worker's question waits on you for one wake at most. Read its case first, \
+         `cases/<issue>.md`, named on the item's line under `## Code`. Answer with `text` \
+         where the case, the code and the docs give you an argument, and put that argument \
+         in `why`: kelpie sends the worker `PM answered: ` and your text as its next turn, \
+         and the maintainer is not asked. A wrong answer costs the worker a turn, where \
+         passing a question on costs the maintainer a read. Give `escalate` with the choice \
+         you recommend only for a decision that is the maintainer's: one that changes a \
+         public interface, sets the project's direction, or costs past what the item was \
+         given. Something you could argue either way, with none of those at stake, is yours \
+         to pick. An `escalate` is added to the question as `PM recommends: \
          <choice>`; kelpie checks that the item is parked on a question, and drops the \
          answer if not, when the question goes to the maintainer as it stands. Where the \
          question lists choices, name the one you recommend by its letter (`A`, `B`, \
@@ -67,9 +72,10 @@ macro_rules! follow_up_key {
 /// How a follow-up ruling is decided, shown after [`questions`]
 macro_rules! follow_ups {
     () => {
-        "A merged pull request's unfixed findings wait on you for one wake at most. \
-         Read the merged diff beside them, and check each finding against it and the \
-         docs. Decide the ruling with `follow_up`, and the item's issue in `item`. \
+        "A merged pull request's unfixed findings wait on you for one wake at most. Read \
+         its case, `cases/<issue>.md`, named on the item's line under `## Code`, and the \
+         merged diff beside them, and check each finding against them and the docs. \
+         Decide the ruling with `follow_up`, and the item's issue in `item`. \
          `yes` files every finding as an issue labelled `ready-for-agent` (or \
          `needs-triage` if you give that `label`, when the maintainer reads them first; \
          leave `label` out otherwise, and never give one with `no`), \
@@ -100,21 +106,24 @@ macro_rules! reds {
         "A workflow red on main is yours to clear. \
          `## Red on main` in the board says what is being done about each one, and \
          `## Code` names the end of each one's failed log, `ci/main-<run>.log`: read it \
-         before you answer. Kelpie reruns a red head's failed jobs once itself, so a \
-         flake needs nothing from you. A head that is red again after its rerun is \
-         yours, once. Tell a flake (the failure has nothing to do with the merges since \
-         main was last green, it differs from run to run, the tests passed on the pull \
-         request) from a break. For a break, `call` `fix` opens a fix work item first on \
-         the board, and its `body` names the failing check, the log lines you read and \
-         the suspect merge, in the issue format: a `Touches:` line naming the files to \
-         change in backticks, a `## What to build` section and a `## Acceptance criteria` \
-         section with a `- [ ]` item. Kelpie puts a body that fails the issue check to \
-         the maintainer as a question instead of filing it. Where you cannot tell, `call` `ask` puts the log lines you \
-         read in `log` to the maintainer, so they need not read the log themself. Kelpie \
-         drops a `red` call for a head whose rerun has not come back red, or that one \
-         already settled. While main is red you may still pick an issue that does not \
-         touch the failing area, and your `why` says why each is safe. Cite the failed \
-         job and the log lines you read in your `why` or the fix's `body`."
+         before you answer. A red on main has no case of its own. Where a work item is \
+         parked on a red CI ruling, its case, `cases/<issue>.md`, holds every run on its \
+         head and the whole log of each that failed. Kelpie reruns a red head's failed \
+         jobs once itself, so a flake needs nothing from you. A head that is red again \
+         after its rerun is yours, once. Tell a flake (the failure has nothing to do \
+         with the merges since main was last green, it differs from run to run, the tests \
+         passed on the pull request) from a break. For a break, `call` `fix` opens a fix \
+         work item first on the board, and its `body` names the failing check, the log \
+         lines you read and the suspect merge, in the issue format: a `Touches:` line \
+         naming the files to change in backticks, a `## What to build` section and a \
+         `## Acceptance criteria` section with a `- [ ]` item. Kelpie puts a body that \
+         fails the issue check to the maintainer as a question instead of filing it. \
+         Where you cannot tell, `call` `ask` puts the log lines you read in `log` to the \
+         maintainer, so they need not read the log themself. Kelpie drops a `red` call \
+         for a head whose rerun has not come back red, or that one already settled. While \
+         main is red you may still pick an issue that does not touch the failing area, and \
+         your `why` says why each is safe. Cite the failed job and the log lines you read \
+         in your `why` or the fix's `body`."
     };
 }
 
@@ -154,13 +163,14 @@ macro_rules! votes_key {
 macro_rules! answering {
     () => {
         "A ruling the project leaves to you waits on your answer before it goes to \
-         the maintainer. Give the option you would answer with, and read the board, \
-         the diffs and the CI logs for it as you would for any decision: kelpie \
-         applies it and says so on the ruling's thread, where the maintainer can \
-         reopen it. `design` is true when the question changes an ADR, the glossary, \
-         a public interface or the project's direction, and sends the ruling to the \
-         maintainer with your option as the one you recommend. A ruling you give no \
-         answer on goes to the maintainer as it stands."
+         the maintainer. Give the option you would answer with, and read its case, \
+         `cases/<issue>.md`, named on the item's line under `## Code`, beside the board, \
+         the diffs and the CI logs, as you would for any decision: kelpie applies it and \
+         says so on the ruling's thread, where the maintainer can reopen it. `design` is \
+         true when the question changes an ADR, the glossary, a public interface or the \
+         project's direction, and sends the ruling to the maintainer with your option as \
+         the one you recommend. A ruling you give no answer on goes to the maintainer as \
+         it stands."
     };
 }
 

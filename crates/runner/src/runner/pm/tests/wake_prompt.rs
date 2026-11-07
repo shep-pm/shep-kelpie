@@ -2,14 +2,16 @@
 //! the board carried in the prompt, and one line of what the wake was for,
 //! what kelpie did, and the answer's `why`
 
+use super::question::{ASKS, asking};
 use super::rulings::{answers, left_to_pm};
 use super::{PICK_12, answered, pm_seen, step_until, with_pm};
-use crate::ports::{AgentError, Role};
+use crate::ports::{AgentError, Finding, Role, Severity};
+use crate::runner::pm::Wake;
 use crate::runner::pm::notes::{PM_STANDING, STANDING_MAX};
-use crate::runner::pm::prompt::BOARD_INLINE;
+use crate::runner::pm::prompt::{BOARD_INLINE, Notes, wake as prompt};
 use crate::runner::{StepReport, step};
 use crate::settings::{Harness, Merging};
-use crate::test::{Rig, Scripted};
+use crate::test::{Rig, Scripted, ticket};
 
 fn read(rig: &Rig, name: &str) -> String {
     std::fs::read_to_string(rig.paths().pm.join(name)).unwrap_or_default()
@@ -408,4 +410,126 @@ fn a_wake_for_a_ruling_it_gave_no_answer_on_records_that() {
     let lines: Vec<&str> = notes.lines().collect();
     assert_eq!(lines.len(), 1, "{notes}");
     assert!(lines[0].contains(none), "{notes}");
+}
+
+// #7's worker asking on ruling 7, its answer scripted, and the prompt of the
+// wake that answered it
+fn question_prompt(project: &str) -> String {
+    let (rig, runner) = asking(project, ASKS);
+    rig.claude.script([
+        Scripted::Say(
+            "{\"answer\": {\"item\": 7, \"text\": \"Use --dry-run\", \"why\": \"the issue \
+             names the flag\"}}",
+        ),
+        Scripted::Say("renamed"),
+    ]);
+    answered(Some(step_until(&runner, |r| {
+        matches!(r, StepReport::PmAnswered { .. })
+    })));
+    pm_seen(&rig)[0].call.prompt.clone()
+}
+
+#[test]
+fn a_question_wake_lets_it_answer_what_it_can_argue() {
+    let prompt = question_prompt("argue");
+    assert!(
+        prompt.contains(
+            "Answer with `text` where the case, the code and the docs give you an argument"
+        ),
+        "{prompt}"
+    );
+    assert!(prompt.contains("put that argument in `why`"), "{prompt}");
+    assert!(
+        prompt.contains("Read its case first, `cases/<issue>.md`"),
+        "{prompt}"
+    );
+    assert!(
+        !prompt.contains("the issue, the docs or an ADR settle it"),
+        "the docs settling it is no longer the bar: {prompt}"
+    );
+}
+
+#[test]
+fn a_question_wake_names_the_three_decisions_that_stay_the_maintainers() {
+    let prompt = question_prompt("stake");
+    for said in [
+        "Give `escalate` with the choice you recommend only for a decision that is the \
+         maintainer's",
+        "changes a public interface",
+        "sets the project's direction",
+        "costs past what the item was given",
+        "Something you could argue either way, with none of those at stake, is yours to \
+         pick",
+    ] {
+        assert!(prompt.contains(said), "{said}: {prompt}");
+    }
+}
+
+// A wake for a worker's question on ruling 7
+fn asked() -> Wake {
+    Wake::Question {
+        ticket: ticket(7),
+        id: ticket(7),
+        asked: "Which flag?".into(),
+    }
+}
+
+// A wake for the follow-up ruling on #7's merged pull request 71
+fn left_over() -> Wake {
+    Wake::FollowUp {
+        ticket: ticket(7),
+        id: ticket(4),
+        pull_request: 71,
+        findings: vec![Finding::new(
+            Severity::High,
+            "src/lib.rs",
+            9,
+            "looks racy",
+            "two threads write it",
+        )],
+    }
+}
+
+// A wake for the merge ruling the project leaves to the project manager
+fn to_answer() -> Wake {
+    Wake::Answer {
+        id: ticket(71),
+        asked: "### Merge #71 into main?\n\n| | Option | If you pick it |".into(),
+        request: None,
+    }
+}
+
+// A board kelpie writes, with a workflow red on `main`
+const BOARD: &str = "# Board for koji, at 00:00\n\n## Open work items\n\n(none)\n\n\
+                     ## Code\n\n(none)\n";
+const RED_BOARD: &str = "# Board for koji, at 00:00\n\n## Open work items\n\n(none)\n\n\
+                         ## Code\n\n(none)\n\n## Red on main\n\n- test: red for 1h00m, \
+                         latest run 12\n";
+
+#[test]
+fn each_rulings_wake_names_the_case() {
+    // A resumed wake is sent only the key its wake is for, so each ruling's
+    // words carry the case with them.
+    for (reason, board) in [
+        (asked(), BOARD),
+        (left_over(), BOARD),
+        (to_answer(), BOARD),
+        (Wake::Pick(2, 1), RED_BOARD),
+    ] {
+        let text = prompt("koji", &[reason], &[], &[], false, &Notes::default(), board);
+        assert!(text.contains("`cases/<issue>.md`"), "{text}");
+    }
+    let other = prompt(
+        "koji",
+        &[Wake::Pick(2, 1)],
+        &[],
+        &[],
+        false,
+        &Notes::default(),
+        BOARD,
+    );
+    assert!(
+        !other.contains("`cases/<issue>.md`"),
+        "no ruling is on offer: {other}"
+    );
 }
