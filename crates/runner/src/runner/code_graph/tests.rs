@@ -21,22 +21,14 @@ const INDEXER: &str = "#!/bin/sh\n\
 // The example's code graph table, as `settings.example.toml` writes it
 const GRAPH_OFF: &str = "[app.dogs.kelpie.code_graph]\nenabled = false\nworker = false";
 
-// The graph on for the worker's turns and the reviewers alike
-fn turn_on(rig: &Rig) {
+// Both keys on, which load and are read by nothing
+fn name_both_keys(rig: &Rig) {
     rig.edit_settings(|s| {
         assert!(s.contains(GRAPH_OFF), "the example's code graph moved");
         s.replace(
             GRAPH_OFF,
             "[app.dogs.kelpie.code_graph]\nenabled = true\nworker = true",
         )
-    });
-}
-
-// The graph on with no `worker` key, which is what `enabled` alone gives today
-fn turn_on_for_reviewers(rig: &Rig) {
-    rig.edit_settings(|s| {
-        assert!(s.contains(GRAPH_OFF), "the example's code graph moved");
-        s.replace(GRAPH_OFF, "[app.dogs.kelpie.code_graph]\nenabled = true")
     });
 }
 
@@ -97,9 +89,9 @@ fn work_and_review(rig: &Rig) -> Mutex<Runner> {
     runner
 }
 
-fn reads_code(rig: &Rig) -> Vec<crate::test::Seen> {
+fn reviewer_rounds(rig: &Rig) -> Vec<crate::test::Seen> {
     (rig.claude.all_seen().into_iter())
-        .filter(|s| matches!(s.call.role, Role::Worker | Role::Reviewer))
+        .filter(|s| s.call.role == Role::Reviewer)
         .collect()
 }
 
@@ -124,18 +116,15 @@ fn mcp_file(seen: &crate::test::Seen) -> PathBuf {
 }
 
 #[test]
-fn a_project_with_the_graph_on_gives_its_worker_and_reviewer_the_server_and_an_index_under_kelpies_home()
- {
+fn an_installed_server_gives_the_reviewer_the_server_and_an_index_under_kelpies_home() {
     let rig = Rig::new("shep");
-    turn_on(&rig);
     install(&rig, INDEXER);
     work_and_review(&rig);
 
     let index = rig.paths().folder.join("code-graphs/7");
     let runtime = rig.paths().folder.join("cbm/7");
-    let seen = reads_code(&rig);
-    let roles: Vec<Role> = seen.iter().map(|s| s.call.role).collect();
-    assert!(roles.contains(&Role::Worker) && roles.contains(&Role::Reviewer));
+    let seen = reviewer_rounds(&rig);
+    assert!(!seen.is_empty(), "a reviewer's round ran");
     for seen in &seen {
         let graph = seen.call.reach.code_graph.as_ref().expect("the server");
         assert_eq!(graph.index, index);
@@ -186,11 +175,11 @@ fn a_project_with_the_graph_on_gives_its_worker_and_reviewer_the_server_and_an_i
 }
 
 #[test]
-fn a_worker_gets_no_graph_unless_the_project_names_it() {
-    // `enabled = true` with no `worker` key: the worker's turn carries no server, writes no
-    // MCP file of its own, allows no `mcp__` tool, and indexes nothing.
+fn a_worker_never_gets_the_graph() {
+    // Installed, with both keys on: the worker's turn carries no server, writes no MCP file of
+    // its own, allows no `mcp__` tool, and indexes nothing.
     let rig = Rig::new("shep");
-    turn_on_for_reviewers(&rig);
+    name_both_keys(&rig);
     install(&rig, INDEXER);
     worker_turn(&rig);
 
@@ -209,41 +198,6 @@ fn a_worker_gets_no_graph_unless_the_project_names_it() {
         !rig.paths().folder.join("code-graphs").exists(),
         "nothing is indexed before a reviewer's round"
     );
-
-    // With `worker = true`, the same turn carries the server and builds the index it does today.
-    let rig = Rig::new("shep");
-    turn_on(&rig);
-    install(&rig, INDEXER);
-    worker_turn(&rig);
-
-    let index = rig.paths().folder.join("code-graphs/7");
-    let seen = worker_turns(&rig);
-    assert!(!seen.is_empty(), "the worker's turn ran");
-    for seen in &seen {
-        let graph = seen.call.reach.code_graph.as_ref().expect("the server");
-        assert_eq!(graph.index, index);
-        assert_eq!(graph.binary, rig.paths().tools.code_graph());
-        let config: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(mcp_file(seen)).unwrap()).unwrap();
-        assert_eq!(
-            config["mcpServers"]["codebase-memory-mcp"]["env"]["CBM_CACHE_DIR"],
-            index.to_str().unwrap()
-        );
-        assert!(
-            seen.settings["permissions"]["allow"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|a| *a == "mcp__codebase-memory-mcp"),
-            "{:?}",
-            seen.settings
-        );
-    }
-    let indexed = std::fs::read_to_string(index.join("indexed-with")).unwrap();
-    assert!(
-        indexed.starts_with("cli index_repository --repo-path "),
-        "{indexed}"
-    );
 }
 
 #[test]
@@ -251,7 +205,6 @@ fn a_worker_without_the_graph_still_gets_the_repo_s_own_servers() {
     // The graph is its own path through the call's reach, so a worker without it keeps what
     // `repo_setup` gives it.
     let rig = Rig::new("shep");
-    turn_on_for_reviewers(&rig);
     install(&rig, INDEXER);
     let own =
         json!({"mcpServers": {"docs": {"type": "http", "url": "https://docs.example.com/mcp"}}});
@@ -281,25 +234,21 @@ fn a_worker_without_the_graph_still_gets_the_repo_s_own_servers() {
 #[test]
 fn a_reviewer_still_gets_the_graph_when_the_worker_does_not() {
     let rig = Rig::new("shep");
-    turn_on_for_reviewers(&rig);
     install(&rig, INDEXER);
     work_and_review(&rig);
 
     let index = rig.paths().folder.join("code-graphs/7");
-    let seen = reads_code(&rig);
-    let roles: Vec<Role> = seen.iter().map(|s| s.call.role).collect();
     assert!(
-        roles.contains(&Role::Worker) && roles.contains(&Role::Reviewer),
-        "both calls ran: {roles:?}"
+        !worker_turns(&rig).is_empty() && !reviewer_rounds(&rig).is_empty(),
+        "both calls ran"
     );
-    for seen in &seen {
-        if seen.call.role == Role::Worker {
-            assert_eq!(
-                seen.call.reach.code_graph, None,
-                "the worker's turn is not given it"
-            );
-            continue;
-        }
+    for seen in &worker_turns(&rig) {
+        assert_eq!(
+            seen.call.reach.code_graph, None,
+            "the worker's turn is not given it"
+        );
+    }
+    for seen in &reviewer_rounds(&rig) {
         let graph = seen.call.reach.code_graph.as_ref().expect("the server");
         assert_eq!(graph.index, index);
         assert_eq!(graph.binary, rig.paths().tools.code_graph());
@@ -312,9 +261,8 @@ fn a_reviewer_still_gets_the_graph_when_the_worker_does_not() {
 }
 
 #[test]
-fn a_pi_worker_and_reviewer_get_the_server_and_an_index() {
+fn a_pi_reviewer_alone_gets_the_server_and_an_index() {
     let rig = Rig::new("shep");
-    turn_on(&rig);
     install(&rig, INDEXER);
     pi_agents(&rig);
     let runner = rig.open().unwrap();
@@ -326,94 +274,81 @@ fn a_pi_worker_and_reviewer_get_the_server_and_an_index() {
     step(&runner).unwrap(); // round 1, the pi reviewer
 
     let index = rig.paths().folder.join("code-graphs/7");
-    let seen = reads_code(&rig);
-    let roles: Vec<Role> = seen.iter().map(|s| s.call.role).collect();
-    assert!(roles.contains(&Role::Worker) && roles.contains(&Role::Reviewer));
-    for seen in &seen {
+    let reviewers = reviewer_rounds(&rig);
+    assert!(!reviewers.is_empty());
+    for seen in &reviewers {
         assert!(matches!(seen.call.harness, AgentHarness::Pi(_)));
         let graph = seen.call.reach.code_graph.as_ref().expect("the server");
         assert_eq!(graph.index, index);
         assert_eq!(graph.binary, rig.paths().tools.code_graph());
     }
+    for seen in &worker_turns(&rig) {
+        assert_eq!(seen.call.reach.code_graph, None);
+    }
     let root = std::fs::read_to_string(index.join("root")).unwrap();
-    assert_eq!(PathBuf::from(root.trim()), seen[0].call.cwd);
+    assert_eq!(PathBuf::from(root.trim()), reviewers[0].call.cwd);
 }
 
 #[test]
-fn a_pi_worker_gets_no_graph_when_the_project_does_not_name_it() {
+fn a_pi_worker_never_gets_the_graph() {
     let rig = Rig::new("shep");
-    turn_on_for_reviewers(&rig);
+    name_both_keys(&rig);
     install(&rig, INDEXER);
     pi_agents(&rig);
     worker_turn(&rig);
 
+    let seen = worker_turns(&rig);
+    assert!(!seen.is_empty());
     assert!(
-        worker_turns(&rig)
-            .iter()
-            .all(|s| s.call.reach.code_graph.is_none()),
+        seen.iter().all(|s| s.call.reach.code_graph.is_none()),
         "the pi worker carries no server"
     );
 }
 
 #[test]
-fn a_goose_worker_gets_no_graph_when_the_project_does_not_name_it() {
+fn a_goose_worker_never_gets_the_graph() {
     let rig = Rig::new("shep");
-    turn_on_for_reviewers(&rig);
+    name_both_keys(&rig);
     install(&rig, INDEXER);
     goose_agent(&rig);
     worker_turn(&rig);
 
+    let seen = worker_turns(&rig);
+    assert!(!seen.is_empty());
     assert!(
-        worker_turns(&rig)
-            .iter()
-            .all(|s| s.call.reach.code_graph.is_none()),
+        seen.iter().all(|s| s.call.reach.code_graph.is_none()),
         "the goose worker carries no server"
     );
 }
 
 #[test]
-fn a_codex_worker_gets_no_graph_when_the_project_does_not_name_it() {
+fn a_codex_worker_never_gets_the_graph() {
     let rig = Rig::new("shep");
-    turn_on_for_reviewers(&rig);
+    name_both_keys(&rig);
     install(&rig, INDEXER);
     codex_agents(&rig);
     worker_turn(&rig);
 
+    let seen = worker_turns(&rig);
+    assert!(!seen.is_empty());
     assert!(
-        worker_turns(&rig)
-            .iter()
-            .all(|s| s.call.reach.code_graph.is_none()),
+        seen.iter().all(|s| s.call.reach.code_graph.is_none()),
         "the Codex worker carries no server"
     );
 }
 
 #[test]
-fn a_goose_worker_and_reviewer_get_the_server_and_an_index() {
+fn a_goose_reviewer_alone_gets_the_server_and_an_index() {
     let rig = Rig::new("shep");
-    turn_on(&rig);
     install(&rig, INDEXER);
     // A goose reviewer cannot be named in an agent file yet (#789), so the worker is run
     // and the reviewer's call is asked about directly.
     goose_agent(&rig);
-    let runner = rig.open().unwrap();
-    rig.ask(&runner, "add", Some("7"));
-    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
-    step(&runner).unwrap(); // the worker's first turn
-
-    let index = rig.paths().folder.join("code-graphs/7");
-    let seen: Vec<_> = (rig.claude.all_seen().into_iter())
-        .filter(|s| s.call.role == Role::Worker)
-        .collect();
-    assert!(!seen.is_empty());
-    for seen in &seen {
+    worker_turn(&rig);
+    for seen in &worker_turns(&rig) {
         assert!(matches!(seen.call.harness, AgentHarness::Goose(_)));
-        let graph = seen.call.reach.code_graph.as_ref().expect("the server");
-        assert_eq!(graph.index, index);
-        assert_eq!(graph.binary, rig.paths().tools.code_graph());
+        assert_eq!(seen.call.reach.code_graph, None);
     }
-    let root = std::fs::read_to_string(index.join("root")).unwrap();
-    assert_eq!(PathBuf::from(root.trim()), seen[0].call.cwd);
 
     let server = crate::settings::ModelServer {
         host: crate::settings::ModelHost::Url("http://box:11434/v1".to_owned().try_into().unwrap()),
@@ -431,27 +366,19 @@ fn a_goose_worker_and_reviewer_get_the_server_and_an_index() {
             "go",
         )
     };
-    assert!(super::reads_code(
-        &call(Role::Reviewer, Tools::Review),
-        false
-    ));
-    assert!(super::reads_code(
-        &call(Role::Triager, Tools::Review),
-        false
-    ));
-    assert!(super::reads_code(&call(Role::Worker, Tools::Work), true));
-    assert!(!super::reads_code(&call(Role::Worker, Tools::Work), false));
-    assert!(!super::reads_code(&call(Role::Worker, Tools::Retro), true));
-    assert!(!super::reads_code(
-        &call(Role::Representative, Tools::Answer),
-        true
-    ));
+    assert!(super::reads_code(&call(Role::Reviewer, Tools::Review)));
+    assert!(super::reads_code(&call(Role::Triager, Tools::Review)));
+    assert!(!super::reads_code(&call(Role::Worker, Tools::Work)));
+    assert!(!super::reads_code(&call(Role::Worker, Tools::Retro)));
+    assert!(!super::reads_code(&call(
+        Role::Representative,
+        Tools::Answer
+    )));
 }
 
 #[test]
-fn a_codex_worker_and_reviewer_get_the_server_and_an_index() {
+fn a_codex_reviewer_alone_gets_the_server_and_an_index() {
     let rig = Rig::new("shep");
-    turn_on(&rig);
     install(&rig, INDEXER);
     codex_agents(&rig);
     let runner = rig.open().unwrap();
@@ -463,83 +390,58 @@ fn a_codex_worker_and_reviewer_get_the_server_and_an_index() {
     step(&runner).unwrap(); // round 1, the Codex reviewer
 
     let index = rig.paths().folder.join("code-graphs/7");
-    let seen = reads_code(&rig);
-    let roles: Vec<Role> = seen.iter().map(|s| s.call.role).collect();
-    assert!(roles.contains(&Role::Worker) && roles.contains(&Role::Reviewer));
-    for seen in &seen {
+    let reviewers = reviewer_rounds(&rig);
+    assert!(!reviewers.is_empty());
+    for seen in &reviewers {
         assert_eq!(seen.call.harness, AgentHarness::Codex);
         let graph = seen.call.reach.code_graph.as_ref().expect("the server");
         assert_eq!(graph.index, index);
         assert_eq!(graph.binary, rig.paths().tools.code_graph());
     }
+    for seen in &worker_turns(&rig) {
+        assert_eq!(seen.call.reach.code_graph, None);
+    }
     let root = std::fs::read_to_string(index.join("root")).unwrap();
-    assert_eq!(PathBuf::from(root.trim()), seen[0].call.cwd);
+    assert_eq!(PathBuf::from(root.trim()), reviewers[0].call.cwd);
 }
 
 #[test]
-fn a_project_with_the_graph_off_gets_no_server_and_no_index() {
+fn no_installed_server_means_no_graph_and_no_note() {
+    // Both keys on, which nothing reads: only the server being there turns the graph on.
     let rig = Rig::new("shep");
-    install(&rig, INDEXER);
-    work_and_review(&rig);
+    name_both_keys(&rig);
+    let runner = work_and_review(&rig);
 
-    let seen = reads_code(&rig);
-    assert!(seen.len() >= 2);
+    let seen = rig.claude.all_seen();
+    assert!(seen.len() >= 2, "the turns ran");
     for seen in &seen {
         assert_eq!(seen.call.reach.code_graph, None);
         assert!(!mcp_file(seen).exists());
         assert!(!seen.settings.to_string().contains("mcp__"));
     }
     assert!(!rig.paths().folder.join("code-graphs").exists());
-}
-
-#[test]
-fn a_server_that_is_not_installed_is_a_logged_skip_and_the_calls_run() {
-    let rig = Rig::new("shep");
-    turn_on(&rig);
-    let runner = work_and_review(&rig);
-
-    let seen = reads_code(&rig);
-    assert!(seen.len() >= 2, "the turns ran");
-    assert!(seen.iter().all(|s| s.call.reach.code_graph.is_none()));
     let notes = runner.lock().unwrap().take_notes();
-    let skip = notes
-        .iter()
-        .find(|n| n.contains("runs without a code graph"))
-        .expect("a note");
-    assert!(skip.contains("tools install"), "{skip}");
-}
-
-#[test]
-fn a_server_that_is_not_installed_is_said_once_across_calls_and_status_shows_it() {
-    let rig = Rig::new("shep");
-    turn_on(&rig);
-    let runner = work_and_review(&rig);
-
-    assert!(reads_code(&rig).len() >= 2, "several calls met it");
-    let notes = runner.lock().unwrap().take_notes();
-    let said: Vec<_> = (notes.iter())
-        .filter(|n| n.contains("runs without a code graph"))
-        .collect();
-    assert_eq!(said.len(), 1, "{notes:#?}");
+    assert!(
+        !notes.iter().any(|n| n.contains("code graph")),
+        "{notes:#?}"
+    );
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["standing"], json!([said[0]]));
+    let standing = status["standing"].as_array().map_or(0, Vec::len);
+    assert_eq!(standing, 0, "{status}");
 }
 
 #[test]
 fn an_indexer_that_fails_is_a_logged_skip_naming_why() {
     let rig = Rig::new("shep");
-    turn_on(&rig);
     install(
         &rig,
         "#!/bin/sh\necho 'no room for the index' >&2\nexit 3\n",
     );
     let runner = work_and_review(&rig);
 
-    assert!(
-        reads_code(&rig)
-            .iter()
-            .all(|s| s.call.reach.code_graph.is_none())
-    );
+    let seen = reviewer_rounds(&rig);
+    assert!(!seen.is_empty());
+    assert!(seen.iter().all(|s| s.call.reach.code_graph.is_none()));
     let notes = runner.lock().unwrap().take_notes();
     let skip = notes
         .iter()
@@ -550,15 +452,12 @@ fn an_indexer_that_fails_is_a_logged_skip_naming_why() {
 
 #[test]
 fn the_index_goes_when_the_work_item_finishes_and_its_worktree_goes() {
-    let (rig, runner, _) = Rig::parked_set("shep", |rig| {
-        turn_on(rig);
-        install(rig, INDEXER);
-    });
+    let (rig, runner, _) = Rig::parked_set("shep", |rig| install(rig, INDEXER));
     let index = rig.paths().folder.join("code-graphs/7");
     let runtime = rig.paths().folder.join("cbm/7");
     assert!(
         index.join("indexed-with").is_file(),
-        "the worker's turn indexed"
+        "the reviewer's round indexed"
     );
     assert!(runtime.is_dir());
 

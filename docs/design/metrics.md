@@ -32,8 +32,8 @@ Work items (phases, how they ended, review rounds, findings, red CI heads) are i
 
 Features: whether what a project turned on runs.
 
-- `kelpie_feature_enabled{feature}` gauge (1 or 0) at open and each reread: `code_graph`, `browser`, `dev_server` (browser on and `main`'s launch file selects a configuration), `hooks`
-- `kelpie_feature_runs_total{feature,outcome}`: `code_graph` index `ok`, `failed`, `skipped` (no binary), `ended` (call ended first). `runner/code_graph/`
+- `kelpie_feature_enabled{feature}` gauge (1 or 0) at open and each reread: `code_graph` (the server is installed, read again at each call), `browser`, `dev_server` (browser on and `main`'s launch file selects a configuration), `hooks`
+- `kelpie_feature_runs_total{feature,outcome}`: `code_graph` index `ok`, `failed`, `ended` (call ended first). `runner/code_graph/`
 - `browser`: the bridge opened for a turn `ok`, `failed`, `skipped` (tools not installed). `runner/browser.rs`
 - `dev_server`: `ok` (answered within `READY_WITHIN`), `failed` (could not be planned or started, or silent), `skipped` (no launch file on `main`, or none configured). `runner/dev_server/`
 - `hooks`: each hook the runner runs, `ok` (exit 0 or a deliberate exit 2) or `failed`; no label per hook or point. The hooks carry the recorder (`Hooks::counted_by`); a `kelpie guard` or `kelpie confine` process has none, so the worker's own `commit`, `push` and `command` hooks are not counted. `crates/core/src/hooks/mod.rs`
