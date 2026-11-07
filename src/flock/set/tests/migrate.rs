@@ -21,6 +21,11 @@ impl Scene {
     }
 }
 
+// `table` with the `agents.slack` an older build wrote put back in it
+fn with_slack(table: &str) -> String {
+    table.replace("[agents]\n", "[agents]\nslack = 25\n")
+}
+
 fn with_rulings(lines: &str) -> String {
     format!("{TABLE}\n[rulings]\n{lines}\n")
 }
@@ -84,7 +89,7 @@ async fn an_old_list_becomes_entries_in_the_map_and_is_removed() {
 
 #[tokio::test]
 async fn a_second_run_has_nothing_to_migrate() {
-    let mut scene = Scene::new().await;
+    let mut scene = Scene::holding(&with_slack(TABLE)).await;
     scene.migrate().await.unwrap();
     let after = scene.table();
     assert_eq!(scene.shepherd.writes().len(), 2);
@@ -225,6 +230,27 @@ async fn the_keys_the_agent_board_replaced_are_deleted_and_named_and_the_rest_is
     };
     assert_eq!(
         rest(scene.table()),
+        rest(scene.table_of("eevee")),
+        "every other key is as it was"
+    );
+}
+
+#[tokio::test]
+async fn the_slack_key_is_deleted_and_named_and_the_rest_is_kept() {
+    let scene = Scene::holding_each(&with_slack(TABLE), TABLE).await;
+
+    let said = scene.migrate().await.unwrap();
+
+    assert!(said[1].contains("removed agents.slack = 25"), "{said:?}");
+    let table = scene.table();
+    assert!(table["agents"].get("slack").is_none(), "{table:?}");
+    // Only the checkout and the repo tell the two projects apart.
+    let rest = |mut table: Map<String, Value>| {
+        table.remove("git");
+        table
+    };
+    assert_eq!(
+        rest(table),
         rest(scene.table_of("eevee")),
         "every other key is as it was"
     );

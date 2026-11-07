@@ -336,7 +336,7 @@ impl From<Vec<AgentName>> for Allow {
 }
 
 /// The agents a project may use, and the few it names outright
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoleAgentNames {
     /// The only agents the project may use, by the names of kelpie's agent
@@ -361,12 +361,11 @@ pub struct RoleAgentNames {
     #[serde(default)]
     #[schemars(extend("deprecated" = true))]
     pub fallback_after: Option<Gone>,
-    /// Minutes a work item may wait for its agent to start: a new item opens
-    /// on the cheapest agent that can start within it, and a later turn moves
-    /// on when its own agent cannot start within it. The project manager's pick
-    /// may name its own. Whole minutes, `0` allowed. 60 when absent.
-    #[serde(default = "default_slack")]
-    pub slack: u32,
+    /// Read by nothing: the project manager's pick names how long an item may
+    /// wait for its agent, and `shep kelpie upgrade` deletes it
+    #[serde(default)]
+    #[schemars(extend("deprecated" = true))]
+    pub slack: Option<Gone>,
     /// Read by nothing: a pass's candidates are every reviewer file
     /// `agents.allow` holds, and `shep kelpie upgrade` deletes it
     #[serde(default)]
@@ -385,21 +384,6 @@ pub struct RoleAgentNames {
     pub representative: Option<AgentName>,
 }
 
-impl Default for RoleAgentNames {
-    fn default() -> Self {
-        Self {
-            allow: None,
-            implementers: None,
-            implementer_choice: None,
-            fallback_after: None,
-            slack: DEFAULT_SLACK_MINUTES,
-            reviewers: None,
-            pm: None,
-            representative: None,
-        }
-    }
-}
-
 impl RoleAgentNames {
     /// Each key kelpie reads no longer that the table still holds, by its setting's name
     pub fn gone_keys(&self) -> Vec<&'static str> {
@@ -407,16 +391,13 @@ impl RoleAgentNames {
             ("agents.implementers", self.implementers),
             ("agents.implementer_choice", self.implementer_choice),
             ("agents.fallback_after", self.fallback_after),
+            ("agents.slack", self.slack),
             ("agents.reviewers", self.reviewers),
         ];
         (held.into_iter())
             .filter_map(|(key, gone)| gone.map(|_| key))
             .collect()
     }
-}
-
-fn default_slack() -> u32 {
-    DEFAULT_SLACK_MINUTES
 }
 
 /// An implementer the agent board may pick for a project

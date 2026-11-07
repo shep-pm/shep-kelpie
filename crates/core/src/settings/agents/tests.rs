@@ -518,25 +518,13 @@ fn the_keys_the_agent_board_replaced_load_read_by_nothing_and_are_named() {
 }
 
 #[test]
-fn slack_is_an_hour_when_absent_and_read_in_minutes_with_zero_allowed() {
-    let absent = project("");
-    assert_eq!(absent.agents.slack, 60);
-
-    let none = project("slack = 0\n");
-    assert_eq!(none.agents.slack, 0);
-
-    let long = project("slack = 240\n");
-    assert_eq!(long.agents.slack, 240);
-}
-
-#[test]
-fn a_slack_that_is_not_whole_minutes_is_refused_naming_the_key() {
-    for bad in ["-5", "1.5", "\"soon\""] {
-        let err = try_project(&format!("slack = {bad}\n"))
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("slack"), "{bad}: {err}");
+fn an_old_slack_of_any_value_loads_and_is_named_gone() {
+    for old in ["0", "240", "-5", "1.5", "\"soon\""] {
+        let settings = project(&format!("slack = {old}\n"));
+        assert_eq!(settings.agents.gone_keys(), ["agents.slack"], "{old}");
+        settings.role_agents(&book()).unwrap();
     }
+    assert_eq!(project("").agents.gone_keys(), Vec::<&str>::new());
 }
 
 #[test]

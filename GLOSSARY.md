@@ -143,8 +143,8 @@ _Avoid_: score, rating
 
 **Slack**:
 How long a work item may wait for an agent to start, so kelpie's rule can
-take a cheaper one: `agents.slack` minutes (60 when absent), unless the
-project manager's pick names its own, such as 0 for a hotfix. An agent that
+take a cheaper one: 60 minutes, unless the project manager's pick names its
+own, such as 0 for a hotfix. An agent that
 can start within it is available, and a started item keeps its agent while
 it is.
 _Avoid_: max wait

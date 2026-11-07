@@ -436,15 +436,8 @@ fn a_picks_agent_that_allow_drops_before_dispatch_opens_on_the_boards_pick_keepi
 }
 
 #[test]
-fn a_picks_own_slack_wins_over_the_settings() {
-    let rig = Rig::new("koji");
-    rig.edit_settings(|s| {
-        s.replace(
-            "[app.dogs.kelpie.agents]\n",
-            "[app.dogs.kelpie.agents]\nslack = 25\n",
-        )
-    });
-    let (rig, runner) = pm_on(rig);
+fn a_picks_own_slack_reaches_the_ask() {
+    let (rig, runner) = pm_on(Rig::new("koji"));
     rig.forge.list_ready(9, false);
     rig.forge.list_ready(12, false);
     rig.claude.script([Scripted::Say(
