@@ -12,6 +12,8 @@ use crate::runner::{Answer, CHECKS_SETTLE, Runner, StepReport, step};
 use crate::test::{Rig, Scripted, ScriptedRound, ticket};
 use crate::ticket::TicketId;
 
+mod saved;
+
 fn finding(file: &str, what: &str) -> Finding {
     Finding::new(
         Severity::High,
@@ -52,7 +54,6 @@ fn reviewed_pushing(
 ) -> (Rig, Mutex<Runner>, String) {
     if auto {
         rig.merge_auto();
-        rig.issues("file");
     }
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
@@ -75,9 +76,7 @@ fn reviewed_pushing(
     panic!("the review never settled");
 }
 
-// On a project under `auto` that files deferred findings at once, CI green
-// and the draft ready, with `deferred`
-// in the worker's deferred findings file
+// Under `auto`, CI green and the draft ready, with `deferred` in the worker's findings file
 fn ready_in(rig: Rig, found: &[Finding], deferred: &str) -> (Rig, Mutex<Runner>) {
     let (rig, runner, head) = reviewed_in(rig, found, true);
     defer(&rig, deferred);
@@ -100,6 +99,16 @@ pub(in crate::runner) fn after_merge(runner: &Mutex<Runner>) -> Option<StepRepor
         Some(StepReport::Noticed { .. }) => step(runner).unwrap(),
         other => other,
     }
+}
+
+// A yes asking for unread filing, followed by the next step's report
+pub(in crate::runner) fn after_yes(runner: &Mutex<Runner>) -> Option<StepReport> {
+    let report = after_merge(runner);
+    let Some(StepReport::Ruling { id, .. }) = report else {
+        panic!("expected a follow-up ruling, got {report:?}");
+    };
+    pm_says_yes(runner, id, true);
+    after_merge(runner)
 }
 
 fn filed(opened: &[u64], commented: &[u64], skipped: usize) -> Option<StepReport> {
@@ -125,11 +134,11 @@ fn finished(report: Option<StepReport>) -> bool {
 }
 
 #[test]
-fn under_file_an_unfixed_confirmed_finding_files_one_issue_for_triage() {
+fn a_project_managers_yes_for_needs_triage_files_one_unfixed_confirmed_finding() {
     let found = [racy()];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
 
-    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_yes(&runner), filed(&[900], &[], 0));
     let [issue] = rig.forge.created().try_into().unwrap();
     assert_eq!(issue.title, "looks racy");
     assert_eq!(issue.labels, [TRIAGE]);
@@ -157,7 +166,7 @@ fn with_an_app_the_follow_up_issue_and_the_label_it_needs_are_made_through_it() 
     let (rig, runner) = ready_in(rig, &found, &lines(&found));
     rig.forge.set_repo_labels(&["bug"]);
 
-    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_yes(&runner), filed(&[900], &[], 0));
 
     assert_eq!(
         rig.forge.created(),
@@ -190,7 +199,7 @@ fn with_no_app_the_follow_up_issue_is_opened_as_it_always_was() {
     let found = [racy()];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
 
-    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_yes(&runner), filed(&[900], &[], 0));
 
     assert_eq!(rig.forge.created().len(), 1);
     assert_eq!(rig.github.writes(), []);
@@ -202,7 +211,7 @@ fn a_repo_without_the_triage_label_gets_it_once_and_the_findings_are_filed() {
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
     rig.forge.set_repo_labels(&["bug"]);
 
-    assert_eq!(after_merge(&runner), filed(&[900, 901], &[], 0));
+    assert_eq!(after_yes(&runner), filed(&[900, 901], &[], 0));
     assert_eq!(rig.forge.repo_labels_now(), ["bug", TRIAGE]);
     let labels: Vec<_> = rig.forge.created().into_iter().map(|i| i.labels).collect();
     assert_eq!(labels, [[TRIAGE], [TRIAGE]]);
@@ -214,16 +223,17 @@ fn a_triage_label_the_repo_has_in_another_case_is_left_as_it_is() {
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
     rig.forge.set_repo_labels(&["Needs-Triage"]);
 
-    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_yes(&runner), filed(&[900], &[], 0));
     assert_eq!(rig.forge.repo_labels_now(), ["Needs-Triage"]);
 }
 
 #[test]
-fn a_finding_the_worker_fixed_files_nothing() {
+fn no_deferred_finding_raises_no_ruling() {
     let (rig, runner) = auto_ready_to_merge(&[racy()], "");
 
     assert!(finished(after_merge(&runner)));
     assert_eq!(rig.forge.created(), []);
+    assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
 }
 
 #[test]
@@ -253,7 +263,7 @@ fn what_is_filed_is_kelpies_own_text_not_the_workers_edit_of_it() {
     };
     let (rig, runner) = auto_ready_to_merge(&[racy()], &lines(&[edited]));
 
-    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_yes(&runner), filed(&[900], &[], 0));
     let [issue] = rig.forge.created().try_into().unwrap();
     assert!(issue.body.contains("two threads write"), "{}", issue.body);
     assert!(!issue.body.contains("example.invalid"), "{}", issue.body);
@@ -266,7 +276,7 @@ fn a_finding_an_open_issue_already_holds_gets_a_comment_and_no_new_issue() {
     rig.forge
         .open_issue(50, "Looks racy", "Filed by hand, in src/lib.rs.");
 
-    assert_eq!(after_merge(&runner), filed(&[], &[50], 0));
+    assert_eq!(after_yes(&runner), filed(&[], &[50], 0));
     assert_eq!(rig.forge.created(), []);
     let [(number, body)] = rig.forge.comments().try_into().unwrap();
     assert_eq!(number, 50);
@@ -283,7 +293,7 @@ fn an_issue_that_names_the_file_and_says_the_same_thing_is_a_duplicate_too() {
     rig.forge.open_issue(51, "Race in the writer", body);
     rig.forge.open_issue(52, "Unrelated", "src/lib.rs is long.");
 
-    assert_eq!(after_merge(&runner), filed(&[], &[51], 0));
+    assert_eq!(after_yes(&runner), filed(&[], &[51], 0));
     assert_eq!(rig.forge.created(), []);
     assert!(finished(after_merge(&runner)));
 }
@@ -300,7 +310,7 @@ fn two_findings_sharing_the_first_eighty_characters_are_not_one_issue() {
     rig.forge
         .open_issue(60, &stem, &format!("In src/lib.rs: {first}"));
 
-    assert_eq!(after_merge(&runner), filed(&[900], &[60], 0));
+    assert_eq!(after_yes(&runner), filed(&[900], &[60], 0));
     let [issue] = rig.forge.created().try_into().unwrap();
     assert!(issue.body.contains(&second), "{}", issue.body);
 }
@@ -337,7 +347,7 @@ fn a_title_is_the_findings_first_clause_cut_at_a_whole_word_within_72_characters
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
 
     assert_eq!(
-        after_merge(&runner),
+        after_yes(&runner),
         filed(&[900, 901, 902, 903, 904], &[], 0)
     );
     let titles: Vec<String> = rig.forge.created().into_iter().map(|i| i.title).collect();
@@ -351,7 +361,7 @@ fn a_what_with_no_clause_break_over_72_characters_ends_on_a_whole_word_and_an_el
     let found = [finding("src/lib.rs", what)];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
 
-    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_yes(&runner), filed(&[900], &[], 0));
     let [issue] = rig.forge.created().try_into().unwrap();
     assert_eq!(
         issue.title,
@@ -367,7 +377,7 @@ fn a_dotted_abbreviation_does_not_end_a_title() {
     let found = [finding("src/lib.rs", what)];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
 
-    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_yes(&runner), filed(&[900], &[], 0));
     let [issue] = rig.forge.created().try_into().unwrap();
     assert_eq!(
         issue.title,
@@ -384,7 +394,7 @@ fn a_finding_filed_before_under_its_80_character_title_is_not_filed_again() {
     rig.forge
         .open_issue(61, &old_title, &format!("In `src/lib.rs`: {what}"));
 
-    assert_eq!(after_merge(&runner), filed(&[], &[61], 0));
+    assert_eq!(after_yes(&runner), filed(&[], &[61], 0));
     assert_eq!(rig.forge.created(), []);
 }
 
@@ -393,7 +403,7 @@ fn the_same_finding_deferred_twice_files_once() {
     let found = [racy()];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found).repeat(2));
 
-    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_yes(&runner), filed(&[900], &[], 0));
     assert_eq!(rig.forge.created().len(), 1);
 }
 
@@ -428,7 +438,7 @@ fn a_dispute_with_no_reason_leaves_the_deferred_finding_to_be_filed() {
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
     std::fs::write(rig.build_7().join("disputed-findings.md"), lines(&found)).unwrap();
 
-    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_yes(&runner), filed(&[900], &[], 0));
     assert_eq!(rig.forge.created().len(), 1);
 }
 
@@ -452,7 +462,7 @@ fn a_nit_an_older_state_file_held_is_not_filed() {
     let (rig, runner) = auto_ready_to_merge(&found, &deferred);
     runner.lock().unwrap().state.work_items[0].held.push(nit);
 
-    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_yes(&runner), filed(&[900], &[], 0));
     let [issue] = rig.forge.created().try_into().unwrap();
     assert_eq!(issue.title, "looks racy");
 }
@@ -461,7 +471,6 @@ fn a_nit_an_older_state_file_held_is_not_filed() {
 fn a_nit_the_worker_deferred_files_nothing() {
     let rig = Rig::new("shep");
     rig.merge_auto();
-    rig.issues("file");
     let runner = rig.open().unwrap();
     rig.ask(&runner, "add", Some("7"));
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
@@ -511,7 +520,7 @@ fn a_finding_that_names_a_folder_on_this_machine_is_left_out_and_the_rest_are_fi
     let found = [finding(&local, "names a build folder"), racy()];
     let (rig, runner) = ready_in(rig, &found, &lines(&found));
 
-    assert_eq!(after_merge(&runner), filed(&[900], &[], 1));
+    assert_eq!(after_yes(&runner), filed(&[900], &[], 1));
     let [issue] = rig.forge.created().try_into().unwrap();
     assert_eq!(issue.title, "looks racy");
     assert!(finished(after_merge(&runner)));
@@ -524,7 +533,7 @@ fn a_finding_named_by_its_worktree_path_is_filed_by_the_path_in_the_repo() {
     let found = [finding(&inside, "looks racy")];
     let (rig, runner) = ready_in(rig, &found, &lines(&found));
 
-    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_yes(&runner), filed(&[900], &[], 0));
     let [issue] = rig.forge.created().try_into().unwrap();
     assert!(issue.body.contains("`src/lib.rs:9`"), "{}", issue.body);
     assert!(finished(after_merge(&runner)));
@@ -536,7 +545,7 @@ fn a_forge_that_cannot_open_issues_holds_the_work_item_and_the_retry_files_once(
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
     rig.forge.set_issues_down(true);
 
-    let Some(StepReport::GateFailed { issue, reason }) = after_merge(&runner) else {
+    let Some(StepReport::GateFailed { issue, reason }) = after_yes(&runner) else {
         panic!("the failure was not reported");
     };
     assert_eq!(issue, ticket(7));
@@ -559,7 +568,7 @@ fn an_issue_with_the_same_title_that_never_names_the_file_is_not_a_duplicate() {
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
     rig.forge.open_issue(53, "Looks racy", "Somewhere else.");
 
-    assert_eq!(after_merge(&runner), filed(&[900], &[], 0));
+    assert_eq!(after_yes(&runner), filed(&[900], &[], 0));
 }
 
 #[test]
@@ -569,7 +578,7 @@ fn a_forge_that_keeps_refusing_is_retried_for_hours_and_then_the_maintainer_is_a
     rig.forge.set_issues_down(true);
 
     assert!(matches!(
-        after_merge(&runner),
+        after_yes(&runner),
         Some(StepReport::GateFailed { .. })
     ));
     for _ in 0..19 {
@@ -606,7 +615,7 @@ fn a_finding_a_publish_hook_refuses_is_not_filed_and_the_maintainer_is_asked_nam
     let found = [racy()];
     let (rig, runner) = ready_in(rig, &found, &lines(&found));
 
-    let Some(StepReport::GateFailed { reason, .. }) = after_merge(&runner) else {
+    let Some(StepReport::GateFailed { reason, .. }) = after_yes(&runner) else {
         panic!("the refused issue did not hold the work item");
     };
     assert!(
@@ -633,7 +642,7 @@ fn a_yes_while_the_forge_still_refuses_starts_a_fresh_window_not_an_instant_ruli
     let found = [racy()];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
     rig.forge.set_issues_down(true);
-    after_merge(&runner);
+    after_yes(&runner);
     rig.clock.advance(6 * 60 * 60);
     let Some(StepReport::Ruling { id, .. }) = after_merge(&runner) else {
         panic!("the maintainer was not asked after the window");
@@ -662,7 +671,7 @@ fn a_finding_the_forge_takes_starts_the_refusal_window_again() {
     let found = [racy(), finding("src/main.rs", "leaks a handle")];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
     rig.forge.set_issues_down(true);
-    after_merge(&runner);
+    after_yes(&runner);
     rig.clock.advance(5 * 60 * 60);
 
     // It takes one finding, then refuses the other.
@@ -690,7 +699,7 @@ fn what_a_ruling_says_of_the_forges_refusal_is_cut_short() {
     let found = [racy()];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
     rig.forge.set_issues_error(&"x".repeat(5000));
-    after_merge(&runner);
+    after_yes(&runner);
     rig.clock.advance(6 * 60 * 60);
 
     let Some(StepReport::Ruling { question, .. }) = after_merge(&runner) else {
@@ -730,7 +739,7 @@ fn a_no_to_a_forge_that_kept_refusing_drops_the_findings() {
     let found = [racy()];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
     rig.forge.set_issues_down(true);
-    after_merge(&runner);
+    after_yes(&runner);
     rig.clock.advance(6 * 60 * 60);
     let Some(StepReport::Ruling { id, .. }) = after_merge(&runner) else {
         panic!("the maintainer was not asked after the window");
@@ -771,7 +780,7 @@ fn a_restart_after_the_merge_still_files_what_the_worker_deferred() {
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
     rig.forge.set_issues_down(true);
     assert!(matches!(
-        after_merge(&runner),
+        after_yes(&runner),
         Some(StepReport::GateFailed { .. })
     ));
     drop(runner);
@@ -927,20 +936,13 @@ fn under_ask_a_no_drops_the_findings() {
     assert_eq!(rig.forge.created(), []);
 }
 
-// Under `auto` with `git.issues` as `filing`, CI green, `racy()` deferred: next merges it
-fn auto_merging_with_issues(filing: &str) -> (Rig, Mutex<Runner>) {
-    auto_merging_on(Rig::new("shep"), filing, "work\n", &[racy()])
-}
-
 // ... on `rig`, whose worker writes `work` to `work.txt` and defers `found`
 pub(in crate::runner) fn auto_merging_on(
     rig: Rig,
-    filing: &str,
     work: &'static str,
     found: &[Finding],
 ) -> (Rig, Mutex<Runner>) {
     rig.merge_auto();
-    rig.issues(filing);
     let (rig, runner, head) = reviewed_pushing(rig, found, false, work);
     defer(&rig, &lines(found));
     rig.forge.set_checks(&head, Checks::Passed);
@@ -953,48 +955,19 @@ pub(in crate::runner) fn auto_merging_on(
 }
 
 #[test]
-fn issues_ask_raises_the_follow_up_ruling_under_auto_merging_too() {
-    let (rig, runner) = auto_merging_with_issues("ask");
-    let Some(StepReport::Ruling { question, .. }) = after_merge(&runner) else {
-        panic!("the maintainer was not asked about the findings");
-    };
-    assert_eq!(rig.forge.merges().len(), 1, "kelpie merged it itself");
-    assert!(question.contains("src/lib.rs:9 looks racy"), "{question}");
-    assert_eq!(rig.forge.created(), [], "nothing is filed before the yes");
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["rulings"][0]["kind"]["kind"], "follow-up");
-}
-
-#[test]
-fn issues_skip_files_nothing_asks_nothing_and_the_work_item_finishes() {
-    let (rig, runner) = auto_merging_with_issues("skip");
-    assert!(finished(after_merge(&runner)));
-    assert_eq!(rig.forge.merges().len(), 1);
-    assert_eq!(rig.forge.created(), []);
-    assert_eq!(rig.forge.comments(), []);
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["rulings"], json!([]));
-    assert_eq!(status["work_items"], json!([]));
-}
-
-#[test]
-fn issues_file_files_at_once_under_ask_merging_too() {
-    let rig = Rig::new("shep");
-    rig.issues("file");
-    let (rig, runner, head) = reviewed_in(rig, &[racy()], false);
-    defer(&rig, &lines(&[racy()]));
-    rig.forge.set_checks(&head, Checks::Passed);
-    assert!(matches!(
-        rig.verdict(&runner),
-        Some(StepReport::Ruling { id, .. }) if id == ticket(71)
-    ));
-    rig.ask(&runner, "rule", Some("71 yes"));
-    assert!(matches!(
-        step(&runner).unwrap(),
-        Some(StepReport::MarkedReady { .. })
-    ));
-    rig.clock.advance(CHECKS_SETTLE);
-    assert_eq!(step(&runner).unwrap(), filed(&[900], &[], 0));
-    assert_eq!(rig.forge.merges().len(), 1);
-    assert_eq!(rig.forge.created().len(), 1);
+fn a_deferred_finding_raises_a_follow_up_ruling_whatever_git_issues_holds() {
+    for filing in ["ask", "file", "skip"] {
+        let rig = Rig::new("shep");
+        rig.edit_settings(|s| s.replace("issues = \"ask\"", &format!("issues = \"{filing}\"")));
+        let (rig, runner) = auto_merging_on(rig, "work\n", &[racy()]);
+        let report = after_merge(&runner);
+        let Some(StepReport::Ruling { question, .. }) = report else {
+            panic!("git.issues = {filing}: expected a follow-up ruling, got {report:?}");
+        };
+        assert_eq!(rig.forge.merges().len(), 1, "kelpie merged it itself");
+        assert!(question.contains("src/lib.rs:9 looks racy"), "{question}");
+        assert_eq!(rig.forge.created(), [], "nothing is filed before the yes");
+        let status = rig.ask(&runner, "status", None);
+        assert_eq!(status["rulings"][0]["kind"]["kind"], "follow-up");
+    }
 }

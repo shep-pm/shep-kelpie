@@ -60,7 +60,7 @@ pub use e2e::{E2e, RepoPath, ResultsDir, SshAlias};
 pub use gateway::{
     Gateway, GatewayKey, GatewayKind, GatewayName, Gateways, KeyVar, ModelHost, Route, Timing,
 };
-pub use git::{BaseBranch, DEFAULT_BASE, Filing, Git, GithubLogin, Merging};
+pub use git::{BaseBranch, DEFAULT_BASE, Git, GithubLogin, Merging};
 pub use hooks::{HookPoint, PointKind, ProjectHook};
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use local_rounds::{KeepDays, LocalRounds, RoundsFolder};
@@ -454,8 +454,7 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "merge_authority",
         because: "it set both who merges and whether deferred findings are asked about",
-        fix: "move its value to `git.merging`, and set `git.issues`: `ask` asks before \
-              filing deferred findings as `ask` did, and `file` files them as `auto` did",
+        fix: "move its value to `git.merging`; deferred findings always raise a follow-up ruling",
     },
     Removed {
         key: "ci",
