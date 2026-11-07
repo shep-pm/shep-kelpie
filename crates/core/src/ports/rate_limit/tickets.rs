@@ -120,6 +120,15 @@ impl Tickets for RateHeld {
         })
     }
 
+    fn add_sub_issue(
+        &self,
+        repo: &ForgeSlug,
+        parent: TicketId,
+        child: TicketId,
+    ) -> Result<(), ForgeError> {
+        self.call_tickets(Kind::AddSubIssue, |t| t.add_sub_issue(repo, parent, child))
+    }
+
     fn set_issue_label(
         &self,
         repo: &ForgeSlug,

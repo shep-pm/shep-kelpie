@@ -1,8 +1,8 @@
-//! A blocked-by link added to a GitHub issue
+//! A blocked-by or sub-issue link added to a GitHub issue
 //!
-//! The endpoint takes the blocker's database id, which is not its number, so
-//! the blocker is read first. That read answers for a pull request too, which
-//! the endpoint refuses, so one is left unlinked.
+//! Each endpoint takes the linked issue's database id, which is not its
+//! number, so that issue is read first. That read answers for a pull request
+//! too, which the endpoint refuses, so a blocker that is one is left unlinked.
 
 use serde::Deserialize;
 
@@ -24,13 +24,56 @@ pub(super) fn add_blocked_by(
     Ok(true)
 }
 
-// `-F` sends the id as a number, which the endpoint wants.
-fn link_args(repo: &ForgeSlug, number: u64, id: u64) -> Vec<String> {
-    let path = format!(
-        "repos/{}/issues/{number}/dependencies/blocked_by",
+pub(super) fn add_sub_issue(repo: &ForgeSlug, parent: u64, child: u64) -> Result<(), ForgeError> {
+    let path = format!("repos/{}/issues/{child}", repo.as_str());
+    let Some(id) = parse_id(&gh(&["api", &path])?)? else {
+        return Err(ForgeError::Failed(format!(
+            "#{child} is a pull request, which is no sub-issue"
+        )));
+    };
+    // GitHub lists a parent's sub-issues from other repos too, so the child is
+    // looked for by its database id, which no two issues share.
+    let listed = format!(
+        "repos/{}/issues/{parent}/sub_issues?per_page=100",
         repo.as_str()
     );
-    let field = format!("issue_id={id}");
+    if is_linked(&gh(&["api", &listed])?, id)? {
+        return Ok(());
+    }
+    let args = sub_issue_args(repo, parent, id);
+    gh(&args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    Ok(())
+}
+
+// Whether the sub-issues listed in `stdout` hold the issue with database id `id`
+fn is_linked(stdout: &[u8], id: u64) -> Result<bool, ForgeError> {
+    #[derive(Deserialize)]
+    struct Listed {
+        id: u64,
+    }
+    let listed: Vec<Listed> = serde_json::from_slice(stdout).map_err(|_| unreadable(stdout))?;
+    Ok(listed.iter().any(|sub| sub.id == id))
+}
+
+fn sub_issue_args(repo: &ForgeSlug, parent: u64, id: u64) -> Vec<String> {
+    post_args(
+        format!("repos/{}/issues/{parent}/sub_issues", repo.as_str()),
+        format!("sub_issue_id={id}"),
+    )
+}
+
+// `-F` sends the id as a number, which the endpoint wants.
+fn link_args(repo: &ForgeSlug, number: u64, id: u64) -> Vec<String> {
+    post_args(
+        format!(
+            "repos/{}/issues/{number}/dependencies/blocked_by",
+            repo.as_str()
+        ),
+        format!("issue_id={id}"),
+    )
+}
+
+fn post_args(path: String, field: String) -> Vec<String> {
     [
         "api",
         "--method",
@@ -81,6 +124,45 @@ mod tests {
                 "issue_id=3912345678",
             ]
         );
+    }
+
+    #[test]
+    fn the_sub_issue_is_linked_by_its_database_id_and_not_its_number() {
+        // The head of `gh api repos/shep-pm/koji/issues/13`
+        let out = br#"{"url":"https://api.github.com/repos/shep-pm/koji/issues/13",
+            "id":3912345999,"node_id":"I_kwDOAbd","number":13,"title":"The child",
+            "state":"open"}"#;
+        let id = parse_id(out).unwrap().unwrap();
+        assert_eq!(id, 3_912_345_999);
+        assert_eq!(
+            sub_issue_args(&repo(), 12, id),
+            [
+                "api",
+                "--method",
+                "POST",
+                "repos/shep-pm/koji/issues/12/sub_issues",
+                "-F",
+                "sub_issue_id=3912345999",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_child_already_linked_is_not_linked_twice() {
+        // The head of `gh api repos/shep-pm/koji/issues/12/sub_issues?per_page=100`
+        let out = br#"[{"id":3912345998,"number":11,"state":"closed","state_reason":"completed"},
+            {"id":3912345999,"number":13,"state":"open","state_reason":null}]"#;
+        assert!(is_linked(out, 3_912_345_999).unwrap());
+        assert!(!is_linked(out, 3_912_346_000).unwrap());
+        assert!(!is_linked(b"[]", 3_912_345_999).unwrap());
+    }
+
+    #[test]
+    fn a_sub_issue_of_another_repo_with_the_same_number_is_not_the_child() {
+        // `other/koji#13` sits under the parent; `shep-pm/koji#13` has its own id
+        let out = br#"[{"id":3900000013,"number":13,"state":"open","state_reason":null,
+            "repository_url":"https://api.github.com/repos/other/koji"}]"#;
+        assert!(!is_linked(out, 3_912_345_999).unwrap());
     }
 
     #[test]
