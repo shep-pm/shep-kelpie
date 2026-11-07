@@ -5,14 +5,15 @@
 //! an implementer, and an unstick a work item that is stuck now: parked on a
 //! ruling a stuck item raises, or with a call the board reads as idle.
 //! A fix names a stuck item too, and the open fix it waits on. Anything else
-//! is dropped, and named in the log. Each unstick and each fix in the answer
-//! runs on its own, so one wake that carried several stuck items can settle
-//! each, and one naming the same item twice acts once.
+//! is dropped, and named in the log. Each unstick and each fix runs on its
+//! own, so one wake that carried several stuck items can settle each, and an
+//! item named twice, in one key or across both, acts once.
 
 use super::answer::{Action, Answer, Unstick};
 use super::red::Settled;
 use super::{Pick, Picked, StuckState, Wake, stuck_on};
 use crate::board::briefing::ticket_ref;
+use crate::runner::ruling::PARKS;
 use crate::runner::thread_replies::Settler;
 use crate::runner::{Answer as Ruled, RuleError, Runner};
 use crate::settings::AgentName;
@@ -133,9 +134,11 @@ impl Runner {
             let named: Vec<String> = self.state.pm_holds.iter().map(PmHeld::to_string).collect();
             acted.push(format!("holds {}", named.join(", ")));
         }
-        let mut unstuck: Vec<TicketId> = Vec::new();
+        // One item acts once, whichever key named it first, so an answer that
+        // both unsticks and parks it settles its ruling once.
+        let mut handled: Vec<TicketId> = Vec::new();
         for unstick in &answer.unstick {
-            if unstuck.contains(&unstick.item) {
+            if handled.contains(&unstick.item) {
                 dropped.push(format!(
                     "{} {}: the answer names it twice",
                     unstick.action.as_str(),
@@ -143,20 +146,19 @@ impl Runner {
                 ));
                 continue;
             }
-            unstuck.push(unstick.item);
+            handled.push(unstick.item);
             match self.unstick(unstick)? {
                 Ok(done) => acted.push(done),
                 Err(why) => dropped.push(why),
             }
         }
-        let mut parked: Vec<TicketId> = Vec::new();
         for call in &answer.fix {
             let named = ticket_ref(call.item);
-            if parked.contains(&call.item) {
+            if handled.contains(&call.item) {
                 dropped.push(format!("fix {named}: the answer names it twice"));
                 continue;
             }
-            parked.push(call.item);
+            handled.push(call.item);
             match self.settle_fix(call)? {
                 Ok(done) => acted.push(done),
                 Err(why) => dropped.push(why),
@@ -358,9 +360,7 @@ impl Runner {
         }
         let lead = match (action, on) {
             (Action::ReScope, _) => "The project manager proposes re-scoping it".to_owned(),
-            (Action::Ask, Some(fix)) => {
-                format!("The project manager parks this on {}", ticket_ref(fix))
-            }
+            (Action::Ask, Some(fix)) => format!("{PARKS}{}", ticket_ref(fix)),
             _ => "The project manager asks you to decide".to_owned(),
         };
         let mut next = self.state.clone();

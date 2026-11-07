@@ -13,7 +13,7 @@ use super::super::contributions::{
     ADOPT_ANYWAY, CLOSE_WITH_THANKS, KEEP_WAITING, LEAVE_OPEN, flagged_lines,
 };
 use super::super::gate::short;
-use super::super::ruling::{needs_pass, stuck_comment};
+use super::super::ruling::{PARKS, needs_pass, stuck_comment};
 use super::super::words::{NO_NOTE, Wants};
 use super::super::{Action, Answer};
 use super::{has_high, merge_notes, open_lines};
@@ -754,8 +754,11 @@ pub(in crate::runner) const SAYS: &str = "PM says:";
 // The project manager's pick and why, where it gave any:
 // `**Project manager: A**. Its why.`, or by name on a card whose table names
 // its options instead of lettering them, as `**Project manager: Merge**`.
+// A parked item names the fix it waits on instead, with or without its why.
 fn pm_words(ruling: &Ruling, choices: &[Choice]) -> Option<String> {
     let says = after_last(&ruling.question, SAYS).map(super::inert);
+    // The fix is the one word the park line has after its lead
+    let parks = (after_last(&ruling.question, PARKS)).and_then(|line| line.split(' ').next());
     let picked = after_last(&ruling.question, RECOMMENDS).and_then(|pick| {
         let plain = |text: &str| text.trim().trim_matches('`').to_lowercase();
         let at = choices.iter().position(|c| plain(&c.name) == plain(pick))?;
@@ -764,11 +767,13 @@ fn pm_words(ruling: &Ruling, choices: &[Choice]) -> Option<String> {
             _ => choices[at].name.clone(),
         })
     });
-    Some(match (picked, says) {
-        (None, None) => return None,
-        (Some(key), None) => format!("**Project manager: {key}**"),
-        (Some(key), Some(words)) => format!("**Project manager: {key}**. {words}"),
-        (None, Some(words)) => format!("**Project manager**: {words}"),
+    Some(match (parks, picked, says) {
+        (Some(fix), _, Some(words)) => format!("**{PARKS}{fix}** {words}"),
+        (Some(fix), _, None) => format!("**{PARKS}{fix}**"),
+        (None, Some(key), None) => format!("**Project manager: {key}**"),
+        (None, Some(key), Some(words)) => format!("**Project manager: {key}**. {words}"),
+        (None, None, Some(words)) => format!("**Project manager**: {words}"),
+        (None, None, None) => return None,
     })
 }
 

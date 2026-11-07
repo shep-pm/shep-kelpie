@@ -2,14 +2,15 @@
 //! system and a fix for it is already open
 
 use std::sync::Mutex;
+use std::time::Instant;
 
 use serde_json::Value;
 
 use super::{answered, past_the_window, step_until, with_pm};
 use crate::ports::AgentError;
-use crate::runner::{Runner, StepReport};
+use crate::runner::{Runner, StepReport, step};
 use crate::settings::Harness;
-use crate::test::{Rig, Scripted};
+use crate::test::{CALL_PATIENCE, Rig, Scripted};
 
 /// What kelpie could not set up, in the forge's own words
 const SETUP: &str = "cannot empty worker/settings-7.tmp: permission denied";
@@ -189,6 +190,66 @@ fn a_fix_on_a_setup_failure_parks_it() {
         asked(&rig, &runner, 7)
     );
     assert_eq!(rig.claude.calls().len(), 1, "no turn is tried again");
+}
+
+/// The card kelpie sends the maintainer for ruling 7 after the answer, which
+/// names the fix the item waits on. The re-post is the webhook alert, which
+/// carries the ruling's words as they now stand.
+fn reposted_card(rig: &Rig, runner: &Mutex<Runner>) -> String {
+    let deadline = Instant::now() + CALL_PATIENCE;
+    loop {
+        let named = (rig.alerts.posts()).into_iter().find_map(|(_, alert)| {
+            alert
+                .text
+                .contains("parks this on")
+                .then(|| alert.text.clone())
+        });
+        if let Some(card) = named {
+            return card;
+        }
+        assert!(Instant::now() < deadline, "no card names the fix");
+        step(runner).unwrap();
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn the_card_posted_again_names_the_fix_the_item_waits_on() {
+    let (rig, runner) = parked("abra8");
+    rig.claude
+        .script([Scripted::Say(parks_7("a machine fault, not the item's"))]);
+
+    let (acted, dropped) = answered_wake(&rig, &runner);
+    assert_eq!(acted, ["parked #7 on #12"]);
+    assert_eq!(dropped, Vec::<String>::new());
+
+    let card = reposted_card(&rig, &runner);
+    assert!(
+        card.contains(
+            "The project manager parks this on #12. PM says: a machine fault, not the item's"
+        ),
+        "{card}"
+    );
+}
+
+#[test]
+fn an_item_named_by_an_unstick_and_a_fix_acts_once() {
+    let (rig, runner) = parked("abra9");
+    const BOTH: &str = "{\"pick\": null, \"unstick\": {\"item\": 7, \"action\": \"ask\", \
+                        \"why\": \"the machine, not the item\"}, \"fix\": {\"item\": 7, \
+                        \"on\": 12, \"why\": \"and its fix\"}}";
+    rig.claude.script([Scripted::Say(BOTH)]);
+
+    let (acted, dropped) = answered_wake(&rig, &runner);
+
+    assert_eq!(acted, ["put #7 to the maintainer on ruling 7"]);
+    assert_eq!(dropped, ["fix #7: the answer names it twice"]);
+    let question = asked(&rig, &runner, 7);
+    assert_eq!(
+        question.matches("PM says:").count(),
+        1,
+        "one line for one item: {question}"
+    );
 }
 
 #[test]

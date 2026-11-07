@@ -1,9 +1,9 @@
 use super::*;
 use crate::ports::{Finding, Severity};
-use crate::runner::ruling::question;
+use crate::runner::ruling::{PARKS, question};
 use crate::state::{AgentFit, AgentMeasure, OpenThread, Resume, Ruling, RulingKind, Stuck};
 use crate::test::ticket;
-use crate::work_item::{Known, Phase};
+use crate::work_item::{Known, Phase, Turn};
 
 // A ruling on pull request 71, whose question is the one kelpie words for it
 fn ruling(id: TicketId, kind: RulingKind) -> Ruling {
@@ -410,6 +410,55 @@ fn a_stuck_ruling_takes_a_yes_or_a_no_and_carries_the_project_managers_words() {
         rendered(&said_by_the_pm(ruling(ticket(1), kind), words)),
         expected!("stuck-still-red.md")
     );
+}
+
+// A worker's turn that failed, which parks the work item on a ruling
+fn turn_failed(why: &str) -> RulingKind {
+    RulingKind::Stuck(Stuck::TurnFailed {
+        why: why.into(),
+        phase: Phase::Implement,
+        retry: Turn::Due,
+        restore: Vec::new(),
+        setup: false,
+    })
+}
+
+// A stuck item the project manager parked on the open fix #12, as `settle`
+// words its question
+fn parked_on_a_fix(mut ruling: Ruling) -> Ruling {
+    ruling.question = format!("{}\n\n{PARKS}#12. PM says: {WHY}", ruling.question);
+    ruling
+}
+
+/// What the project manager says about the parked item
+const WHY: &str = "a machine fault, not the item's";
+
+#[test]
+fn a_parked_stuck_card_names_the_fix_it_waits_on() {
+    let parked = parked_on_a_fix(ruling(
+        ticket(1),
+        turn_failed("the parser fights the lexer"),
+    ));
+    let comment = rendered(&parked);
+
+    assert!(
+        comment.contains(&format!("**{PARKS}#12.** {WHY}")),
+        "{comment}"
+    );
+    assert!(
+        !comment.contains("**Project manager**"),
+        "the fix line stands in for the pick line: {comment}"
+    );
+}
+
+#[test]
+fn a_parked_stuck_card_names_the_fix_with_no_words_to_say() {
+    let mut parked = ruling(ticket(1), turn_failed("it crashed"));
+    parked.question = format!("{}\n\n{PARKS}#12.", parked.question);
+    let comment = rendered(&parked);
+
+    assert!(comment.contains(&format!("**{PARKS}#12.**")), "{comment}");
+    assert!(!comment.contains("**Project manager**"), "{comment}");
 }
 
 #[test]
