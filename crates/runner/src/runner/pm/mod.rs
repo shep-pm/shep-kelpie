@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 use super::Runner;
+use super::pace::Pace;
 use super::report::StepReport;
 use super::ruling::PostJob;
 use super::trigger::lock;
@@ -22,7 +23,7 @@ use crate::pacer::Scope;
 use crate::ports::{
     AgentError, AgentReply, COMPACT, Finding, PaddockHolder, Session, SessionId, Timestamp, Wait,
 };
-use crate::settings::PmAgent;
+use crate::settings::{AgentName, PmAgent};
 use crate::state::StateError;
 use crate::ticket::TicketId;
 use crate::usage::CallKind;
@@ -58,7 +59,7 @@ pub(super) use said::{Released, SaidHow};
 
 use answer::Action;
 use ci_logs::Woke;
-use wakes::{LeftAlone, stuck_on};
+use wakes::{AgentOut, LeftAlone, stuck_on};
 
 /// The context, in tokens, past which the session is compacted after a wake
 ///
@@ -93,7 +94,7 @@ pub(super) const HOLD_FOR: u64 = 3 * 60;
 
 /// What a work item is stuck on, which a new turn, phase or ruling is a
 /// different one of
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum StuckState {
     /// Parked on this ruling, raised then. A ruling raised again on the same
     /// item is a different one, whatever its number.
@@ -105,6 +106,8 @@ pub(super) enum StuckState {
     },
     /// Its call in flight has shown nothing, on the turn that started then
     Idle(Timestamp),
+    /// Its due turn waits for the next pick, since this agent is out
+    AgentOut(AgentName),
 }
 
 /// Why the project manager is woken
@@ -307,6 +310,8 @@ pub(super) struct Desk {
     // it said so, how many `none`s in a row on that state, and when its hold
     // ends
     left_alone: BTreeMap<TicketId, LeftAlone>,
+    // Each work item whose due turn waits for its pick since its agent is out
+    agent_out: BTreeMap<TicketId, AgentOut>,
     // Each question ruling held back from the maintainer for its answer, with
     // when it was raised
     asking: BTreeMap<TicketId, Timestamp>,
@@ -359,7 +364,7 @@ impl Runner {
             return;
         }
         if let Wake::Stuck { ticket, state, .. } = &wake
-            && self.left_alone_holds(*ticket, *state)
+            && self.left_alone_holds(*ticket, state)
         {
             return;
         }
@@ -537,20 +542,24 @@ impl Runner {
     // Set up, not held by the maintainer's terminal, not down, and within
     // its account's pace.
     pub(super) fn pm_available(&mut self) -> bool {
-        let Some(limit) = self.agents.pm.as_ref().map(|pm| pm.limit.clone()) else {
-            return false;
-        };
+        matches!(self.pm_pace(), Some(Pace::Clear))
+    }
+
+    /// How its account's pace stands for a call, or none when no call can run:
+    /// no project manager, held by the maintainer's terminal, or down
+    ///
+    /// A step that has not read the account's usage gets a read back, which
+    /// makes the step again.
+    pub(super) fn pm_pace(&mut self) -> Option<Pace> {
+        let limit = self.agents.pm.as_ref().map(|pm| pm.limit.clone())?;
         if self.pm_held_by_terminal() {
-            return false;
+            return None;
         }
         let now = self.ports.clock.now();
         if self.pm.down_until.is_some_and(|until| now < until) {
-            return false;
+            return None;
         }
-        matches!(
-            self.pace_now(Scope::Turn, &limit),
-            Ok(super::pace::Pace::Clear)
-        )
+        self.pace_now(Scope::Turn, &limit).ok()
     }
 
     /// Starts the project manager's call if one is due and it can run,
@@ -959,6 +968,7 @@ impl Runner {
                 self.pm.reading.remove(ticket);
             }
         }
+        self.pm_unpicked(&flying.wakes);
         // Its pick or hold is taken on the board's next read.
         self.looks.board_moved();
         Ok(Some(StepReport::PmAnswered {

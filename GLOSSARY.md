@@ -186,8 +186,9 @@ An agent kelpie can run a work item on, from a file whose role is
 every new work item opens on, a rework and an adopted item included, and an
 issue's `agent:<name>!` label **pins** it to one. There is no default
 implementer. A work item keeps the implementer it opened on until a
-**handoff** moves it to the board's next pick. A pinned work item is never
-handed off.
+**handoff** moves it to the next agent, which the project manager names where
+the project has one and the board's next pick is otherwise. A pinned work item
+is never handed off.
 _Avoid_: worker model, local worker
 
 **Waiting for model**:
@@ -347,8 +348,10 @@ drives it yet.
 The document a session writes so the next session can continue: the
 `reset` step's skill. Also a work item moved to another implementer before a
 due turn, because the **agent board** says its own cannot start within the
-item's slack. The new implementer starts a session of its own on the
-same branch, with a note kelpie writes of the commits and the last turn.
+item's slack. The project manager names the next implementer and the turn
+waits for it; with no project manager, the board's next pick takes the item.
+The new implementer starts a session of its own on the same branch, with a
+note kelpie writes of the commits and the last turn.
 _Avoid_: summary (Claude's compaction output)
 
 **Attach**:
