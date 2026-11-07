@@ -280,10 +280,12 @@ impl Runner {
 }
 
 impl Runner {
-    // Sets which features the settings and `main`'s launch file turn on.
+    // Sets which features the settings, `main`'s launch file and the installed tools turn on.
     fn refresh_features(&self) {
         let dev_server = super::dev_server::is_on(&self.settings);
-        self.metrics.features(&self.settings, dev_server);
+        let code_graph = self.paths.tools.has_code_graph();
+        self.metrics
+            .features(&self.settings, dev_server, code_graph);
     }
 
     /// Loads the repo's plugins again if its default branch moved since they

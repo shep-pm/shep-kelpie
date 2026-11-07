@@ -537,17 +537,16 @@ compact_window = 200000
 [app.dogs.kelpie.tickets]
 source = "github"
 
-# A code graph of each work item's worktree for the reviewers' calls, served by
-# codebase-memory-mcp: where a symbol is, what calls it, what it touches, in one
-# call instead of a run of greps. `shep kelpie tools install` fetches the
-# server, and a project that turns it on without it gets a doctor line and calls
-# that run without a graph. Kelpie indexes the worktree before each call given
-# it, keeps the index under `$SHEP_HOME/kelpie/<project>/code-graphs/`, and
-# removes it with the worktree. The server runs inside the call's sandbox like
-# everything else in it. `worker` adds the worker's own working turns, and is
-# off: the server's 17 tool definitions ride in every request of every turn, and
-# no worker session recorded so far, on Claude Code or pi, has answered one of
-# them.
+# A code graph of each work item's worktree for the reviewers' and the triager's
+# calls, served by codebase-memory-mcp: where a symbol is, what calls it, what it
+# touches, in one call instead of a run of greps. `shep kelpie tools install`
+# fetches the server, and a machine that has it gives every project the graph.
+# Kelpie indexes the worktree before each call given it, keeps the index under
+# `$SHEP_HOME/kelpie/<project>/code-graphs/`, and removes it with the worktree.
+# The server runs inside the call's sandbox like everything else in it. A
+# worker never gets it: the server's 17 tool definitions would ride in every
+# request of every turn, and no worker session recorded so far, on Claude Code
+# or pi, has answered one of them. Both keys load and nothing reads them.
 [app.dogs.kelpie.code_graph]
 enabled = false
 worker = false

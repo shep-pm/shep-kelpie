@@ -1,9 +1,9 @@
 //! A code graph of a work item's worktree for the calls that read the code
 //!
-//! A project that turns it on in `code_graph` has each reviewer indexed before
-//! the call starts, and each worker turn too when the table names `worker`. The
-//! index is kept under kelpie's home per work item, and goes with the work
-//! item's worktree. A triage view's index goes when its call ends.
+//! A machine with the server installed has each reviewer and the triager
+//! indexed before the call starts. A worker never gets it. The index is kept
+//! under kelpie's home per work item, and goes with the work item's worktree. A
+//! triage view's index goes when its call ends.
 //!
 //! The call is prepared with the runner's lock held, and indexing takes
 //! seconds to minutes, so it runs on the call's own thread, where a stop
@@ -24,8 +24,7 @@ use crate::ticket::TicketId;
 // An index that takes longer is not worth holding a turn for.
 const INDEX_LIMIT: Duration = Duration::from_secs(300);
 
-// The standing warnings: told once however many calls meet them.
-const NOT_INSTALLED: &str = "code-graph-not-installed";
+// The standing warning: told once however many calls meet it.
 const INDEX_FAILED: &str = "code-graph-index-failed";
 
 // How much of an indexer's output a note repeats.
@@ -33,30 +32,15 @@ const TAIL: usize = 300;
 
 impl Runner {
     /// Names the code graph server and its index in `call`'s reach, if the
-    /// project turned it on and the call reads the code
+    /// server is installed and the call reads the code
     ///
     /// The index is built by [`indexed`], once the call's thread has started.
-    /// A call that cannot have the server runs without, and a note says why.
+    /// A machine without the server runs its calls without, and says nothing.
     pub(super) fn with_code_graph(&self, call: &mut AgentCall) {
-        let code_graph = &self.settings.code_graph;
-        if !code_graph.enabled || !reads_code(call, code_graph.worker) {
-            return;
-        }
         let tools = &self.paths.tools;
-        if !tools.has_code_graph() {
-            self.metrics.feature_ran(Feature::CodeGraph, "skipped");
-            self.notes.standing(
-                NOT_INSTALLED,
-                format!(
-                    "{} runs without a code graph: {} is not there, so run \
-                     `shep kelpie tools install`",
-                    who(call),
-                    tools.code_graph().display()
-                ),
-            );
+        if !reads_code(call) || !tools.has_code_graph() {
             return;
         }
-        self.notes.ends(NOT_INSTALLED);
         // Only a call that works an issue reads code.
         let Some(ticket) = call.issue else {
             return;
@@ -116,17 +100,15 @@ impl Runner {
     }
 }
 
-// The reviewers and the triager read the code. The worker's turns do only
-// when the project names `code_graph.worker`: no recorded worker session has
-// answered one of the server's tools, and its 17 definitions ride in every
-// request of every turn (`docs/facts/mcp-servers.md`).
-fn reads_code(call: &AgentCall, worker: bool) -> bool {
+// The reviewers and the triager read the code. The worker's turns never do:
+// no recorded worker session has answered one of the server's tools, and its 17
+// definitions ride in every request of every turn (`docs/facts/mcp-servers.md`).
+fn reads_code(call: &AgentCall) -> bool {
     call.harness.loads_mcp()
-        && match (call.role, call.tools) {
-            (Role::Worker, Tools::Work) => worker,
-            (Role::Reviewer | Role::Triager, Tools::Review) => true,
-            _ => false,
-        }
+        && matches!(
+            (call.role, call.tools),
+            (Role::Reviewer | Role::Triager, Tools::Review)
+        )
 }
 
 pub(super) fn who(call: &AgentCall) -> String {
