@@ -147,11 +147,10 @@ through the typical time. `status` shows it as `records`.
 _Avoid_: score, rating
 
 **Slack**:
-How long a work item may wait for an agent to start, so kelpie's rule can
-take a cheaper one: 60 minutes, unless the project manager's pick names its
-own, such as 0 for a hotfix. An agent that
-can start within it is available, and a started item keeps its agent while
-it is.
+How long an item's agent may take to start before it counts as out: 60
+minutes, unless the project manager's pick names its own, such as 0 for a
+hotfix. An agent that can start within it is available, and a started item
+keeps its agent while it is.
 _Avoid_: max wait
 
 **Baseline**:

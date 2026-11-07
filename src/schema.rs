@@ -184,12 +184,6 @@ mod tests {
         }
     }
 
-    fn keys_of_schema(schema: &Value) -> BTreeSet<String> {
-        let mut keys = BTreeSet::new();
-        schema_keys(schema, schema, "", &mut keys);
-        keys
-    }
-
     // Names the keys only one side has, not either whole set.
     fn assert_same_keys(schema: &BTreeSet<String>, set: &BTreeSet<String>) {
         let unset: Vec<_> = schema.difference(set).collect();
@@ -360,17 +354,12 @@ mod tests {
             .replace(
                 "# [kelpie.leases]\n# cargo-test",
                 "[kelpie.leases]\ncargo-test",
-            )
-            .replace(
-                "# [kelpie.agent_board]\n# prefer",
-                "[kelpie.agent_board]\nprefer",
             );
         let example: toml::Table = toml::from_str(&example).unwrap();
         let section = toml::to_string(&example["kelpie"]).unwrap();
-        assert_same_keys(
-            &keys_of_schema(&root),
-            &keys_of_table(&root, &root, &section),
-        );
+        let mut live = BTreeSet::new();
+        live_keys(&root, &root, "", &mut live);
+        assert_same_keys(&live, &keys_of_table(&root, &root, &section));
     }
 
     #[test]
@@ -468,6 +457,16 @@ mod tests {
             project["properties"]["pacing"].is_null(),
             "the project schema names a pacing table"
         );
+    }
+
+    // `[agent_board]` is read by nothing, so the example documents no key for
+    // it, and a section that still holds one loads.
+    #[test]
+    fn the_agent_board_table_is_deprecated_and_takes_any_value() {
+        let root = schema();
+        let key = &root["properties"]["agent_board"];
+        assert_eq!(key["deprecated"], true, "{key}");
+        assert!(resolve(&root, key).get("type").is_none(), "{key}");
     }
 
     #[test]

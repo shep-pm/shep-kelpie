@@ -98,8 +98,8 @@ fn checked(text: &str) -> Result<(), String> {
     KelpieSettings::check_trusted(text).map_err(|e| e.to_string())
 }
 
-// A section that does not parse whole: the `[leases]` and `[agent_board]` tables
-// and the rest are read apart, so a mistake in one leaves the others standing. A leftover
+// A section that does not parse whole: the `[leases]` table and the rest are
+// read apart, so a mistake in one leaves the other standing. A leftover
 // `[api_credit]` table is taken out first and named, so the rest of the
 // section still reads.
 fn salvage(text: &str) -> KelpieSettings {
@@ -108,17 +108,12 @@ fn salvage(text: &str) -> KelpieSettings {
         return KelpieSettings::default();
     };
     let leases = table.remove("leases");
-    let board = table.remove("agent_board");
     let credit = table.remove("api_credit");
     let rest = toml::to_string(&table).unwrap_or_default();
     let mut settings = KelpieSettings::from_section(&rest).unwrap_or_default();
     match leases.map(toml::Value::try_into).transpose() {
         Ok(leases) => settings.leases = leases.unwrap_or_default(),
         Err(e) => println!("[leases] is not right ({e}): cargo-test is held by 3 at a time"),
-    }
-    match board.map(toml::Value::try_into).transpose() {
-        Ok(board) => settings.agent_board = board.unwrap_or_default(),
-        Err(e) => println!("[agent_board] is not right ({e}): the board ranks no agent first"),
     }
     if credit.is_some() {
         println!("[api_credit] is gone: delete it from the [kelpie] section");
@@ -138,23 +133,22 @@ mod tests {
         assert_eq!(settings.leases.cargo_test_capacity().get(), 3);
     }
 
+    // `[agent_board]` is a removed table of any shape, so a section holding one
+    // reads whole and the rest stands.
     #[test]
-    fn a_bad_agent_board_list_leaves_the_rest_standing_and_ranks_none() {
+    fn an_old_agent_board_table_leaves_the_rest_of_the_section_standing() {
         let good = "gpu_metrics_url = \"http://gpu-box:9835/metrics\"\n\
                     [leases]\ncargo-test = 5\n[agent_board]\nprefer = [\"opus\"]\n";
-        let settings = read_section(good).unwrap();
-        assert_eq!(settings.agent_board.prefer.len(), 1);
-
-        for bad in [
+        for old in [
+            "prefer = [\"opus\"]",
             "prefer = [\"Opus\"]",
             "prefer = \"opus\"",
             "rank = [\"opus\"]",
         ] {
-            let text = good.replace("prefer = [\"opus\"]", bad);
+            let text = good.replace("prefer = [\"opus\"]", old);
             let settings = read_section(&text).unwrap();
-            assert!(settings.gpu_metrics_url.is_some(), "{bad}");
-            assert_eq!(settings.leases.cargo_test_capacity().get(), 5, "{bad}");
-            assert!(settings.agent_board.prefer.is_empty(), "{bad}");
+            assert!(settings.gpu_metrics_url.is_some(), "{old}");
+            assert_eq!(settings.leases.cargo_test_capacity().get(), 5, "{old}");
         }
     }
 
