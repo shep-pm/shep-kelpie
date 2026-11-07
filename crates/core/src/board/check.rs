@@ -1,7 +1,8 @@
 //! The issue check: whether an issue holds every part an implementer builds from
 //!
 //! It reads structure, not quality: each part is there and well formed. The
-//! parts are what an issue body holds, as the triager writes one, the
+//! one exception is a path a worker's fence refuses, which it reads from
+//! [`crate::fence`] and fails. The parts are what an issue body holds, as the triager writes one, the
 //! blockers and harness reach `CLAUDE.md` asks for, and the labels the board
 //! and the triager set. The issue skill, `skills/kelpie/issue/SKILL.md`, gives
 //! the same format to the agent that writes an issue, and a test holds the
@@ -9,7 +10,10 @@
 
 use std::fmt;
 
+use std::path::Path;
+
 use super::is_priority_label;
+use crate::fence;
 use crate::guard::{CONVENTIONAL_TYPES, conventional_type};
 use crate::ticket::TicketId;
 
@@ -64,6 +68,14 @@ pub enum Failure {
     /// `Touches:` names this path in one harness's adapter, and no
     /// `Harness reach:` line with text follows
     NoHarnessReach(String),
+    /// `Touches:` names this path, which a worker's fence refuses to write for
+    /// this harness
+    Fenced {
+        /// The path as written
+        path: String,
+        /// The harness whose own file it is
+        harness: &'static str,
+    },
     /// No `What to build` heading, or nothing under it
     NoWhatToBuild,
     /// No `Acceptance criteria` heading
@@ -99,6 +111,12 @@ impl fmt::Display for Failure {
                 f,
                 "`{TOUCHES}` names `{path}`, one harness's adapter, and no `{HARNESS_REACH}` \
                  line says which harnesses the change reaches"
+            ),
+            Self::Fenced { path, harness } => write!(
+                f,
+                "`{TOUCHES}` names `{path}`, one of {harness}'s own files, and a worker's fence \
+                 refuses writes there on every harness: take the path out and give that change \
+                 to the maintainer in a `ready-for-human` issue"
             ),
             Self::NoWhatToBuild => {
                 write!(f, "no `## {WHAT_TO_BUILD}` section, or nothing under it")
@@ -147,6 +165,12 @@ pub fn check(title: &str, body: &str, labels: &[String]) -> Vec<Failure> {
             if paths.is_empty() {
                 failures.push(Failure::TouchesNoPath);
             }
+            failures.extend(fenced(body).into_iter().map(|(path, harness)| {
+                Failure::Fenced {
+                    path: path.to_owned(),
+                    harness,
+                }
+            }));
             let reach = labelled_line(body, HARNESS_REACH).is_some_and(|r| !bare(r).is_empty());
             let adapter = paths.into_iter().find(|p| is_adapter(p));
             if let Some(path) = adapter.filter(|_| !reach) {
@@ -205,7 +229,7 @@ pub fn check(title: &str, body: &str, labels: &[String]) -> Vec<Failure> {
 ///
 /// Raise it with any change to what [`check`] refuses: every issue is then
 /// checked once more, and each that now fails is owed a new triage pass.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// A digest of what [`check`] reads of an issue, which an edit changes
 ///
@@ -256,6 +280,17 @@ pub fn touched(body: &str) -> Option<Vec<&str>> {
     let below = below.skip_while(|l| l.trim().is_empty());
     let list = below.take_while(|l| is_list_item(l));
     Some(list.flat_map(backticked).collect())
+}
+
+/// The paths [`touched`] reads that a worker's fence refuses, each with the
+/// harness whose own file it is
+///
+/// [`fence::owner`] decides from the path alone, so this needs no settings.
+pub fn fenced(body: &str) -> Vec<(&str, &'static str)> {
+    let paths = touched(body).unwrap_or_default();
+    (paths.into_iter())
+        .filter_map(|path| Some((path, fence::owner(Path::new(path))?)))
+        .collect()
 }
 
 // Whether `line` is an item of a `-` or `*` list.

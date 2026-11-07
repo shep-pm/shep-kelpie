@@ -500,6 +500,13 @@ fn each_failure_names_the_part_it_is_about() {
         ),
         (Failure::BlockedByNoIssue, "`Blocked by:`"),
         (
+            Failure::Fenced {
+                path: ".claude/x.md".into(),
+                harness: "Claude Code",
+            },
+            "`.claude/x.md`",
+        ),
+        (
             Failure::ChangesIssue("Edit #1075's step 7 row".into()),
             "credential cannot change issues",
         ),
@@ -553,4 +560,100 @@ fn the_key_changes_with_what_the_check_reads_and_nothing_else() {
 fn fnv1a_is_the_published_function() {
     assert_eq!(fnv1a(b""), 0xcbf2_9ce4_8422_2325);
     assert_eq!(fnv1a(b"a"), 0xaf63_dc4c_8601_ec8c);
+}
+
+fn fenced_by(path: &str) -> Vec<Failure> {
+    of(&BODY.replace("`src/board.rs`", &format!("`{path}`")))
+}
+
+fn named(path: &str, harness: &'static str) -> Failure {
+    Failure::Fenced {
+        path: path.to_owned(),
+        harness,
+    }
+}
+
+#[test]
+fn a_fenced_path_on_the_touches_line_fails_naming_its_harness() {
+    for (path, harness) in [
+        (".claude/skills/x/SKILL.md", "Claude Code"),
+        (".mcp.json", "Claude Code"),
+        (".codex/config.toml", "Codex"),
+        (".agents/skills/x.md", "Codex"),
+        (".pi/extensions/x.ts", "pi"),
+        (".goose/x.yaml", "goose"),
+        (".config/goose/x.yaml", "goose"),
+    ] {
+        let failures = fenced_by(path);
+        assert_eq!(failures, [named(path, harness)], "{path}");
+        let said = failures[0].to_string();
+        assert!(said.contains(path) && said.contains(harness), "{said}");
+        assert!(said.contains("every harness"), "{said}");
+        assert!(said.contains("ready-for-human"), "{said}");
+    }
+}
+
+#[test]
+fn a_fenced_path_at_any_depth_or_in_any_case_fails() {
+    for (path, harness) in [
+        ("crates/x/.claude/settings.json", "Claude Code"),
+        ("docs/.Codex/x.md", "Codex"),
+        (".CLAUDE/x.md", "Claude Code"),
+        (".MCP.JSON", "Claude Code"),
+        ("a/b/.config/Goose/x.yaml", "goose"),
+    ] {
+        assert_eq!(fenced_by(path), [named(path, harness)], "{path}");
+    }
+}
+
+#[test]
+fn a_nested_mcp_json_and_a_claude_plugin_folder_pass() {
+    for path in ["docs/.mcp.json", ".claude-plugin/plugin.json"] {
+        assert_eq!(fenced_by(path), [], "{path}");
+    }
+}
+
+#[test]
+fn a_fenced_path_in_a_touches_list_or_section_fails() {
+    let list = BODY.replace(
+        "Touches: `src/board.rs`",
+        "Touches:\n\n- `src/board.rs`\n- `.codex/config.toml`",
+    );
+    assert_eq!(of(&list), [named(".codex/config.toml", "Codex")]);
+    let section = BODY.replace(
+        "Touches: `src/board.rs`",
+        "## Touches\n\n- `src/board.rs` and `.pi/x.ts`",
+    );
+    assert_eq!(of(&section), [named(".pi/x.ts", "pi")]);
+}
+
+#[test]
+fn each_fenced_path_is_named_on_its_own() {
+    let body = BODY.replace(
+        "`src/board.rs`",
+        "`src/board.rs`, `.claude/a.md`, `.goose/b.yaml`, `.claude/c.md`",
+    );
+    assert_eq!(
+        of(&body),
+        [
+            named(".claude/a.md", "Claude Code"),
+            named(".goose/b.yaml", "goose"),
+            named(".claude/c.md", "Claude Code"),
+        ]
+    );
+    assert_eq!(
+        fenced(&body),
+        [
+            (".claude/a.md", "Claude Code"),
+            (".goose/b.yaml", "goose"),
+            (".claude/c.md", "Claude Code"),
+        ]
+    );
+    assert_eq!(fenced("no touches"), []);
+}
+
+#[test]
+fn a_fenced_path_named_only_under_what_to_build_passes() {
+    let body = BODY.replace("- A thing", "- Move `.claude/skills/x/SKILL.md` and `.mcp.json`");
+    assert_eq!(of(&body), []);
 }
