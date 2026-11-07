@@ -63,8 +63,8 @@ koji (finishing)
     #9 Fix the other: phase implement, turn running, no PR
   rulings waiting: 1
     ruling 1: merge, #7, PR #71
-  pacer: on
-    claude: session 3%, week 15%, 15% of the week spent today of 14.3% allowed
+  pacer:
+    claude: session 3%, week 15%
     claude holding (window): the 5-hour window is at 100%, so no turn starts until it resets
 ```
 

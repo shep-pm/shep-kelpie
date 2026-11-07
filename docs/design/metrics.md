@@ -25,7 +25,6 @@ Plan limits: gauges the pacer sets whenever it reads an account's usage (`Runner
 
 - `kelpie_plan_used_ratio{account,window}`: `window` is `session` (5 hours) or `week`, 0 to 1
 - `kelpie_plan_resets_at_seconds{account,window}`: Unix seconds
-- `kelpie_plan_allowance_ratio{account}`, `kelpie_plan_spent_today_ratio{account}`: the share of the week today may spend, and the share spent since the day began, 0 to 1. They read the same with pacing on or off
 
 - The runner's lock: `kelpie_runner_lock_held_seconds_total` and `kelpie_runner_lock_holds_total{le}` (`1`, `+Inf`), three series. `runner-lock.md`, `crates/core/src/metrics/lock.rs`
 

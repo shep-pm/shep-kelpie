@@ -6,13 +6,13 @@
 //! read holds nothing. A running turn is never interrupted: the pacer is asked
 //! only between turns.
 //!
-//! [`window`]'s 50% mark is what the agent board's waits read, and the
-//! figures of the day are what `status` and the plan gauges still show.
+//! [`window`]'s 50% mark is what the agent board's waits read. `status` and
+//! the plan gauges show each window as the pacer last read it.
 
 use serde::{Deserialize, Serialize};
 
 use crate::ports::{Timestamp, Utilization, Window};
-use crate::settings::{Account, KickoffHours};
+use crate::settings::Account;
 
 /// Percent of the 5-hour window at which no further turn starts
 pub const PARK_AT_PCT: u32 = 50;
@@ -68,7 +68,7 @@ pub struct Hold {
     pub until: Timestamp,
 }
 
-/// What usage was when the pacer last read it, and what it makes of it
+/// What usage was when the pacer last read it
 // wire format: changing this is a breaking change to the pacer's status
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Reading {
@@ -78,12 +78,6 @@ pub struct Reading {
     pub session: Window,
     /// The weekly window
     pub week: Window,
-    /// Percent of the week today may spend
-    pub allowance_pct: f64,
-    /// Percent of the week spent since the day began, by anyone on the account
-    pub spent_today_pct: u32,
-    /// The allowance spread over the kickoff hours
-    pub per_hour_pct: f64,
 }
 
 /// What one reading of usage decides
@@ -127,7 +121,7 @@ impl Assessment {
     }
 }
 
-/// Reads `account`'s `usage` at `now` against the day's start and the kickoff hours
+/// Reads `account`'s `usage` at `now` against the day's start
 ///
 /// A new day or a new week starts the day over from `usage`.
 pub fn assess(
@@ -135,7 +129,6 @@ pub fn assess(
     now: Timestamp,
     usage: &Utilization,
     prior: Option<DayStart>,
-    kickoff: KickoffHours,
 ) -> Assessment {
     let week_start = usage
         .week
@@ -153,17 +146,10 @@ pub fn assess(
             week_used_pct: usage.week.used_pct,
         });
 
-    let days_left = f64::from(WEEK_DAYS - day);
-    let left = f64::from(100u32.saturating_sub(day_start.week_used_pct));
-    let allowance_pct = left / days_left;
-    let spent_today_pct = usage.week.used_pct.saturating_sub(day_start.week_used_pct);
     let reading = Reading {
         at: now,
         session: usage.session,
         week: usage.week,
-        allowance_pct: tenth(allowance_pct),
-        spent_today_pct,
-        per_hour_pct: tenth(allowance_pct / f64::from(kickoff.get())),
     };
 
     Assessment {
@@ -237,20 +223,12 @@ pub fn named(account: Account, claude: &'static str, other: &'static str) -> &'s
     }
 }
 
-fn tenth(pct: f64) -> f64 {
-    (pct * 10.0).round() / 10.0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test::EPOCH;
 
     const RESETS: u64 = EPOCH + 7 * DAY_SECS;
-
-    fn eight() -> KickoffHours {
-        KickoffHours::try_from(8).unwrap()
-    }
 
     fn usage(week: u32, session: u32) -> Utilization {
         Utilization {
@@ -270,61 +248,17 @@ mod tests {
     }
 
     #[test]
-    fn a_fresh_week_allows_a_seventh_of_it_spread_over_the_kickoff_hours() {
-        let a = assess(Account::Claude, at(0, 1), &usage(0, 0), None, eight());
-        let reading = a.reading.unwrap();
-        assert_eq!((reading.allowance_pct, reading.per_hour_pct), (14.3, 1.8));
-        assert_eq!(
-            a.day_start.unwrap(),
-            DayStart {
-                week_resets_at: Timestamp(RESETS),
-                day: 0,
-                week_used_pct: 0
-            }
-        );
-        assert_eq!(a.window, None);
-    }
-
-    #[test]
-    fn the_allowance_is_what_was_left_when_the_day_began_over_the_days_left() {
-        // 20% used when day 2 began: 80% over 5 days
-        let start = DayStart {
-            week_resets_at: Timestamp(RESETS),
-            day: 2,
-            week_used_pct: 20,
-        };
-        let a = assess(
-            Account::Claude,
-            at(2, 9),
-            &usage(25, 0),
-            Some(start),
-            eight(),
-        );
-        let reading = a.reading.unwrap();
-        assert_eq!(reading.allowance_pct, 16.0);
-        assert_eq!(reading.spent_today_pct, 5);
-        assert_eq!(a.day_start, Some(start));
-    }
-
-    #[test]
     fn a_new_day_starts_over_from_what_the_week_has_used() {
         let start = DayStart {
             week_resets_at: Timestamp(RESETS),
             day: 0,
             week_used_pct: 0,
         };
-        let a = assess(
-            Account::Claude,
-            at(1, 0),
-            &usage(15, 0),
-            Some(start),
-            eight(),
-        );
+        let a = assess(Account::Claude, at(1, 0), &usage(15, 0), Some(start));
         assert_eq!(a.day_start.unwrap().day, 1);
         assert_eq!(a.day_start.unwrap().week_used_pct, 15);
         let reading = a.reading.unwrap();
-        // 85% over the 6 days left
-        assert_eq!((reading.allowance_pct, reading.spent_today_pct), (14.2, 0));
+        assert_eq!((reading.at, reading.week.used_pct), (at(1, 0), 15));
     }
 
     #[test]
@@ -343,7 +277,6 @@ mod tests {
             Timestamp(RESETS + 3600),
             &after,
             Some(start),
-            eight(),
         );
         assert_eq!(
             a.day_start.unwrap(),
@@ -353,7 +286,6 @@ mod tests {
                 week_used_pct: 2
             }
         );
-        assert_eq!(a.reading.unwrap().allowance_pct, 14.0);
     }
 
     #[test]
@@ -363,31 +295,17 @@ mod tests {
             day: 0,
             week_used_pct: 10,
         };
-        let a = assess(
-            Account::Claude,
-            at(0, 2),
-            &usage(12, 0),
-            Some(start),
-            eight(),
-        );
+        let a = assess(Account::Claude, at(0, 2), &usage(12, 0), Some(start));
         assert_eq!(a.day_start, Some(start));
     }
 
     #[test]
-    fn the_last_day_may_spend_what_is_left() {
-        let a = assess(Account::Claude, at(6, 3), &usage(88, 0), None, eight());
-        let reading = a.reading.unwrap();
-        assert_eq!(reading.allowance_pct, 12.0);
+    fn the_last_day_holds_nothing_until_the_week_is_spent() {
+        let a = assess(Account::Claude, at(6, 3), &usage(88, 0), None);
         assert_eq!(a.window, None);
 
         let start = a.day_start.unwrap();
-        let spent = assess(
-            Account::Claude,
-            at(6, 20),
-            &usage(100, 0),
-            Some(start),
-            eight(),
-        );
+        let spent = assess(Account::Claude, at(6, 20), &usage(100, 0), Some(start));
         let hold = spent.hold(Scope::Dispatch).unwrap();
         assert_eq!(
             (hold.kind, hold.until),
@@ -398,8 +316,7 @@ mod tests {
 
     #[test]
     fn a_week_with_nothing_left_holds_at_once() {
-        let a = assess(Account::Claude, at(3, 1), &usage(100, 0), None, eight());
-        assert_eq!(a.reading.unwrap().allowance_pct, 0.0);
+        let a = assess(Account::Claude, at(3, 1), &usage(100, 0), None);
         let hold = a.hold(Scope::Dispatch).unwrap();
         assert_eq!(
             (hold.kind, hold.until),
@@ -409,10 +326,10 @@ mod tests {
 
     #[test]
     fn the_window_parks_every_turn_from_half_until_it_resets() {
-        let below = assess(Account::Claude, at(0, 1), &usage(0, 49), None, eight());
+        let below = assess(Account::Claude, at(0, 1), &usage(0, 49), None);
         assert_eq!(below.hold(Scope::Turn), None);
 
-        let parked = assess(Account::Claude, at(0, 1), &usage(0, 50), None, eight());
+        let parked = assess(Account::Claude, at(0, 1), &usage(0, 50), None);
         let hold = parked.hold(Scope::Turn).unwrap();
         assert_eq!(hold.kind, HoldKind::Window);
         assert_eq!(hold.until, at(0, 3));
@@ -425,7 +342,7 @@ mod tests {
 
     #[test]
     fn a_spent_week_holds_every_turn_until_the_week_resets_and_outlasts_the_window() {
-        let a = assess(Account::Codex, at(3, 1), &usage(100, 60), None, eight());
+        let a = assess(Account::Codex, at(3, 1), &usage(100, 60), None);
         let hold = a.hold(Scope::Turn).unwrap();
         assert_eq!(
             (hold.kind, hold.until),
@@ -436,7 +353,7 @@ mod tests {
             "Codex's week is at 100%, so no turn starts until it resets"
         );
 
-        let almost = assess(Account::Codex, at(3, 1), &usage(99, 0), None, eight());
+        let almost = assess(Account::Codex, at(3, 1), &usage(99, 0), None);
         assert_eq!(almost.hold(Scope::Turn), None);
     }
 
@@ -494,37 +411,25 @@ mod tests {
         let now = at(0, 1);
         let mut fresh = usage(0, 0);
         fresh.session.resets_at = Timestamp(now.0 + 5 * 3600);
-        let a = assess(Account::Claude, now, &fresh, None, eight());
+        let a = assess(Account::Claude, now, &fresh, None);
         assert_eq!((a.hold(Scope::Dispatch), a.hold(Scope::Turn)), (None, None));
     }
 
     #[test]
     fn a_hold_is_the_same_for_a_new_item_and_a_turn() {
-        // 20% of the week gone on day 0 is past a seventh, which holds nothing
+        // 20% of the week gone holds nothing
         let start = DayStart {
             week_resets_at: Timestamp(RESETS),
             day: 0,
             week_used_pct: 0,
         };
-        let over = assess(
-            Account::Claude,
-            at(0, 1),
-            &usage(20, 0),
-            Some(start),
-            eight(),
-        );
+        let over = assess(Account::Claude, at(0, 1), &usage(20, 0), Some(start));
         assert_eq!(
             (over.hold(Scope::Dispatch), over.hold(Scope::Turn)),
             (None, None)
         );
 
-        let spent = assess(
-            Account::Claude,
-            at(0, 1),
-            &usage(20, 100),
-            Some(start),
-            eight(),
-        );
+        let spent = assess(Account::Claude, at(0, 1), &usage(20, 100), Some(start));
         let hold = spent.hold(Scope::Turn).unwrap();
         assert_eq!((hold.kind, hold.until), (HoldKind::Window, at(0, 3)));
         assert_eq!(spent.hold(Scope::Dispatch), Some(hold));

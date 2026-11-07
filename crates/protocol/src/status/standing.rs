@@ -13,8 +13,12 @@ use shep_kelpie_core::ticket::TicketId;
 /// What `status` shows of the pacer
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PacerStatus {
-    /// Whether the limits hold anything
-    pub enabled: bool,
+    /// What an older runner said `pacing.enabled` was, which nothing reads and
+    /// no runner sends. It is read so a runner not yet restarted answers, and
+    /// left out of what this one sends: the accounts below are flattened, so
+    /// an `enabled` key read as an account would fail the whole reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     /// Each account the worker spends or a reading was taken of, by its name
     #[serde(flatten)]
     pub accounts: BTreeMap<Account, AccountStatus>,
@@ -174,5 +178,36 @@ impl fmt::Display for TemplateSource {
             Self::Owner(repo) => write!(f, "the owner's, from {repo}"),
             Self::None => f.write_str("none"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::status::Status;
+    use crate::status::tests::{recorded, recorded_status};
+
+    // What a runner not yet restarted sends for `claude`: what `pacing.enabled`
+    // was, and the three figures of the day each reading used to carry
+    const OLDER: &str = r#"{"enabled":true,"claude":{"reading":{"at":300,"session":{"used_pct":3,"resets_at":400},"week":{"used_pct":15,"resets_at":500},"allowance_pct":14.3,"spent_today_pct":15,"per_hour_pct":1.8},"holding":null}}"#;
+
+    #[test]
+    fn a_status_from_a_runner_not_yet_restarted_still_reads() {
+        let mut shown = recorded();
+        shown["pacer"] = serde_json::from_str(OLDER).expect("the older pacer is JSON");
+        let status: Status =
+            serde_json::from_value(shown).expect("a runner not yet restarted still answers");
+        assert_eq!(status.pacer.enabled, Some(true));
+        let claude = &status.pacer.accounts[&Account::Claude];
+        assert_eq!(claude.reading.unwrap().week.used_pct, 15);
+        assert_eq!(claude.holding, None);
+    }
+
+    #[test]
+    fn a_new_status_sends_no_enabled_key() {
+        let status = recorded_status();
+        assert_eq!(status.pacer.enabled, None);
+        let shown = serde_json::to_value(&status).unwrap();
+        assert_eq!(shown["pacer"].get("enabled"), None, "{shown}");
     }
 }

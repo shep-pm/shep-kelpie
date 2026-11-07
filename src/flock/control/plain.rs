@@ -471,30 +471,35 @@ fn rulings(status: &Value, lines: &mut Vec<String>) {
     }
 }
 
+// The pacer's header, then each account it read and what holds it. A runner
+// not yet restarted sends `enabled` beside the accounts, which names no
+// account and prints nothing.
 fn pacer(status: &Value, lines: &mut Vec<String>) {
-    let pacer = &status["pacer"];
-    let on = pacer["enabled"].as_bool().unwrap_or(true);
-    lines.push(format!("  pacer: {}", if on { "on" } else { "off" }));
-    let accounts = pacer.as_object().into_iter().flatten();
-    for (account, state) in accounts.filter(|(key, _)| key.as_str() != "enabled") {
+    let mut shown = Vec::new();
+    for (account, state) in status["pacer"].as_object().into_iter().flatten() {
+        if account.as_str() == "enabled" {
+            continue;
+        }
         let reading = &state["reading"];
-        lines.push(match reading.is_object() {
+        shown.push(match reading.is_object() {
             true => format!(
-                "    {account}: session {}%, week {}%, {}% of the week spent today of {}% allowed",
-                reading["session"]["used_pct"],
-                reading["week"]["used_pct"],
-                reading["spent_today_pct"],
-                reading["allowance_pct"],
+                "    {account}: session {}%, week {}%",
+                reading["session"]["used_pct"], reading["week"]["used_pct"],
             ),
             false => format!("    {account}: not read"),
         });
         let hold = &state["holding"];
         if hold.is_object() {
-            lines.push(format!(
+            shown.push(format!(
                 "    {account} holding ({}): {}",
                 hold["kind"].as_str().unwrap_or("?"),
                 hold["reason"].as_str().unwrap_or_default(),
             ));
         }
     }
+    if shown.is_empty() {
+        return;
+    }
+    lines.push("  pacer:".to_owned());
+    lines.extend(shown);
 }

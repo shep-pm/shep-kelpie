@@ -95,7 +95,7 @@ fn a_new_project_has_nothing_in_flight() {
             "rulings": [],
             "leases": [],
             "history": [],
-            "pacer": { "enabled": true, "claude": { "reading": null, "holding": null } },
+            "pacer": { "claude": { "reading": null, "holding": null } },
             // kelpie seeds a vendored skill for the worker's four and for
             // the retro this rig turned on, so `status` names no command
             // for triage, spec and reset: they run kelpie's own prompt.
