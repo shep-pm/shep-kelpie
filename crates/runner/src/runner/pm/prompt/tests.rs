@@ -78,6 +78,33 @@ fn the_said_key_shows_only_on_a_wake_carrying_held_words() {
 }
 
 #[test]
+fn the_said_key_names_an_issue_comment() {
+    let held = held_line(44, 9, None, "Why is the cache a map?");
+    let text = wake(
+        "koji",
+        &[Wake::Told],
+        &[held],
+        &[],
+        true,
+        &Notes::default(),
+        BOARD,
+    );
+
+    assert!(
+        text.contains("> The maintainer's comment 9 on #44:"),
+        "{text}"
+    );
+    assert!(
+        text.contains("On an issue with no open work item, `none` posts your `why` there"),
+        "{text}"
+    );
+    assert!(
+        text.contains("`send-back`, `park` and `settle` are refused"),
+        "{text}"
+    );
+}
+
+#[test]
 fn the_pm_prompt_says_a_candidate_the_maintainer_carries_out_starts_with_you() {
     let text = wake(
         "koji",
