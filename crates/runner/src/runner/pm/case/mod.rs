@@ -9,6 +9,7 @@
 //! the runner's lock let go, in the logs job.
 
 mod ci;
+mod history;
 mod threads;
 
 use std::collections::BTreeMap;
@@ -17,9 +18,10 @@ use std::path::Path;
 
 use self::ci::CiReads;
 pub(super) use self::ci::ended_red;
+pub(super) use self::history::{Files, Told};
 use crate::board::briefing::quoted;
 use crate::ports::{
-    Checks, ForgeError, Issue, PAGE, PullRequest, PullRequestState, Standing, Talk,
+    Checks, ForgeError, Issue, PAGE, PullRequest, PullRequestState, SessionId, Standing, Talk,
 };
 use crate::runner::Runner;
 use crate::runner::voice::brief;
@@ -44,6 +46,8 @@ pub(super) struct Parked {
     pub(super) pull: Option<u64>,
     // An adopted contribution, which is a stranger's work
     pub(super) contribution: bool,
+    // Its worker's session, whose transcript says what the worker said
+    pub(super) session: SessionId,
 }
 
 // What one case reads of the forge and the ticket source
@@ -52,6 +56,7 @@ struct Reads {
     pull: Option<Result<PullRequest, ForgeError>>,
     talk: Option<Result<Talk, ForgeError>>,
     ci: Option<CiReads>,
+    told: Told,
 }
 
 impl Runner {
@@ -133,6 +138,7 @@ impl Runner {
                 ruling,
                 pull,
                 contribution,
+                session: item.session.clone(),
             });
         }
         parked
@@ -160,6 +166,7 @@ impl Runner {
             pull,
             talk,
             ci,
+            told: self.case_told(parked),
         }
     }
 
@@ -191,10 +198,33 @@ impl Runner {
                 gaps.push(("the issue", why));
             }
         }
-        let (Some(number), Some(pull), Some(talk)) = (parked.pull, reads.pull, reads.talk) else {
-            out.push_str("## Pull request\n\nIt has no pull request yet.\n");
-            return (out, gaps);
-        };
+        match (parked.pull, reads.pull, reads.talk) {
+            (Some(number), Some(pull), Some(talk)) => {
+                self.pull_parts(
+                    &mut out,
+                    &mut gaps,
+                    (number, pull, talk),
+                    (parked.ticket, ci),
+                );
+            }
+            _ => out.push_str("## Pull request\n\nIt has no pull request yet.\n\n"),
+        }
+        gaps.extend(self.history_parts(&mut out, parked, &reads.told));
+        (out, gaps)
+    }
+
+    // The pull request's state, its threads and comments, and its CI
+    fn pull_parts(
+        &self,
+        out: &mut String,
+        gaps: &mut Vec<(&'static str, String)>,
+        (number, pull, talk): (
+            u64,
+            Result<PullRequest, ForgeError>,
+            Result<Talk, ForgeError>,
+        ),
+        (ticket, ci): (TicketId, Option<&CiReads>),
+    ) {
         let _ = write!(out, "## Pull request #{number}\n\n");
         match pull {
             Ok(pull) => out.push_str(&pull_state(&pull)),
@@ -205,7 +235,7 @@ impl Runner {
             }
         }
         match talk {
-            Ok(talk) => self.talk_part(&mut out, &talk),
+            Ok(talk) => self.talk_part(out, &talk),
             Err(e) => {
                 let why = format!("kelpie could not read them ({})", cause(&e));
                 let _ = write!(out, "### Open review threads and comments\n\n({why})\n");
@@ -213,10 +243,10 @@ impl Runner {
             }
         }
         out.push('\n');
-        if let Some(why) = self.ci_part(&mut out, parked.ticket, ci) {
+        if let Some(why) = self.ci_part(out, ticket, ci) {
             gaps.push(("the CI", why));
         }
-        (out, gaps)
+        out.push('\n');
     }
 
     // The open threads that stay and the comments, and what was left out or may be missing

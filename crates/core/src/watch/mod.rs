@@ -19,7 +19,7 @@ mod tail;
 #[cfg(test)]
 mod tests;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::ticket::TicketId;
 use crate::transcripts;
@@ -74,6 +74,42 @@ pub fn transcripts_of(
         }
     }
     found
+}
+
+/// Everything the session whose transcript is `file` said, in order
+///
+/// Only the whole lines of the file count, so one still being written is
+/// passed over. A `Format::Goose` file gives none: its stdout file holds no
+/// whole session, as [`transcripts_of`] leaves it out.
+///
+/// # Errors
+///
+/// When `file` cannot be opened or read, which is not the same as a session
+/// that said nothing.
+pub fn said(format: Format, file: &Path) -> std::io::Result<Vec<String>> {
+    let events = match format {
+        Format::Claude => claude::events,
+        Format::Codex => codex::events,
+        Format::Pi => pi::events,
+        // parity: harness.transcript-said
+        Format::Goose => return Ok(Vec::new()),
+    };
+    let lines = Tail::from_start(file.to_owned()).read_lines()?;
+    let said = lines.iter().flat_map(|line| events(line));
+    Ok(said
+        .filter(|event| event.kind == Kind::Said)
+        .map(|event| event.text)
+        .filter(|text| !text.trim().is_empty())
+        .collect())
+}
+
+/// Every step of the steps file `steps` that names `ticket`, one line each
+/// with the time it was logged, a line that is not a step passed over
+pub fn steps_of(steps: &str, ticket: TicketId) -> Vec<String> {
+    let steps = steps.lines().filter_map(log::parse);
+    (steps.filter(|step| step.names(ticket)))
+        .map(|step| format!("{} {}", step.at, step.text(false)))
+        .collect()
 }
 
 /// How far before its `session-started` step a transcript line may be and

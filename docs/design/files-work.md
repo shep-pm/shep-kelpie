@@ -10,6 +10,7 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | pm-pick.md | its `pick`: the list, the entry object, holds | `runner/pm/picked.rs`, `core/state/pm_holds.rs` |
 | pm-retro.md | the project manager's batch retro and digest | `runner/retro/` |
 | pm-board.md | its board | `core/board/briefing/`, `runner/briefing/` |
+| pm-case.md | its case files: the ruling, issue, pull request, CI and past rulings | `runner/pm/case/`, `runner/pm/ci_logs.rs` |
 | pm-notes.md | its notes files: the log, the archive, the standing notes and their ends | `runner/pm/notes.rs` |
 | workers.md | runner loop, turns | `runner/{turn,flight}/` |
 | runner-lock.md | lock, hold metric | `runner/{lock_hold,off_lock}.rs` |
