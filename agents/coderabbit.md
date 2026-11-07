@@ -1,7 +1,7 @@
 ---
 # CodeRabbit, the pull request review bot, as a reviewer: a candidate for
 # every review pass whose `agents.allow` holds it. The agent board picks
-# each round's reviewer toward `reviews.need`. If picked, it reads once
+# each round's reviewer toward the item's plan's reads. If picked, it reads once
 # a pass, and the worker gets one fix turn for the threads
 # it leaves open. Its window is its account's: one review an hour until a
 # review footer states more. Its free plan reviews public repos only, so a

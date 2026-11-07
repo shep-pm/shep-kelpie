@@ -85,7 +85,7 @@ mod tests {
     use crate::work_item::{Heavier, Lighter, Phase, ReviewPlan, ReviewWeight};
 
     // `two_local`'s candidates `mine`, `other` and `claude` on a project that names `agents.pm`,
-    // with `reviews.need` left out.
+    // whose reads kelpie's own rule counts until a test plans an item's.
     fn pm_project() -> Rig {
         let rig = two_local();
         rig.reviewers(&["mine", "other", "claude"]);
@@ -145,7 +145,11 @@ mod tests {
 
         reviewers_until_ci(&rig, &runner);
 
-        assert_eq!(rig.reviewer.seen().len(), 2, "reviews.need is 2");
+        assert_eq!(
+            rig.reviewer.seen().len(),
+            2,
+            "kelpie's own rule reads twice"
+        );
         assert_eq!(phase(&rig, &runner), "ci");
     }
 
@@ -157,12 +161,16 @@ mod tests {
 
         reviewers_until_ci(&rig, &runner);
 
-        assert_eq!(rig.reviewer.seen().len(), 2, "reviews.need is 2");
+        assert_eq!(
+            rig.reviewer.seen().len(),
+            2,
+            "kelpie's own rule reads twice"
+        );
         assert_eq!(phase(&rig, &runner), "ci");
     }
 
     #[test]
-    fn a_project_managers_project_weighs_with_no_light_key() {
+    fn a_project_managers_project_weighs_with_no_setting() {
         let rig = pm_project();
         let runner = at_review(&rig, "docs/guide.md");
         step(&runner).unwrap();

@@ -435,8 +435,8 @@ fn a_fix_that_pushes_nothing_still_parks_on_a_ruling() {
     still_stuck(&rig, &runner, id, "fix-not-pushed");
 }
 
-// The qwen and Claude rounds read it, two of the three `reviews.need`, so the
-// pass is short and `auto` leaves the merge to the maintainer.
+// The qwen and Claude rounds read it, two of the three reads the item calls
+// for, so the pass is short and `auto` leaves the merge to the maintainer.
 #[test]
 fn a_summon_coderabbit_never_answers_passes_it_over_and_a_short_pass_is_not_merged() {
     let (rig, runner, head) = summoned_under_auto("chelone");

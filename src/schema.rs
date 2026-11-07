@@ -246,15 +246,6 @@ mod tests {
             .replace("# implementers =", "implementers =")
             .replace("# implementer_choice =", "implementer_choice =")
             .replace("# fallback_after =", "fallback_after =")
-            .replace(
-                "# [app.dogs.kelpie.reviews]\n# need = 2",
-                "[app.dogs.kelpie.reviews]\nneed = 2",
-            )
-            .replace("# light = 1", "light = 1")
-            .replace("# light_paths =", "light_paths =")
-            .replace("# full_paths =", "full_paths =")
-            .replace("# pm_lightens =", "pm_lightens =")
-            .replace("# light_max_lines =", "light_max_lines =")
             .replace("# maintainer =", "maintainer =")
             .replace("# base =", "base =")
             .replace(
@@ -280,10 +271,6 @@ mod tests {
             .replace("# extra =", "extra =")
             .replace("# command = \"scripts/", "command = \"scripts/")
             .replace("# results =", "results =");
-        assert!(
-            text.contains("[app.dogs.kelpie.reviews]\nneed = 2"),
-            "the example's review count moved"
-        );
         // Each kind of skill once, every step naming it.
         let kinds = [
             "{ kind = \"path\", path = \"skills/mine\" }",

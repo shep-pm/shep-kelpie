@@ -33,6 +33,7 @@ mod foreign;
 mod green;
 mod lineup;
 use lineup::Chosen;
+pub(in crate::runner) use lineup::RULE_READS;
 pub(super) use lineup::{RoundNext, changed_files, touches};
 #[cfg(test)]
 mod local;
@@ -283,7 +284,7 @@ impl Runner {
     }
 
     // The last reviewer is done, so the work item goes on to CI. A pass that
-    // fewer than `reviews.need` reviewers read, because one was down or failing,
+    // ran fewer reads than the item calls for, because one was down or failing,
     // marks the work item unreviewed, which the merge ruling names and `auto`
     // will not merge. One the project's own list left short is only noted.
     fn pass_ended(&mut self, review: &Review, unranked: &[AgentName]) -> Result<Begin, StateError> {

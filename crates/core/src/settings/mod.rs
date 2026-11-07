@@ -38,7 +38,6 @@ mod local_rounds;
 mod removed;
 mod repo_setup;
 mod reviewers;
-mod reviews;
 mod rulings;
 mod skills;
 mod tickets;
@@ -66,7 +65,6 @@ pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use local_rounds::{KeepDays, LocalRounds, RoundsFolder};
 pub use repo_setup::{CallRole, MarketplaceSource, Part, PluginId, RepoSetup};
 pub use reviewers::ListedReviewer;
-pub use reviews::Reviews;
 pub use rulings::{PM_ALONE, PM_DECIDES, RulingName, Rulings};
 pub use skills::{SkillChoice, SkillName, StepSkills};
 pub use tickets::{TicketSource, Tickets};
@@ -95,9 +93,6 @@ pub struct Settings {
     /// may use, from kelpie's agent files
     #[serde(default)]
     pub agents: RoleAgentNames,
-    /// How many reviewers read each work item. Two when absent.
-    #[serde(default)]
-    pub reviews: Reviews,
     /// Usage pacing
     pub pacing: Pacing,
     /// What every worker is started with
@@ -170,8 +165,9 @@ const LOOP: &str = "the review loop and its judge are gone";
 const SHOTS: &str = "shots and the preview are parked";
 const AGENT_FILES: &str = "agents are files in kelpie's home's `agents` folder";
 const REVIEWER_FILES: &str = "reviewers are agent files in kelpie's home's `agents` folder: \
-                             every one `agents.allow` holds is a candidate, and `reviews.need` \
-                             says how many read a work item";
+                             every one `agents.allow` holds is a candidate";
+const REVIEW_PLAN: &str = "the project manager sets each work item's review plan at the pick, \
+                          and kelpie weighs a diff only to report what it touches";
 const BOT_FILES: &str = "review bots are reviewer agent files on the `bot` harness, a \
                          candidate like every other reviewer file, and run once a pass in \
                          their place";
@@ -326,6 +322,41 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "review",
         because: REVIEWER_FILES,
+        fix: DELETE,
+    },
+    Removed {
+        key: "reviews.need",
+        because: REVIEW_PLAN,
+        fix: DELETE,
+    },
+    Removed {
+        key: "reviews.light",
+        because: REVIEW_PLAN,
+        fix: DELETE,
+    },
+    Removed {
+        key: "reviews.light_paths",
+        because: REVIEW_PLAN,
+        fix: DELETE,
+    },
+    Removed {
+        key: "reviews.full_paths",
+        because: REVIEW_PLAN,
+        fix: DELETE,
+    },
+    Removed {
+        key: "reviews.pm_lightens",
+        because: REVIEW_PLAN,
+        fix: DELETE,
+    },
+    Removed {
+        key: "reviews.light_max_lines",
+        because: REVIEW_PLAN,
+        fix: DELETE,
+    },
+    Removed {
+        key: "reviews",
+        because: REVIEW_PLAN,
         fix: DELETE,
     },
     Removed {

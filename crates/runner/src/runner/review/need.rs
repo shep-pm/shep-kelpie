@@ -1,4 +1,4 @@
-//! A pass runs `reviews.need` reviewers, each round the agent board's pick
+//! A pass runs the reads its item calls for, each round the agent board's pick
 
 use std::sync::Mutex;
 
@@ -15,7 +15,7 @@ use crate::settings::{AgentName, LocalRound};
 use crate::test::{Rig, Scripted, Told, ticket};
 
 // `two_local`'s project, whose candidates are `mine`, `other` and `claude`, and
-// whose `reviews.need` is left out.
+// whose reads kelpie's own rule counts.
 fn three_candidates() -> Rig {
     let rig = two_local();
     rig.reviewers(&["mine", "other", "claude"]);
