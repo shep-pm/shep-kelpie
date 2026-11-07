@@ -101,7 +101,7 @@ impl Runner {
             }
             // A pass under way writes its own body and labels. The next check
             // reads its end.
-            if busy.contains(&issue.number) || self.triage_busy(issue.number) {
+            if busy.contains(&issue.number) || self.triage_busy(issue.number, &issue.body) {
                 continue;
             }
             let mut labels = issue.labels.clone();
@@ -226,7 +226,9 @@ impl Runner {
         }
     }
 
-    pub(super) fn triage_busy(&self, issue: u64) -> bool {
+    // Whether `issue`, with `body`, is under a pass, or is a sub-issue of a split
+    // whose links and labels are not all in
+    pub(super) fn triage_busy(&self, issue: u64, body: &str) -> bool {
         let unfinished = self.triage_record(issue).is_some_and(|t| {
             !matches!(
                 t.step,
@@ -236,7 +238,9 @@ impl Runner {
         let unposted = (self.triage_tries.get(&issue))
             .is_some_and(|t| t.waiting.is_some() || t.body.is_some());
         let given_up = self.triage_given_up(issue);
-        ((unfinished || unposted) && !given_up) || self.flights.triaging() == Some(issue)
+        ((unfinished || unposted) && !given_up)
+            || self.flights.triaging() == Some(issue)
+            || self.split_child_pending(issue, body)
     }
 
     // Says that `issue`'s `ready-for-agent` is not seen, because kelpie is taking it
@@ -320,7 +324,8 @@ impl Runner {
         let number = issue.number;
         let decided = (issue.labels.iter())
             .any(|l| l != READY && l != TRIAGE && TRIAGE_LABELS.contains(&l.as_str()));
-        if decided || self.has_work_item(number) {
+        // A split parent is never ready: its sub-issues are what the board takes.
+        if decided || self.has_work_item(number) || self.split_of(number).is_some() {
             return true;
         }
         let Some(maintainer) = self.poll_maintainer(poll) else {
