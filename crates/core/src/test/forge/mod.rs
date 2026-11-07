@@ -9,10 +9,10 @@ use std::sync::{Arc, Mutex};
 use super::coderabbit::FakeCodeRabbit;
 use crate::board::{OpenPullRequest, ReadyIssue, ReviewMarks};
 use crate::ports::{
-    BranchRun, Checks, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, InstallationToken,
-    IssueCloseReason, MaintainerReview, NewLabel, OpenIssue, OpenPull, PullRequest,
-    PullRequestState, QueueStanding, RateLimits, Rerun, Reviewed, Talk, ThreadComment, Timestamp,
-    Visibility, Workflow,
+    BranchRun, Checks, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, HeadRun,
+    InstallationToken, IssueCloseReason, LogPart, MaintainerReview, NewLabel, OpenIssue, OpenPull,
+    PullRequest, PullRequestState, QueueStanding, RateLimits, Rerun, Reviewed, Talk, ThreadComment,
+    Timestamp, Visibility, Workflow,
 };
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
@@ -774,6 +774,16 @@ impl Forge for FakeForge {
         self.ask()?;
         self.wait_if_held(held::At::RunLogTail);
         self.run_log_tail_of(run).map_err(ForgeError::Failed)
+    }
+
+    fn head_runs(&self, _repo: &ForgeSlug, head: &str) -> Result<Vec<HeadRun>, ForgeError> {
+        self.ask()?;
+        self.head_runs_of(head).map_err(ForgeError::Failed)
+    }
+
+    fn run_log(&self, _repo: &ForgeSlug, run: u64, part: LogPart) -> Result<String, ForgeError> {
+        self.ask()?;
+        self.run_log_of(run, part).map_err(ForgeError::Failed)
     }
 
     fn rerun_failed(&self, _repo: &ForgeSlug, head: &str) -> Result<(), ForgeError> {
