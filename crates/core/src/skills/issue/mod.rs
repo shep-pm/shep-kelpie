@@ -45,8 +45,8 @@ pub(super) fn write(dir: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::board::check::{
-        BLOCKED_BY, CRITERIA, Failure, HARNESS_REACH, HARNESSES, KIND, TOUCHES, WHAT_TO_BUILD,
-        check, kinds,
+        BLOCKED_BY, CRITERIA, Failure, HARNESS_REACH, HARNESSES, KIND, NEEDS, TOUCHES,
+        WHAT_TO_BUILD, check, kinds,
     };
 
     // The skill's example issue, and the title and labels its line starting
@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn the_skill_names_every_part_and_label_the_check_reads() {
         let format = TEXT.split("## Check it").next().unwrap();
-        for part in [TOUCHES, HARNESS_REACH, BLOCKED_BY] {
+        for part in [TOUCHES, HARNESS_REACH, BLOCKED_BY, NEEDS] {
             assert!(format.contains(&format!("**`{part}`**")), "{part}");
         }
         for heading in [WHAT_TO_BUILD, CRITERIA] {
