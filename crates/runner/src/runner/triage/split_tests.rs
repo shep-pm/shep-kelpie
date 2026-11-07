@@ -11,7 +11,7 @@ use super::pick_tests::{MAINTAINER, issue, list, rig_with};
 use super::research_tests::{APP, WORDS, calls, facts, reply, triage};
 use crate::ports::Role;
 use crate::runner::{Runner, step};
-use crate::state::StateStore;
+use crate::state::{StateStore, TriageQuestions, TriageStep};
 use crate::test::{Rig, Scripted};
 
 const BODY: &str = "Touches:\n- `src/start.rs` (new)\n\n## What to build\n\n- Fix the \
@@ -867,4 +867,45 @@ fn silence_drops_the_split() {
     assert_eq!(saved_split(&rig), Value::Null);
     assert_eq!(rig.github.issues_created(), 0);
     assert_eq!(posted(&rig).len(), 2, "nothing more is posted");
+}
+
+// The saved plan put back to what it was before its ask went up: held by the
+// triage comment, with the record at the `labelled` step. This is what a pass
+// that stopped before the ask leaves.
+fn before_the_ask(runner: &Mutex<Runner>) {
+    let mut runner = runner.lock().unwrap();
+    let mut next = runner.state.clone();
+    let triage = next.triage.as_mut().unwrap();
+    let record = triage.issues.iter_mut().find(|t| t.issue == 30).unwrap();
+    record.step = TriageStep::Labelled;
+    let comment = record.comment;
+    let at = record.at;
+    triage.splits[0].asked = Some(TriageQuestions { comment, at });
+    runner.save(next).unwrap();
+}
+
+#[test]
+fn an_ask_whose_post_answer_was_lost_is_found_and_not_posted_again() {
+    let (rig, runner) = asked_to_split(PICK_ALL);
+    let asked = saved_split(&rig)["asked"]["comment"].as_u64().unwrap();
+
+    before_the_ask(&runner);
+    assert!(runner.lock().unwrap().ask_split(30).unwrap());
+
+    assert_eq!(posted(&rig).len(), 2, "the ask is not posted twice");
+    assert_eq!(saved_split(&rig)["asked"]["comment"], asked);
+}
+
+#[test]
+fn a_hand_label_that_ends_the_pass_drops_the_plan_it_never_asked() {
+    let (rig, runner) = asked_to_split(PICK_ALL);
+    before_the_ask(&runner);
+    rig.forge.label(30, "ready-for-agent");
+
+    runner.lock().unwrap().label_waiting_step(30).unwrap();
+
+    assert_eq!(saved_split(&rig), Value::Null, "no plan waits on no ask");
+    wrote(&rig, MAINTAINER, "ok");
+    heard(&rig, &runner);
+    assert_eq!(rig.github.issues_created(), 0, "a bare ok files nothing");
 }

@@ -11,13 +11,20 @@
 
 use super::super::Runner;
 use super::super::contributions::post::forge_is_busy;
+use super::super::thread_replies::plain_login;
 use super::ask::says_yes;
 use crate::board::{AGENT_LABEL, PIN, TRIAGE};
-use crate::ports::Timestamp;
+use crate::ports::{ForgeError, PostedComment, Timestamp};
 use crate::state::{SplitDraft, StateError, TriageQuestions, TriageStep};
 
-// The comment that asks `maintainer` to say yes to `drafts`
-fn ask_text(maintainer: &str, drafts: &[SplitDraft], days: u32) -> String {
+// The marker that ends the ask made for the triage comment `comment`: a post
+// whose answer was lost is found by it and not made again
+fn ask_marker(comment: u64) -> String {
+    format!("<!-- kelpie:split-ask #{comment} -->")
+}
+
+// The comment that asks `maintainer` to say yes to `drafts`, ending in `marker`
+fn ask_text(maintainer: &str, drafts: &[SplitDraft], days: u32, marker: &str) -> String {
     let mut text = format!(
         "@{maintainer} Kelpie judged this issue too big for one work item. With your yes it \
          files these sub-issues of it, in this order, each labelled `ready-for-agent`:\n\n"
@@ -37,7 +44,7 @@ fn ask_text(maintainer: &str, drafts: &[SplitDraft], days: u32) -> String {
     }
     text.push_str(&format!(
         "\nReply `yes` to file them, or `no` to drop the plan. Only your reply counts. With no \
-         reply in {days} days the plan is dropped and the issue stays as it is."
+         reply in {days} days the plan is dropped and the issue stays as it is.\n\n{marker}"
     ));
     text
 }
@@ -83,8 +90,22 @@ impl Runner {
             }
         };
         let days = self.settings.triage.wait_days.get();
-        let text = ask_text(&maintainer, &split.drafts, days);
-        match self.ports.voice.post(&self.remote, issue, &text) {
+        let marker = ask_marker(comment.unwrap_or_default());
+        let text = ask_text(&maintainer, &split.drafts, days, &marker);
+        // An ask whose post answer was lost is on the forge already
+        let found = match self.ask_found(issue, &marker) {
+            Ok(found) => found,
+            Err(e) => {
+                let why = format!("cannot read its comments for the ask: {e}");
+                self.triage_failed(issue, &why, !forge_is_busy(&e));
+                return Ok(false);
+            }
+        };
+        let posted = match found {
+            Some(found) => Ok(found),
+            None => self.ports.voice.post(&self.remote, issue, &text),
+        };
+        match posted {
             Ok(posted) => {
                 let mut next = self.state.clone();
                 let held = (next.triage.as_mut())
@@ -104,6 +125,21 @@ impl Runner {
                 Ok(false)
             }
         }
+    }
+
+    // The App's own comment on `issue` that ends in `marker`, if one is
+    fn ask_found(&self, issue: u64, marker: &str) -> Result<Option<PostedComment>, ForgeError> {
+        let comments = (self.ports.tickets).issue_comments(&self.remote, super::ticket(issue)?)?;
+        let Some(app) = self.app_login().map(|app| plain_login(&app)) else {
+            return Ok(None);
+        };
+        let ours = comments.iter().find(|c| {
+            plain_login(&c.author) == app && c.body.trim_end().lines().last() == Some(marker)
+        });
+        Ok(ours.map(|c| PostedComment {
+            id: c.id,
+            created: c.created,
+        }))
     }
 
     // Takes the plan saved for `issue` back, with `note` in the log

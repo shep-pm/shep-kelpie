@@ -304,6 +304,14 @@ impl Runner {
                     "triage #{issue}: `{label}` went on by hand while its labels went on, so \
                      that stands: kelpie adds no `{TRIAGE}`"
                 ));
+                // The ask is never posted now, so a plan held for it goes too:
+                // left, it would be dated from this comment and filed on a bare
+                // `ok` nobody asked for.
+                if self.split_of(issue).is_some_and(|s| s.asked.is_some()) {
+                    let note =
+                        format!("triage #{issue}: its split was never asked, so it is dropped");
+                    self.drop_split(issue, note)?;
+                }
                 self.triage_stepped(issue, TriageStep::Done)?;
                 self.triage_tries.remove(&issue);
                 return Ok(());

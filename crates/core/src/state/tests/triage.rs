@@ -209,6 +209,52 @@ fn the_oldest_finished_records_go_past_the_cap() {
     );
 }
 
+// A finished record whose split still waits on the maintainer's yes is kept
+// past the cap, since the yes files from it.
+#[test]
+fn a_record_whose_split_is_held_is_kept_past_the_cap() {
+    let record = |issue: u64| Triaged {
+        issue,
+        comment: issue + 1_000,
+        step: TriageStep::Done,
+        at: Timestamp(0),
+        author: String::new(),
+        held: None,
+        calls: Vec::new(),
+        labels: Vec::new(),
+        duplicate_of: None,
+        ready_body: None,
+        seen: Vec::new(),
+        asked: None,
+        questions: None,
+        local: None,
+        spam: None,
+        begun: None,
+    };
+    let cap = TRIAGED_KEPT as u64;
+    let mut triage = TriageState {
+        since: Timestamp(1),
+        issues: (1..cap + 4).map(record).collect(),
+        unrecorded: Vec::new(),
+        pruned_through: 0,
+        splits: vec![TriageSplit {
+            issue: 1,
+            drafts: Vec::new(),
+            filed: Vec::new(),
+            asked: Some(TriageQuestions {
+                comment: 9,
+                at: Timestamp(2),
+            }),
+        }],
+    };
+
+    triage.prune();
+
+    assert_eq!(triage.issues[0].issue, 1, "the held split's record stays");
+    assert_eq!(triage.issues[1].issue, 4, "the oldest others went");
+    assert_eq!(triage.issues.len(), TRIAGED_KEPT + 1);
+}
+
 // The daily caps count the calls the records hold, so a record that holds one is
 // kept ahead of one that holds none: a burst of issues a limit held cannot push
 // out the records the caps count, which is what they hold the burst for.
