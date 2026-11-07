@@ -97,7 +97,7 @@ fn the_pm_prompt_says_a_candidate_the_maintainer_carries_out_starts_with_you() {
 }
 
 #[test]
-fn the_pm_prompt_says_when_to_tag_a_pick_light() {
+fn the_pm_prompt_offers_no_light_tag_on_a_pick() {
     let text = wake(
         "koji",
         &[Wake::Told],
@@ -107,19 +107,12 @@ fn the_pm_prompt_says_when_to_tag_a_pick_light() {
         &Notes::default(),
         BOARD,
     );
-    assert!(text.contains("\"light\": <true | false>"), "{text}");
     assert!(
-        text.contains(
-            "`light: true` is for a change small and low-risk enough to skim, such as \
-             a typo, a comment or a one-line config value"
-        ),
-        "{text}"
+        !text.contains("\"light\": <true | false>"),
+        "the tag lightens no review, so the prompt offers it for nothing: {text}"
     );
     assert!(
-        text.contains(
-            "Kelpie checks the diff itself and ignores the tag when the change is \
-             larger or the project does not allow it"
-        ),
+        text.contains("the only part of a pick that says how much review it gets"),
         "{text}"
     );
 }
