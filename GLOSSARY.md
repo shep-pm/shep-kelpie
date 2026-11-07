@@ -236,8 +236,9 @@ _Avoid_: judge, round guard, deep round, pull request reviewer
 **Review plan**:
 What the project manager sets with its pick: how many reads it wants for the
 work item and what it wants them for. A pass runs those reads, each once and
-each the agent board's pick. Where no project manager planned any, kelpie's
-own rule reads twice, and an adopted item too.
+each the agent board's pick. Where its pick planned none: twice for an adopted
+pull request, once on a project that names `agents.pm`, and kelpie's own two
+on a project with no project manager at all.
 _Avoid_: review count, reviewer count
 
 **Light weight**:

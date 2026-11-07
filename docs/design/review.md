@@ -4,7 +4,7 @@ Review passes and the review bots. Rulings are in rulings.md, and CI and the mer
 
 ## Review
 
-- One pass at green CI on draft head: the item's review plan's reads (kelpie's own two where no project manager planned any, `review-pick.md`), once each; no loop or judge. A pass's candidates are every reviewer file `agents.allow` holds but `contributions.security_reviewer`, and a project naming no agent in `agents.allow` takes only those its gateways can route. ADR 0006, ADR 0008, ADR 0018, #1544, `runner/review/`
+- One pass at green CI on draft head: the item's review plan's reads, `need_of` where its pick planned none (`review-pick.md`), once each; no loop or judge. A pass's candidates are every reviewer file `agents.allow` holds but `contributions.security_reviewer`, and a project naming no agent in `agents.allow` takes only those its gateways can route. ADR 0006, ADR 0008, ADR 0018, #1544, `runner/review/`
 - A review call ends at its own ceiling, `REVIEW_CEILING` (1h, no setting): past it the round fails like any failed round, and its ledger line reads `timed-out`. The ask reaches a session call, not a local round's command. `runner/flight/` #1711
 - Each round is the agent board's pick, and a finding above a nit may ask for one more read (`review-more.md`). #1539
 - Any finding, nits included, goes to one fix turn; next reviewer reads the fix (skipped nits left open threads). Nit-only fix starts nothing new; bot nits on a head it read stay open. ADR 0007, #354
