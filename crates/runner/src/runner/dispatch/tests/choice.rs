@@ -74,33 +74,13 @@ fn the_ask_carries_every_allowed_implementer_by_name_which_the_board_ranks_unles
     );
 }
 
-// The ask a new item for issue 6 sends the board, in a project whose settings
-// hold `slack` minutes, or the example's when None
-fn slack_asked(slack: Option<u32>) -> Option<u32> {
+#[test]
+fn the_ask_carries_an_hour_of_slack_when_the_pick_names_none() {
     let rig = Rig::new("acme");
-    if let Some(minutes) = slack {
-        rig.edit_settings(|s| {
-            s.replace(
-                "[app.dogs.kelpie.agents]\n",
-                &format!("[app.dogs.kelpie.agents]\nslack = {minutes}\n"),
-            )
-        });
-    }
     let runner = rig.open().unwrap();
     rig.forge.list_ready(6, false);
     assert!(dispatched_on(step(&runner).unwrap(), 6, "sonnet-high"));
-    rig.agent_board.asks()[0].slack
-}
-
-#[test]
-fn the_ask_carries_an_hour_of_slack_when_the_settings_name_none() {
-    assert_eq!(slack_asked(None), Some(60));
-}
-
-#[test]
-fn the_ask_carries_the_settings_slack() {
-    assert_eq!(slack_asked(Some(25)), Some(25));
-    assert_eq!(slack_asked(Some(0)), Some(0));
+    assert_eq!(rig.agent_board.asks()[0].slack, Some(60));
 }
 
 #[test]

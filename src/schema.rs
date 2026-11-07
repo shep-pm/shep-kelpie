@@ -103,17 +103,35 @@ mod tests {
     // Every leaf key the schema names, dotted, the way lookout lists its rows.
     // A tagged enum's variants each add their own keys.
     fn schema_keys(root: &Value, schema: &Value, prefix: &str, keys: &mut BTreeSet<String>) {
+        collect_keys(root, schema, prefix, keys, false);
+    }
+
+    // The same, leaving out each key marked `deprecated`: the keys the example documents.
+    fn live_keys(root: &Value, schema: &Value, prefix: &str, keys: &mut BTreeSet<String>) {
+        collect_keys(root, schema, prefix, keys, true);
+    }
+
+    fn collect_keys(
+        root: &Value,
+        schema: &Value,
+        prefix: &str,
+        keys: &mut BTreeSet<String>,
+        live: bool,
+    ) {
         let schema = resolve(root, schema);
         if let Some(variants) = schema["oneOf"].as_array() {
             for variant in variants {
-                schema_keys(root, variant, prefix, keys);
+                collect_keys(root, variant, prefix, keys, live);
             }
             return;
         }
         match schema["properties"].as_object() {
             Some(properties) => {
                 for (key, property) in properties {
-                    schema_keys(root, property, &format!("{prefix}{key}."), keys);
+                    if live && property["deprecated"] == true {
+                        continue;
+                    }
+                    collect_keys(root, property, &format!("{prefix}{key}."), keys, live);
                 }
             }
             None => {
@@ -236,16 +254,8 @@ mod tests {
                 "# [app.dogs.kelpie.dependencies]\n# pick = \"off\"\n# bots = [\"dependabot\"]\n# on_red = \"close\"\n# web = [\"web/\", \"package.json\"]\n# wait_hours = 24\n",
                 "[app.dogs.kelpie.dependencies]\npick = \"off\"\nbots = [\"dependabot\"]\non_red = \"close\"\nweb = [\"web/\", \"package.json\"]\nwait_hours = 24\n",
             )
-            .replace(
-                "[app.dogs.kelpie.agents]\n",
-                "[app.dogs.kelpie.agents]\nreviewers = [\"qwen\"]\n",
-            )
             .replace("# allow =", "allow =")
             .replace("# representative =", "representative =")
-            .replace("# slack =", "slack =")
-            .replace("# implementers =", "implementers =")
-            .replace("# implementer_choice =", "implementer_choice =")
-            .replace("# fallback_after =", "fallback_after =")
             .replace("# maintainer =", "maintainer =")
             .replace("# base =", "base =")
             .replace(
@@ -296,18 +306,16 @@ mod tests {
         let root = schema();
         let sheep_schema = &root[SHEEP_SCHEMA_KEY];
         let mut sheep = BTreeSet::new();
-        schema_keys(&root, sheep_schema, "", &mut sheep);
+        live_keys(&root, sheep_schema, "", &mut sheep);
         let set: BTreeSet<String> = examples_with_every_key()
             .iter()
             .flat_map(|text| keys_of_table(&root, sheep_schema, text))
             .collect();
         assert_same_keys(&sheep, &set);
-        for key in ["agents.reviewers", "worker.build_env"] {
-            assert!(
-                sheep.contains(key),
-                "{key} is not a key of the project schema"
-            );
-        }
+        assert!(
+            sheep.contains("worker.build_env"),
+            "worker.build_env is not a key of the project schema"
+        );
     }
 
     // Lookout edits a boolean, a list of strings and a table of strings, and
@@ -424,6 +432,7 @@ mod tests {
             "implementers",
             "implementer_choice",
             "fallback_after",
+            "slack",
             "reviewers",
         ] {
             let key = &agents["properties"][old];
@@ -437,7 +446,7 @@ mod tests {
             );
         }
         let old = "[app.dogs.kelpie.agents]\nimplementers = [\"sonnet-high\"]\n\
-                   implementer_choice = \"order\"\nfallback_after = 15\n\
+                   implementer_choice = \"order\"\nfallback_after = 15\nslack = 20\n\
                    reviewers = [\"defect-hunter-lite\"]\n";
         let text =
             include_str!("../settings.example.toml").replace("[app.dogs.kelpie.agents]\n", old);
