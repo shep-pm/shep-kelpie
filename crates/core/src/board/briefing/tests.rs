@@ -290,6 +290,13 @@ fn an_excerpt_closes_up_blank_runs_and_cuts_at_a_word() {
 }
 
 #[test]
+fn an_excerpt_is_quoted_as_before() {
+    assert_eq!(excerpt("# Heading\n\nDo this."), "> # Heading\n>\n> Do this.");
+    assert_eq!(quoted("One.\n\nTwo."), "> One.\n>\n> Two.");
+    assert_eq!(quoted("a\n> b"), "> a\n> > b");
+}
+
+#[test]
 fn a_cut_keeps_the_last_word_that_fits_and_drops_one_that_does_not() {
     assert_eq!(cut("one two three", 7), "one two …");
     assert_eq!(cut("one two three", 8), "one two …");
