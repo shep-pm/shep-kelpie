@@ -41,8 +41,12 @@ pub(super) struct Look {
     agents: PathBuf,
     home: PathBuf,
     last: Option<Read>,
-    // Every project's table as the last read held them, and as last handed over
-    peers: Peers,
+    // The other projects' tables as the last read held them, this project's own
+    // table as that read held it and as the runner last took it, and what was
+    // last handed over
+    others: Peers,
+    seen: Option<Map<String, Value>>,
+    accepted: Option<Map<String, Value>>,
     handed: Peers,
     failed: Option<String>,
 }
@@ -73,25 +77,45 @@ impl Look {
             agents: sources.agents,
             home,
             last: None,
-            peers: Peers::new(),
+            others: Peers::new(),
+            seen: None,
+            accepted: None,
             handed: Peers::new(),
             failed: None,
         }
     }
 
-    /// Every project's table as the last read held them, this project's too
+    /// Every project's table as the last read held them, and this project's
+    /// own as the runner last took it
     ///
     /// Kelpie's own section is not among them.
     pub(super) fn handing(&mut self) -> Peers {
-        self.handed.clone_from(&self.peers);
-        self.peers.clone()
+        let mut peers = self.others.clone();
+        peers.extend(self.accepted.clone().map(|own| (self.sheep.clone(), own)));
+        self.handed.clone_from(&peers);
+        peers
+    }
+
+    // Hands `runner` the tables if they changed since the last time.
+    fn hand(&mut self, runner: &Mutex<Runner>) {
+        let mut peers = self.others.clone();
+        peers.extend(self.accepted.clone().map(|own| (self.sheep.clone(), own)));
+        if peers != self.handed {
+            self.handed.clone_from(&peers);
+            (runner.lock())
+                .unwrap_or_else(PoisonError::into_inner)
+                .set_peer_tables(peers);
+        }
     }
 
     /// Reads the tables, and remembers them
     pub(super) fn read(&mut self) -> Result<Loaded, String> {
-        self.fetch().map_err(|e| match e {
+        let loaded = self.fetch().map_err(|e| match e {
             Unread::Shepherd(why) | Unread::Table(why) => why,
-        })
+        })?;
+        // The runner starts on what this read holds.
+        self.accepted.clone_from(&self.seen);
+        Ok(loaded)
     }
 
     fn fetch(&mut self) -> Result<Loaded, Unread> {
@@ -101,12 +125,11 @@ impl Look {
             &self.sheep,
         ))
         .map_err(Unread::Shepherd)?;
+        self.others = tables.others.clone();
+        self.seen.clone_from(&tables.project);
         let loaded = source::load(&tables, &self.sheep, &self.home, &self.folder)
             .map_err(|e| Unread::Table(e.to_string()))?;
         let agents = agents::snapshot(&self.agents);
-        self.peers = tables.others;
-        self.peers
-            .extend(tables.project.map(|own| (self.sheep.clone(), own)));
         self.last = Some((loaded.settings.clone(), loaded.kelpie.clone(), agents));
         Ok(loaded)
     }
@@ -172,6 +195,11 @@ impl Look {
 
     /// Reads again, and hands `runner` whatever changed since the last read
     pub(super) fn again(&mut self, runner: &Mutex<Runner>) {
+        self.reread_settings(runner);
+        self.hand(runner);
+    }
+
+    fn reread_settings(&mut self, runner: &Mutex<Runner>) {
         const KEPT: &str = "cannot read the settings again, so they stay as they are";
         const WAIT: &str = "a git settings change waits, so they stay as they are";
         const BAD: &str = "the settings table does not load, so they stay as they are";
@@ -182,14 +210,9 @@ impl Look {
             Err(Unread::Shepherd(why)) => return self.say(KEPT, &why),
             Err(Unread::Table(why)) => return self.refuse(runner, BAD, &why),
         };
-        if self.handed != self.peers {
-            let peers = self.handing();
-            (runner.lock())
-                .unwrap_or_else(PoisonError::into_inner)
-                .set_peer_tables(peers);
-        }
         if before == self.last {
             self.failed = None;
+            self.accepted.clone_from(&self.seen);
             // The repo's plugins come from its default branch, which no
             // setting of kelpie's announces.
             let mut runner = runner.lock().unwrap_or_else(PoisonError::into_inner);
@@ -216,6 +239,7 @@ impl Look {
         match runner.reread(loaded.settings, loaded.kelpie) {
             Ok(line) => {
                 self.failed = None;
+                self.accepted.clone_from(&self.seen);
                 runner.accept();
                 if let Some(line) = line {
                     eprintln!("{line}");
@@ -438,6 +462,49 @@ mod tests {
             .insert("koji".to_owned(), koji("auto"));
         look.again(&runner);
         assert_eq!(runner.lock().unwrap().peer_tables()["koji"], koji("auto"));
+    }
+
+    #[test]
+    fn a_table_that_does_not_load_keeps_its_own_copy_while_the_others_move_on() {
+        let rig = Rig::new("shep");
+        let runner = rig.open().unwrap();
+        let entry = std::fs::read_to_string(rig.settings_file()).unwrap();
+        let own = Arc::new(Mutex::new(project_table(&entry)));
+        let koji = |merging: &str| {
+            let mut table = Map::new();
+            table.insert("git".into(), serde_json::json!({ "merging": merging }));
+            table
+        };
+        let others = Arc::new(Mutex::new(Peers::from([("koji".to_owned(), koji("ask"))])));
+        let shep_home = tempfile::tempdir().unwrap();
+        let dial = shepherd_of(shep_home.path(), Arc::clone(&own), Arc::clone(&others));
+        let paths = rig.paths();
+        let mut look = Look::new(
+            dial,
+            shep_home.path().to_owned(),
+            "shep".into(),
+            Sources {
+                folder: paths.folder.clone(),
+                agents: paths.agents.clone(),
+            },
+            rig.home.path().to_owned(),
+        );
+        look.read().unwrap();
+        look.again(&runner);
+        let good = runner.lock().unwrap().peer_tables()["shep"].clone();
+
+        own.lock()
+            .unwrap()
+            .insert("bogus".into(), Value::Bool(true));
+        others
+            .lock()
+            .unwrap()
+            .insert("koji".to_owned(), koji("auto"));
+        look.again(&runner);
+
+        let held = runner.lock().unwrap().peer_tables().clone();
+        assert_eq!(held["koji"], koji("auto"));
+        assert_eq!(held["shep"], good);
     }
 
     #[test]

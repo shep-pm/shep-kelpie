@@ -42,10 +42,11 @@ fn shown(key: &str, value: &Value) -> Option<Value> {
     }
 }
 
-// An array's own items, which have no key: a table in one is shown as any other.
+// An array's own items, which have no key: a table in one, at any depth, is shown as any other.
 fn shown_item(item: &Value) -> Value {
     match item {
         Value::Object(inner) => Value::Object(shown_table(inner)),
+        Value::Array(items) => Value::Array(items.iter().map(shown_item).collect()),
         other => other.clone(),
     }
 }
@@ -100,6 +101,17 @@ mod tests {
                 "list": [{ "name": "n" }],
                 "ci": { "block": true },
             })
+        );
+    }
+
+    #[test]
+    fn a_table_inside_an_array_of_arrays_is_shown_like_any_other() {
+        let shown = shown_table(&table(json!({
+            "x": [[{ "api_token": "t0", "name": "n", "env": { "K": "v" } }]],
+        })));
+        assert_eq!(
+            Value::Object(shown),
+            json!({ "x": [[{ "name": "n", "env": { "K": "(hidden)" } }]] })
         );
     }
 
