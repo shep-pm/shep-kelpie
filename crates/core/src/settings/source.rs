@@ -86,6 +86,7 @@ mod tests {
         Tables {
             project: Some(table),
             kelpie: SECTION.into(),
+            ..Tables::default()
         }
     }
 
