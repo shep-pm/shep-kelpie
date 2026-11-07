@@ -502,7 +502,7 @@ domains = []
 
 # A local round (a `command` or `endpoint` reviewer) writes its request and
 # reply under the work item's build folder, which goes when the work item
-# ends. With `keep` on, kelpie copies each round to
+# ends. Kelpie copies each round to
 # `<folder>/<issue>-r<round>-<UTC time>/` when it ends, with a `round.json`
 # saying what it was and how it ended, so a round can be replayed at another
 # thinking limit. A round is about 250 KB. Rounds older than `keep_days` are
@@ -510,7 +510,6 @@ domains = []
 # all. `folder` is an absolute path or `~/` and a path, and defaults to
 # `local-rounds/` in the project's kelpie folder. Removal touches only `folder`.
 # [app.dogs.kelpie.local_rounds]
-# keep = true
 # keep_days = 30
 # folder = "~/kelpie-local-rounds"
 

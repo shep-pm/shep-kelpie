@@ -60,7 +60,7 @@ pub use e2e::{E2e, RepoPath, ResultsDir, SshAlias};
 pub use gateway::{
     Gateway, GatewayKey, GatewayKind, GatewayName, Gateways, KeyVar, ModelHost, Route, Timing,
 };
-pub use git::{BaseBranch, DEFAULT_BASE, Filing, Git, GithubLogin, Merging};
+pub use git::{BaseBranch, DEFAULT_BASE, Git, GithubLogin, Merging};
 pub use hooks::{HookPoint, PointKind, ProjectHook};
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use local_rounds::{KeepDays, LocalRounds, RoundsFolder};
@@ -145,9 +145,8 @@ pub struct Settings {
     /// hosts it reaches, and whether it is headed. Off when absent.
     #[serde(default)]
     pub browser: Browser,
-    /// Whether each local round is kept after its work item ends, for how
-    /// long, and where. Kept for 30 days in `local-rounds` in the project's
-    /// folder when absent.
+    /// How long each local round is kept after its work item ends, and where.
+    /// Kept for 30 days in `local-rounds` in the project's folder when absent.
     #[serde(default)]
     pub local_rounds: LocalRounds,
     /// How much a work item's build folder may hold, and the free space the
@@ -410,6 +409,12 @@ const REMOVED: &[Removed] = &[
         fix: MIGRATE,
     },
     Removed {
+        key: "local_rounds.keep",
+        because: "a kept round costs about 250 KB, and `keep_days` bounds how long one \
+                  stays, so kelpie keeps every local round",
+        fix: MIGRATE,
+    },
+    Removed {
         key: "coderabbit.enabled",
         because: BOT_FILES,
         fix: "for `true`, nothing to do: every reviewer file is a candidate, so \
@@ -454,8 +459,7 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "merge_authority",
         because: "it set both who merges and whether deferred findings are asked about",
-        fix: "move its value to `git.merging`, and set `git.issues`: `ask` asks before \
-              filing deferred findings as `ask` did, and `file` files them as `auto` did",
+        fix: "move its value to `git.merging`; deferred findings always raise a follow-up ruling",
     },
     Removed {
         key: "ci",

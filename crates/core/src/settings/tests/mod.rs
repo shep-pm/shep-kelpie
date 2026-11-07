@@ -47,7 +47,6 @@ fn the_example_holds_the_first_build_defaults() {
     assert_eq!(s.git.checkout, Path::new("/home/me/GitHub/shep"));
     assert_eq!(s.git.remote.unwrap().as_str(), "shep-pm/shep");
     assert_eq!(s.git.merging, Merging::Ask);
-    assert_eq!(s.git.issues, Filing::Ask);
     assert!(s.ci.block);
     assert_eq!(s.ci.fix_attempts.cap(), None);
     assert_eq!(s.concurrency.active_items.get(), 1);
@@ -119,16 +118,16 @@ fn the_maintainer_is_a_github_login_and_may_be_left_out() {
     assert_eq!(parse(EXAMPLE).unwrap().git.maintainer, None);
     for (written, login) in [("octocat", "octocat"), ("@Octo-Cat", "Octo-Cat")] {
         let text = EXAMPLE.replace(
-            "issues = \"ask\"\n",
-            &format!("issues = \"ask\"\nmaintainer = \"{written}\"\n"),
+            "merging = \"ask\"\n",
+            &format!("merging = \"ask\"\nmaintainer = \"{written}\"\n"),
         );
         let maintainer = parse(&text).unwrap().git.maintainer;
         assert_eq!(maintainer.unwrap().as_str(), login);
     }
     for bad in ["", "-octo", "octo cat", "octo/cat"] {
         let text = EXAMPLE.replace(
-            "issues = \"ask\"\n",
-            &format!("issues = \"ask\"\nmaintainer = \"{bad}\"\n"),
+            "merging = \"ask\"\n",
+            &format!("merging = \"ask\"\nmaintainer = \"{bad}\"\n"),
         );
         let err = parse_err(&text);
         assert!(err.contains("must be a GitHub login"), "{bad:?}: {err}");
@@ -136,19 +135,21 @@ fn the_maintainer_is_a_github_login_and_may_be_left_out() {
 }
 
 #[test]
-fn the_issues_setting_asks_files_or_skips_and_asks_when_absent() {
-    for (value, filing) in [
-        ("ask", Filing::Ask),
-        ("file", Filing::File),
-        ("skip", Filing::Skip),
+fn git_issues_loads_and_is_read_by_nothing() {
+    for value in [
+        r#""ask""#,
+        r#""file""#,
+        r#""skip""#,
+        r#""auto""#,
+        "false",
+        "[]",
+        "{}",
     ] {
-        let text = EXAMPLE.replace("issues = \"ask\"", &format!("issues = \"{value}\""));
-        assert_eq!(parse(&text).unwrap().git.issues, filing, "{value}");
+        let text = EXAMPLE.replace("issues = \"ask\"", &format!("issues = {value}"));
+        parse(&text).unwrap_or_else(|e| panic!("{value}: {e}"));
     }
     let absent = EXAMPLE.replace("issues = \"ask\"\n", "");
-    assert_eq!(parse(&absent).unwrap().git.issues, Filing::Ask);
-    let err = parse_err(&EXAMPLE.replace("issues = \"ask\"", "issues = \"auto\""));
-    assert!(err.contains("unknown variant `auto`"), "{err}");
+    parse(&absent).unwrap();
 }
 
 #[test]
@@ -259,9 +260,8 @@ fn every_old_top_level_key_is_refused_at_once_naming_what_replaces_it() {
              - `forge`, {grouped}: move its value to `git.remote`, or delete it to read \
              the repo from the checkout's `origin`\n\
              - `merge_authority`, because it set both who merges and whether deferred \
-             findings are asked about: move its value to `git.merging`, and set \
-             `git.issues`: `ask` asks before filing deferred findings as `ask` did, and \
-             `file` files them as `auto` did\n\
+             findings are asked about: move its value to `git.merging`; deferred findings \
+             always raise a follow-up ruling\n\
              - `ci`, {grouped}: move its value to `block` in a `[ci]` table\n\
              - `max_items`, {grouped}: move its value to `concurrency.active_items`\n\
              - `max_parked`, {grouped}: move its value to `concurrency.pending_rulings`\n\
@@ -552,7 +552,10 @@ fn a_table_carrying_several_removed_keys_names_them_all_at_once() {
             "[app.dogs.kelpie.git]\n",
             "[app.dogs.kelpie]\ngenerated = [\"Cargo.lock\"]\n[app.dogs.kelpie.git]\n",
         )
-        .replace("# reviewers = [\"iq3", "reviewers = [\"iq3");
+        .replace(
+            "[app.dogs.kelpie.agents]\n",
+            "[app.dogs.kelpie.agents]\nreviewers = [\"iq3-xxs-review\", \"defect-hunter\"]\n",
+        );
     let text = format!(
         "{text}\n[app.dogs.kelpie.coderabbit]\nenabled = true\ndivisor = 1000\nrounds = 1\n"
     );
@@ -889,21 +892,29 @@ fn with_local_rounds(keys: &str) -> String {
 #[test]
 fn local_rounds_default_to_kept_for_30_days() {
     let rounds = parse(EXAMPLE).unwrap().local_rounds;
-    assert!(rounds.keep);
     assert_eq!(rounds.keep_days.get(), 30);
     assert_eq!(rounds.folder, None);
     let empty = parse(&with_local_rounds("")).unwrap().local_rounds;
-    assert_eq!((empty.keep, empty.keep_days.get()), (true, 30));
+    assert_eq!(empty.keep_days.get(), 30);
+}
+
+#[test]
+fn local_rounds_keep_is_refused_by_name_and_says_migrate_deletes_it() {
+    for value in ["true", "false"] {
+        let err = parse_err(&with_local_rounds(&format!("keep = {value}")));
+        assert!(err.contains("local_rounds.keep"), "{value}: {err}");
+        assert!(
+            err.contains("shep kelpie settings migrate"),
+            "{value}: {err}"
+        );
+    }
 }
 
 #[test]
 fn local_rounds_take_keep_days_and_a_folder() {
-    let set = parse(&with_local_rounds(
-        "keep = false\nkeep_days = 0\nfolder = \"~/rounds\"",
-    ))
-    .unwrap()
-    .local_rounds;
-    assert!(!set.keep);
+    let set = parse(&with_local_rounds("keep_days = 0\nfolder = \"~/rounds\""))
+        .unwrap()
+        .local_rounds;
     assert_eq!(set.keep_days.get(), 0);
     assert_eq!(
         set.folder.as_ref().map(|f| f.as_path()),

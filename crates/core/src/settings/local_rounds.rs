@@ -1,4 +1,4 @@
-//! `[app.dogs.kelpie.local_rounds]`: whether a local round is kept after its work item ends
+//! `[app.dogs.kelpie.local_rounds]`: how long a project keeps its local rounds, and where
 
 use std::path::{Path, PathBuf};
 
@@ -7,15 +7,11 @@ use serde::Deserialize;
 
 const DAYS: u32 = 30;
 
-/// Whether and for how long a project keeps its local rounds
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+/// How long a project keeps its local rounds, and where. Every round is kept.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(title = "Local rounds")]
 pub struct LocalRounds {
-    /// Whether each local round is copied out of its work item's build folder
-    /// when it ends, so it outlives the work item. On when absent.
-    #[serde(default = "yes")]
-    pub keep: bool,
     /// Kept rounds older than this many days are removed; 0 keeps them all.
     /// 30 when absent.
     #[serde(default)]
@@ -24,20 +20,6 @@ pub struct LocalRounds {
     /// in the project's kelpie folder when absent.
     #[serde(default)]
     pub folder: Option<RoundsFolder>,
-}
-
-fn yes() -> bool {
-    true
-}
-
-impl Default for LocalRounds {
-    fn default() -> Self {
-        Self {
-            keep: true,
-            keep_days: KeepDays::default(),
-            folder: None,
-        }
-    }
 }
 
 /// Days a kept round stays, from 0 (for ever)
