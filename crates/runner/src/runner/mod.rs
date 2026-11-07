@@ -624,8 +624,7 @@ impl Runner {
         );
         let plugins_head = crate::skills::default_head(checkout, settings.git.base());
         // Only a reviewer the project named in `agents.allow` is held to what a
-        // round cannot work around: a candidate it never named is passed over at
-        // its round, as down or by the repo's visibility.
+        // round cannot work around: one it never named is passed over, as down or by visibility.
         if !named.is_empty() {
             check_local(&named, &ports)?;
         }
