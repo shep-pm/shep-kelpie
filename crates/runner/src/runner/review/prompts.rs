@@ -395,7 +395,8 @@ SEVERITY|file:line|what is wrong, and its trigger|what goes wrong, and who sees 
 
     #[test]
     fn a_long_body_keeps_its_end_at_a_character_boundary() {
-        let body = format!("{}{}", "a".repeat(5000), "é".repeat(2001));
+        // 6001 bytes: the last 4000 begin at byte 2001, inside the 1001st "é"
+        let body = format!("{}z", "é".repeat(3000));
 
         let note = body_note(&body);
 
@@ -404,9 +405,7 @@ SEVERITY|file:line|what is wrong, and its trigger|what goes wrong, and who sees 
             .nth(1)
             .and_then(|rest| rest.strip_suffix("\n--- end ---"))
             .expect("the body sits between its markers");
-        assert!(kept.ends_with(&"é".repeat(2000)), "{note}");
-        assert!(!kept.contains('a'), "{note}");
-        assert!(kept.len() <= 4000, "{}", kept.len());
+        assert_eq!(kept, format!("{}z", "é".repeat(1999)), "{note}");
         assert!(note.contains("start of the body is left out"), "{note}");
     }
 
