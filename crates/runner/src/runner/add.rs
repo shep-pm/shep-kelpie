@@ -197,6 +197,19 @@ impl fmt::Display for AddError {
 
 impl core::error::Error for AddError {}
 
+// Refuses an issue whose `Touches:` names a path a worker's fence refuses, which an
+// opened work item and a queued one would both stall on.
+fn refuse_fenced(ticket: TicketId, body: &str) -> Result<(), AddError> {
+    let paths: Vec<String> = (fenced(body).into_iter())
+        .map(|(path, _)| path.to_owned())
+        .collect();
+    if paths.is_empty() {
+        Ok(())
+    } else {
+        Err(AddError::Fenced(ticket, paths))
+    }
+}
+
 impl Runner {
     /// Takes `ticket` back into kelpie's work: at once as [`Added::Opened`], on the
     /// implementer its worker runs on, or, with no slot free and the issue one kelpie
@@ -285,6 +298,7 @@ impl Runner {
         if !found.open {
             return Err(AddError::Closed(ticket));
         }
+        refuse_fenced(ticket, &found.body)?;
         (agent_label(&found.labels, &self.implementer_files())).map_err(AddError::Label)?;
         if !found.labels.iter().any(|l| l == READY) {
             return Err(AddError::NotReady(ticket));
@@ -381,13 +395,7 @@ impl Runner {
         if !found.open {
             return Err(AddError::Closed(ticket));
         }
-        let paths: Vec<String> = fenced(&found.body)
-            .into_iter()
-            .map(|(path, _)| path.to_owned())
-            .collect();
-        if !paths.is_empty() {
-            return Err(AddError::Fenced(ticket, paths));
-        }
+        refuse_fenced(ticket, &found.body)?;
         let opening = match opening {
             Some(opening) => opening,
             None => self.ranked(ticket, &found.labels, picked)?.first(),
