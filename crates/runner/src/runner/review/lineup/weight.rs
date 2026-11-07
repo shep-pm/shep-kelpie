@@ -203,6 +203,35 @@ mod tests {
         assert!(reviewer_models(&rig).is_empty(), "claude was not needed");
     }
 
+    // A project manager plans its own items' reads, so one its pick carried no
+    // plan for reads once, not at kelpie's own count.
+    #[test]
+    fn a_project_manager_that_planned_nothing_reads_once() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+
+        reviewers_until_ci(&rig, &runner);
+
+        assert_eq!(rig.reviewer.seen().len(), 1, "one read, then CI");
+        assert_eq!(
+            rig.ask(&runner, "status", None)["work_item"]["phase"]["state"],
+            "ci"
+        );
+    }
+
+    // An adopted pull request may be a stranger's, so kelpie's own count reads
+    // it even under a project manager that planned nothing.
+    #[test]
+    fn an_adopted_item_reads_twice_where_nothing_was_planned() {
+        let rig = pm_project();
+        let runner = at_review(&rig, "work.txt");
+        runner.lock().unwrap().state.work_items[0].adopted = true;
+
+        reviewers_until_ci(&rig, &runner);
+
+        assert_eq!(rig.reviewer.seen().len(), 2, "mine and other read");
+    }
+
     #[test]
     fn a_project_with_no_project_manager_weighs_nothing() {
         let rig = two_local();

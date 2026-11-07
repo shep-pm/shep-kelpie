@@ -29,7 +29,7 @@ A stub written before baselines dropped their binding (`extends: kelpie:pm` and 
 
 Kelpie also writes each shipped agent whole and read-only to `agents/.defaults/<name>.md`, to read and to diff against your file. Nothing loads it, and an edit there is lost: `add` and the dog's start write it again, so an upgrade's restart refreshes it. Override in `agents/<name>.md` instead.
 
-A pass runs the reads its work item's review plan calls for (2 where no project manager planned any), each once and each the agent board's pick from the candidates it has not run. The pass ends sooner when no candidate can run. Its lineup is every agent file whose role is `reviewer` that `agents.allow` holds, apart from `contributions.security_reviewer`. A project that names the agents it may use lists them there, its implementers included:
+A pass runs the reads its work item's review plan calls for, or, where its pick planned none, two reads for an adopted item, one on a project that names `agents.pm`, and kelpie's own two on a project with no project manager, each once and each the agent board's pick from the candidates it has not run. The pass ends sooner when no candidate can run. On a project that names `agents.pm`, a round that sent a finding above a nit asks it for one more read, which it rules on (see [The review](review.md#the-review)); a project with no `agents.pm` asks nothing. Its lineup is every agent file whose role is `reviewer` that `agents.allow` holds, apart from `contributions.security_reviewer`. A project that names the agents it may use lists them there, its implementers included:
 
 ```toml
 [app.dogs.kelpie.agents]
