@@ -1,10 +1,9 @@
 # A project's runner, as its `[[app]]` entry in your shepherd's Flockfile. The project's
 # settings are the sheep's `[app.dogs.kelpie]` table: shep keeps it and hands
 # it to the runner, and lookout edits it in the sheep's pane. Every setting
-# sits in a table. `git.checkout`, `git.merging` and `ci.block` are required,
-# with the `[git]` and `[ci]` tables that hold them. The `[worker]` table must
-# be present too, though every key in it has a default, as does every other
-# key.
+# sits in a table. `git.checkout` and `ci.block` are required, with the `[git]`
+# and `[ci]` tables that hold them. The `[worker]` table must be present too,
+# though every key in it has a default, as does every other key.
 # This entry holds the first build's defaults, for shep.
 # `env` must hold `SHEP_HOME` as an absolute path, since a sheep starts
 # without it. An older entry's `kill_timeout = "10s"` still works and is no
@@ -40,7 +39,8 @@ remote = "shep-pm/shep"
 # kelpie has none. Under `auto` some pull requests still get the merge
 # ruling, which names why: one no reviewer read, one with a review bot's
 # thread above a nit open, a head no review round read, a fix after a
-# `no`, and a late bot round's fix.
+# `no`, and a late bot round's fix. Left out, `rulings.pm_decides.merge` says:
+# `true` is `auto` and `false` is `ask`.
 merging = "ask"
 # Findings a worker deferred, once its pull request merges. `ask` raises a
 # ruling before filing them as issues, `file` files them at once, and
@@ -508,7 +508,7 @@ domains = []
 
 # A local round (a `command` or `endpoint` reviewer) writes its request and
 # reply under the work item's build folder, which goes when the work item
-# ends. With `keep` on, kelpie copies each round to
+# ends. Kelpie copies each round to
 # `<folder>/<issue>-r<round>-<UTC time>/` when it ends, with a `round.json`
 # saying what it was and how it ended, so a round can be replayed at another
 # thinking limit. A round is about 250 KB. Rounds older than `keep_days` are
@@ -516,7 +516,6 @@ domains = []
 # all. `folder` is an absolute path or `~/` and a path, and defaults to
 # `local-rounds/` in the project's kelpie folder. Removal touches only `folder`.
 # [app.dogs.kelpie.local_rounds]
-# keep = true
 # keep_days = 30
 # folder = "~/kelpie-local-rounds"
 

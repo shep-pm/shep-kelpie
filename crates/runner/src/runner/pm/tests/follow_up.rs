@@ -17,12 +17,11 @@ use crate::test::{Rig, Scripted};
 const LEAVES_IT: &str = "{\"answer\": null}";
 
 /// A project with a project manager whose issue 7 is ready to merge under
-/// `auto`, with `git.issues` as `ask`, the worker having written `work` to
-/// `work.txt`
+/// `auto`, the worker having written `work` to `work.txt`
 fn ready_to_merge(project: &str, work: &'static str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
     name_pm(&rig);
-    auto_merging_on(rig, "ask", work, &[racy()])
+    auto_merging_on(rig, work, &[racy()])
 }
 
 /// ... merged, and the follow-up ruling raised
@@ -46,7 +45,7 @@ fn merged_with_two_findings(project: &str) -> (Rig, Mutex<Runner>) {
         "leaks a handle",
         "the file stays open",
     );
-    let (rig, runner) = auto_merging_on(rig, "ask", "work\n", &[racy(), leak]);
+    let (rig, runner) = auto_merging_on(rig, "work\n", &[racy(), leak]);
     let Some(StepReport::Ruling { id, .. }) = after_merge(&runner) else {
         panic!("the maintainer was not asked about the findings");
     };

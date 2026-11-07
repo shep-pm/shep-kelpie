@@ -10,7 +10,7 @@ mod triage;
 use std::path::Path;
 
 use crate::ports::Visibility;
-use crate::settings::{Filing, GatewayName, Merging};
+use crate::settings::{GatewayName, Merging};
 use crate::test::Rig;
 use crate::webhook::{KelpieSettings, WebhookKind};
 
@@ -30,7 +30,6 @@ fn a_changed_setting_takes_effect_at_once() {
     let runner = rig.open().unwrap();
     let next = settings_with(&rig, |s| {
         s.replace("merging = \"ask\"", "merging = \"auto\"")
-            .replace("issues = \"ask\"", "issues = \"skip\"")
             .replace("fix_attempts = -1", "fix_attempts = 2")
             .replace("active_items = 1", "active_items = 2")
     });
@@ -38,11 +37,10 @@ fn a_changed_setting_takes_effect_at_once() {
     let line = runner.reread(next, rig.kelpie_settings()).unwrap();
     assert_eq!(
         line.as_deref(),
-        Some("settings changed: git.merging, git.issues, ci, concurrency now in effect")
+        Some("settings changed: git.merging, ci, concurrency now in effect")
     );
     assert_eq!(runner.settings().concurrency.active_items.get(), 2);
-    assert_eq!(runner.settings().git.merging, Merging::Auto);
-    assert_eq!(runner.settings().git.issues, Filing::Skip);
+    assert_eq!(runner.settings().git.merging, Some(Merging::Auto));
     assert_eq!(runner.settings().ci.fix_attempts.cap(), Some(2));
     assert_eq!(runner.status().merging, Merging::Auto);
 }
