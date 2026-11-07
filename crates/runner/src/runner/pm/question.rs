@@ -215,31 +215,32 @@ impl Runner {
             Call::Drop => (Ruled::No(why.clone()), "dropping", None),
         };
         let as_label = label.map_or_else(String::new, |l| format!(" as {l}"));
-        let by = Settler::Pm {
-            answer: format!(
+        let (answered, unread) = (
+            format!(
                 "{}, {verb} {count}{as_label}: {at}",
                 if label.is_some() { "yes" } else { "no" }
             ),
-            why: why.clone(),
-            unread: call == Call::File { unread: true },
-        };
-        // The findings a yes drops come off the work item, so only the rest
-        // are filed. The ruling keeps all it asked.
-        let kept = match (label, drops.is_empty()) {
-            (Some(_), false) => self.keep_findings(ticket, &decide.dropped)?,
-            _ => None,
+            call == Call::File { unread: true },
+        );
+        // The findings a yes drops come off the work item in the save that
+        // settles the ruling, so a stop between the two saves cannot part them.
+        let by = match (label, drops.is_empty()) {
+            (Some(_), false) => Settler::PmDropping {
+                answer: answered,
+                why: why.clone(),
+                unread,
+                dropped: decide.dropped.iter().map(|(n, _)| *n).collect(),
+            },
+            _ => Settler::Pm {
+                answer: answered,
+                why: why.clone(),
+                unread,
+            },
         };
         match self.rule_by(id, answer, by) {
             Ok(()) => {}
-            Err(e) => {
-                if let Some(all) = kept {
-                    self.set_findings(ticket, all)?;
-                }
-                match e {
-                    RuleError::State(e) => return Err(e),
-                    e => return Ok(Err(format!("follow_up {named}: {e}"))),
-                }
-            }
+            Err(RuleError::State(e)) => return Err(e),
+            Err(e) => return Ok(Err(format!("follow_up {named}: {e}"))),
         }
         let how = if label.is_some() { "filed" } else { "dropped" };
         let line = format!(
@@ -256,38 +257,6 @@ impl Runner {
         Ok(Ok(format!(
             "{verb} {count} of ruling {id} on {named}{as_label}: {at}"
         )))
-    }
-
-    // Takes the findings numbered in `dropped` off the work item for `ticket`
-    // and returns the ones it held, to put back if the ruling cannot be settled.
-    fn keep_findings(
-        &mut self,
-        ticket: TicketId,
-        dropped: &[(usize, String)],
-    ) -> Result<Option<Vec<Finding>>, StateError> {
-        let mut next = self.state.clone();
-        let item = next.work_items.iter_mut().find(|i| i.issue == ticket);
-        let Some(pending) = item.and_then(|i| i.follow_ups.as_mut()) else {
-            return Ok(None);
-        };
-        let all = pending.findings.clone();
-        let mut at = 0;
-        pending.findings.retain(|_| {
-            at += 1;
-            dropped.iter().all(|(n, _)| *n != at)
-        });
-        self.save(next)?;
-        Ok(Some(all))
-    }
-
-    // Sets the findings still to file on the work item for `ticket`.
-    fn set_findings(&mut self, ticket: TicketId, findings: Vec<Finding>) -> Result<(), StateError> {
-        let mut next = self.state.clone();
-        let item = next.work_items.iter_mut().find(|i| i.issue == ticket);
-        if let Some(pending) = item.and_then(|i| i.follow_ups.as_mut()) {
-            pending.findings = findings;
-        }
-        self.save(next)
     }
 
     // Whether follow-up ruling `id` was raised after the forge refused the

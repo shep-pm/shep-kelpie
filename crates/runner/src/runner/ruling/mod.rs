@@ -267,6 +267,7 @@ impl Runner {
         answer: Answer,
         by: Answerer,
         unread: bool,
+        dropped: &[usize],
     ) -> Result<bool, RuleError> {
         let at = self.state.rulings.iter().position(|r| r.id == id);
         let at = at.ok_or(RuleError::NoSuchRuling(id))?;
@@ -429,6 +430,12 @@ impl Runner {
                     pending.ruled |= triaged;
                     pending.unread |= unread;
                     pending.first_refused = None;
+                    // Each by its place from 1, which the project manager's yes left out.
+                    let mut at = 0;
+                    pending.findings.retain(|_| {
+                        at += 1;
+                        !dropped.contains(&at)
+                    });
                 } else {
                     pending.findings.clear();
                 }
