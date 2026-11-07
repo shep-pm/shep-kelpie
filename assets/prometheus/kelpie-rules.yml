@@ -96,7 +96,7 @@ groups:
           severity: warning
         annotations:
           summary: "{{ $labels.sheep }}: the {{ $labels.account }} plan's week is {{ $value | humanizePercentage }} used with over a day to its reset"
-          description: "Little of the week is left for the days that remain, and the pacer holds new work items on its allowance."
+          description: "Little of the week is left for the days that remain, and a spent week holds every turn."
 
       # A runner with more series than it may send, so some go unseen.
       - alert: KelpieSeriesDropped
