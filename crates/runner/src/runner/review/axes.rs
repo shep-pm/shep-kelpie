@@ -34,7 +34,12 @@ fn a_listed_spec_reviewer_gets_the_issue_s_criteria_after_its_body() {
         "{prompt}"
     );
     assert!(
-        criteria.ends_with("#7 Title of #7\n\nBody of #7."),
+        criteria.contains("#7 Title of #7\n\nBody of #7."),
+        "{prompt}"
+    );
+    assert!(
+        criteria
+            .ends_with("--- the pull request's body ---\nBody of pull request #71.\n--- end ---"),
         "{prompt}"
     );
 }
@@ -68,7 +73,7 @@ fn a_spec_reviewer_in_round_two_is_told_what_round_one_sent_the_worker() {
 
     assert!(prompt.starts_with("You are checking"), "{prompt}");
     assert!(
-        prompt.ends_with(
+        prompt.contains(
             "--- the findings earlier rounds sent ---\n\
              MEDIUM|src/lib.rs:3|the flag is read first|a caller sees nothing\n--- end ---"
         ),
