@@ -1,21 +1,17 @@
-//! `[app.dogs.kelpie.repo_setup]`, which narrows the repo's plugins and adds to them
+//! `[app.dogs.kelpie.repo_setup]`, whose `extra` adds a plugin the repo does not name and whose
+//! other keys still load, read by nothing
 
 use super::{EXAMPLE, parse, parse_err};
-use crate::ports::Role;
-use crate::settings::Part;
 
 fn with(keys: &str) -> String {
     format!("{EXAMPLE}\n[app.dogs.kelpie.repo_setup]\n{keys}\n")
 }
 
 #[test]
-fn left_out_the_repos_plugins_reach_every_call() {
+fn left_out_the_table_narrows_nothing_and_adds_nothing() {
     let setup = parse(EXAMPLE).unwrap().repo_setup;
     assert!(setup.plugins && setup.own);
-    for role in [Role::Worker, Role::Reviewer, Role::Pm] {
-        assert!(setup.reaches(role), "{role:?}");
-    }
-    assert!(!setup.skips("style@house"));
+    assert!(setup.skip.is_empty());
     assert!(setup.extra.is_empty());
 }
 
@@ -29,13 +25,15 @@ fn an_unknown_key_is_refused_by_name() {
 }
 
 #[test]
-fn roles_name_the_calls_that_get_the_plugins() {
-    let setup = parse(&with("roles = [\"worker\", \"pm\"]"))
-        .unwrap()
-        .repo_setup;
-    assert!(setup.reaches(Role::Worker) && setup.reaches(Role::Pm));
-    assert!(!setup.reaches(Role::Reviewer));
-    assert!(!setup.reaches(Role::Triager));
+fn the_keys_that_used_to_narrow_still_load() {
+    let keys = "plugins = false\nown = false\nroles = [\"worker\", \"pm\"]\n\
+                parts = [\"skills\", \"agents\"]\nskip = [\"style@house\"]";
+    let setup = parse(&with(keys)).unwrap().repo_setup;
+    assert!(!setup.plugins && !setup.own);
+    assert_eq!(
+        (setup.roles.len(), setup.parts.len(), setup.skip.len()),
+        (2, 2, 1)
+    );
 }
 
 #[test]
@@ -72,9 +70,7 @@ fn a_plugin_is_written_name_at_marketplace() {
         let err = parse_err(&with(&format!("skip = [{bad:?}]")));
         assert!(err.contains("name@marketplace"), "{bad}: {err}");
     }
-    let setup = parse(&with("skip = [\"style@house\"]")).unwrap().repo_setup;
-    assert!(setup.skips("style@house"));
-    assert!(!setup.skips("quiet@house"));
+    assert!(parse(&with("skip = [\"style@house\"]")).is_ok());
 }
 
 #[test]
@@ -116,25 +112,6 @@ fn a_marketplace_is_written_kind_colon_address() {
 }
 
 #[test]
-fn every_part_of_a_plugin_loads_unless_parts_narrows_it() {
-    let setup = parse(EXAMPLE).unwrap().repo_setup;
-    for part in [
-        Part::Skills,
-        Part::Agents,
-        Part::Commands,
-        Part::Hooks,
-        Part::Mcp,
-    ] {
-        assert!(setup.loads(part), "{part:?}");
-    }
-    let setup = parse(&with("parts = [\"skills\", \"agents\"]"))
-        .unwrap()
-        .repo_setup;
-    assert!(setup.loads(Part::Skills) && setup.loads(Part::Agents));
-    assert!(!setup.loads(Part::Hooks) && !setup.loads(Part::Commands) && !setup.loads(Part::Mcp));
-}
-
-#[test]
 fn a_part_a_plugin_lacks_is_refused() {
     let err = parse_err(&with("parts = [\"themes\"]"));
     assert!(err.contains("repo_setup.parts"), "{err}");
@@ -142,11 +119,4 @@ fn a_part_a_plugin_lacks_is_refused() {
         err.contains("skills, agents, commands, hooks or mcp"),
         "{err}"
     );
-}
-
-#[test]
-fn own_false_leaves_the_repos_own_files_out() {
-    let setup = parse(&with("own = false")).unwrap().repo_setup;
-    assert!(!setup.own);
-    assert!(setup.plugins);
 }

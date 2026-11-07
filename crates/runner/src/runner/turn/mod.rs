@@ -822,9 +822,10 @@ impl Runner {
     /// Done before the call is marked running, so a failure keeps the turn
     /// it would have run for a retry.
     pub(super) fn prepared(&self, mut call: AgentCall) -> Result<AgentCall, String> {
-        // The plugins the repo turns on reach every call the runner makes in it,
-        // unless the project's `repo_setup` keeps them from this call's role.
-        if self.settings.repo_setup.reaches(call.role) {
+        // The plugins the repo turns on reach the worker, the reviewers and the project
+        // manager. No other call gets them, whatever a project's settings say: the
+        // representative reads a stranger's text.
+        if matches!(call.role, Role::Worker | Role::Reviewer | Role::Pm) {
             // A call in a worktree that matches `main` loads the repo's own
             // `.claude` files from it already, and must not get them twice.
             let item = call.issue.and_then(|ticket| self.state.item(ticket));

@@ -1,4 +1,4 @@
-//! A repo plugin's agents, commands and hooks load beside its skills, and `repo_setup.parts` narrows them
+//! A repo plugin's agents, commands and hooks load beside its skills
 
 use std::fs;
 use std::path::Path;
@@ -16,11 +16,10 @@ use crate::test::Rig;
 
 const PLUGIN: &str = "markets/house/plugins/style";
 
-// A runner whose `repo_setup` table holds `keys`, on a repo that turns on `style@house`, a
-// plugin with a skill, an agent, a command and a hook, with a worker's first turn run
-fn with_parts(keys: &str) -> (Rig, Mutex<Runner>) {
+// A runner on a repo that turns on `style@house`, a plugin with a skill, an agent, a command and
+// a hook, with a worker's first turn run
+fn with_parts() -> (Rig, Mutex<Runner>) {
     let rig = Rig::new("shep");
-    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.repo_setup]\n{keys}\n"));
     let dir = marketplace(&rig, "house", &[("style", "style")]);
     rig.land(
         &format!("{PLUGIN}/agents/checker.md"),
@@ -53,7 +52,7 @@ fn with_parts(keys: &str) -> (Rig, Mutex<Runner>) {
 
 #[test]
 fn a_plugins_agent_command_and_hook_reach_the_workers_plugin_copy() {
-    let (rig, _runner) = with_parts("");
+    let (rig, _runner) = with_parts();
     let plugin = rig.paths().skills.join("repo/style");
     assert!(call_of(&rig, Role::Worker).plugin_dirs.contains(&plugin));
     assert!(plugin.join("skills/style/SKILL.md").is_file());
@@ -81,7 +80,7 @@ fn bash_hooks(hooks: &serde_json::Value) -> Vec<String> {
 
 #[test]
 fn a_plugin_hook_runs_and_kelpies_guard_still_blocks_what_it_blocks() {
-    let (rig, _runner) = with_parts("");
+    let (rig, _runner) = with_parts();
     let plugin = rig.paths().skills.join("repo/style");
     let plugins: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(plugin.join("hooks/hooks.json")).unwrap())
@@ -134,56 +133,4 @@ fn a_plugin_hook_runs_and_kelpies_guard_still_blocks_what_it_blocks() {
 
     // The plugin's hook is in its own folder, never in kelpie's settings file.
     assert!(!worker.settings.to_string().contains("note.sh"));
-}
-
-#[test]
-fn parts_skills_copies_only_the_skills() {
-    let (rig, runner) = with_parts("parts = [\"skills\"]");
-    let plugin = rig.paths().skills.join("repo/style");
-    assert!(plugin.join("skills/style/SKILL.md").is_file());
-    for left_out in ["agents", "commands", "hooks"] {
-        assert!(!plugin.join(left_out).exists(), "{left_out}");
-    }
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["plugins"][0]["skills"], json!(["style"]));
-}
-
-#[test]
-fn parts_narrows_the_part_folders_and_keeps_the_rest_of_the_plugin() {
-    let (rig, _runner) = with_parts("parts = [\"skills\"]");
-    let plugin = rig.paths().skills.join("repo/style");
-    assert!(plugin.join("skills/style/SKILL.md").is_file());
-    assert!(plugin.join("docs/rules.md").is_file());
-    for left_out in ["agents", "commands", "hooks"] {
-        assert!(!plugin.join(left_out).exists(), "{left_out}");
-    }
-}
-
-#[test]
-fn parts_without_skills_loads_a_plugin_for_its_agents_alone() {
-    let (rig, runner) = with_parts("parts = [\"agents\"]");
-    let plugin = rig.paths().skills.join("repo/style");
-    assert!(plugin.join("agents/checker.md").is_file());
-    assert!(!plugin.join("skills").exists());
-    assert!(!plugin.join("hooks").exists());
-    assert!(call_of(&rig, Role::Worker).plugin_dirs.contains(&plugin));
-    let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["plugins"][0].get("skipped"), None);
-}
-
-#[test]
-fn a_plugin_with_none_of_the_parts_asked_for_is_skipped_with_its_reason() {
-    let rig = Rig::new("shep");
-    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.repo_setup]\nparts = [\"agents\"]\n"));
-    let dir = marketplace(&rig, "house", &[("style", "style")]);
-    land_settings(
-        &rig,
-        &[("style@house", true)],
-        &[("house", directory(&dir))],
-    );
-    let runner = rig.open().unwrap();
-    let status = rig.ask(&runner, "status", None);
-    let skipped = status["plugins"][0]["skipped"].as_str().unwrap();
-    assert!(skipped.contains("agents"), "{skipped}");
-    assert!(!rig.paths().skills.join("repo/style").exists());
 }
