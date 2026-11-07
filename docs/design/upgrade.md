@@ -39,3 +39,4 @@ After the canary's restart, `status` is asked every `patience.poll` and `judge(b
 - One runner's error lets the others run to their ends. The errors are joined in name order.
 - The interrupt is awaited once for the group. Each runner still draining is sent `undrain`.
 - `--now` still goes canary first with its checks, with no handover and no drain.
+- An install of an older build (`--rollback`, `--binary`, `--ref`, `--release`) leaves the installed kelpie older than every runner not yet restarted, and a restart that stops short leaves it that way after the command exits. What such a pairing cannot do is read a `status` over the socket: runner-socket.md.

@@ -643,8 +643,8 @@ fn a_runner_with_every_role_and_harness_in_use_stays_under_the_cap() {
     }
     // The series set from the state and the settings, which these lines do not drive: six phases,
     // four features' enabled gauges, the plan gauges of the two accounts (two windows' two
-    // gauges, and two more), and the four ways a work item's CI can fail.
-    let not_driven = 6 + 4 + 2 * (4 + 2) + 4;
+    // gauges each), and the four ways a work item's CI can fail.
+    let not_driven = 6 + 4 + 2 * 4 + 4;
     let held: std::collections::BTreeSet<_> = (sink.sent().iter())
         .map(|s| (s.name, s.labels.clone()))
         .collect();
@@ -750,13 +750,16 @@ fn a_pacer_reading_sets_the_plan_gauges() {
     let week = (Rig::EPOCH + 7 * Rig::DAY) as f64;
     assert_eq!(at("week"), (Some(0.3), Some(week)));
     let claude = [("account", "claude")];
-    let allowance = rig.samples.value("kelpie_plan_allowance_ratio", &claude);
-    assert!(
-        allowance.is_some_and(|a| (0.0..=1.0).contains(&a)),
-        "{allowance:?}"
+    assert_eq!(
+        rig.samples.value("kelpie_plan_allowance_ratio", &claude),
+        None,
+        "the day's share is no longer a gauge"
     );
-    let spent = rig.samples.value("kelpie_plan_spent_today_ratio", &claude);
-    assert!(spent.is_some_and(|s| (0.0..=1.0).contains(&s)), "{spent:?}");
+    assert_eq!(
+        rig.samples.value("kelpie_plan_spent_today_ratio", &claude),
+        None,
+        "the day's spending is no longer a gauge"
+    );
 }
 
 #[test]

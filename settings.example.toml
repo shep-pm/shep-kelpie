@@ -184,10 +184,9 @@ per_item_usd = 10
 # `shep kelpie upgrade` deletes it.
 # fallback_after = 15
 
-# `enabled` is what `status` reports as pacing. Only a spent 5-hour window
-# or week holds a turn or a new work item, on or off, and usage is read and
-# shown either way. `kickoff_hours` is the hours a day that the per-hour
-# figure in `status` divides the day's allowance by.
+# Read by nothing since the day's allowance went. Only a spent 5-hour window
+# or week holds a turn or a new work item, and usage is read and shown
+# whatever these say.
 [app.dogs.kelpie.pacing]
 enabled = true
 kickoff_hours = 8

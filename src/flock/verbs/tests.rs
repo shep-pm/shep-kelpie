@@ -414,7 +414,6 @@ async fn status_prints_a_plain_block_without_the_flag() {
         "  build: not recorded",
         "  work items: none",
         "  rulings waiting: none",
-        "  pacer: on",
     ];
     assert_eq!(status("").await.unwrap(), block);
     assert_eq!(status("-p koji").await.unwrap(), block);

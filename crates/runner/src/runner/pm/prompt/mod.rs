@@ -256,6 +256,12 @@ those reads are for, such as \"the migration's rollback path\". With no `review`
 reads the item. An entry with any other key, \
 a `review` with a key but `reads` and `about`, or naming no implementer, is dropped.
 
+A stuck item whose agent is out waits for you: its wake names the agent and when it can start. \
+Give a `pick` entry with its `issue` and the `agent` to move it to, an implementer it has not \
+left, and kelpie moves it there on a fresh session with a note of where the work stands. That \
+entry takes none of the wake's slots. An entry naming no agent, one `agents.allow` leaves \
+out, or one the item has left is dropped.
+
 `hold` names, for each ready issue, the open work item it waits on as `until`. The \
 hold ends when that work item closes or the issue's text changes, and no other \
 close ends it, so you need not hold it again on each wake. An `until` that is no open \
@@ -267,7 +273,8 @@ should stand; null, or leaving `hold` out, keeps them as they are, and [] clears
 carried several: kelpie acts on each in turn. `retry` runs the item's turn \
 again as it is. `re-scope` and `ask` put it to \
 the maintainer, with your `why` as what you propose or ask. `none` leaves it to \
-resolve itself. Kelpie checks every answer against the board, and drops and \
+resolve itself, as it does an item whose agent is out; any other action on that item is \
+dropped, since it takes a `pick`. Kelpie checks every answer against the board, and drops and \
 logs any part that names an issue the board does not show as ready, or an item \
 that is not stuck.
 

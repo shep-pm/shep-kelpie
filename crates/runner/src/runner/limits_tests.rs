@@ -389,8 +389,8 @@ fn each_account_keeps_its_own_day() {
     rig.codex_meter.set(Rig::utilization(100, 0));
     let reading = rig.ask(&runner, "status", None)["pacer"]["codex"]["reading"].clone();
     assert_eq!(
-        reading["spent_today_pct"],
-        json!(0),
+        reading["week"]["used_pct"],
+        json!(20),
         "read at dispatch only"
     );
     rig.ask(&runner, "drop", Some("7"));
