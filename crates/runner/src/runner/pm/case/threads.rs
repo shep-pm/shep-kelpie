@@ -33,7 +33,7 @@ impl Runner {
         };
         let mut kept = CaseThreads::default();
         for thread in (talk.threads.iter()).filter(|t| !t.resolved && !t.outdated) {
-            let opened_by_trusted = thread.remarks.first().is_some_and(&trusted);
+            let opened_by_trusted = thread.remarks.first().is_some_and(trusted);
             let spoken_in = thread
                 .remarks
                 .iter()
