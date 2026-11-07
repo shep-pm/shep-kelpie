@@ -14,9 +14,9 @@ use std::sync::Arc;
 
 use super::{
     BranchRun, CheckRunId, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, GateCheck,
-    InstallationToken, LineComment, NewLabel, OpenPull, PostedComment, PullRequest, QueueStanding,
-    RateLimits, Rerun, Reviewed, Talk, ThreadComment, Tickets, Timestamp, Visibility, Voice,
-    Workflow,
+    HeadRun, InstallationToken, LineComment, LogPart, NewLabel, OpenPull, PostedComment,
+    PullRequest, QueueStanding, RateLimits, Rerun, Reviewed, Talk, ThreadComment, Tickets,
+    Timestamp, Visibility, Voice, Workflow,
 };
 use crate::board::OpenPullRequest;
 use crate::hooks::{Hooks, Role, SharedHooks};
@@ -318,6 +318,14 @@ impl Forge for Guarded {
 
     fn run_log_tail(&self, repo: &ForgeSlug, run: u64) -> Result<String, ForgeError> {
         self.forge.run_log_tail(repo, run)
+    }
+
+    fn head_runs(&self, repo: &ForgeSlug, head: &str) -> Result<Vec<HeadRun>, ForgeError> {
+        self.forge.head_runs(repo, head)
+    }
+
+    fn run_log(&self, repo: &ForgeSlug, run: u64, part: LogPart) -> Result<String, ForgeError> {
+        self.forge.run_log(repo, run, part)
     }
 
     fn rerun_failed(&self, repo: &ForgeSlug, head: &str) -> Result<(), ForgeError> {

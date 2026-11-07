@@ -121,6 +121,22 @@ impl ForgeError {
     }
 }
 
+impl ForgeError {
+    /// Whether this is GitHub's answer for a log past its retention
+    ///
+    /// That is a 404 or 410 `gh` printed, or its own "log not found" or "log has
+    /// expired". Any other failure says nothing of whether the log exists.
+    pub fn log_is_gone(&self) -> bool {
+        let Self::Failed(said) = self else {
+            return false;
+        };
+        let lower = said.to_lowercase();
+        printed_status(said).is_some_and(|status| status == 404 || status == 410)
+            || lower.contains("log not found")
+            || lower.contains("log has expired")
+    }
+}
+
 // The status `gh` printed for a failed call's answer, of which the last is the
 // one its own line names
 fn printed_status(said: &str) -> Option<u16> {
@@ -199,6 +215,31 @@ mod tests {
             !ForgeError::Unreadable("HTTP 502".into()).passes(),
             "an answer that was not gh's own"
         );
+    }
+
+    #[test]
+    fn only_gh_saying_a_log_is_not_there_is_a_log_gone() {
+        for (said, gone) in [
+            (
+                "HTTP 410: Gone (https://api.github.com/repos/o/r/actions/runs/1/logs)",
+                true,
+            ),
+            ("gh: Not Found (HTTP 404)", true),
+            ("failed to get run log: log not found", true),
+            ("log has expired and is no longer available", true),
+            ("error connecting to api.github.com", false),
+            ("gh: Bad credentials (HTTP 401)", false),
+            ("gh: Resource not accessible (HTTP 403)", false),
+            ("HTTP 502: Bad Gateway", false),
+        ] {
+            assert_eq!(
+                ForgeError::Failed(said.into()).log_is_gone(),
+                gone,
+                "{said}"
+            );
+        }
+        assert!(!ForgeError::Spawn("gh: not found".into()).log_is_gone());
+        assert!(!ForgeError::Unreadable("HTTP 404".into()).log_is_gone());
     }
 
     #[test]

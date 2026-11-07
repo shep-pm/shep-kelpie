@@ -189,6 +189,10 @@ pub(super) struct Desk {
     flying: Option<Flying>,
     // What the wake read with the lock let go, kept while it launches
     logs: Option<ci_logs::Logs>,
+    // Each failed run's whole log a case holds, by item and run: a completed
+    // run's log does not change, so it is read once. An item's go when it
+    // closes, and a restart forgets them all.
+    run_logs: BTreeMap<(TicketId, u64, u32), String>,
 }
 
 impl Desk {

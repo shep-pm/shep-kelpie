@@ -12,9 +12,10 @@ use std::time::Instant;
 
 use super::Revalidated;
 use super::{
-    BranchRun, Clock, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, InstallationToken,
-    LocalPace, NewLabel, OpenPull, Pace, PullRequest, QueueStanding, RateLimits, Rerun, Reviewed,
-    Talk, ThreadComment, Tickets, Timestamp, Visibility, Workflow, pace,
+    BranchRun, Clock, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, HeadRun,
+    InstallationToken, LocalPace, LogPart, NewLabel, OpenPull, Pace, PullRequest, QueueStanding,
+    RateLimits, Rerun, Reviewed, Talk, ThreadComment, Tickets, Timestamp, Visibility, Workflow,
+    pace,
 };
 use crate::board::OpenPullRequest;
 use crate::forge_ledger::{Ended, Identity, Kind, Ledger};
@@ -491,6 +492,14 @@ impl Forge for RateHeld {
 
     fn run_log_tail(&self, repo: &ForgeSlug, run: u64) -> Result<String, ForgeError> {
         self.call(Kind::RunLogTail, |f| f.run_log_tail(repo, run))
+    }
+
+    fn head_runs(&self, repo: &ForgeSlug, head: &str) -> Result<Vec<HeadRun>, ForgeError> {
+        self.call(Kind::HeadRuns, |f| f.head_runs(repo, head))
+    }
+
+    fn run_log(&self, repo: &ForgeSlug, run: u64, part: LogPart) -> Result<String, ForgeError> {
+        self.call(Kind::RunLog, |f| f.run_log(repo, run, part))
     }
 
     fn rerun_failed(&self, repo: &ForgeSlug, head: &str) -> Result<(), ForgeError> {
