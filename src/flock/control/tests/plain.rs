@@ -35,6 +35,7 @@ fn a_plain_status_names_what_the_maintainer_looks_for() {
             "    #9 Fix the other: phase implement, turn running, no PR",
             "  rulings waiting: 1",
             "    ruling 1: merge, #7, PR #71",
+            "  pacer:",
             "    claude: session 3%, week 15%",
             "    claude holding (window): the 5-hour window is at 100%, \
              so no turn starts until it resets",
@@ -42,7 +43,8 @@ fn a_plain_status_names_what_the_maintainer_looks_for() {
     );
 }
 
-// The pacer's account line, and what a runner not yet restarted sends beside it
+// The pacer's header and account line, and what a runner not yet restarted
+// sends beside the accounts
 #[test]
 fn a_reading_shows_each_windows_share() {
     let body = r#"{"project":"koji","work_items":[],"rulings":[],
@@ -51,8 +53,17 @@ fn a_reading_shows_each_windows_share() {
             "week":{"used_pct":15,"resets_at":500}},"holding":null},
         "codex":{"reading":null,"holding":null}}}"#;
     assert_eq!(
-        plain_status("koji", body, None)[5..7],
-        ["    claude: session 3%, week 15%", "    codex: not read"]
+        plain_status("koji", body, None),
+        [
+            "koji",
+            "  run: running",
+            "  build: not recorded",
+            "  work items: none",
+            "  rulings waiting: none",
+            "  pacer:",
+            "    claude: session 3%, week 15%",
+            "    codex: not read",
+        ]
     );
 }
 
@@ -68,6 +79,7 @@ fn an_older_runners_enabled_key_prints_no_account() {
             "  build: not recorded",
             "  work items: none",
             "  rulings waiting: none",
+            "  pacer:",
             "    claude: not read",
         ]
     );
@@ -428,6 +440,7 @@ fn a_plain_status_of_an_idle_runner_says_so() {
             "  build: not recorded",
             "  work items: none",
             "  rulings waiting: none",
+            "  pacer:",
             "    claude: not read",
         ]
     );
