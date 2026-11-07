@@ -117,6 +117,13 @@ pi = "yes"
 codex = { cannot = "its rollout has no tool call that names a file it read", doc = "docs/facts/session-transcripts.md", says = "Codex rollout names no file a tool call read" }
 goose = { gap = 784 }
 
+[harness.transcript-said]
+what = "A case file holds everything a worker said, read from its transcript"
+claude-code = "yes"
+pi = "yes"
+codex = "yes"
+goose = { gap = 784 }
+
 [harness.tool-errors]
 what = "A call's tool calls that failed are counted by what made them fail, from its transcript once it ends"
 claude-code = "yes"

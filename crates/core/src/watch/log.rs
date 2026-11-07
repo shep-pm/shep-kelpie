@@ -81,11 +81,16 @@ impl Step {
         self.fields["step"].as_str().unwrap_or_default()
     }
 
+    /// Whether this step names `ticket`
+    pub fn names(&self, ticket: TicketId) -> bool {
+        named(&self.fields) == Some(ticket)
+    }
+
     /// Whether `scope` shows this step
     pub fn in_scope(&self, scope: Scope) -> bool {
         match scope {
             Scope::Project => true,
-            Scope::Issue(ticket) => named(&self.fields) == Some(ticket),
+            Scope::Issue(ticket) => self.names(ticket),
             Scope::Pm => {
                 self.name().starts_with(PM_STEPS)
                     || (self.name() == STARTED && self.fields.get("role") == Some(&"pm".into()))
