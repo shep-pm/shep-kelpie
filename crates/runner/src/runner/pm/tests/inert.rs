@@ -7,7 +7,7 @@ use super::rulings::{answered, asking, left_to_pm, settled};
 use super::{name_pm, past_the_window, step_until};
 use crate::ports::{AgentError, Role};
 use crate::runner::{StepReport, step};
-use crate::settings::{Harness, Merging};
+use crate::settings::Harness;
 use crate::test::{CALL_PATIENCE, Rig, Scripted};
 
 /// The project manager's reply answering ruling 71 with `choice`, giving a
@@ -26,7 +26,7 @@ const INERT_WHY: &str = "ask @\u{200b}someone, see \\[it\\]\\(https:\u{200b}//ev
 
 #[test]
 fn the_project_managers_why_cannot_mention_anyone_or_link_in_its_answer() {
-    let (rig, runner) = left_to_pm("pm-inert", Merging::Auto);
+    let (rig, runner) = left_to_pm("pm-inert");
     rig.claude.script_for(
         Role::Pm,
         [Scripted::Say(answers_with_a_mention('A', false))],
@@ -40,7 +40,7 @@ fn the_project_managers_why_cannot_mention_anyone_or_link_in_its_answer() {
 
 #[test]
 fn the_project_managers_why_cannot_mention_anyone_or_link_on_the_maintainers_card() {
-    let (rig, runner) = left_to_pm("pm-inert-card", Merging::Auto);
+    let (rig, runner) = left_to_pm("pm-inert-card");
     rig.claude
         .script_for(Role::Pm, [Scripted::Say(answers_with_a_mention('B', true))]);
 
@@ -52,7 +52,7 @@ fn the_project_managers_why_cannot_mention_anyone_or_link_on_the_maintainers_car
 
 #[test]
 fn the_worker_gets_the_project_managers_why_as_it_was_written() {
-    let (rig, runner) = left_to_pm("pm-raw-note", Merging::Auto);
+    let (rig, runner) = left_to_pm("pm-raw-note");
     rig.claude.script_for(
         Role::Pm,
         [Scripted::Say(answers_with_a_mention('B', false))],
