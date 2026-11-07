@@ -101,6 +101,7 @@ impl Runner {
         question.push_str(notice);
         if let Some(ruling) = next.rulings.iter_mut().rev().find(|r| r.id == id) {
             ruling.question.clone_from(&question);
+            ruling.borrowed = true;
         }
         self.save(next)?;
         self.word_effects(id)?;
