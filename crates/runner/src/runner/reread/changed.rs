@@ -19,7 +19,7 @@ pub(super) fn names((old, was): Reach<'_>, (new, now): Reach<'_>) -> Vec<&'stati
         concurrency: old_concurrency,
         budget: old_budget,
         agents: _, // `reread` compares the agents it resolves, with the files
-        pacing: old_pacing,
+        pacing: _, // read by nothing
         worker: old_worker,
         rulings: old_rulings,
         contributions: old_contributions,
@@ -41,7 +41,7 @@ pub(super) fn names((old, was): Reach<'_>, (new, now): Reach<'_>) -> Vec<&'stati
         concurrency: new_concurrency,
         budget: new_budget,
         agents: _,
-        pacing: new_pacing,
+        pacing: _,
         worker: new_worker,
         rulings: new_rulings,
         contributions: new_contributions,
@@ -81,7 +81,6 @@ pub(super) fn names((old, was): Reach<'_>, (new, now): Reach<'_>) -> Vec<&'stati
         ("ci", old_ci != new_ci),
         ("concurrency", old_concurrency != new_concurrency),
         ("budget", old_budget != new_budget),
-        ("pacing", old_pacing != new_pacing),
         ("worker", old_worker != new_worker),
         ("hooks", old_hooks != new_hooks),
         ("skills", old_skills != new_skills),
