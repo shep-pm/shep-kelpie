@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 
 use super::ask_tests::{A_WORDS, asked, filed_before, record, settled_ready, wrote};
+use super::check_tests::{PASSING, PASSING_LABELS, checks};
 use super::pick_tests::{MAINTAINER, issue, list, rig_with};
 use super::research_tests::{calls, moves, nothing, reply, took_back, triage};
 use crate::github::ApiError;
@@ -287,6 +288,78 @@ fn a_taken_issue_whose_ready_label_is_gone_still_gets_needs_triage_before_its_pa
         rig.github.label_takes(),
         [],
         "ready-for-agent is not taken off where the listing shows it off already"
+    );
+}
+
+// A decision the maintainer puts on after the swap stopped is the record's match
+#[test]
+fn a_taken_record_does_not_outrank_a_decision_put_on_later() {
+    let (rig, runner) = filed_before(PICK, MAINTAINER, nothing(), |rig| {
+        hand_labelled(rig, MAINTAINER);
+    });
+    let runner = reopened_as_taken(&rig, runner);
+    rig.github.refuse_label_removals(ApiError::Refused(500));
+
+    // The maintainer answers it `needs-info` by hand
+    relist(&rig, &["ready-for-agent", "needs-info"]);
+    step(&runner).unwrap();
+
+    assert_eq!(rig.github.label_takes(), [], "the decision stands");
+    assert_eq!(
+        calls(&rig, Role::Triager).len(),
+        0,
+        "a decided issue is not due"
+    );
+}
+
+// What becomes of a `taken` record whose issue was rewritten into one the check
+// would pass: the record still owes its swap and its pass, the check reads the
+// new body only once the pass ends, and it is ready from there
+#[test]
+fn a_taken_record_whose_body_now_passes_gets_its_swap_then_its_pass() {
+    let (rig, runner) = filed_before(PICK, MAINTAINER, nothing(), |rig| {
+        hand_labelled(rig, MAINTAINER);
+    });
+    let runner = reopened_as_taken(&rig, runner);
+
+    let mut rewritten = issue(&rig, 30, MAINTAINER, 5);
+    rewritten.title = TITLE.to_owned();
+    rewritten.body = PASSING.to_owned();
+    let mut labels = PASSING_LABELS.to_vec();
+    labels.push("ready-for-agent");
+    rewritten.labels = labels.iter().map(|&l| l.to_owned()).collect();
+    list(&rig, rewritten);
+    step(&runner).unwrap();
+
+    assert_eq!(
+        rig.github.label_takes(),
+        [(30, "ready-for-agent".to_owned())],
+        "the record owes the swap, and the check has not read the new body"
+    );
+    assert_eq!(checks(&rig)[0]["triage"], "ran", "{}", checks(&rig));
+    assert_eq!(calls(&rig, Role::Triager).len(), 1, "and its owed pass");
+    assert_eq!(record(&rig, &runner)["step"], "done");
+
+    // The forge as the swap and the pass left it, the rewritten body still on
+    let mut after = issue(&rig, 30, MAINTAINER, 5);
+    after.title = TITLE.to_owned();
+    after.body = PASSING.to_owned();
+    let after_labels = ["needs-triage", "kind:fix", "priority: P3"];
+    after.labels = after_labels.iter().map(|&l| l.to_owned()).collect();
+    list(&rig, after);
+    rig.next_look();
+    step(&runner).unwrap();
+
+    assert_eq!(
+        moves(&rig).last().unwrap(),
+        "label ready-for-agent",
+        "the check reads the body once its pass ends: {}",
+        checks(&rig)
+    );
+    assert_eq!(
+        rig.github.label_takes().last().unwrap(),
+        &(30, "needs-triage".to_owned()),
+        "and it is ready from there"
     );
 }
 

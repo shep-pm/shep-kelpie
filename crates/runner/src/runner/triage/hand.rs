@@ -9,7 +9,7 @@
 
 use super::super::Runner;
 use super::super::contributions::post::forge_is_busy;
-use super::ticket;
+use super::{decided, ticket};
 use crate::board::{READY, TRIAGE};
 use crate::ports::{ForgeError, OpenIssue, OpenPull};
 use crate::state::{StateError, TriageStep, Triaged};
@@ -46,9 +46,11 @@ impl Runner {
     }
 
     // Whether `issue` has the record that says it was taken back and a swap the
-    // listing shows not done
+    // listing shows not done. A triage decision the maintainer put on since
+    // stands: the label would come off and nothing would put it back.
     fn swap_owed(&self, issue: &OpenIssue) -> bool {
         self.taken_seen(issue.number).is_some()
+            && !decided(&issue.labels)
             && (carries(&issue.labels, READY) || !carries(&issue.labels, TRIAGE))
     }
 
