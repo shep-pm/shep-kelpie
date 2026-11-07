@@ -741,6 +741,8 @@ mod mention_tests;
 #[cfg(test)]
 mod pick_tests;
 #[cfg(test)]
+mod priority_tests;
+#[cfg(test)]
 mod reach_tests;
 #[cfg(test)]
 mod ready_tests;

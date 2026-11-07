@@ -3,12 +3,11 @@
 //!
 //! The rewrite runs for an issue by [`Runner::maintainer`], ignoring case. The
 //! reply must have a `body` and no open question. Where the check passes the
-//! issue as left, the body goes over the issue's. Then the labels
-//! go on, `ready-for-agent` last. Otherwise the body goes under the issue's
-//! text, and the issue ends `needs-triage`. The comment is worded first. It
-//! promises nothing the local guard would refuse, or while a hand-put triage
-//! label stands. A reply that splits the issue is read here too, and is made
-//! ready as a split or refused as one ([`super::split`]).
+//! issue as left, the body goes over the issue's and the labels go on,
+//! `ready-for-agent` last. Otherwise the body goes under the issue's text, and
+//! the issue ends `needs-triage`. The comment is worded first. A reply that
+//! splits the issue is made ready as a split or refused as one
+//! ([`super::split`]).
 
 use super::super::Runner;
 use super::super::contributions::post::{forge_is_busy, refused_text};
