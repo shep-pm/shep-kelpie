@@ -61,18 +61,18 @@ impl Rig {
         on(&["commit", "--quiet", "-m", "start the line"]);
         on(&["push", "--quiet", "origin", branch]);
         on(&["checkout", "--quiet", "main"]);
-        let ask = "issues = \"ask\"";
+        let ask = "merging = \"ask\"";
         self.edit_settings(|s| {
-            assert!(s.contains(ask), "the example's `git.issues` moved");
+            assert!(s.contains(ask), "the example's `git.merging` moved");
             s.replace(ask, &format!("{ask}\nbase = \"{branch}\""))
         });
     }
 
     /// Sets the project's `git.maintainer` to `login`, read when a runner next opens
     pub fn maintainer(&self, login: &str) {
-        let ask = "issues = \"ask\"";
+        let ask = "merging = \"ask\"";
         self.edit_settings(|s| {
-            assert!(s.contains(ask), "the example's `git.issues` moved");
+            assert!(s.contains(ask), "the example's `git.merging` moved");
             s.replace(ask, &format!("{ask}\nmaintainer = \"{login}\""))
         });
     }
@@ -151,15 +151,6 @@ impl Rig {
         self.edit_settings(|s| {
             assert!(s.contains(NO_RETRO), "the rig's no-retro table moved");
             s.replace(NO_RETRO, "")
-        });
-    }
-
-    /// Sets the project's `git.issues` to `filing`, read when a runner next opens
-    pub fn issues(&self, filing: &str) {
-        let ask = "issues = \"ask\"";
-        self.edit_settings(|s| {
-            assert!(s.contains(ask), "the example's `git.issues` moved");
-            s.replace(ask, &format!("issues = \"{filing}\""))
         });
     }
 
