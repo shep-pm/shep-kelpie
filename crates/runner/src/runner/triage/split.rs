@@ -18,7 +18,7 @@ use super::ready::{READY_LABEL, Ready, ReadyLabels};
 use super::research::{Drafted, Found};
 use super::rewrite::{new_kind_label, priority_label, refusals};
 use crate::board::check;
-use crate::board::{AGENT_LABEL, PIN, READY, TRIAGE, agent_label, is_priority_label};
+use crate::board::{AGENT_LABEL, PIN, READY, TRIAGE, agent_label, is_priority_label, priority};
 use crate::local_paths::Surface;
 use crate::ports::{ForgeError, NewLabel, OpenIssue};
 use crate::state::{SplitDraft, StateError, TriageSplit, TriageState, TriageStep};
@@ -80,22 +80,22 @@ fn new_label(name: &str) -> NewLabel<'_> {
 }
 
 // The labels draft `part` is filed with: its kind, which a conventional title
-// already gives, its priority, which falls back on the issue's, and the
-// implementer it is pinned to
-fn draft_labels(found: &Found, part: &Drafted) -> Vec<String> {
+// already gives, its priority, which falls back on the one the issue carries
+// (`seen`), then the triager's for it, and the implementer it is pinned to
+fn draft_labels(found: &Found, seen: &[String], part: &Drafted) -> Vec<String> {
     let kind = part.kind.or_else(|| match check::title_kind(&part.title) {
         Some(_) => None,
         None => found.work,
     });
-    let priority = part
-        .priority
+    let ranked = (part.priority)
+        .or_else(|| priority(seen))
         .or(found.priority)
         .unwrap_or(FALLBACK_PRIORITY);
     let mut labels: Vec<String> = kind
         .map(|k| format!("{}{k}", check::KIND))
         .into_iter()
         .collect();
-    labels.push(format!("priority: {priority}"));
+    labels.push(format!("priority: {ranked}"));
     labels.extend(
         part.agent
             .as_ref()
@@ -123,11 +123,12 @@ impl Runner {
                     .map(|why| format!("the issue's own body: {why}")),
             ),
         }
+        let seen = self.triage_seen(issue);
         let drafts: Vec<SplitDraft> = (found.split.iter())
             .map(|part| SplitDraft {
                 title: part.title.clone(),
                 body: part.body.clone(),
-                labels: draft_labels(found, part),
+                labels: draft_labels(found, &seen, part),
                 after: part.after.clone(),
             })
             .collect();
@@ -255,6 +256,24 @@ struct Attempt {
 }
 
 impl Runner {
+    // Takes back the plan saved for `issue` when its pass ends with no body
+    // written, since nothing the comment promised came to be: its drafts are
+    // never filed, and a later reply may split the issue again. A plan with a
+    // draft filed, or held, is part done and stays.
+    pub(super) fn unplan(&mut self, issue: u64) -> Result<(), StateError> {
+        let owed = self
+            .split_of(issue)
+            .is_some_and(|s| s.filed.is_empty() && s.asked.is_none());
+        if !owed {
+            return Ok(());
+        }
+        let mut next = self.state.clone();
+        if let Some(triage) = next.triage.as_mut() {
+            triage.splits.retain(|s| s.issue != issue);
+        }
+        self.save(next)
+    }
+
     // The split saved for `issue`, if one is
     pub(super) fn split_of(&self, issue: u64) -> Option<&TriageSplit> {
         self.state

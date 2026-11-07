@@ -473,6 +473,16 @@ fn drawn(title: &str, body: &str, after: &[usize], agent: Value) -> Value {
 // A rig whose maintainer's issue 30 never asks to be split, and whose triager
 // answers `found`
 fn splitting(found: impl FnOnce(&Rig) -> Value, pick: &str, author: &str) -> (Rig, Mutex<Runner>) {
+    splitting_labelled(found, pick, author, &[])
+}
+
+// [`splitting`] for an issue that carries `labels` when the pass begins
+fn splitting_labelled(
+    found: impl FnOnce(&Rig) -> Value,
+    pick: &str,
+    author: &str,
+    labels: &[&str],
+) -> (Rig, Mutex<Runner>) {
     let rig = rig_with(&format!("pick = \"{pick}\""));
     rig.forge.set_repo_labels(&[
         "needs-triage",
@@ -483,6 +493,7 @@ fn splitting(found: impl FnOnce(&Rig) -> Value, pick: &str, author: &str) -> (Ri
     let mut parent = issue(&rig, 30, author, 5);
     parent.title = "Translate the guide".to_owned();
     parent.body = "The guide is English only. Translate it into nine languages.".to_owned();
+    parent.labels = labels.iter().map(|l| (*l).to_owned()).collect();
     list(&rig, parent);
     rig.claude
         .script_for(Role::Representative, [Scripted::Say(WORDS)]);
@@ -639,4 +650,67 @@ fn a_draft_naming_a_local_path_is_refused() {
     assert!(said.contains("draft 2"), "{said}");
     assert!(said.contains("a path on this machine"), "{said}");
     assert_eq!(saved_split(&rig), Value::Null);
+}
+
+#[test]
+fn a_parent_whose_body_the_hook_refuses_files_no_split_and_keeps_no_plan() {
+    let hooked = |rig: &Rig| {
+        rig.forbid_word(&["publish"], "Unwriteable");
+        let body = format!("Touches:\n- `src/start.rs`\n\nUnwriteable notes.\n\n{BODY}");
+        let mut found = judged(&[drawn("fix(a): first", BODY, &[], Value::Null)]);
+        found["body"] = json!(body);
+        found
+    };
+    let (rig, runner) = splitting(hooked, "maintainer", MAINTAINER);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(rig.github.issue_edits(), []);
+    assert_eq!(rig.github.issues_created(), 0);
+    assert_eq!(
+        saved_split(&rig),
+        Value::Null,
+        "the plan goes with the body"
+    );
+    assert_eq!(parent_record(&rig, &runner)["step"], "done");
+}
+
+#[test]
+fn a_split_parent_gets_the_kind_and_priority_the_comment_promised() {
+    let drafts = [drawn("fix(a): first", BODY, &[], Value::Null)];
+    let (rig, runner) = splitting(|_| judged(&drafts), "maintainer", MAINTAINER);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let said = facts(&rig);
+    assert!(said.contains("Kelpie labels it:"), "{said}");
+    let writes = app_writes(&rig, 0);
+    for label in ["kind:fix", "priority: P2"] {
+        assert!(
+            writes.contains(&format!("label #30 {label}")),
+            "{label}: {writes:?}"
+        );
+    }
+    assert!(
+        writes.iter().all(|w| w != "label #30 ready-for-agent"),
+        "{writes:?}"
+    );
+}
+
+#[test]
+fn a_draft_with_no_priority_takes_the_one_the_issue_carries() {
+    let bare = |title: &str| json!({ "title": title, "body": BODY, "priority": null, "kind": "fix", "after": [] });
+    let drafts = [bare("fix(a): first"), bare("fix(b): second")];
+    let unranked = |_: &Rig| {
+        let mut found = judged(&drafts);
+        found["priority"] = Value::Null;
+        found
+    };
+    let (rig, runner) = splitting_labelled(unranked, "maintainer", MAINTAINER, &["priority: P1"]);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let labels = filed_labels(&rig);
+    assert_eq!(labels[0], ["kind:fix", "priority: P1"]);
+    assert_eq!(labels[1], ["kind:fix", "priority: P1"]);
 }

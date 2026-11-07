@@ -138,6 +138,7 @@ impl Runner {
                      that stands: kelpie labels it no further and writes no new body"
                 ));
                 self.triage_stepped(issue, TriageStep::Done)?;
+                self.unplan(issue)?;
                 self.triage_tries.remove(&issue);
                 return Ok(ReadyWrite::Held);
             }
@@ -281,7 +282,8 @@ impl Runner {
         {
             held.ready_body = None;
         }
-        self.save(next)
+        self.save(next)?;
+        self.unplan(issue)
     }
 
     // Puts on the labels the reply gave and then `ready-for-agent`, last, taking
@@ -313,17 +315,19 @@ impl Runner {
                  that stands: kelpie labels it no further"
             ));
             self.triage_stepped(issue, TriageStep::Done)?;
+            self.unplan(issue)?;
             return Ok(ReadyLabels::Stood);
-        }
-        // A split parent is never ready: its sub-issues are filed in its place.
-        if self.split_of(issue).is_some() {
-            return self.label_split(issue, &carried);
         }
         let labels = self
             .triage_record(issue)
             .map_or_else(Vec::new, |t| t.labels.clone());
         if !self.put_pass_labels(issue, &labels) {
             return Ok(ReadyLabels::Held);
+        }
+        // A split parent is never ready: its sub-issues are filed in its place,
+        // after the pass's own labels, which the comment promised.
+        if self.split_of(issue).is_some() {
+            return self.label_split(issue, &carried);
         }
         // The maintainer may have taken `ready-for-agent` off since the pass
         // began, and then it stays off.
