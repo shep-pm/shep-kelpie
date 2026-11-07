@@ -65,6 +65,8 @@ pub struct CiRuns {
     head_runs_reads: usize,
     // A run's log in whole, by run id and part
     whole_logs: HashMap<(u64, bool), String>,
+    // Why reading a run's log fails, by run id
+    whole_log_errors: HashMap<u64, String>,
     // How many times each run's log was read
     whole_log_reads: HashMap<u64, usize>,
 }
@@ -253,6 +255,13 @@ impl FakeForge {
         ci.whole_logs.insert((run, whole), text.to_owned());
     }
 
+    /// Makes reading run `run`'s log fail with `error`, verbatim, in place of
+    /// whatever was scripted
+    pub fn set_run_log_error(&self, run: u64, error: &str) {
+        let mut ci = self.ci.lock().unwrap();
+        ci.whole_log_errors.insert(run, error.to_owned());
+    }
+
     /// How many times run `run`'s log was read, failed reads included
     pub fn run_log_reads(&self, run: u64) -> usize {
         let ci = self.ci.lock().unwrap();
@@ -260,17 +269,20 @@ impl FakeForge {
     }
 
     /// `part` of run `run`'s log, or why none can be read: a log no test
-    /// scripted is one the forge dropped
+    /// scripted is one the forge dropped, which it answers with a 410
     pub fn run_log_of(&self, run: u64, part: LogPart) -> Result<String, String> {
         let mut ci = self.ci.lock().unwrap();
         *ci.whole_log_reads.entry(run).or_default() += 1;
+        if let Some(error) = ci.whole_log_errors.get(&run) {
+            return Err(error.clone());
+        }
         let failed = ci.whole_logs.get(&(run, false)).cloned();
         let whole = ci.whole_logs.get(&(run, true)).cloned();
         let log = match part {
             LogPart::Failed => failed.or(whole),
             LogPart::Whole => whole,
         };
-        log.ok_or_else(|| format!("log for run {run} not found"))
+        log.ok_or_else(|| format!("HTTP 410: Gone (run {run}'s log)"))
     }
 
     /// The runs `branch` lists: none for a branch no test scripted

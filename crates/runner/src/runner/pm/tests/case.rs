@@ -716,6 +716,28 @@ fn a_log_the_forge_dropped_says_so_and_the_wake_goes_on() {
 }
 
 #[test]
+fn a_log_read_that_failed_for_another_reason_is_not_called_gone() {
+    let (rig, runner, head) = red("case-ci-unreachable", "A title", BODY);
+    rig.forge
+        .set_head_runs(&head, vec![head_run("test", 611, Some("failure"))]);
+    rig.forge.set_run_log(611, LogPart::Failed, "NEVER-READ");
+    for said in [
+        "error connecting to api.github.com",
+        "gh: Bad credentials (HTTP 401)",
+    ] {
+        rig.forge.set_run_log_error(611, said);
+        runner.lock().unwrap().take_notes();
+
+        wake(&rig, &runner);
+
+        let case = case(&rig, 7).unwrap();
+        assert!(!case.contains("is gone"), "{said}: {case}");
+        let says = format!("The log of run 611 could not be read just now (gh failed: {said})");
+        assert!(case.contains(&says), "{case}");
+    }
+}
+
+#[test]
 fn a_run_list_that_fails_or_fills_says_so_and_the_wake_goes_on() {
     let (rig, runner, head) = red("case-ci-list", "A title", BODY);
     rig.forge.set_head_runs_error(Some("runs are down"));

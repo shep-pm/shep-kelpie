@@ -137,19 +137,19 @@ impl Runner {
             Ok(log) => {
                 let _ = writeln!(out, "{}", self.data(log));
             }
-            Err(e) if e.passes() => {
+            Err(e) if e.log_is_gone() => {
                 let _ = writeln!(
                     out,
-                    "The log of run {run} could not be read just now ({}). It is asked for again \
-                     at the next wake.",
+                    "The log of run {run} is gone: GitHub drops a log past its retention. \
+                     (kelpie's read said: {}.)",
                     cause(e)
                 );
             }
             Err(e) => {
                 let _ = writeln!(
                     out,
-                    "The log of run {run} is gone: GitHub drops a log past its retention. \
-                     (kelpie's read said: {}.)",
+                    "The log of run {run} could not be read just now ({}). It is asked for again \
+                     at the next wake.",
                     cause(e)
                 );
             }
