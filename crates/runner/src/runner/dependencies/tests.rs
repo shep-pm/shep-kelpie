@@ -4,8 +4,9 @@ use std::sync::Mutex;
 use serde_json::{Value, json};
 
 use super::super::contributions::security_tests::commit_on;
-use crate::ports::{Checks, E2eOutcome};
+use crate::ports::{Checks, Clock, E2eOutcome};
 use crate::runner::{CHECKS_SETTLE, Pass, Runner, advance, step};
+use crate::state::{Bump, ProjectState, Red, RedStep, StateStore};
 use crate::test::{CALL_PATIENCE, Hold, Rig};
 
 // A runner for a project with `[app.dogs.kelpie.dependencies]` set to `pick = "on"`
@@ -485,7 +486,7 @@ fn a_red_bump_on_a_local_store_is_closed_and_filed_as_a_local_ticket() {
 }
 
 #[test]
-fn a_failed_check_closes_the_bump_naming_the_checks_that_failed() {
+fn a_red_bump_gets_its_comment_its_close_and_its_issue() {
     let (rig, runner) = bumping("");
     let head = bump(&rig, 40, "Cargo.lock");
     rig.forge
@@ -513,17 +514,43 @@ fn a_failed_check_closes_the_bump_naming_the_checks_that_failed() {
         "{}",
         made[0].body
     );
+    let notes = notes(&runner);
+    assert_eq!(words(&notes, "bump #40: red"), 1, "{notes:?}");
+    assert_eq!(words(&notes, "closing it"), 1, "{notes:?}");
+}
+
+// A bump a build that had `on_red = "leave"` saved as red and left open, at `head`
+fn saved_as_left(rig: &Rig, number: u64, head: &str) {
+    let mut left = Bump::new(
+        number,
+        "dependabot".to_owned(),
+        format!("topic/{number}"),
+        head.to_owned(),
+        rig.clock.now(),
+    );
+    left.red = Some(Red {
+        head: head.to_owned(),
+        why: vec!["check `test` failed".to_owned()],
+        step: RedStep::Left,
+    });
+    let mut state = ProjectState::new();
+    state.bumps = vec![left];
+    let file = rig.paths().state;
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    StateStore::new(file).save(&state).unwrap();
 }
 
 #[test]
-fn a_red_bump_under_leave_is_logged_once_and_left_open() {
-    let (rig, runner) = bumping("on_red = \"leave\"");
+fn a_bump_saved_as_left_stays_left_open() {
+    let rig = Rig::new("shep");
+    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.dependencies]\npick = \"on\"\n"));
     let head = bump(&rig, 40, "Cargo.lock");
     rig.forge
         .set_checks(&head, Checks::Failed(vec!["test".into()]));
+    saved_as_left(&rig, 40, &head);
+    let runner = rig.open().unwrap();
 
     settle(&rig, &runner);
-    poll(&rig, &runner);
     poll(&rig, &runner);
 
     assert!(rig.forge.comments().is_empty());
@@ -534,16 +561,16 @@ fn a_red_bump_under_leave_is_logged_once_and_left_open() {
     assert!(standing.contains("check `test` failed"), "{standing}");
     assert!(standing.contains("left open"), "{standing}");
     let notes = notes(&runner);
-    assert_eq!(words(&notes, "bump #40: red"), 1, "{notes:?}");
+    assert_eq!(words(&notes, "bump #40: red"), 0, "{notes:?}");
 }
 
 #[test]
 fn a_new_head_gives_a_bump_left_open_another_chance() {
-    let (rig, runner) = bumping("on_red = \"leave\"");
+    let rig = Rig::new("shep");
+    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.dependencies]\npick = \"on\"\n"));
     let head = bump(&rig, 40, "Cargo.lock");
-    rig.forge
-        .set_checks(&head, Checks::Failed(vec!["test".into()]));
-    settle(&rig, &runner);
+    saved_as_left(&rig, 40, &head);
+    let runner = rig.open().unwrap();
 
     let fixed = commit_on(&rig, 40, "origin/main", |h| write(h, "Cargo.lock", "b\n"));
     rig.forge.set_checks(&fixed, Checks::Passed);

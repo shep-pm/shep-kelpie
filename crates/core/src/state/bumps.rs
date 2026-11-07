@@ -87,13 +87,14 @@ pub struct Red {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RedStep {
-    /// Under `on_red = "close"`: the comment naming what failed is next
+    /// The comment naming what failed is next
     Comment,
     /// The comment is posted and the close is next
     Close,
     /// The bump is closed and the issue for it is next
     File,
-    /// Under `on_red = "leave"`: logged, and nothing more is done to it
+    /// Logged, and nothing more is done to it until the bot pushes a new head: only a
+    /// record saved by a build that had `on_red = "leave"` holds it, and no new bump gets it
     Left,
 }
 
