@@ -61,8 +61,7 @@ impl Tools {
     /// Fetches the pinned release of the code graph server, as `asset` names it
     ///
     /// A machine the release has no build for, which has no `asset`, is left without one, which
-    /// returns `Ok(false)`: a project that turns the graph on gets a doctor
-    /// line and its calls run without it.
+    /// returns `Ok(false)`: its calls run without a graph.
     ///
     /// # Errors
     ///

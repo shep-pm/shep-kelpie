@@ -469,27 +469,17 @@ compact_window = 200000
 # reset = { kind = "kelpie" }
 # retro = { kind = "kelpie" }
 
-# Which plugins, and which of the repo's own files, reach which calls. Kelpie
-# loads each plugin the repo turns on in `.claude/settings.json` on its default
-# branch into every call, and the repo's own `.claude/skills/`,
-# `.claude/agents/`, `.claude/commands/` and the `hooks` of
-# `.claude/settings.json` as one more plugin; this table narrows that and adds
-# to it. Every key is optional. `plugins = false` loads none of the repo's
-# plugins. `own = false` leaves the repo's own files out and keeps its plugins.
-# A call in a worktree that matches the default branch loads those files from
-# it, and does not get them twice. `roles` lists the calls that get plugins and
-# the repo's own files, from `worker`, `reviewer` and `pm`,
-# all of them when absent. `parts` lists which parts load, from `skills`,
-# `agents`, `commands`, `hooks` and `mcp`, all of them when absent: a hook
-# runs beside kelpie's own and cannot replace them.
-# `mcp` adds the MCP servers of a plugin and of the repo's `.mcp.json` on its
-# default branch to those calls; the hosts they reach need `allowed_domains`.
-# `skip` lists plugins, as `name@marketplace`, left out though the repo turns
-# them on. `extra` lists plugins the repo does not turn on, each as
-# `name@marketplace` with its marketplace's source as one string:
-# `github:owner/name`, `git:<url>` or `directory:<folder inside the checkout>`,
-# with `#<branch or tag>` after a `github` or `git` address. `roles` narrows
-# `extra` too, and `plugins = false` does not.
+# What a project adds to the repo's plugins. Kelpie loads each plugin the repo
+# turns on in `.claude/settings.json` on its default branch, and the repo's own
+# `.claude/skills/`, `.claude/agents/`, `.claude/commands/`, the `hooks` of
+# `.claude/settings.json` and its `.mcp.json` as one more plugin, into the
+# worker's, the reviewers' and the project manager's calls. The repo's files
+# decide, so this table narrows nothing. `extra` lists plugins the repo does not
+# turn on, each as `name@marketplace` with its marketplace's source as one
+# string: `github:owner/name`, `git:<url>` or `directory:<folder inside the
+# checkout>`, with `#<branch or tag>` after a `github` or `git` address.
+# `plugins`, `own`, `roles`, `parts` and `skip` still load and nothing reads
+# them: delete them.
 # [app.dogs.kelpie.repo_setup]
 # plugins = true
 # own = true
@@ -510,17 +500,16 @@ compact_window = 200000
 [app.dogs.kelpie.tickets]
 source = "github"
 
-# A code graph of each work item's worktree for the reviewers' calls, served by
-# codebase-memory-mcp: where a symbol is, what calls it, what it touches, in one
-# call instead of a run of greps. `shep kelpie tools install` fetches the
-# server, and a project that turns it on without it gets a doctor line and calls
-# that run without a graph. Kelpie indexes the worktree before each call given
-# it, keeps the index under `$SHEP_HOME/kelpie/<project>/code-graphs/`, and
-# removes it with the worktree. The server runs inside the call's sandbox like
-# everything else in it. `worker` adds the worker's own working turns, and is
-# off: the server's 17 tool definitions ride in every request of every turn, and
-# no worker session recorded so far, on Claude Code or pi, has answered one of
-# them.
+# A code graph of each work item's worktree for the reviewers' and the triager's
+# calls, served by codebase-memory-mcp: where a symbol is, what calls it, what it
+# touches, in one call instead of a run of greps. `shep kelpie tools install`
+# fetches the server, and a machine that has it gives every project the graph.
+# Kelpie indexes the worktree before each call given it, keeps the index under
+# `$SHEP_HOME/kelpie/<project>/code-graphs/`, and removes it with the worktree.
+# The server runs inside the call's sandbox like everything else in it. A
+# worker never gets it: the server's 17 tool definitions would ride in every
+# request of every turn, and no worker session recorded so far, on Claude Code
+# or pi, has answered one of them. Both keys load and nothing reads them.
 [app.dogs.kelpie.code_graph]
 enabled = false
 worker = false

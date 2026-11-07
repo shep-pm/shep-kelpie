@@ -792,8 +792,6 @@ fn a_comment_found_by_its_marker_after_a_failed_post_is_not_posted_again() {
 #[test]
 fn the_code_graph_index_of_the_view_goes_when_the_call_ends() {
     let rig = rig_with("pick = \"all\"");
-    let off = "[app.dogs.kelpie.code_graph]\nenabled = false";
-    rig.edit_settings(|s| s.replace(off, "[app.dogs.kelpie.code_graph]\nenabled = true"));
     let binary = rig.paths().tools.code_graph();
     std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
     write_script(

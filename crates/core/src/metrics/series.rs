@@ -109,7 +109,7 @@ const PHASES: [&str; 6] = ["implement", "review", "ci", "ruling", "merge", "done
 /// A feature a project turns on, as its series name it
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Feature {
-    /// `code_graph`: codebase-memory-mcp for workers and reviewers
+    /// `code_graph`: codebase-memory-mcp for reviewers and the triager, on where it is installed
     CodeGraph,
     /// `browser`: the Playwright MCP server behind kelpie's bridge
     Browser,
@@ -131,10 +131,11 @@ impl Feature {
         }
     }
 
-    // `dev_server`: whether the browser is on and `main` has a launch file that gives a server
-    fn enabled(self, settings: &Settings, dev_server: bool) -> bool {
+    // `dev_server`: whether the browser is on and `main` has a launch file that gives a server.
+    // `code_graph`: whether the server is installed.
+    fn enabled(self, settings: &Settings, dev_server: bool, code_graph: bool) -> bool {
         match self {
-            Self::CodeGraph => settings.code_graph.enabled,
+            Self::CodeGraph => code_graph,
             Self::Browser => settings.browser.enabled,
             Self::DevServer => dev_server,
             Self::Hooks => !settings.hooks.is_empty(),
@@ -190,12 +191,24 @@ impl Recorder {
     }
 
     /// Sets which features `settings` turn on, where `dev_server` is whether the dev server
-    /// is on, which only the runner can read from `main`
-    pub fn features(&self, settings: &Settings, dev_server: bool) {
+    /// is on, which only the runner can read from `main`, and `code_graph` is whether its
+    /// server is installed
+    pub fn features(&self, settings: &Settings, dev_server: bool, code_graph: bool) {
         for feature in Feature::ALL {
-            let on = f64::from(u8::from(feature.enabled(settings, dev_server)));
+            let on = f64::from(u8::from(feature.enabled(settings, dev_server, code_graph)));
             self.set(&FEATURE_ENABLED, vec![feature_label(feature)], on);
         }
+    }
+
+    /// Sets whether the code graph is on, which is whether its server is installed, as a call
+    /// finds it
+    pub fn code_graph(&self, installed: bool) {
+        let on = f64::from(u8::from(installed));
+        self.set(
+            &FEATURE_ENABLED,
+            vec![feature_label(Feature::CodeGraph)],
+            on,
+        );
     }
 
     /// Counts one run of `feature` for a call, which went as `outcome`

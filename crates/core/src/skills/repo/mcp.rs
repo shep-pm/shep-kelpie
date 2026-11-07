@@ -4,10 +4,9 @@
 //! the repo's from its root `.mcp.json`. Kelpie runs most calls with
 //! `--strict-mcp-config`, which drops them all, so it hands them to the adapter as `mcpServers`.
 //!
-//! A plugin's server may run a file of it through `${CLAUDE_PLUGIN_ROOT}`, and
-//! `repo_setup.parts` can leave a part folder out of the copy, so the whole
-//! plugin is copied to a folder inside it that Claude Code does not read, which
-//! the variable names. A skill's text gets the copy's own folder.
+//! A plugin's server may run a file of it through `${CLAUDE_PLUGIN_ROOT}`, so
+//! the whole plugin is copied to a folder inside it that Claude Code does not
+//! read, which the variable names. A skill's text gets the copy's own folder.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -22,9 +21,8 @@ pub type Servers = BTreeMap<String, Value>;
 
 /// The folder inside a plugin's copy that holds the whole plugin, for a server that runs one of its files
 ///
-/// The copy beside it holds every folder of the plugin and the files at its
-/// root, but not the parts `repo_setup.parts` leaves out, and this one holds
-/// all of them, so a server runs a file of a part that is not loaded.
+/// The copy beside it leaves `.mcp.json` out of its root, and this one holds
+/// the whole plugin, so a server runs a file of it from a folder Claude Code does not read.
 pub(super) const ROOT: &str = "mcp-root";
 
 /// The file at a plugin's root that lists its servers, which the copy keeps out of its own root
