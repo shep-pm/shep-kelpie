@@ -224,9 +224,9 @@ impl FakeForge {
             .insert(head.to_owned(), runs);
     }
 
-    /// Makes listing a head's runs fail with `error`, verbatim
-    pub fn set_head_runs_error(&self, error: &str) {
-        self.ci.lock().unwrap().head_runs_error = Some(error.to_owned());
+    /// Makes listing a head's runs fail with `error`, verbatim, or work again
+    pub fn set_head_runs_error(&self, error: Option<&str>) {
+        self.ci.lock().unwrap().head_runs_error = error.map(str::to_owned);
     }
 
     /// How many times a head's runs were listed, failed lists included
