@@ -67,7 +67,7 @@ use crate::work_item::{Attached, Known, Phase, Priced, Review, Seconds, Tally, T
 pub const STATE_FILE: &str = "state.json";
 
 /// The state file's format version, bumped when the file gains a field or value an older kelpie refuses
-pub const VERSION: u32 = 101;
+pub const VERSION: u32 = 102;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -924,6 +924,7 @@ impl StateStore {
             }
         }
         state.triage.iter_mut().for_each(|t| t.migrate(found));
+        state.checks.iter_mut().for_each(|c| c.migrate(found));
         let state = state.one_item_moved();
         let state = if found < NUMBERED {
             state.rulings_numbered()

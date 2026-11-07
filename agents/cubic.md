@@ -1,8 +1,8 @@
 ---
 # cubic, the pull request review bot, as a reviewer: a candidate for every
 # review pass whose `agents.allow` holds it. The agent board picks each
-# round's reviewer toward the item's plan's reads. If picked, it reads once a pass,
-# and the worker gets one fix turn for the threads it leaves open.
+# round's reviewer toward the item's review plan. If picked, it reads once a
+# pass, and the worker gets one fix turn for the threads it leaves open.
 # Its window is its account's: the free plan gives a repo GitHub marks
 # private 20 reviews a month, and a public repo draws on a fair-use pool of
 # reviewed lines. Kelpie passes over a closed window. If it has never

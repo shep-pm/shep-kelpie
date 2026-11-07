@@ -77,8 +77,8 @@ pub struct FinishedLine {
     /// The findings its worker deferred, counted the same way
     #[serde(default, skip_serializing_if = "is_zero")]
     pub deferred: u32,
-    /// Whether its review ended light, so a step-up to the full count leaves
-    /// it false
+    /// Whether its review read the change as docs only. The weighing reports
+    /// what the diff touches and decides nothing, and the ledger keeps the field
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub light: bool,
 }

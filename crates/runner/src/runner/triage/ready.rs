@@ -74,6 +74,12 @@ pub(in crate::runner) fn readiness(
     if !runner.own_author(author) {
         return Ready::Not;
     }
+    // The maintainer took the label off, now or while the pass ran, so it stays
+    // off: the pass ends at `needs-triage`.
+    let now = (runner.labels_now(issue)).unwrap_or_else(|_| runner.triage_seen(issue));
+    if runner.check_ready_was_seen(issue) && !now.iter().any(|l| l == READY) {
+        return Ready::Not;
+    }
     match runner.local.find(&body, Surface::Prose) {
         Some(leak) => Ready::Local(leak),
         None if runner.passes_with(issue, &body, labels) => Ready::Body(body),
@@ -304,6 +310,15 @@ impl Runner {
         if !self.put_pass_labels(issue, &labels) {
             return Ok(ReadyLabels::Held);
         }
+        // The maintainer may have taken `ready-for-agent` off since the pass
+        // began, and then it stays off.
+        if self.check_ready_was_seen(issue) && !carried.iter().any(|l| l == READY) {
+            self.notes.push(format!(
+                "triage #{issue}: the maintainer took `{READY}` off, so it stays off"
+            ));
+            self.triage_stepped(issue, TriageStep::Done)?;
+            return Ok(ReadyLabels::Stood);
+        }
         // An issue is not both ready for the board and waiting for the
         // maintainer, so the `needs-triage` of an earlier pass comes off before
         // `ready-for-agent` goes on. The reading above already ruled out a label
@@ -324,6 +339,7 @@ impl Runner {
             self.triage_failed(issue, &why, !forge_is_busy(&e));
             return Ok(ReadyLabels::Held);
         }
+        self.check_ready_seen(issue)?;
         Ok(ReadyLabels::On)
     }
 }

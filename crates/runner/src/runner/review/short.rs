@@ -1,6 +1,6 @@
-//! A pass that ends with some reads but fewer than the item calls for: marked
-//! unreviewed when a reviewer was down or passed over, so `auto` will not
-//! merge it, and left alone when the project's own list gave it too few
+//! A pass that ends with some reads but fewer than its review plan calls for:
+//! marked unreviewed when a reviewer was down or passed over, so `auto` will
+//! not merge it, and left alone when the project's own list gave it too few
 
 use std::sync::Mutex;
 
@@ -14,8 +14,8 @@ use crate::test::{Rig, Scripted, ScriptedRound};
 const SHORT: &str = "1 of 2 reviewers read it: cubic was passed over: its window is closed";
 
 // Pull request 71 for issue 7 is open, its worker's first turn done, on a
-// project whose review is `listed`, needing `need` reads, and whose `cubic`
-// window is closed.
+// project whose candidates are `listed`, whose pass runs `need` reads, and
+// whose `cubic` window is closed.
 fn at_review(rig: &Rig, listed: &[&str], need: usize) -> Mutex<Runner> {
     rig.reviewers(listed);
     rig.reviews_need(Some(need));
