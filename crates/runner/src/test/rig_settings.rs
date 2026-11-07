@@ -61,19 +61,29 @@ impl Rig {
         on(&["commit", "--quiet", "-m", "start the line"]);
         on(&["push", "--quiet", "origin", branch]);
         on(&["checkout", "--quiet", "main"]);
-        let ask = "merging = \"ask\"";
+        let ask = "\nmerging = \"ask\"\n";
         self.edit_settings(|s| {
-            assert!(s.contains(ask), "the example's `git.merging` moved");
-            s.replace(ask, &format!("{ask}\nbase = \"{branch}\""))
+            let anchor = if s.contains(ask) {
+                ask
+            } else {
+                "\nmerging = \"auto\"\n"
+            };
+            assert!(s.contains(anchor), "the example's `git.merging` moved");
+            s.replace(anchor, &format!("{anchor}base = \"{branch}\"\n"))
         });
     }
 
     /// Sets the project's `git.maintainer` to `login`, read when a runner next opens
     pub fn maintainer(&self, login: &str) {
-        let ask = "merging = \"ask\"";
+        let ask = "\nmerging = \"ask\"\n";
         self.edit_settings(|s| {
-            assert!(s.contains(ask), "the example's `git.merging` moved");
-            s.replace(ask, &format!("{ask}\nmaintainer = \"{login}\""))
+            let anchor = if s.contains(ask) {
+                ask
+            } else {
+                "\nmerging = \"auto\"\n"
+            };
+            assert!(s.contains(anchor), "the example's `git.merging` moved");
+            s.replace(anchor, &format!("{anchor}maintainer = \"{login}\"\n"))
         });
     }
 
