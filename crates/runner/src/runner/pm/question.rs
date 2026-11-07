@@ -181,12 +181,35 @@ impl Runner {
         }
         let why = plain(&self.shown(decide.why.clone()), WORDS);
         let found = self.findings_of(id);
-        let count = match found.len() {
-            1 => "1 finding".to_owned(),
-            many => format!("{many} findings"),
+        if let Some((number, _)) = decide.dropped.iter().find(|(n, _)| *n > found.len()) {
+            return Ok(Err(format!(
+                "follow_up {named}: finding {number} is past the {} ruling {id} lists",
+                found.len()
+            )));
+        }
+        // Dropping every finding is a no, which the ruling's own answer says.
+        let every = !decide.dropped.is_empty() && decide.dropped.len() == found.len();
+        let call = if every { Call::Drop } else { decide.call };
+        let drops: Vec<String> = (decide.dropped.iter())
+            .map(|(n, why)| plain(&self.shown(format!("{} ({why})", found[n - 1])), WORDS))
+            .collect();
+        let (count, at) = match (call, drops.is_empty()) {
+            (Call::Drop, false) => (counted(found.len()), drops.join(", ")),
+            (_, false) => {
+                let kept = (found.iter().enumerate())
+                    .filter(|(i, _)| decide.dropped.iter().all(|(n, _)| n - 1 != *i))
+                    .map(|(_, place)| place.as_str());
+                let kept = plain(&self.shown(kept.collect::<Vec<_>>().join(", ")), WORDS);
+                let n = found.len() - drops.len();
+                let count = format!("{n} of {}", counted(found.len()));
+                (count, format!("{kept}; dropping {}", drops.join("; ")))
+            }
+            (_, true) => (
+                counted(found.len()),
+                plain(&self.shown(found.join(", ")), WORDS),
+            ),
         };
-        let at = plain(&self.shown(found.join(", ")), WORDS);
-        let (answer, verb, label) = match decide.call {
+        let (answer, verb, label) = match call {
             Call::File { unread: false } => (Ruled::Yes, "filing", Some(READY)),
             Call::File { unread: true } => (Ruled::Yes, "filing", Some(TRIAGE)),
             Call::Drop => (Ruled::No(why.clone()), "dropping", None),
@@ -198,12 +221,25 @@ impl Runner {
                 if label.is_some() { "yes" } else { "no" }
             ),
             why: why.clone(),
-            unread: decide.call == Call::File { unread: true },
+            unread: call == Call::File { unread: true },
+        };
+        // The findings a yes drops come off the work item, so only the rest
+        // are filed. The ruling keeps all it asked.
+        let kept = match (label, drops.is_empty()) {
+            (Some(_), false) => self.keep_findings(ticket, &decide.dropped)?,
+            _ => None,
         };
         match self.rule_by(id, answer, by) {
             Ok(()) => {}
-            Err(RuleError::State(e)) => return Err(e),
-            Err(e) => return Ok(Err(format!("follow_up {named}: {e}"))),
+            Err(e) => {
+                if let Some(all) = kept {
+                    self.set_findings(ticket, all)?;
+                }
+                match e {
+                    RuleError::State(e) => return Err(e),
+                    e => return Ok(Err(format!("follow_up {named}: {e}"))),
+                }
+            }
         }
         let how = if label.is_some() { "filed" } else { "dropped" };
         let line = format!(
@@ -220,6 +256,38 @@ impl Runner {
         Ok(Ok(format!(
             "{verb} {count} of ruling {id} on {named}{as_label}: {at}"
         )))
+    }
+
+    // Takes the findings numbered in `dropped` off the work item for `ticket`
+    // and returns the ones it held, to put back if the ruling cannot be settled.
+    fn keep_findings(
+        &mut self,
+        ticket: TicketId,
+        dropped: &[(usize, String)],
+    ) -> Result<Option<Vec<Finding>>, StateError> {
+        let mut next = self.state.clone();
+        let item = next.work_items.iter_mut().find(|i| i.issue == ticket);
+        let Some(pending) = item.and_then(|i| i.follow_ups.as_mut()) else {
+            return Ok(None);
+        };
+        let all = pending.findings.clone();
+        let mut at = 0;
+        pending.findings.retain(|_| {
+            at += 1;
+            dropped.iter().all(|(n, _)| *n != at)
+        });
+        self.save(next)?;
+        Ok(Some(all))
+    }
+
+    // Sets the findings still to file on the work item for `ticket`.
+    fn set_findings(&mut self, ticket: TicketId, findings: Vec<Finding>) -> Result<(), StateError> {
+        let mut next = self.state.clone();
+        let item = next.work_items.iter_mut().find(|i| i.issue == ticket);
+        if let Some(pending) = item.and_then(|i| i.follow_ups.as_mut()) {
+            pending.findings = findings;
+        }
+        self.save(next)
     }
 
     // Whether follow-up ruling `id` was raised after the forge refused the
@@ -337,6 +405,14 @@ impl Runner {
         // What it settled is what a later wake must remember.
         self.pm_note(&line);
         self.record(vec![line])
+    }
+}
+
+// `n` findings, in words
+fn counted(n: usize) -> String {
+    match n {
+        1 => "1 finding".to_owned(),
+        many => format!("{many} findings"),
     }
 }
 

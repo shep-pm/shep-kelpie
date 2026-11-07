@@ -7,8 +7,8 @@ use serde_json::json;
 
 use super::{answered, name_pm, pm_seen, question, step_until};
 use crate::board::{READY, TRIAGE};
-use crate::ports::AgentError;
-use crate::runner::follow_up::tests::{after_merge, auto_merging_on};
+use crate::ports::{AgentError, Finding, Severity};
+use crate::runner::follow_up::tests::{after_merge, auto_merging_on, racy};
 use crate::runner::{Runner, StepReport, step};
 use crate::settings::Harness;
 use crate::test::ticket;
@@ -22,7 +22,7 @@ const LEAVES_IT: &str = "{\"answer\": null}";
 fn ready_to_merge(project: &str, work: &'static str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
     name_pm(&rig);
-    auto_merging_on(rig, "ask", work)
+    auto_merging_on(rig, "ask", work, &[racy()])
 }
 
 /// ... merged, and the follow-up ruling raised
@@ -33,6 +33,34 @@ fn merged_with_a_finding(project: &str, work: &'static str) -> (Rig, Mutex<Runne
     };
     assert_eq!(id, ticket(71));
     (rig, runner)
+}
+
+/// ... with two findings, `src/lib.rs:9` first and `src/main.rs:4` second
+fn merged_with_two_findings(project: &str) -> (Rig, Mutex<Runner>) {
+    let rig = Rig::new(project);
+    name_pm(&rig);
+    let leak = Finding::new(
+        Severity::High,
+        "src/main.rs",
+        4,
+        "leaks a handle",
+        "the file stays open",
+    );
+    let (rig, runner) = auto_merging_on(rig, "ask", "work\n", &[racy(), leak]);
+    let Some(StepReport::Ruling { id, .. }) = after_merge(&runner) else {
+        panic!("the maintainer was not asked about the findings");
+    };
+    assert_eq!(id, ticket(71));
+    (rig, runner)
+}
+
+/// The project manager's `answer` to the two-finding ruling: what it acted on
+/// and what it dropped
+fn decides(rig: &Rig, runner: &Mutex<Runner>, answer: &'static str) -> (Vec<String>, Vec<String>) {
+    rig.claude.script([Scripted::Say(answer)]);
+    let report = step_until(runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    let (_, acted, dropped) = answered(Some(report));
+    (acted, dropped)
 }
 
 /// What the maintainer was alerted of the ruling, if anything
@@ -320,5 +348,166 @@ fn a_merged_diff_over_64_kib_is_cut() {
     assert!(
         last.starts_with("[kelpie cut this diff at 64 KiB"),
         "{last}"
+    );
+}
+
+#[test]
+fn the_wake_numbers_its_findings() {
+    let (rig, runner) = merged_with_two_findings("pidgey");
+    rig.claude.script([Scripted::Say(LEAVES_IT)]);
+    step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+
+    let [wake] = pm_seen(&rig).try_into().unwrap();
+    let prompt = &wake.call.prompt;
+    assert!(prompt.contains("1. src/lib.rs:9 looks racy"), "{prompt}");
+    assert!(
+        prompt.contains("2. src/main.rs:4 leaks a handle"),
+        "{prompt}"
+    );
+}
+
+#[test]
+fn a_yes_with_a_drop_files_the_rest_and_not_the_one_dropped() {
+    let (rig, runner) = merged_with_two_findings("rattata");
+    let (acted, dropped) = decides(
+        &rig,
+        &runner,
+        "{\"follow_up\": {\"item\": 7, \"decision\": \"yes\", \"why\": \"the second is real\", \
+         \"drop\": [{\"finding\": 1, \"why\": \"the diff locks the field\"}]}}",
+    );
+    assert_eq!(dropped, Vec::<String>::new());
+    assert_eq!(acted.len(), 1, "{acted:?}");
+    assert!(acted[0].contains("src/main.rs:4"), "{acted:?}");
+
+    let Some(StepReport::FollowUpsFiled { opened, .. }) = after_merge(&runner) else {
+        panic!("the findings were not filed");
+    };
+    assert_eq!(opened.len(), 1);
+    let [issue] = rig.forge.created().try_into().unwrap();
+    assert_eq!(issue.title, "leaks a handle");
+    assert_eq!(issue.labels, [READY]);
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"], json!([]));
+}
+
+#[test]
+fn a_yes_dropping_every_finding_files_nothing() {
+    let (rig, runner) = merged_with_two_findings("spearow");
+    let (acted, dropped) = decides(
+        &rig,
+        &runner,
+        "{\"follow_up\": {\"item\": 7, \"decision\": \"yes\", \"why\": \"none holds\", \
+         \"drop\": [{\"finding\": 1, \"why\": \"fixed\"}, {\"finding\": 2, \"why\": \"mistaken\"}]}}",
+    );
+    assert_eq!(dropped, Vec::<String>::new());
+    assert_eq!(acted.len(), 1, "{acted:?}");
+    assert!(acted[0].starts_with("dropping 2 findings"), "{acted:?}");
+
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"], json!([]));
+    assert_eq!(status["pm"]["settled"][0]["how"], "dropped");
+    assert!(matches!(
+        after_merge(&runner),
+        Some(StepReport::Finished { merged: true, .. })
+    ));
+    assert_eq!(rig.forge.created(), []);
+}
+
+#[test]
+fn a_plain_yes_still_files_every_finding() {
+    let (rig, runner) = merged_with_two_findings("fearow");
+    let (acted, dropped) = decides(
+        &rig,
+        &runner,
+        "{\"follow_up\": {\"item\": 7, \"decision\": \"yes\", \"why\": \"both are real\"}}",
+    );
+    assert_eq!(dropped, Vec::<String>::new());
+    assert_eq!(
+        acted,
+        ["filing 2 findings of ruling 71 on #7 as ready-for-agent: src/lib.rs:9, src/main.rs:4"]
+    );
+    let Some(StepReport::FollowUpsFiled { opened, .. }) = after_merge(&runner) else {
+        panic!("the findings were not filed");
+    };
+    assert_eq!(opened.len(), 2);
+}
+
+#[test]
+fn a_drop_with_a_no_is_unread_and_goes_to_the_maintainer() {
+    let (rig, runner) = merged_with_two_findings("ekans");
+    let (acted, dropped) = decides(
+        &rig,
+        &runner,
+        "{\"follow_up\": {\"item\": 7, \"decision\": \"no\", \"why\": \"x\", \
+         \"drop\": [{\"finding\": 1, \"why\": \"fixed\"}]}}",
+    );
+    assert_eq!(acted, Vec::<String>::new());
+    assert_eq!(dropped.len(), 1, "{dropped:?}");
+    assert!(dropped[0].contains("`follow_up`"), "{dropped:?}");
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Alerted { id: ticket(71) })
+    );
+    assert_eq!(rig.forge.created(), []);
+}
+
+#[test]
+fn a_drop_past_the_list_is_unread_and_goes_to_the_maintainer() {
+    let (rig, runner) = merged_with_two_findings("arbok");
+    let (acted, dropped) = decides(
+        &rig,
+        &runner,
+        "{\"follow_up\": {\"item\": 7, \"decision\": \"yes\", \"why\": \"x\", \
+         \"drop\": [{\"finding\": 3, \"why\": \"fixed\"}]}}",
+    );
+    assert_eq!(acted, Vec::<String>::new());
+    assert_eq!(dropped.len(), 1, "{dropped:?}");
+    assert!(dropped[0].contains("finding 3"), "{dropped:?}");
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Alerted { id: ticket(71) })
+    );
+    assert_eq!(rig.forge.created(), []);
+}
+
+#[test]
+fn the_same_finding_dropped_twice_is_unread() {
+    let (rig, runner) = merged_with_two_findings("pikachu2");
+    let (acted, dropped) = decides(
+        &rig,
+        &runner,
+        "{\"follow_up\": {\"item\": 7, \"decision\": \"yes\", \"why\": \"x\", \
+         \"drop\": [{\"finding\": 1, \"why\": \"a\"}, {\"finding\": 1, \"why\": \"b\"}]}}",
+    );
+    assert_eq!(acted, Vec::<String>::new());
+    assert_eq!(dropped.len(), 1, "{dropped:?}");
+    assert!(dropped[0].contains("`follow_up`"), "{dropped:?}");
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Alerted { id: ticket(71) })
+    );
+    assert_eq!(rig.forge.created(), []);
+}
+
+#[test]
+fn the_posted_answer_names_each_drop_and_its_why() {
+    let (rig, runner) = merged_with_two_findings("sandshrew");
+    // The ruling's comment is posted once the maintainer is asked, so settle
+    // it first and read the line the forge was told.
+    let (acted, _) = decides(
+        &rig,
+        &runner,
+        "{\"follow_up\": {\"item\": 7, \"decision\": \"yes\", \"why\": \"the second is real\", \
+         \"drop\": [{\"finding\": 1, \"why\": \"the diff locks the field\"}]}}",
+    );
+    assert_eq!(acted.len(), 1, "{acted:?}");
+    let notes = std::fs::read_to_string(rig.paths().pm.join("pm-notes.md")).unwrap();
+    assert_eq!(
+        notes.lines().next(),
+        Some(
+            "- ruling 71 on #7: the project manager filed 1 of 2 findings as ready-for-agent: \
+             src/main.rs:4; dropping src/lib.rs:9 (the diff locks the field): the second is real"
+        ),
+        "{notes}"
     );
 }
