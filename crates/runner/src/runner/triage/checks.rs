@@ -325,7 +325,8 @@ impl Runner {
                 Some(Ok(pulls)) if pulls.iter().any(|p| p.closes.contains(&number)) => {
                     return false;
                 }
-                Some(Ok(_)) => &[(READY, true), (TRIAGE, false)],
+                // `ready-for-agent` goes on last, so no write can fail after it
+                Some(Ok(_)) => &[(TRIAGE, false), (READY, true)],
                 _ => return false,
             },
             false if carries(&issue.labels, READY) => &[],

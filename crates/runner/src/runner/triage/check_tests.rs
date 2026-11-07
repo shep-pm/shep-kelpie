@@ -936,3 +936,52 @@ fn a_triage_pass_leaves_it_off() {
     );
     assert_eq!(moved.last().unwrap(), "label needs-triage");
 }
+
+#[test]
+fn a_label_taken_off_while_the_triager_ran_is_not_put_back() {
+    // The maintainer labelled it by hand, so the pass begins with it
+    let (rig, runner) = checking(
+        "pick = \"maintainer\"",
+        MAINTAINER,
+        FAILING,
+        &["ready-for-agent"],
+    );
+    let found = json!({ "type": "bug", "kind": "fix", "priority": "P2", "body": ASSUMED });
+    let hold = Hold::default();
+    let held = Scripted::HoldThenSay(hold.clone(), said(found));
+    rig.claude.script_for(Role::Triager, [held]);
+
+    assert!(matches!(advance(&runner).unwrap(), Pass::Started));
+    assert!(hold.entered(CALL_PATIENCE), "the research never began");
+    list(&rig, filed(&rig, MAINTAINER, FAILING, &[]));
+    hold.release();
+    pump(&runner, || {
+        let moved = moves(&rig);
+        moved.contains(&"label ready-for-agent".to_owned())
+            || moved.contains(&"label needs-triage".to_owned())
+    });
+
+    let moved = moves(&rig);
+    assert!(
+        !moved.contains(&"label ready-for-agent".to_owned()),
+        "{moved:?}"
+    );
+    assert_eq!(moved.last().unwrap(), "label needs-triage");
+}
+
+#[test]
+fn a_passing_issue_whose_needs_triage_will_not_come_off_gets_no_ready_label_yet() {
+    let mut labels = PASSING_LABELS.to_vec();
+    labels.push("needs-triage");
+    let (rig, runner) = checking("pick = \"maintainer\"", MAINTAINER, PASSING, &labels);
+    rig.github.refuse_label_removals(ApiError::Refused(422));
+
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(moves(&rig), Vec::<String>::new(), "nothing went on");
+
+    rig.github.accept_label_removals();
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(moves(&rig), ["label ready-for-agent"]);
+    assert!(ready_seen(&rig), "{}", checks(&rig));
+}
