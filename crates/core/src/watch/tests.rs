@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use jiff::tz::TimeZone;
 
-use super::{Options, Scope, Watch};
+use super::{Format, Options, Scope, Watch};
 
 struct Rig {
     dir: tempfile::TempDir,
@@ -690,4 +690,127 @@ fn watch_follows_a_project_from_steps_jsonl_and_ignores_the_out_log() {
         shown(&watch.poll()),
         ["12:00:02 runner step dispatched #7 agent=sonnet"]
     );
+}
+
+#[test]
+fn all_a_claude_session_said_is_read() {
+    let rig = Rig::new();
+    rig.transcript(
+        "w7",
+        &[
+            &user("2026-10-10T12:00:01.000Z", "Build #7"),
+            &said("2026-10-10T12:00:02.000Z", "Reading the issue."),
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Hm"},{"type":"tool_use","id":"c1","name":"Read","input":{"file_path":"src/lib.rs"}},{"type":"text","text":""}]},"timestamp":"2026-10-10T12:00:03.000Z"}"#,
+            &said("2026-10-10T12:00:04.000Z", "Done, but the test hangs."),
+        ],
+    );
+
+    let file = rig.transcripts().join("w7.jsonl");
+    assert_eq!(
+        super::said(Format::Claude, &file),
+        ["Reading the issue.", "Done, but the test hangs."]
+    );
+}
+
+#[test]
+fn all_a_codex_rollout_said_is_read() {
+    let rig = Rig::new();
+    let rollout = rig.dir.path().join("rollout-2026-10-10T12-00-00-0199-thread.jsonl");
+    rig.append(
+        &rollout,
+        &[
+            r#"{"timestamp":"2026-10-10T12:00:01.000Z","type":"session_meta","payload":{"id":"0199-thread"}}"#,
+            r#"{"timestamp":"2026-10-10T12:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Build #7"}]}}"#,
+            r#"{"timestamp":"2026-10-10T12:00:03.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Looking."}]}}"#,
+            r#"{"timestamp":"2026-10-10T12:00:03.500Z","type":"event_msg","payload":{"type":"agent_message","message":"Looking."}}"#,
+            r#"{"timestamp":"2026-10-10T12:00:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done"}]}}"#,
+        ],
+    );
+
+    assert_eq!(super::said(Format::Codex, &rollout), ["Looking.", "Done"]);
+}
+
+#[test]
+fn all_a_pi_session_said_is_read() {
+    let rig = Rig::new();
+    let file = rig.dir.path().join("2026-10-10T12-00-00-000Z_r7.jsonl");
+    rig.append(
+        &file,
+        &[
+            r#"{"type":"session","version":3,"id":"r7","timestamp":"2026-10-10T12:00:00.500Z","cwd":"/wt"}"#,
+            r#"{"type":"message","id":"a1","timestamp":"2026-10-10T12:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"Review #7"}],"timestamp":1790856001000}}"#,
+            r#"{"type":"message","id":"a2","timestamp":"2026-10-10T12:00:02.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Look"},{"type":"text","text":"Reading the diff."},{"type":"toolCall","id":"c1","name":"read","arguments":{"path":"src/lib.rs"}}]}}"#,
+            r#"{"type":"message","id":"a4","timestamp":"2026-10-10T12:00:04.000Z","message":{"role":"assistant","content":[{"type":"text","text":"CLEAN"}]}}"#,
+        ],
+    );
+
+    assert_eq!(
+        super::said(Format::Pi, &file),
+        ["Reading the diff.", "CLEAN"]
+    );
+}
+
+#[test]
+fn a_goose_session_reads_as_nothing_said() {
+    let rig = Rig::new();
+    let (_, stdout) = goose_started(&rig);
+    rig.append(
+        &stdout,
+        &[
+            r#"{"type":"message","message":{"role":"assistant","created":1791633603,"content":[{"type":"text","text":"CLEAN"}]}}"#,
+        ],
+    );
+
+    assert!(super::said(Format::Goose, &stdout).is_empty());
+}
+
+#[test]
+fn a_half_written_last_line_is_passed_over() {
+    let rig = Rig::new();
+    let file = rig.transcripts().join("w7.jsonl");
+    rig.transcript("w7", &[&said("2026-10-10T12:00:02.000Z", "Whole.")]);
+    let mut open = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
+    // A whole line with no end yet, and a cut one: neither is read.
+    write!(open, "{}", said("2026-10-10T12:00:03.000Z", "Not ended")).unwrap();
+
+    assert_eq!(super::said(Format::Claude, &file), ["Whole."]);
+
+    writeln!(open).unwrap();
+    write!(open, r#"{{"type":"assistant","message":{{"role":"assist"#).unwrap();
+
+    assert_eq!(super::said(Format::Claude, &file), ["Whole.", "Not ended"]);
+    assert!(super::said(Format::Claude, &rig.transcripts().join("none.jsonl")).is_empty());
+}
+
+#[test]
+fn steps_of_keeps_every_line_naming_the_ticket() {
+    let rig = Rig::new();
+    rig.step(
+        "2026-10-10T12:00:00.000+00:00",
+        r#"{"step":"dispatched","issue":7,"agent":"sonnet","skipped":[]}"#,
+    );
+    rig.step(
+        "2026-10-10T12:00:01.000+00:00",
+        r#"{"step":"dispatched","issue":8,"agent":"sonnet","skipped":[]}"#,
+    );
+    rig.step(
+        "2026-10-10T12:00:02.000+00:00",
+        r#"{"step":"pm-woke","reason":"a board change"}"#,
+    );
+    // A step from before ticket ids held a bare number reads as a GitHub ticket.
+    rig.step(
+        "2026-10-10T12:00:03.000+00:00",
+        r#"{"step":"turn-failed","issue":7,"why":"timed out"}"#,
+    );
+    rig.append(&rig.steps(), &["not a step"]);
+    let steps = std::fs::read_to_string(rig.steps()).unwrap();
+
+    assert_eq!(
+        super::steps_of(&steps, ticket(7)),
+        [
+            "2026-10-10T12:00:00Z dispatched #7 agent=sonnet",
+            "2026-10-10T12:00:03Z turn-failed #7 why=timed out",
+        ]
+    );
+    assert_eq!(super::steps_of(&steps, ticket(9)), Vec::<String>::new());
 }
