@@ -1,0 +1,5 @@
+# Project manager: open threads
+
+The wake that asks the project manager what becomes of each open review thread. The agent and its other wakes are in [pm.md](pm.md), its cases in [pm-case.md](pm-case.md).
+
+- It wakes for an item's open threads (`Wake::Threads`: ticket, pull request, head, each `RuledThread`; queued by `pm_ask_threads`, which returns false while the project manager is down). The text writes every thread on one line, however many, and names `cases/<issue>.md`, which an item with an ask out gets with no ruling's card. It rules with `threads`: `[{ item, thread, decision, why }]`, `decision` `fix`, `follow-up`, `close` (the thread is wrong) or `push-back`. `close` needs a `why`, and on a thread the maintainer wrote is refused and named; `push-back` stands in. Any other call is named and dropped, and the thread stays open. A wake that answers nothing holds that ticket's next ask for `quiet_backoff`; an answered thread resets it. The ask is in memory (`Desk.threads_out`); `give_up` and a restart clear it. `Runner::threads_ruled` is a stub until #1824. #1823, `runner/pm/threads.rs`

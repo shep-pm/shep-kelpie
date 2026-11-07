@@ -10,7 +10,7 @@
 
 use super::answer::{Action, Answer, Unstick};
 use super::red::Settled;
-use super::{Pick, Picked, StuckState, stuck_on};
+use super::{Pick, Picked, StuckState, Wake, stuck_on};
 use crate::board::briefing::ticket_ref;
 use crate::runner::thread_replies::Settler;
 use crate::runner::{Answer as Ruled, RuleError, Runner};
@@ -40,6 +40,7 @@ impl Runner {
         &mut self,
         answer: &mut Answer,
         picking: Option<(usize, usize)>,
+        wakes: &[Wake],
     ) -> Result<(Vec<String>, Vec<String>), StateError> {
         let ready = self.board_ready();
         // An answer with no `hold` leaves the holds standing; one with a list replaces them.
@@ -172,6 +173,9 @@ impl Runner {
                 Err(why) => dropped.push(why),
             }
         }
+        let (done, why) = self.rule_threads(wakes, &answer.threads)?;
+        acted.extend(done);
+        dropped.extend(why);
         if let Some(reply) = &answer.reply {
             self.pm.reply = Some(reply.clone());
         }

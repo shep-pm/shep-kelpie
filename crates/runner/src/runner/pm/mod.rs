@@ -46,6 +46,7 @@ mod rulings;
 mod said;
 #[cfg(test)]
 mod tests;
+mod threads;
 mod unstartable;
 mod wakes;
 
@@ -184,6 +185,11 @@ pub(super) struct Desk {
     released: BTreeMap<u64, Released>,
     // Each work item whose pass waits on its answer to a round's findings
     reading: BTreeSet<TicketId>,
+    // Each work item whose open threads were put to it, until its call ends
+    threads_out: BTreeSet<TicketId>,
+    // Each of those a wake left a thread of unanswered, with how many times in a row
+    // and when its next ask may go
+    threads_quiet: BTreeMap<TicketId, threads::Quiet>,
     // The question being raised is one it parked the work item on, the maintainer's alone
     parking: bool,
     flying: Option<Flying>,
@@ -539,6 +545,10 @@ impl Runner {
                 Wake::Findings { ticket, .. } => {
                     self.pm.reading.remove(&ticket);
                 }
+                // The next step asks again, and nothing answered for the item.
+                Wake::Threads { ticket, .. } => {
+                    self.pm.threads_out.remove(&ticket);
+                }
                 // The ruling goes to the maintainer, who need not wait on it again.
                 Wake::Question { id, .. } | Wake::FollowUp { id, .. } => {
                     self.pm.asking.remove(&id);
@@ -787,7 +797,7 @@ impl Runner {
         if !matches!(stood, Some(Ok(_))) {
             self.pm_stand_tells(&flying.told);
         }
-        let (mut acted, mut dropped) = self.act(&mut answer, picking)?;
+        let (mut acted, mut dropped) = self.act(&mut answer, picking, &flying.wakes)?;
         match stood {
             Some(Ok(done)) => acted.push(done),
             Some(Err(why)) => dropped.push(why),

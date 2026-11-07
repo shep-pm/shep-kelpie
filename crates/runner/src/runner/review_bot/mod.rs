@@ -23,6 +23,7 @@ mod on_ready;
     expect(dead_code, reason = "the gate that calls it is a later slice")
 )]
 mod open;
+pub(in crate::runner) use open::RuledThread;
 mod settle;
 pub(in crate::runner) use settle::{lands, open_ids, read_threads, reread_due};
 

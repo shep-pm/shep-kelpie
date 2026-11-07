@@ -14,6 +14,7 @@ use crate::board::briefing::{age, date_time, elapsed, ticket_ref};
 use super::requests;
 use crate::ports::{Finding, PaddockHolder, Timestamp, Wait};
 use crate::runner::Runner;
+use crate::runner::review_bot::RuledThread;
 use crate::runner::voice::brief;
 use crate::settings::AgentName;
 use crate::state::{ProjectState, Ruling, RulingKind, Stuck};
@@ -116,6 +117,22 @@ pub(in crate::runner) enum Wake {
         /// The lines it changes, none when git cannot count them
         lines: Option<u32>,
     },
+    /// An item at the gate waits on the project manager for what becomes of
+    /// each open review thread
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the step that asks is a later slice")
+    )]
+    Threads {
+        /// The work item's ticket
+        ticket: TicketId,
+        /// Its pull request
+        pull_request: u64,
+        /// The head the threads were read at
+        head: String,
+        /// Every open thread the item waits on
+        threads: Vec<RuledThread>,
+    },
     /// A ruling waits on the project manager's answer
     Answer {
         /// The ruling
@@ -141,6 +158,7 @@ impl Wake {
             (Self::Answer { id: a, .. }, Self::Answer { id: b, .. }) => a == b,
             (Self::Red { workflow: a, .. }, Self::Red { workflow: b, .. }) => a == b,
             (Self::Findings { ticket: a, .. }, Self::Findings { ticket: b, .. }) => a == b,
+            (Self::Threads { ticket: a, .. }, Self::Threads { ticket: b, .. }) => a == b,
             _ => false,
         }
     }
@@ -204,7 +222,7 @@ pub(super) struct LeftAlone {
 }
 
 // How long `nones` in a row on one idle call hold its wake back.
-fn quiet_backoff(nones: u32) -> u64 {
+pub(super) fn quiet_backoff(nones: u32) -> u64 {
     match nones {
         0 | 1 => QUIET_FIRST,
         2 => QUIET_SECOND,
@@ -486,6 +504,8 @@ impl Runner {
             self.pm.after_end.retain(|ticket, _| open.contains(ticket));
             (self.pm.left_alone).retain(|ticket, _| open.contains(ticket));
             (self.pm.agent_out).retain(|ticket, _| open.contains(ticket));
+            self.pm.threads_out.retain(|ticket| open.contains(ticket));
+            (self.pm.threads_quiet).retain(|ticket, _| open.contains(ticket));
             (self.pm.conflicts).retain(|(a, b), _| open.contains(a) && open.contains(b));
         }
     }
