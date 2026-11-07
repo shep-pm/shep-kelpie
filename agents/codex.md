@@ -1,8 +1,8 @@
 ---
 # Codex, the ChatGPT Codex app's pull request review, as a reviewer: a
 # candidate for every review pass whose `agents.allow` holds it. The agent
-# board picks each round's reviewer toward the item's plan's reads. If picked, it
-# reads once a pass, and the worker gets one fix turn for the threads
+# board picks each round's reviewer toward the item's review plan. If picked,
+# it reads once a pass, and the worker gets one fix turn for the threads
 # it leaves open. Its window is the weekly allowance the plan gives code
 # reviews. `reviews_on_ready: true` says it reviews a pull request when it
 # leaves draft, as the repo's Codex settings may have it: then marking ready
