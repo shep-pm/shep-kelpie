@@ -14,9 +14,10 @@ use std::sync::{Arc, Mutex};
 
 use super::super::Runner;
 use super::super::trigger::lock;
+use super::unpublished::Read;
 use super::{opened_by_us_or_people, ticket, untouched};
 use crate::board::{READY, check};
-use crate::ports::{Forge, ForgeError, Issue, OpenIssue, OpenPull, Tickets, Timestamp};
+use crate::ports::{Forge, ForgeError, Issue, OpenIssue, OpenPull, Registry, Tickets, Timestamp};
 use crate::settings::{ForgeSlug, TriagePick};
 use crate::state::{CheckTriage, StateError, TriageStep};
 
@@ -24,6 +25,7 @@ use crate::state::{CheckTriage, StateError, TriageStep};
 pub(in crate::runner) struct PollJob {
     tickets: Arc<dyn Tickets>,
     forge: Arc<dyn Forge>,
+    registry: Arc<dyn Registry>,
     repo: ForgeSlug,
     /// The issues whose triage waits on the author's session, to read one by one
     local: Vec<u64>,
@@ -42,6 +44,10 @@ pub(in crate::runner) struct PollJob {
     checked: BTreeMap<u64, u64>,
     /// The App's login, whose issues are read as a person's
     app: Option<String>,
+    /// The packages already found published, as the `Needs:` line writes each
+    published: BTreeSet<String>,
+    /// The issues with a work item, which the board no longer holds for a package
+    at_work: BTreeSet<u64>,
 }
 
 /// What a poll read
@@ -51,6 +57,8 @@ pub(in crate::runner) struct PollRead {
     pulls: Option<Result<Vec<OpenPull>, ForgeError>>,
     /// Each waiting issue as the forge shows it
     local: BTreeMap<u64, Result<Issue, ForgeError>>,
+    /// Each package a ready issue needs that was not yet found published
+    registry: Read,
 }
 
 /// The open issues and pull requests the last poll read, which the triager's call
@@ -90,7 +98,32 @@ impl PollJob {
         let pulls = self
             .pulls_used(&open)
             .then(|| self.forge.open_pulls(&self.repo));
-        Ok(PollRead { open, pulls, local })
+        let registry = self.registry_read(&open);
+        Ok(PollRead {
+            open,
+            pulls,
+            local,
+            registry,
+        })
+    }
+
+    // Asks the registry once for each package a ready issue with no work item needs
+    // and has not been found published. The check reads no network, so this is where
+    // the board's hold on an unpublished package is read.
+    fn registry_read(&self, open: &[OpenIssue]) -> Read {
+        let mut asked = BTreeSet::new();
+        let ready = (open.iter()).filter(|i| i.labels.iter().any(|l| l == READY));
+        let ready = ready.filter(|i| !self.at_work.contains(&i.number));
+        let mut read = Vec::new();
+        for needed in ready.flat_map(|issue| check::needs(&issue.body)) {
+            let package = needed.to_string();
+            if self.published.contains(&package) || !asked.insert(package) {
+                continue;
+            }
+            let answer = self.registry.published(&needed);
+            read.push((needed, answer));
+        }
+        read
     }
 
     // Whether the pass has a use for the open pull requests
@@ -180,6 +213,7 @@ impl Runner {
         let job = PollJob {
             tickets: Arc::clone(&self.ports.tickets),
             forge: Arc::clone(&self.ports.forge),
+            registry: Arc::clone(&self.ports.registry),
             repo: self.remote.clone(),
             local,
             taken,
@@ -192,6 +226,13 @@ impl Runner {
                 .map(|c| (c.issue, c.key))
                 .collect(),
             app: self.app_login(),
+            published: self.triage_run.registry.published().clone(),
+            at_work: self
+                .state
+                .work_items
+                .iter()
+                .filter_map(|w| w.issue.github())
+                .collect(),
         };
         Some((now, job))
     }
@@ -210,6 +251,7 @@ impl Runner {
             mut open,
             pulls,
             local,
+            registry,
         }) = read
         else {
             self.triage_run.listing = None;
@@ -219,6 +261,8 @@ impl Runner {
             }
             return Ok(());
         };
+        // What the registry said stands, whatever the listing it was read beside does.
+        self.keep_registry(registry);
         // The verb queued an issue while the listing was read, so it may predate
         // the issue: it is used for nothing and the next pass lists again.
         if self.looks.triage_asks() != asked {

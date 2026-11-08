@@ -50,8 +50,8 @@ pub use shep_kelpie_adapters::test::{
 pub use shep_kelpie_core::test::{
     Answer, CUBIC_RESUMES, EPOCH, FakeAgentBoard, FakeAlerts, FakeBridges, FakeClassifier,
     FakeClock, FakeDevServers, FakeDisk, FakeE2e, FakeForge, FakeGit, FakeMeter, FakePages,
-    FakeShepherd, FakeTests, GB, HeldCall, Hold, Home, LOGIN_TOKEN, LeaseReads, Memory,
-    OpenSandbox, RecordedSink, SeenAsk, StandInEndpoint, Synced, Take, VIEWER, a_work_item,
+    FakeRegistry, FakeShepherd, FakeTests, GB, HeldCall, Hold, Home, LOGIN_TOKEN, LeaseReads,
+    Memory, OpenSandbox, RecordedSink, SeenAsk, StandInEndpoint, Synced, Take, VIEWER, a_work_item,
     clean_visit, project_table, ticket, toml_path, unreachable_url,
 };
 pub use shep_kelpie_test_support::{
@@ -178,6 +178,8 @@ pub struct Rig {
     pub samples: RecordedSink,
     /// The gateway classifier triage's spam check asks
     pub classifier: FakeClassifier,
+    /// The registries the triage poll asks whether a package is published
+    pub registry: FakeRegistry,
     /// The clock every stand-in and the runner read
     pub clock: FakeClock,
     /// The login's forge hold and pace, which no test's calls reach the cap of
@@ -520,6 +522,7 @@ impl Rig {
             harness_mcp: Arc::clone(&self.harness_mcp.lock().unwrap()),
             metrics: Arc::new(self.samples.clone()),
             classifier: Arc::new(self.classifier.clone()),
+            registry: Arc::new(self.registry.clone()),
             clock: Arc::new(self.clock.clone()),
             pace: Arc::clone(&self.pace),
             agent_board: Arc::new(self.agent_board.clone()),

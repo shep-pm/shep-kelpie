@@ -237,6 +237,14 @@ pub enum Skip {
         /// Each part the check found missing or malformed, in its words
         failures: Vec<String>,
     },
+    /// A package its `Needs:` line names is not published yet, so it waits
+    /// until a poll finds it out
+    Unpublished {
+        /// The ticket
+        issue: TicketId,
+        /// The first unpublished package, as the `Needs:` line writes it
+        package: String,
+    },
     /// The pacer holds every new work item, this pick among them
     Paced {
         /// The ticket
@@ -287,6 +295,7 @@ impl Skip {
             | Self::Overlap { issue, .. }
             | Self::PathsUnread { issue, .. }
             | Self::Check { issue, .. }
+            | Self::Unpublished { issue, .. }
             | Self::Paced { issue, .. }
             | Self::Unpicked { issue, .. }
             | Self::PmWaits { issue } => Some(*issue),

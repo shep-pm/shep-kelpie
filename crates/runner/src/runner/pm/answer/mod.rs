@@ -44,6 +44,9 @@ const UNSTICK: &str = "`item`, an `action` of retry, re-scope, ask or none, and 
 /// What a `fix` entry holds, as a dropped one names it
 const FIX: &str = "`item`, an `on` naming the open fix it waits on, and `why`";
 
+/// What an `answer` entry holds, as a dropped one names it
+const SETTLE: &str = "`item`, then `text` or `escalate`, and `why`";
+
 /// What the project manager answered, field by field
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct Answer {
@@ -57,8 +60,8 @@ pub(super) struct Answer {
     pub(super) unstick: Vec<Unstick>,
     /// Each stuck work item it parks on an open fix, as the wake gave them
     pub(super) fix: Vec<FixCall>,
-    /// What to do about one worker's question
-    pub(super) answer: Option<Settle>,
+    /// What to do about each worker's question the wake carried, in order
+    pub(super) answer: Vec<Settle>,
     /// What to do about one follow-up ruling's findings
     pub(super) follow_up: Option<Decide>,
     /// What to do about each workflow still red on `main` after its rerun
@@ -297,11 +300,20 @@ pub(super) fn read(text: &str) -> Option<Answer> {
             },
             "answer" => match &value {
                 Value::Null => {}
+                // One question is one object; several are a list of them.
+                Value::Array(items) => {
+                    for item in items {
+                        match settle(item) {
+                            Some(s) => answer.answer.push(s),
+                            None => answer
+                                .unread
+                                .push(format!("`answer`: {SETTLE}, not {item}")),
+                        }
+                    }
+                }
                 value => match settle(value) {
-                    Some(s) => answer.answer = Some(s),
-                    None => answer
-                        .unread
-                        .push(unread("`item`, then `text` or `escalate`, and `why`")),
+                    Some(s) => answer.answer.push(s),
+                    None => answer.unread.push(unread(SETTLE)),
                 },
             },
             "follow_up" => match &value {

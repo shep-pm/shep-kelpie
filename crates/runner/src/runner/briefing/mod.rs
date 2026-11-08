@@ -743,6 +743,13 @@ pub(super) fn passed_over(skip: &Skip, shown: &dyn Fn(String) -> String) -> (Str
             format!("the issue check refused it: {}", shown(failures.join("; "))),
             true,
         ),
+        Skip::Unpublished { package, .. } => (
+            format!(
+                "needs {} to be published, which the next poll that finds it ends",
+                shown(package.clone())
+            ),
+            true,
+        ),
         Skip::Paced { hold, .. } => (format!("held by the pacer: {hold}"), true),
         Skip::Unpicked { why, .. } => (why.clone(), true),
         Skip::PmWaits { .. } => ("the project manager's pick waits".into(), true),

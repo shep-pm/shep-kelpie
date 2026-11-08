@@ -286,7 +286,8 @@ impl Runner {
         (self.state.checks.iter()).any(|c| c.issue == issue && c.triage == CheckTriage::Edited)
     }
 
-    // The ready issues the check refuses, as the board's skips. A result kept
+    // The ready issues the check refuses, or that need a package not found
+    // published, as the board's skips. A result kept
     // for the text an issue holds now is read. Any other issue is checked here,
     // whatever its triage did, so a hand fix is not held by the old failures.
     pub(in crate::runner) fn check_holds(&self, ready: &[ReadyIssue]) -> Vec<Skip> {
@@ -307,9 +308,21 @@ impl Runner {
                         .map(ToString::to_string)
                         .collect(),
                 };
-                (!failures.is_empty()).then_some(Skip::Check {
+                if !failures.is_empty() {
+                    return Some(Skip::Check {
+                        issue: issue.ticket,
+                        failures,
+                    });
+                }
+                // The check reads no network: the poll asked the registry. An issue
+                // with a work item is not asked of, so it is not held.
+                if self.has_work_item(number) {
+                    return None;
+                }
+                let package = self.triage_run.registry.first_waiting(&issue.body)?;
+                Some(Skip::Unpublished {
                     issue: issue.ticket,
-                    failures,
+                    package,
                 })
             })
             .collect()

@@ -23,6 +23,7 @@ A pull request that measures something adds it to its topic's file, or starts a 
 - [The machine's load](the-machines-load.md)
 - [The local model's placement](the-local-models-placement.md)
 - [The GPU's metrics](the-gpus-metrics.md)
+- [Registry reads](registry-reads.md)
 - [Cost by role and worker questions](cost-by-role-and-worker-questions.md)
 - [CI and the merge](ci-and-the-merge.md)
 - [Windows runner test time](windows-tests.md)

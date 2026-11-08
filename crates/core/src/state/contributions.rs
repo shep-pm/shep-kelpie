@@ -781,7 +781,7 @@ pub enum Held {
         why: String,
     },
     /// The pass has ended and CI is green on the head, and the maintainer
-    /// decides every merge of someone else's work, whatever `git.merging`
+    /// decides every merge of someone else's work, whatever `rulings.pm_decides`
     /// says. The ruling names the findings recorded and the bot threads
     /// open. A yes merges this head, and a no with a note is worded for the
     /// contributor and posted.
