@@ -62,7 +62,6 @@ pub(super) fn names((old, was): Reach<'_>, (new, now): Reach<'_>) -> Vec<&'stati
         remote: _,   // waits for the next start
         base: old_base,
         merging: old_merging,
-        issues: _, // read by nothing
         maintainer: old_maintainer,
     } = old_git;
     let Git {
@@ -70,7 +69,6 @@ pub(super) fn names((old, was): Reach<'_>, (new, now): Reach<'_>) -> Vec<&'stati
         remote: _,
         base: new_base,
         merging: new_merging,
-        issues: _,
         maintainer: new_maintainer,
     } = new_git;
     [

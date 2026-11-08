@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use super::check_tests::{FAILING, REPO_LABELS, STILL, checks, filed, told};
 use super::pick_tests::{MAINTAINER, due, issue, list, rig_with};
 use super::research_tests::{APP, WORDS, calls, reply};
+use crate::board::TRIAGE;
 use crate::ports::{OpenIssue, Role, Timestamp};
 use crate::runner::{Runner, step};
 use crate::state::StateStore;
@@ -83,20 +84,18 @@ fn a_held_ready_issue_opened_before_triage_was_on_is_due_under_maintainer_pick()
     assert_eq!(commented(&rig), [30]);
 }
 
+// The check holds it off the board, so its age takes it back to the triager with
+// the label the maintainer put on still on it
 #[test]
-fn an_old_held_ready_issue_taken_back_under_hand_ready_still_gets_its_pass() {
-    let rig = turned_on_late("pick = \"maintainer\"\nhand_ready = true");
+fn an_old_held_ready_issue_keeps_its_label_and_still_gets_its_pass() {
+    let rig = turned_on_late("pick = \"maintainer\"");
     list(&rig, old(&rig, 30, MAINTAINER, &["ready-for-agent"]));
     script_one_pass(&rig);
     let runner = rig.open().unwrap();
 
     assert_eq!(step(&runner).unwrap(), None);
 
-    assert_eq!(
-        rig.github.label_takes(),
-        [(30, "ready-for-agent".to_owned())],
-        "taken back"
-    );
+    assert_eq!(rig.github.label_takes(), [], "nothing is taken back");
     assert_eq!(calls(&rig, Role::Triager).len(), 1);
     assert_eq!(commented(&rig), [30]);
 }
@@ -154,7 +153,7 @@ fn a_done_issue_still_failing_gets_one_new_pass_when_the_check_version_changes()
     );
 
     // The same version again: the issue is checked, told and left alone.
-    list(&rig, filed(&rig, MAINTAINER, STILL, &["needs-triage"]));
+    list(&rig, filed(&rig, MAINTAINER, STILL, &[TRIAGE]));
     for _ in 0..3 {
         rig.next_look();
         assert_eq!(step(&runner).unwrap(), None);

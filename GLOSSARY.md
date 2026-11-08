@@ -533,7 +533,11 @@ items already open can still park past it. 0 is taken as 1: the board opens
 nothing while any such ruling waits. It leaves out the `follow-up`
 ruling of a merged pull request. The one exception: the PM may retry a stuck item, which
 answers its `stuck` ruling for the maintainer, with a yes or, for CI still
-red, a note sending the worker back. A merge ruling takes three answers:
+red, a note sending the worker back. It may instead park a stuck item on an
+open fix, which keeps it parked with the ruling left for the maintainer and
+names the fix on its card, and never retries a `turn-failed` ruling for a turn
+kelpie could not set up, since another try meets the same fault. A merge ruling
+takes three answers:
 `yes`, `no <note>`, whose fix goes to CI and back to the ruling, and
 `rework <note>`, whose change starts a new pass, as a `no` does on a
 merge ruling that warns of open bot threads, an unread pass or an unread
@@ -559,7 +563,7 @@ passes, and replaces only that ruling: the merge still asks where a safety
 gate holds it, such as a pull request no reviewer read. Pending deferred findings
 always raise a `follow-up` ruling. The project manager answers when
 `rulings.pm_decides.follow-up` allows it; otherwise the maintainer does,
-including on a project with no `agents.pm`. `git.issues` decides nothing.
+including on a project with no `agents.pm`.
 Every other ruling still asks.
 
 **Notice**:

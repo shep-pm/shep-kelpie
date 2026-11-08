@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use super::checks::CHECK_TRIES;
 use super::pick_tests::{MAINTAINER, issue, list, rig_with, triaging};
 use super::ready_tests::said;
-use super::research_tests::{APP, WORDS, calls, moves, pump, reply, under};
+use super::research_tests::{APP, WORDS, calls, moves, pump, reply, restart, took_back, under};
 use crate::board::{ReadyIssue, Skip, SubIssues, check};
 use crate::github::ApiError;
 use crate::ports::Timestamp;
@@ -884,21 +884,21 @@ fn a_label_put_back_by_hand_stands_and_can_come_off_again() {
 }
 
 #[test]
-fn kelpies_own_take_back_is_not_the_maintainers() {
+fn kelpies_own_swap_is_not_the_maintainers() {
     let (rig, runner) = checking(
-        "pick = \"maintainer\"\nhand_ready = true",
+        "pick = \"maintainer\"",
         MAINTAINER,
         FAILING,
         &["ready-for-agent"],
     );
+    took_back(&rig, 30, MAINTAINER, "Crash on start", FAILING);
+    let runner = restart(&rig, runner);
     rig.claude.script_for(Role::Triager, [reply(json!({}))]);
 
     assert_eq!(step(&runner).unwrap(), None);
-
     assert_eq!(
         rig.github.label_takes(),
-        [(30, "ready-for-agent".to_owned())],
-        "kelpie took it back"
+        [(30, "ready-for-agent".to_owned())]
     );
     assert!(!ready_seen(&rig), "{}", checks(&rig));
 

@@ -487,6 +487,16 @@ const REMOVED: &[Removed] = &[
         because: "the step is named for what it does, apart from the `[ci]` table",
         fix: "move its value to `skills.ci_fix`",
     },
+    Removed {
+        key: "git.issues",
+        because: "deferred findings always raise a follow-up ruling",
+        fix: MIGRATE,
+    },
+    Removed {
+        key: "triage.hand_ready",
+        because: "the issue check decides whether a ready issue goes to the triager",
+        fix: MIGRATE,
+    },
 ];
 
 // The keys removed above that name a table now, refused only when set to a value

@@ -361,36 +361,3 @@ fn the_forge_association_decides_a_role_when_no_login_is_listed() {
         assert_eq!(AuthorRole::of(association), role, "{association:?}");
     }
 }
-
-#[test]
-fn hand_ready_is_off_when_absent_and_on_under_maintainer_or_all() {
-    assert!(!parse(EXAMPLE).unwrap().triage.hand_ready);
-    assert!(!parse(&with("pick = \"all\"\n")).unwrap().triage.hand_ready);
-    for pick in ["maintainer", "all"] {
-        let t = parse(&with(&format!("pick = \"{pick}\"\nhand_ready = true\n")))
-            .unwrap()
-            .triage;
-        assert!(t.hand_ready, "{pick}");
-    }
-}
-
-#[test]
-fn hand_ready_without_a_pick_is_refused_naming_it() {
-    for lines in ["hand_ready = true\n", "pick = \"off\"\nhand_ready = true\n"] {
-        let err = parse_err(&with(lines));
-        assert!(
-            err.contains("triage.hand_ready") && err.contains("triage.pick"),
-            "{lines}: {err}"
-        );
-    }
-    let t = parse(&with("pick = \"off\"\nhand_ready = false\n"))
-        .unwrap()
-        .triage;
-    assert!(!t.hand_ready, "false needs no pick");
-}
-
-#[test]
-fn hand_ready_that_is_not_a_bool_is_refused_naming_it() {
-    let err = parse_err(&with("pick = \"all\"\nhand_ready = \"yes\"\n"));
-    assert!(err.contains("hand_ready"), "{err}");
-}

@@ -13,7 +13,7 @@ use super::super::contributions::{
     ADOPT_ANYWAY, CLOSE_WITH_THANKS, KEEP_WAITING, LEAVE_OPEN, flagged_lines,
 };
 use super::super::gate::short;
-use super::super::ruling::{needs_pass, stuck_comment};
+use super::super::ruling::{PARKS, needs_pass, stuck_comment};
 use super::super::words::{NO_NOTE, Wants};
 use super::super::{Action, Answer};
 use super::{has_high, merge_notes, open_lines};
@@ -751,12 +751,18 @@ pub(in crate::runner) const RECOMMENDS: &str = "PM recommends:";
 /// put to the maintainer
 pub(in crate::runner) const SAYS: &str = "PM says:";
 
-// The project manager's pick and why, where it gave any:
+// The project manager's latest word on the ruling, where it gave any:
 // `**Project manager: A**. Its why.`, or by name on a card whose table names
-// its options instead of lettering them, as `**Project manager: Merge**`.
+// its options instead of lettering them, as `**Project manager: Merge**`. A
+// parked item names the fix it waits on, and a pick after it replaces that.
 fn pm_words(ruling: &Ruling, choices: &[Choice]) -> Option<String> {
-    let says = after_last(&ruling.question, SAYS).map(super::inert);
-    let picked = after_last(&ruling.question, RECOMMENDS).and_then(|pick| {
+    let question = ruling.question.as_str();
+    let says = after_last(question, SAYS).map(super::inert);
+    let parks = match parks_last(question) {
+        true => parked(question),
+        false => None,
+    };
+    let picked = after_last(question, RECOMMENDS).and_then(|pick| {
         let plain = |text: &str| text.trim().trim_matches('`').to_lowercase();
         let at = choices.iter().position(|c| plain(&c.name) == plain(pick))?;
         Some(match Wants::of(&ruling.kind) {
@@ -764,12 +770,32 @@ fn pm_words(ruling: &Ruling, choices: &[Choice]) -> Option<String> {
             _ => choices[at].name.clone(),
         })
     });
-    Some(match (picked, says) {
-        (None, None) => return None,
-        (Some(key), None) => format!("**Project manager: {key}**"),
-        (Some(key), Some(words)) => format!("**Project manager: {key}**. {words}"),
-        (None, Some(words)) => format!("**Project manager**: {words}"),
+    Some(match (parks, picked, says) {
+        (Some((fix, Some(words))), _, _) => format!("**{PARKS}{fix}** {words}"),
+        (Some((fix, None)), _, _) => format!("**{PARKS}{fix}**"),
+        (None, Some(key), None) => format!("**Project manager: {key}**"),
+        (None, Some(key), Some(words)) => format!("**Project manager: {key}**. {words}"),
+        (None, None, Some(words)) => format!("**Project manager**: {words}"),
+        (None, None, None) => return None,
     })
+}
+
+// Whether the park line is later in the question than the pick line, so the
+// park, and not an earlier pick, is the project manager's latest word
+fn parks_last(question: &str) -> bool {
+    match (question.rfind(PARKS), question.rfind(RECOMMENDS)) {
+        (Some(park), Some(pick)) => park >= pick,
+        (Some(_), None) => true,
+        (None, _) => false,
+    }
+}
+
+// A parked item: the fix its park line names, and its why where that line
+// gives one. The park line holds both, on one line.
+fn parked(question: &str) -> Option<(&str, Option<String>)> {
+    let line = after_last(question, PARKS)?;
+    let fix = line.split(' ').next()?;
+    Some((fix, after_last(line, SAYS).map(super::inert)))
 }
 
 // The rest of the line after the last `lead` in `text`

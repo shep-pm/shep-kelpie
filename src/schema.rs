@@ -204,7 +204,6 @@ mod tests {
     // so each key is counted.
     fn examples_with_every_key() -> Vec<String> {
         let text = include_str!("../settings.example.toml")
-            .replace("issues = \"ask\"\n", "")
             .replace("build_env = {}", "build_env = { BUN = \"bun\" }")
             .replace(
                 "# instructions_file = \"~/.shep/kelpie/shep/worker-instructions.md\"",
@@ -234,8 +233,8 @@ mod tests {
                 "[app.dogs.kelpie.contributions]\npick = \"off\"\nreviewers = [\"defect-hunter\"]\nsecurity_reviewer = \"security-reviewer\"\nquiet_days = 7\nnudge_days = 3\n",
             )
             .replace(
-                "# [app.dogs.kelpie.triage]\n# pick = \"off\"\n# hand_ready = false\n# wait_days = 7\n# max_questions = 10\n# agent = \"triager\"\n# per_day = 10\n# per_author_per_day = 2\n# min_account_days = 30\n# max_body_kb = 20\n",
-                "[app.dogs.kelpie.triage]\npick = \"off\"\nhand_ready = false\nwait_days = 7\nmax_questions = 10\nagent = \"triager\"\nper_day = 10\nper_author_per_day = 2\nmin_account_days = 30\nmax_body_kb = 20\n",
+                "# [app.dogs.kelpie.triage]\n# pick = \"off\"\n# wait_days = 7\n# max_questions = 10\n# agent = \"triager\"\n# per_day = 10\n# per_author_per_day = 2\n# min_account_days = 30\n# max_body_kb = 20\n",
+                "[app.dogs.kelpie.triage]\npick = \"off\"\nwait_days = 7\nmax_questions = 10\nagent = \"triager\"\nper_day = 10\nper_author_per_day = 2\nmin_account_days = 30\nmax_body_kb = 20\n",
             )
             .replace(
                 "# authors = { \"qc-tester\"",
@@ -380,14 +379,6 @@ mod tests {
         );
         assert_eq!(fix_attempts["maximum"], u32::MAX);
         assert!(defs["EndpointUrl"]["pattern"].is_string());
-    }
-
-    #[test]
-    fn git_issues_is_deprecated_and_takes_any_value() {
-        let root = schema();
-        let key = &root["$defs"]["Git"]["properties"]["issues"];
-        assert_eq!(key["deprecated"], true, "{key}");
-        assert!(resolve(&root, key).get("type").is_none(), "{key}");
     }
 
     // Lookout groups a sheep's rows by table, under each table's title.
