@@ -33,6 +33,8 @@ pub enum At {
     MergeQueue,
     // The read of the end of one run's failed log, which a wake makes for each workflow red on `main`
     RunLogTail,
+    // The read of one run's log, which a wake makes for a failed run and for a log the project manager asked for
+    RunLog,
     // The read of an issue's comments, which a worker's first turn makes
     IssueComments,
     // The read of the login's rate limits, which a pass makes once a minute
@@ -161,6 +163,11 @@ impl FakeForge {
     /// Holds the next read of a workflow run's log tail open, and lets every other call through
     pub fn hold_next_run_log_tail_read(&self) -> HeldCall {
         self.hold_open(At::RunLogTail)
+    }
+
+    /// Holds the next read of one run's log open, and lets every other call through
+    pub fn hold_next_run_log_read(&self) -> HeldCall {
+        self.hold_open(At::RunLog)
     }
 
     /// Holds the next read of an issue's comments open, and lets every other call through

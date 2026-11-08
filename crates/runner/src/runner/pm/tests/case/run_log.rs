@@ -7,7 +7,8 @@ use super::super::rulings::{answered, asking, left_to_pm, settled};
 use super::super::{answered as reported, pm_seen, question, step_until};
 use super::rig::{BODY, case, head_run, red, wake};
 use crate::ports::{LogPart, Role};
-use crate::runner::{Runner, StepReport};
+use crate::runner::flight::advance;
+use crate::runner::{Pass, Runner, StepReport};
 use crate::test::{Rig, Scripted, Seen};
 
 /// Run 102 is green on the head, with a whole log of `GREEN-LOG-LINE`
@@ -227,5 +228,42 @@ fn a_wake_with_no_new_log_to_ask_for_lets_the_ruling_go_to_the_maintainer() {
     assert_eq!(put_to_it(&rig), 2, "asked again once, for the one log");
     assert!(asking(&rig).is_some(), "the maintainer is asked at last");
     assert_eq!(answered(&rig), None);
+    assert_eq!(rig.forge.run_log_reads(102), 1);
+}
+
+#[test]
+fn the_log_is_read_with_the_lock_let_go() {
+    let (rig, runner) = with_green_run("case-green-off-lock");
+    wake_saying(&rig, &runner, ASK);
+    rig.claude
+        .script_for(Role::Pm, [Scripted::Say(super::rig::NOTHING)]);
+    let read = rig.forge.hold_next_run_log_read();
+
+    let (meanwhile, pass) = rig.during_read(
+        read,
+        || advance(&runner),
+        || rig.ask(&runner, "status", None),
+    );
+
+    let status = meanwhile.expect("the trigger waited for the lock the read held");
+    assert!(status.is_object(), "{status}");
+    assert!(matches!(pass, Ok(Pass::Started)), "{pass:?}");
+    assert!(case(&rig, 7).unwrap().contains("> GREEN-LOG-LINE"));
+}
+
+#[test]
+fn a_log_that_could_not_be_read_is_not_asked_for_again() {
+    let (rig, runner) = with_green_run("case-green-unread");
+    rig.forge.set_run_log_error(102, "GitHub is down");
+    wake_saying(&rig, &runner, ASK);
+    next_wake(&rig, &runner);
+
+    let case = case(&rig, 7).unwrap();
+    assert!(case.contains("could not be read just now"), "{case}");
+    assert!(case.contains("It is not asked for again."), "{case}");
+    let dropped = wake_saying(&rig, &runner, ASK);
+
+    assert_eq!(dropped.len(), 1, "{dropped:?}");
+    assert!(dropped[0].contains("could not be"), "{dropped:?}");
     assert_eq!(rig.forge.run_log_reads(102), 1);
 }

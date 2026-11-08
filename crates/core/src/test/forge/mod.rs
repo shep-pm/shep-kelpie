@@ -783,6 +783,7 @@ impl Forge for FakeForge {
 
     fn run_log(&self, _repo: &ForgeSlug, run: u64, part: LogPart) -> Result<String, ForgeError> {
         self.ask()?;
+        self.wait_if_held(held::At::RunLog);
         self.run_log_of(run, part).map_err(ForgeError::Failed)
     }
 

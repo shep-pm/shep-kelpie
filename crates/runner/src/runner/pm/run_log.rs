@@ -29,6 +29,11 @@ impl Runner {
         let open = listed
             .map(|r| (ticket, run, r.attempt))
             .find(|key| !self.pm.run_logs.contains_key(key));
+        if open.is_some_and(|key| self.pm.run_log_tried.contains(&key)) {
+            return Err(format!(
+                "run_log {named} run {run}: its log was read once and could not be"
+            ));
+        }
         let Some(key) = open else {
             return Err(format!(
                 "run_log {named} run {run}: its case already holds the log"

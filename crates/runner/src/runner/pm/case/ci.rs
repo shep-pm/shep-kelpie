@@ -1,4 +1,5 @@
-//! A case's CI part: every run on the pull request's head, then the whole log of each that failed
+//! A case's CI part: every run on the pull request's head, then the whole log of each that
+//! failed and each the project manager asked for
 //!
 //! A completed run's log does not change, so the runner keeps each one it read
 //! in memory, by item, run and attempt, and a wake reads only the logs it lacks. The
@@ -135,13 +136,19 @@ impl Runner {
                 plain(&run.workflow),
                 run.run
             );
-            self.run_log_part(out, ticket, (run.run, run.attempt), ci);
+            self.run_log_part(out, ticket, (run.run, run.attempt), (ci, ended_red(run)));
         }
         None
     }
 
-    // One failed run's log, quoted, or what became of it
-    fn run_log_part(&self, out: &mut String, ticket: TicketId, key: (u64, u32), ci: &CiReads) {
+    // One run's log, quoted, or what became of it
+    fn run_log_part(
+        &self,
+        out: &mut String,
+        ticket: TicketId,
+        key: (u64, u32),
+        (ci, red): (&CiReads, bool),
+    ) {
         let run = key.0;
         let read = match (
             self.pm.run_logs.get(&(ticket, key.0, key.1)),
@@ -166,10 +173,14 @@ impl Runner {
                 );
             }
             Err(e) => {
+                // A failed run's log is read again at the next wake, and a log asked for is not.
+                let again = match red {
+                    true => "It is asked for again at the next wake.",
+                    false => "It is not asked for again.",
+                };
                 let _ = writeln!(
                     out,
-                    "The log of run {run} could not be read just now ({}). It is asked for again \
-                     at the next wake.",
+                    "The log of run {run} could not be read just now ({}). {again}",
                     cause(e)
                 );
             }

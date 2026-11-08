@@ -213,6 +213,8 @@ pub(super) struct Desk {
     ci_runs: BTreeMap<TicketId, Vec<HeadRun>>,
     // Each run attempt whose log it asked for, which the next case reads
     run_log_asks: Vec<(TicketId, u64, u32)>,
+    // Each run attempt a case read the log of for it, so a log is read once however it came out
+    run_log_tried: BTreeSet<(TicketId, u64, u32)>,
 }
 
 impl Desk {
