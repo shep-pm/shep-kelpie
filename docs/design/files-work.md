@@ -4,8 +4,8 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 
 | file | covers | touch (`core/`: `crates/core/src/`, `dog/`: `crates/dog/src/dog/`, `adapters/`: `crates/adapters/src/`, `runner/`: `crates/runner/src/runner/`) |
 |---|---|---|
-| work.md | projects, slots, issues | `src/{issues/check,flock/verbs}.rs`, `src/flock/control/tell_all.rs`, `runner/slots.rs`, `core/board/check.rs` |
-| runner-start-stop.md | `start`, `pause`, `finish`: the runner's sheep | `src/flock/{verbs,control/}` |
+| work.md | projects, slots, issues | `src/issues/check.rs`, `src/flock/{verbs,add,control}/`, `src/flock/control/tell_all.rs`, `runner/slots.rs`, `core/board/check.rs` |
+| runner-start-stop.md | `start`, `pause`, `finish`: the runner's sheep | `src/flock/{verbs,control}/` |
 | board.md | board, items, adoption | `core/board/`, `runner/{dispatch,adopt}/` |
 | pm.md | the project manager | `runner/pm/`, `core/state/pm_holds.rs` |
 | pm-pick.md | its `pick`: the list, the entry object, holds | `runner/pm/picked.rs`, `core/state/pm_holds.rs` |
