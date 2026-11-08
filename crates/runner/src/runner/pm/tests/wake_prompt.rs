@@ -447,6 +447,14 @@ fn a_question_wake_lets_it_answer_what_it_can_argue() {
         !prompt.contains("the issue, the docs or an ADR settle it"),
         "the docs settling it is no longer the bar: {prompt}"
     );
+    assert!(
+        prompt.contains("Answer each one the wake carried, in its own `answer` entry or as a list"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("at most 300 characters>\"} or a list of them"),
+        "{prompt}"
+    );
 }
 
 #[test]
