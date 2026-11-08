@@ -2,18 +2,19 @@
 //! stand-ins: a passing issue is ready with no triage call, and only a failing
 //! one reaches the triager
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
 use super::checks::CHECK_TRIES;
 use super::pick_tests::{MAINTAINER, issue, list, rig_with, triaging};
+use super::poll_read::read_triage;
 use super::ready_tests::said;
 use super::research_tests::{APP, WORDS, calls, moves, pump, reply, under};
 use crate::board::{ReadyIssue, Skip, SubIssues, check};
 use crate::github::ApiError;
 use crate::ports::Timestamp;
-use crate::ports::{OpenIssue, Role};
+use crate::ports::{OpenIssue, RegistryError, Role};
 use crate::runner::slots_tests::dispatched;
 use crate::runner::{Pass, Runner, advance, step};
 use crate::state::{CheckTriage, IssueCheck};
@@ -776,4 +777,117 @@ fn a_local_ticket_naming_a_fenced_path_is_skipped_and_the_board_goes_on() {
     };
     assert_eq!(*issue, "k1".parse().unwrap());
     assert!(error.contains(".claude/skills/x/SKILL.md"), "{error}");
+}
+
+// `PASSING` with a `Needs:` line naming `packages`, each as the line writes it
+fn needing(packages: &[&str]) -> String {
+    let named: Vec<String> = packages.iter().map(|p| format!("`{p}`")).collect();
+    format!("Needs: {}\n\n{PASSING}", named.join(", "))
+}
+
+const FOO: &str = "crates:foo@1.2.0";
+const BAR: &str = "npm:bar@3.0.0";
+
+// A rig whose board holds issue 30 ready, needing `packages`, with the poll yet to read
+fn waiting_on(packages: &[&str]) -> (Rig, Mutex<Runner>) {
+    let rig = rig_with("pick = \"off\"");
+    ready_on_the_board(&rig, &needing(packages), &PASSING_LABELS);
+    let runner = rig.open().unwrap();
+    (rig, runner)
+}
+
+// Reads the triage poll once more, a look after the last
+fn polled(rig: &Rig, runner: &Mutex<Runner>) {
+    rig.next_look();
+    read_triage(runner).unwrap();
+}
+
+#[test]
+fn a_ready_issue_needing_an_unpublished_package_is_held() {
+    let (rig, runner) = waiting_on(&[FOO]);
+
+    assert_eq!(step(&runner).unwrap(), None, "nothing starts");
+
+    let skipped = rig.ask(&runner, "status", None)["skipped"].clone();
+    assert_eq!(skipped[0]["reason"], "unpublished", "{skipped}");
+    assert_eq!(skipped[0]["issue"], "30", "{skipped}");
+    assert_eq!(skipped[0]["package"], FOO, "{skipped}");
+    // Nothing in the issue is wrong, so it is told nothing and sent to no triager
+    assert_eq!(calls(&rig, Role::Triager).len(), 0);
+    assert_eq!(moves(&rig), Vec::<String>::new());
+}
+
+#[test]
+fn it_goes_on_by_itself_once_the_package_is_published() {
+    let (rig, runner) = waiting_on(&[FOO]);
+    assert_eq!(step(&runner).unwrap(), None, "held");
+
+    rig.registry.publish(FOO);
+    rig.next_look();
+    let (started, _) = dispatched(step(&runner).unwrap());
+
+    assert_eq!(started.github(), Some(30));
+}
+
+#[test]
+fn a_registry_that_cannot_answer_holds_nothing_and_says_so_once() {
+    let (rig, runner) = waiting_on(&[FOO]);
+    rig.registry.fails(RegistryError::Unreachable(7));
+
+    read_triage(&runner).unwrap();
+    polled(&rig, &runner);
+    polled(&rig, &runner);
+
+    let notes = runner.lock().unwrap().take_notes();
+    let said: Vec<&String> = notes.iter().filter(|n| n.contains(FOO)).collect();
+    assert_eq!(said.len(), 1, "{notes:?}");
+    assert!(
+        said[0].contains("curl could not reach the registry"),
+        "{said:?}"
+    );
+    assert_eq!(
+        rig.registry.asked(),
+        [FOO, FOO, FOO],
+        "it asked at every poll"
+    );
+    let (started, _) = dispatched(step(&runner).unwrap());
+    assert_eq!(started.github(), Some(30), "nothing held it");
+}
+
+#[test]
+fn a_published_package_is_not_asked_of_twice() {
+    let (rig, runner) = waiting_on(&[FOO, BAR]);
+    rig.registry.publish(FOO);
+
+    read_triage(&runner).unwrap();
+    polled(&rig, &runner);
+
+    // The published one once, the one not found at each poll
+    assert_eq!(rig.registry.asked(), [FOO, BAR, BAR]);
+    assert_eq!(step(&runner).unwrap(), None, "still held by the other");
+    let skipped = rig.ask(&runner, "status", None)["skipped"].clone();
+    assert_eq!(skipped[0]["package"], BAR, "{skipped}");
+}
+
+#[test]
+fn the_registry_is_asked_with_the_lock_let_go() {
+    let (rig, runner) = waiting_on(&[FOO]);
+    let runner = Arc::new(runner);
+    let held = Arc::new(Mutex::new(Vec::new()));
+    {
+        let (runner, held) = (Arc::downgrade(&runner), Arc::clone(&held));
+        rig.registry.watch(move || {
+            let runner = runner.upgrade().expect("the runner is open");
+            // A lock the read holds is a lock a trigger waits on
+            held.lock().unwrap().push(runner.try_lock().is_err());
+        });
+    }
+
+    read_triage(&runner).unwrap();
+
+    assert_eq!(
+        *held.lock().unwrap(),
+        [false],
+        "the read was made under the lock"
+    );
 }

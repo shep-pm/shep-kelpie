@@ -1,0 +1,7 @@
+# Registry reads
+
+- On 2026-11-07, over `curl` from the maintainer's Mac, each public registry answered a read of one package version in one GET, with no redirect and no user agent. The recordings are `fixtures/registry-*`, and `CurlRegistry` (`crates/adapters/src/adapters/registry.rs`) reads them.
+- The crates.io sparse index holds one file for a crate at `https://index.crates.io/<shard>/<name>`, one JSON object a line, one line a version, each with `vers`, `yanked` and `cksum`. The shard is `1`, `2`, `3/<first letter>` or `<first two>/<next two>` for the name's length, the name lowered. A crate it does not hold answers HTTP 404 with an S3 `NoSuchKey` XML body. A listed version can be yanked, and the adapter counts it published.
+- npm answers `https://registry.npmjs.org/<name>/<version>` with that version's manifest (HTTP 200, `version` the one asked), or HTTP 404 with a JSON string such as `"version not found: 99.0.0"`. A scoped name's `/` goes as `%2f`: `@types%2fms`.
+- PyPI answers `https://pypi.org/pypi/<name>/<version>/json` with HTTP 200 and `info.version` the one asked, or HTTP 404 with `{"message": "Not Found"}`.
+- Not measured: a private registry's answer, which the public hosts cannot give. The adapter takes any status but 200 and 404 as a failed read.
