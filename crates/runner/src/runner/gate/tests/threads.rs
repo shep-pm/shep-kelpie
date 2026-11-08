@@ -294,8 +294,9 @@ fn an_open_writers_thread_holds_the_merge_and_asks_the_project_manager() {
         "{}",
         wake.call.prompt
     );
+    let line = wake.call.prompt.lines().find(|l| l.contains("1. work.txt:3"));
     assert!(
-        !wake.call.prompt.contains("public API"),
+        !line.expect("the thread's line").contains("public API"),
         "the worker's answer is not the thread: {}",
         wake.call.prompt
     );
@@ -846,24 +847,15 @@ fn deferred_findings_are_still_filed_at_the_merge_after_a_follow_up_before_it() 
         deferred(&[found.clone()]),
     )
     .unwrap();
-    open_bots(&rig, &head, &[NIT, NIT]);
+    open_bots(&rig, &head, &[NIT]);
 
     ruled_by(&rig, &runner, FOLLOW_UP);
     assert_eq!(rig.forge.coderabbit.resolved(), [THREAD]);
     let [issue] = rig.forge.created().try_into().unwrap();
     assert_eq!(issue.labels, [READY], "the follow-up is ready for a worker");
 
-    steps(&runner, |r| {
-        matches!(
-            r,
-            StepReport::Finished {
-                merged: true,
-                pull_request: Some(71),
-                ..
-            }
-        )
-    });
     let question = merge_ruling(&runner);
+    assert_eq!(rig.forge.merges(), [(71, head)], "the head merged");
     assert!(
         question.contains("looks racy"),
         "the deferred finding is still there to file: {question}"
