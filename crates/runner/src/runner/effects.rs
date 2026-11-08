@@ -7,9 +7,10 @@
 //! round roughly costs, read from the work item's own calls. An option with
 //! no effect worded keeps the phrase its kind always had.
 
-use super::Runner;
+use super::pm::stalled_words;
 use super::ruling::needs_pass;
-use super::voice::phrases;
+use super::voice::{chosen, phrases};
+use super::{Answer, Runner};
 use crate::ports::{Checks, Cost, Role};
 use crate::state::{Ruling, RulingKind, StateError};
 use crate::ticket::TicketId;
@@ -100,6 +101,20 @@ impl Runner {
                    review round.";
         vec![merge, fix.to_owned(), again]
     }
+}
+
+/// The effects of a ruling past the resumes one head earns: the kind's own
+/// phrases, with the resume saying what kelpie knows, that those resumes moved
+/// nothing
+pub(super) fn stalled_effects(kind: &RulingKind) -> Vec<String> {
+    let resume = (chosen(kind, &Answer::Yes)).and_then(|key| ('A'..='Z').position(|k| k == key));
+    (phrases(kind).into_iter())
+        .enumerate()
+        .map(|(option, does)| match Some(option) == resume {
+            true => format!("{does}. {}.", stalled_words()),
+            false => does,
+        })
+        .collect()
 }
 
 // Who read the pull request, where anyone did: the rounds that ran and the

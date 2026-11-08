@@ -17,6 +17,7 @@ use super::act::{WORDS, plain};
 use super::maintainer::held_on;
 use super::requests::Request;
 use super::said::{Released, SaidCall, SaidHow};
+use super::stalled_words;
 use crate::pm_answer::{PmAnswer, WHY_LONGEST, from_fields};
 use crate::ports::ThreadComment;
 use crate::runner::voice::{answer_for, brief, inert, named};
@@ -210,8 +211,8 @@ impl Runner {
         if brief(ruling).1 < 2 {
             return Err("it lists fewer than two options to pick from".into());
         }
-        if self.pm_answered_before(ruling) {
-            return Err("the project manager already answered this failed turn".into());
+        if self.turn_stalled(ruling) {
+            return Err(stalled_words());
         }
         Ok(())
     }

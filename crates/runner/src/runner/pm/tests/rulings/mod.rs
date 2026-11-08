@@ -11,15 +11,14 @@ use crate::ports::{
     AgentError, Checks, Cost, Finding, ForgeError, Role, SessionId, Severity, Timestamp, Usage,
 };
 use crate::runner::flight::advance;
-use crate::runner::ruling::{Answerer, Record};
-use crate::runner::{Answer, CHECKS_SETTLE, Runner, StepReport, step};
+use crate::runner::{CHECKS_SETTLE, Runner, StepReport, step};
 use crate::settings::{Harness, RulingName};
-use crate::state::{Ruling, RulingKind, Stuck};
-use crate::test::ticket;
+use crate::state::{Ruling, RulingKind};
 use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, git};
-use crate::work_item::{Awaited, Phase, Review, ReviewStage, Turn, WorkItem};
+use crate::work_item::{Awaited, Phase, Review, ReviewStage, WorkItem};
 
 mod gated;
+mod stalled;
 
 /// A project whose project manager answers merge rulings, with CI green and
 /// the worker parked on merge ruling 71
@@ -261,36 +260,6 @@ fn a_turn_kelpie_could_not_set_up_goes_to_the_maintainer_even_when_left_to_it() 
         "{comment}"
     );
     assert_eq!(asked(&rig), 0);
-}
-
-#[test]
-fn a_failure_the_project_manager_answered_on_the_item_is_not_left_to_it_again() {
-    let (rig, runner) = super::with_pm("pm-again");
-    let failing = |why: &str| {
-        let kind = RulingKind::from(Stuck::TurnFailed {
-            why: why.into(),
-            phase: Phase::Implement,
-            retry: Turn::Due,
-            restore: Vec::new(),
-            setup: false,
-        });
-        Ruling {
-            issue: Some(ticket(7)),
-            ..Ruling::new(ticket(7), why, kind)
-        }
-    };
-    let mut runner = runner.lock().unwrap();
-    (runner.settings.rulings.pm_decides).insert(RulingName::TurnFailed, true);
-    let answered = failing("harness exited with 1");
-    assert!(runner.pm_answers_ruling(&answered));
-    let record = Record::of(&answered, &Answer::Yes, Timestamp(1), Answerer::Pm);
-    record.append(&rig.paths().rulings).unwrap();
-
-    assert!(
-        !runner.pm_answers_ruling(&failing("harness exited with 1")),
-        "the same failure on the same item is the maintainer's"
-    );
-    assert!(runner.pm_answers_ruling(&failing("harness exited with 2")));
 }
 
 // Reopening a ruling the project manager answered, from its thread

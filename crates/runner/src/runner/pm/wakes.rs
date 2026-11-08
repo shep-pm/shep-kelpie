@@ -14,6 +14,7 @@ use crate::board::briefing::{age, date_time, elapsed, ticket_ref};
 use super::requests;
 use crate::ports::{Finding, PaddockHolder, Timestamp, Wait};
 use crate::runner::Runner;
+use crate::runner::effects::stalled_effects;
 use crate::runner::gate::READ_AGAIN;
 use crate::runner::review_bot::RuledThread;
 use crate::runner::voice::brief;
@@ -582,6 +583,7 @@ impl Runner {
             .map(|r| r.id)
             .collect();
         self.stuck_heads(now, &fresh);
+        self.stalled_cards(now, &fresh);
         let stuck: Vec<Wake> = (now.rulings.iter())
             .filter(|r| fresh.contains(&r.id))
             .filter_map(|ruling| {
@@ -637,6 +639,17 @@ impl Runner {
                 ));
             }
             ruling.stuck_head = head.unwrap_or(None);
+        }
+    }
+
+    /// Words the options of each newly raised ruling that is past the resumes
+    /// its item got at its head, so its card says why it came to the maintainer
+    fn stalled_cards(&mut self, now: &mut ProjectState, fresh: &[TicketId]) {
+        for ruling in &mut now.rulings {
+            if !fresh.contains(&ruling.id) || !self.turn_stalled(ruling) {
+                continue;
+            }
+            ruling.effects = stalled_effects(&ruling.kind);
         }
     }
 

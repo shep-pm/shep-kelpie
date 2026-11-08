@@ -5,9 +5,9 @@
 //! that picks an option is applied at once. It is posted headed "Answered by
 //! the project manager", where a `no <note>` reopens it. An abstention, a
 //! `design` flag or a yes on a merge ruling that warns of its head goes to
-//! the maintainer. The card shows the project manager's pick. An over-budget
-//! ruling the map leaves to the maintainer wakes it the same way, but only
-//! to recommend: its pick is never applied.
+//! the maintainer, as does a timed-out or failed turn past [`STALLED_RESUMES`]
+//! at its head. The card shows the pick. An over-budget ruling the map leaves
+//! to the maintainer wakes it only to recommend.
 
 use std::collections::BTreeMap;
 
@@ -22,15 +22,29 @@ use crate::state::{Ruling, RulingKind, StateError, Stuck};
 use crate::ticket::TicketId;
 use crate::work_item::Phase;
 
+/// The most `turn-timeout` and `turn-failed` rulings the project manager is
+/// given one work item at one head
+///
+/// Each resume can cost a whole turn's ceiling, and a ruling raised again at
+/// the head the last was raised at shows the resumed turn moved nothing. Kelpie
+/// stops asking after this many, whatever `rulings.pm_decides` says, and no
+/// setting changes it.
+pub(in crate::runner) const STALLED_RESUMES: u32 = 2;
+
+/// What kelpie says of a ruling past [`STALLED_RESUMES`] at one head, on its
+/// card and where it refuses to resume it again
+pub(in crate::runner) fn stalled_words() -> String {
+    format!("{STALLED_RESUMES} resumes at this head moved nothing")
+}
+
 impl Runner {
     /// Whether the project manager answers `ruling` for the maintainer
     ///
     /// Its kind is one `rulings.pm_decides` gives it, and it lists two options
     /// or more. A question and a follow-up have wakes of their own. A
     /// contribution's ruling is never the project manager's. A turn kelpie
-    /// could not set up is the maintainer's alone. So is a failed turn the
-    /// project manager already answered on the same work item. In a drain it
-    /// goes to the maintainer.
+    /// could not set up is the maintainer's alone. So is a turn ruling past
+    /// [`STALLED_RESUMES`] at its head. In a drain it goes to the maintainer.
     pub(super) fn pm_answers_ruling(&self, ruling: &Ruling) -> bool {
         let own_wake = matches!(
             ruling.kind,
@@ -50,7 +64,7 @@ impl Runner {
                 .rulings
                 .pm_decides(RulingName::of(&ruling.kind))
             && brief(ruling).1 >= 2;
-        answers && !self.pm_answered_before(ruling)
+        answers && !self.turn_stalled(ruling)
     }
 
     /// Whether the project manager recommends on `ruling` for the maintainer,
@@ -67,11 +81,23 @@ impl Runner {
             && brief(ruling).1 >= 2
     }
 
-    // Whether the project manager already answered the failed turn `ruling`
-    // is, on the same work item. That answer did not settle it.
-    pub(super) fn pm_answered_before(&self, ruling: &Ruling) -> bool {
-        let records = ruling::records(&self.paths.rulings);
-        records.iter().any(|r| r.decided_by_pm(ruling))
+    /// Whether `ruling` is past the resumes the project manager gets at its head
+    ///
+    /// Only a timed-out or failed turn's ruling can be. It walks this item's
+    /// rulings of either kind, newest first, each raised at the head this one
+    /// stands at, and stops at the first raised at another: a head that moved
+    /// starts the count again. Two rulings with no head count with each other,
+    /// since a head git could not read is no proof the worker got further.
+    pub(in crate::runner) fn turn_stalled(&self, ruling: &Ruling) -> bool {
+        if !is_turn(&ruling.kind) {
+            return false;
+        }
+        let answered = (ruling::records(&self.paths.rulings).iter())
+            .rev()
+            .filter(|r| r.issue == ruling.issue && r.kind.is_some_and(on_a_turn))
+            .take_while(|r| r.head == ruling.stuck_head)
+            .count();
+        answered >= usize::try_from(STALLED_RESUMES).unwrap_or(usize::MAX)
     }
 
     /// How many rulings the project manager answered, by kind, for
@@ -336,6 +362,19 @@ impl Runner {
             )),
         }
     }
+}
+
+// Whether `kind` is a timed-out or failed turn's
+fn is_turn(kind: &RulingKind) -> bool {
+    matches!(
+        kind,
+        RulingKind::Stuck(Stuck::TurnTimeout { .. } | Stuck::TurnFailed { .. })
+    )
+}
+
+// Whether `rulings.jsonl` names `name` as one of those two kinds
+fn on_a_turn(name: RulingName) -> bool {
+    matches!(name, RulingName::TurnTimeout | RulingName::TurnFailed)
 }
 
 // Whether `ruling` is a merge ruling the gate raised with a warning on its

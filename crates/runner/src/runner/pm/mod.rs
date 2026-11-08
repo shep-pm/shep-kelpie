@@ -58,6 +58,7 @@ pub(super) use ci_logs::wake_off_lock;
 pub(super) use maintainer::held_line;
 pub use maintainer::{PmAttaching, PmError, PmHeld, PmStatus, Settled};
 pub(super) use picked::Picked;
+pub(in crate::runner) use rulings::stalled_words;
 pub(super) use said::{Released, SaidHow};
 
 use answer::Action;

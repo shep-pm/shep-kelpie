@@ -11,6 +11,7 @@
 
 use super::answer::{Action, Answer, FixHow, Unstick};
 use super::red::Settled;
+use super::stalled_words;
 use super::{Pick, Picked, StuckState, Wake, stuck_on};
 use crate::board::briefing::ticket_ref;
 use crate::runner::ruling::PARKS;
@@ -368,6 +369,12 @@ impl Runner {
                 return Ok(Err(format!(
                     "retry {named}: kelpie could not set up that turn, and the fix is on this \
                      machine, so another try meets the same fault"
+                )));
+            }
+            if self.turn_stalled(ruling) {
+                return Ok(Err(format!(
+                    "retry {named}: {}, so only the maintainer can ask for another",
+                    stalled_words()
                 )));
             }
             let (answer, said) = match ruling.kind {
