@@ -60,7 +60,11 @@ impl Runner {
         queued: &[Queued],
         review: Option<&Review>,
     ) -> Result<Option<Begin>, StateError> {
+        let now = self.ports.clock.now();
         if !queued.is_empty() && queued.iter().all(|check| check.held) {
+            if !super::settled(since, now) {
+                return Ok(None);
+            }
             let remote = self.remote.as_str();
             let held = queued
                 .iter()
@@ -84,7 +88,6 @@ impl Runner {
         }
         let active: Vec<Queued> = queued.iter().filter(|check| !check.held).cloned().collect();
         let queued = active.as_slice();
-        let now = self.ports.clock.now();
         let cap = u64::from(self.settings.ci.queued_minutes.get()) * 60;
         if now.0.saturating_sub(since.0) < cap {
             return Ok(None);
