@@ -6,8 +6,8 @@
 //! read holds nothing. A running turn is never interrupted: the pacer is asked
 //! only between turns.
 //!
-//! [`window`]'s 50% mark is what the agent board's waits read. `status` and
-//! the plan gauges show each window as the pacer last read it.
+//! The agent board's waits read the same spent rule. `status` and the plan
+//! gauges show each window as the pacer last read it.
 
 use serde::{Deserialize, Serialize};
 
@@ -19,9 +19,6 @@ pub const DAY_SECS: u64 = 86_400;
 
 /// Days in the weekly window
 pub const WEEK_DAYS: u64 = 7;
-
-/// Percent of the 5-hour window at which no further turn starts
-pub const PARK_AT_PCT: u32 = 50;
 
 /// Percent of a window at which it is spent, where a turn fails at once
 pub const SPENT_PCT: u32 = 100;
@@ -113,29 +110,8 @@ pub fn assess(account: Account, now: Timestamp, usage: &Utilization) -> Assessme
 
     Assessment {
         reading: Some(reading),
-        window: window(account, usage),
+        window: spent(account, usage),
     }
-}
-
-/// The hold on every turn while `account`'s 5-hour window is past [`PARK_AT_PCT`] or its
-/// week is spent, until the window or the week resets, the longer of the two when both apply
-///
-/// The agent board's waits read this mark; a runner holds a turn only at [`SPENT_PCT`].
-pub fn window(account: Account, usage: &Utilization) -> Option<Hold> {
-    let session = (usage.session.used_pct >= PARK_AT_PCT).then(|| Hold {
-        kind: HoldKind::Window,
-        reason: format!(
-            "{} 5-hour window is at {}%, past the {PARK_AT_PCT}% mark, \
-             so no turn starts until it resets",
-            named(account, "the", "Codex's"),
-            usage.session.used_pct
-        ),
-        until: usage.session.resets_at,
-    });
-    [session, spent_week(account, &usage.week)]
-        .into_iter()
-        .flatten()
-        .max_by_key(|hold| hold.until)
 }
 
 /// The hold on every turn while `account`'s 5-hour window or `week` is at [`SPENT_PCT`],
@@ -249,14 +225,15 @@ mod tests {
     }
 
     #[test]
-    fn the_window_parks_every_turn_from_half_until_it_resets() {
-        let below = assess(Account::Claude, at(0, 1), &usage(0, 49));
-        assert_eq!(below.hold(), None);
+    fn the_window_holds_every_turn_only_once_spent() {
+        for pct in [49, 50, 99] {
+            let below = assess(Account::Codex, at(0, 1), &usage(0, pct));
+            assert_eq!(below.hold(), None, "{pct}% holds nothing");
+        }
 
-        let parked = assess(Account::Claude, at(0, 1), &usage(0, 50));
-        let hold = parked.hold().unwrap();
-        assert_eq!(hold.kind, HoldKind::Window);
-        assert_eq!(hold.until, at(0, 3));
+        let spent = assess(Account::Codex, at(0, 1), &usage(0, 100));
+        let hold = spent.hold().unwrap();
+        assert_eq!((hold.kind, hold.until), (HoldKind::Window, at(0, 3)));
     }
 
     #[test]
