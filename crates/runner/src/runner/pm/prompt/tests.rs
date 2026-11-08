@@ -569,7 +569,10 @@ fn the_prompt_asks_for_an_agent_on_every_pick_and_a_hold_for_one_that_should_wai
         "{text}"
     );
     assert!(
-        text.contains("kelpie takes the cheapest available agent that fits"),
+        text.contains(
+            "kelpie takes the cheapest available agent that fits, and never one the Agents \
+             section marks billed to the API"
+        ),
         "{text}"
     );
     assert!(

@@ -1,6 +1,6 @@
 use super::*;
 use crate::agents::{Role, Tier};
-use crate::lease::door::Pick;
+use crate::lease::door::{Budget, Pick};
 use crate::pacer::Reading;
 use crate::ports::Window;
 use crate::settings::AgentName;
@@ -464,21 +464,24 @@ fn the_agents_section_lists_the_implementers_then_the_reviewers_with_tier_kinds_
         "\n\
          Implementers by name, then reviewers in their order. You name each work item's \
          agent from this list. Kelpie takes the cheapest available agent that fits when you \
-         name none, and an `agent:<name>!` label pins. An implementer's line shows when it can \
-         start and what it typically takes and costs, and an agent marked out cannot start a \
-         work item before the time shown. To have a work item wait for an agent, hold it. \
-         A ready issue whose line says `unblocks` holds up other work, so it is worth the \
-         fastest agent that can start. A plan agent costs no dollars, but each work item \
-         spends a share of its week's limit, and a share left at the reset is lost, so a \
-         plan's week is a budget to spend by its reset, not to save. Read the pace and where \
-         it lands, not the share left. On course to land under 100%, run more work items at \
-         once and give work that holds up other work to the faster plan agent. On course for \
-         over 100%, lean on local models. A small share left with little time left is no \
-         reason to slow down. The pace never reorders the agents: spend a local model that \
-         can start first, then API credit while the API is not held, then a plan, and the \
-         pace says only how far down that order to reach when the cheaper ones are busy. The \
-         ready queue is not the week's work, since the maintainer files issues all week, so \
-         a short queue is no reason to spend faster.\n\
+         name none, and an `agent:<name>!` label pins. An implementer's line shows when it \
+         can start, what it typically takes and costs, and which budget its calls draw from, \
+         and an agent marked out cannot start a work item before the time shown. To have a \
+         work item wait for an agent, hold it. A ready issue whose line says `unblocks` holds \
+         up other work, so it is worth the fastest agent that can start. Each budget has its \
+         own rule. A local model's power is already paid for: spend one first when it can \
+         take the item. A plan agent costs no dollars, but each work item spends a share of \
+         its week's limit, and a share left at the reset is lost, so a plan's week is a \
+         budget to spend by its reset, not to save. Read the pace and where it lands, not the \
+         share left. On course to land under 100%, run more work items at once and give work \
+         that holds up other work to the faster plan agent. On course for over 100%, lean on \
+         local models. A small share left with little time left is no reason to slow down. \
+         Spend the API credit and the plan week to their pace, the one further behind its \
+         reset first, since both are lost at their reset. Billed API is overflow: kelpie \
+         starts an agent billed to the API only when you name it, an `agent:<name>!` label \
+         pins it, or every other budget is out or held. The ready queue is not the week's \
+         work, since the maintainer files issues all week, so a short queue is no reason to \
+         spend faster.\n\
          \n\
          - opus-high (implementer): heavy tier, kinds design, migration; \
          Work that needs the strongest agent.; starts now, typically 1h30m, about $4.25\n\
@@ -538,6 +541,85 @@ fn an_agent_line_shows_when_it_can_start_and_what_it_typically_takes_and_costs()
     ] {
         assert!(text.contains(line), "{line}\n{text}");
     }
+}
+
+#[test]
+fn each_implementer_line_names_its_budget() {
+    let line = |name: &str, budget: Option<Budget>, cost_usd: Option<f64>| AgentLine {
+        reading: Some(Pick {
+            budget,
+            ..reads(0, 600, cost_usd)
+        }),
+        ..agent(
+            name,
+            Role::Implementer,
+            (Tier::Standard, None, Some("Work.")),
+        )
+    };
+    let board = Briefing {
+        agents: vec![
+            line("local", Some(Budget::Local), Some(0.5)),
+            line("unmetered", Some(Budget::Local), None),
+            line("plan", Some(Budget::Plan), Some(3.0)),
+            line("credit", Some(Budget::Credit), Some(1.0)),
+            line("billed", Some(Budget::Billed), Some(2.0)),
+            line("older", None, Some(4.0)),
+            line("older-unpriced", None, None),
+        ],
+        ..briefing(Vec::new())
+    };
+    let text = render(&board);
+    for line in [
+        "- local (implementer): standard tier, every kind; Work.; starts now, typically 10m, \
+         about $0.50 in power\n",
+        "- unmetered (implementer): standard tier, every kind; Work.; starts now, typically \
+         10m, power not metered\n",
+        "- plan (implementer): standard tier, every kind; Work.; starts now, typically 10m, \
+         about $3.00 at list price, from the plan week\n",
+        "- credit (implementer): standard tier, every kind; Work.; starts now, typically 10m, \
+         about $1.00 from the API credit\n",
+        "- billed (implementer): standard tier, every kind; Work.; starts now, typically 10m, \
+         about $2.00 billed to the API\n",
+        "- older (implementer): standard tier, every kind; Work.; starts now, typically 10m, \
+         about $4.00\n",
+        "- older-unpriced (implementer): standard tier, every kind; Work.; starts now, \
+         typically 10m, cost unknown\n",
+    ] {
+        assert!(text.contains(line), "{line}\n{text}");
+    }
+}
+
+#[test]
+fn the_opening_spends_each_budget_by_its_reset() {
+    let board = Briefing {
+        agents: vec![agent(
+            "sonnet-high",
+            Role::Implementer,
+            (Tier::Standard, None, Some("Work.")),
+        )],
+        ..briefing(Vec::new())
+    };
+    let text = render(&board);
+    let opening = text
+        .split("## Agents\n\n")
+        .nth(1)
+        .unwrap()
+        .lines()
+        .next()
+        .unwrap();
+    for rule in [
+        "A local model's power is already paid for: spend one first when it can take the item.",
+        "Spend the API credit and the plan week to their pace, the one further behind its \
+         reset first, since both are lost at their reset.",
+        "kelpie starts an agent billed to the API only when you name it, an `agent:<name>!` \
+         label pins it, or every other budget is out or held.",
+    ] {
+        assert!(opening.contains(rule), "{rule}\n{opening}");
+    }
+    assert!(
+        !text.contains("while the API is not held, then a plan"),
+        "no briefing text keeps the fixed order: {text}"
+    );
 }
 
 #[test]
@@ -818,8 +900,8 @@ fn the_credit_guidance_shows_with_the_credit_line_alone() {
     for part in [
         "bonus on top of the plans",
         "paced across the month so its course aims at 100%",
-        "the order alone decides: a local model that can start, then API credit \
-         while the API is not held, then a plan",
+        "spend a local model that can take the item first, spend the credit and the plan \
+         week while either lasts, and billed API only when the rest are out or held",
     ] {
         assert!(section.contains(part), "{part}\n{section}");
     }

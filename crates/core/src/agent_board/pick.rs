@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 
 use super::Typical;
 use crate::agents::{Fit, Tier};
-use crate::lease::door::Pick;
+use crate::lease::door::{Budget, Pick};
 use crate::settings::{AgentName, DEFAULT_SLACK_MINUTES};
 
 /// What a work item asks of the agent the board picks
@@ -95,6 +95,22 @@ pub fn rank(picks: Vec<Pick>, slack: Option<u32>) -> Vec<Pick> {
     rest.sort_by(|a, b| (a.wait, &a.agent).cmp(&(b.wait, &b.agent)));
     available.extend(rest);
     available
+}
+
+/// `picks`, ranked or not, with every agent billed to the API key left out
+/// unless `pinned`
+///
+/// Only an ask that names an agent, the project manager's pick or the
+/// maintainer's `agent:<name>!` label, may spend real API dollars. A pick from
+/// a dog that names no budget is kept, as any pick an older dog wrote.
+pub fn startable(picks: Vec<Pick>, pinned: bool) -> Vec<Pick> {
+    if pinned {
+        return picks;
+    }
+    picks
+        .into_iter()
+        .filter(|p| p.budget != Some(Budget::Billed))
+        .collect()
 }
 
 // What an agent is ranked on: its cost, or $0 for a local agent with none
@@ -513,5 +529,39 @@ mod tests {
             "it is the cheapest and finishes first, yet waits on the hold"
         );
         assert_eq!(ranked(vec![held_first], None), ["held"]);
+    }
+
+    #[test]
+    fn a_billed_pick_starts_only_when_the_ask_pins_it() {
+        let (local, plan, credit, billed) =
+            (name("local"), name("plan"), name("credit"), name("billed"));
+        let budget = |agent: &AgentName, budget| Pick {
+            budget: Some(budget),
+            ..read(agent, 600, Some(1.0))
+        };
+        let picks = vec![
+            budget(&local, Budget::Local),
+            budget(&plan, Budget::Plan),
+            budget(&credit, Budget::Credit),
+            budget(&billed, Budget::Billed),
+        ];
+        let names =
+            |picks: &[Pick]| -> Vec<String> { picks.iter().map(|p| p.agent.to_string()).collect() };
+        assert_eq!(
+            names(&startable(picks.clone(), false)),
+            ["local", "plan", "credit"],
+            "the ask names no agent, so the billed one is left out and the order stands"
+        );
+        assert_eq!(
+            names(&startable(picks, true)),
+            ["local", "plan", "credit", "billed"],
+            "a named or pinned agent may spend billed API"
+        );
+        let older = read(&name("older"), 600, Some(1.0));
+        assert_eq!(
+            names(&startable(vec![older], false)),
+            ["older"],
+            "a pick from a dog that names no budget is kept"
+        );
     }
 }

@@ -11,7 +11,7 @@ use crate::dog::availability::{self, Availability};
 use crate::dog::door::{Place, say};
 use crate::dog::lock_desk;
 use crate::ipc::ServerWriteHalf;
-use crate::lease::door::{Answer, Ask, Pick, PickAsk};
+use crate::lease::door::{Answer, Ask, Budget, Pick, PickAsk};
 use crate::pacer::{self, Assessment, Hold, HoldKind};
 use crate::ports::Timestamp;
 use crate::settings::{AgentName, Limit};
@@ -103,18 +103,39 @@ fn candidates<'a>(
 }
 
 // What the dog reads of `candidate`, which starts in `wait` seconds. The ask's
-// runner orders it, so the cost, tier, local and held flags all go with it.
-fn read(candidate: &Candidate<'_>, wait: u64) -> Pick {
+// runner orders it, so the cost, tier, local, held and budget all go with it.
+fn read(candidate: &Candidate<'_>, agent: &Agent, wait: u64, api: Budget) -> Pick {
     Pick {
         cost_usd: candidate.typical.cost_usd,
         tier: Some(candidate.fit.tier()),
         local: candidate.local,
         held: candidate.held,
+        budget: Some(budget(agent, candidate.local, api)),
         ..Pick::new(
             candidate.agent.clone(),
             wait.saturating_add(candidate.typical.secs),
             wait,
         )
+    }
+}
+
+// Which budget `agent` draws from: an API agent takes the month's credit while
+// it lasts, and every other agent its model's power or its account's plan week.
+fn budget(agent: &Agent, local: bool, api: Budget) -> Budget {
+    match (bills_api(agent), local) {
+        (true, _) => api,
+        (false, true) => Budget::Local,
+        (false, false) => Budget::Plan,
+    }
+}
+
+// The budget every agent billed to the API key draws from at `now`: the month's
+// credit while it is set and the month's spend is under it, else real dollars.
+fn api_budget(view: &View, now: Timestamp) -> Budget {
+    let credit = view.credit(now);
+    match credit.monthly_usd {
+        Some(monthly) if credit.spent_usd < monthly => Budget::Credit,
+        _ => Budget::Billed,
     }
 }
 
@@ -128,6 +149,7 @@ pub(super) fn answer(
 ) -> Vec<Pick> {
     let kind = ask.kind.as_deref();
     let candidates = candidates(view, shown, &ask.agents, kind, now);
+    let api = api_budget(view, now);
     let item = Item {
         kind,
         tier: ask.tier,
@@ -137,7 +159,7 @@ pub(super) fn answer(
     (agent_board::pick(&item, &candidates).into_iter())
         .filter_map(|choice| {
             let candidate = candidates.iter().find(|c| c.agent == choice.agent)?;
-            Some(read(candidate, choice.wait))
+            Some(read(candidate, booked(view, candidate)?, choice.wait, api))
         })
         .collect()
 }
@@ -151,9 +173,15 @@ pub(super) fn reading(
     now: Timestamp,
 ) -> Vec<Pick> {
     let candidates = candidates(view, shown, names, None, now);
+    let api = api_budget(view, now);
     (candidates.iter())
-        .filter_map(|c| Some(read(c, c.wait?)))
+        .filter_map(|c| Some(read(c, booked(view, c)?, c.wait?, api)))
         .collect()
+}
+
+// The book's `Agent` behind `candidate`, which its own flags come from.
+fn booked<'a>(view: &'a View, candidate: &Candidate<'_>) -> Option<&'a Agent> {
+    view.ranked.get(candidate.agent)
 }
 
 // What `agent` typically takes for an item of `kind`, and one of its turns:

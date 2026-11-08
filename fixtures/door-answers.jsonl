@@ -11,3 +11,4 @@
 {"fits":"yes"}
 {"fits":{"no":{"kind":"fix","worse":"slow","better":"quick","measure":{"merge_rate":{"worse":0.5,"better":1.0}},"suggested_kinds":["docs"]}}}
 {"picks":[{"agent":"sonnet-high","finish":2400,"wait":0,"cost_usd":1.2,"tier":"standard","listed":0},{"agent":"iq3-xxs","finish":6000,"wait":2400,"tier":"light","local":true},{"agent":"billed","finish":2400,"wait":1800,"tier":"standard","held":true}]}
+{"picks":[{"agent":"sonnet-high","finish":2400,"wait":0,"cost_usd":1.2,"tier":"standard","budget":"credit"},{"agent":"iq3-xxs","finish":6000,"wait":2400,"tier":"light","local":true,"budget":"local"},{"agent":"billed","finish":2400,"wait":1800,"tier":"standard","held":true,"budget":"billed"}]}
