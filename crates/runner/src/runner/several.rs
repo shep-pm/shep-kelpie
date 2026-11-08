@@ -9,6 +9,7 @@ use crate::lease::LeaseKind;
 use crate::ports::{CLEAN, Checks, Cost, Usage};
 use crate::runner::coderabbit::HEARD_WAIT;
 use crate::runner::{Runner, StepReport, step};
+use crate::state::{ProjectState, StateStore};
 use crate::test::{Rig, Scripted, Told, ticket};
 use crate::ticket::TicketId;
 
@@ -532,6 +533,46 @@ fn a_dropped_issue_added_with_every_slot_busy_is_queued_and_starts_when_one_free
         [ticket(7)],
         "#7 takes the freed slot"
     );
+}
+
+// A saved finished entry whose issue the forge still lists open.
+fn seven_finished(project: &str) -> (Rig, Mutex<Runner>) {
+    let rig = two_slot_rig(project);
+    let mut state = ProjectState::new();
+    state.finished.push(ticket(7));
+    StateStore::new(rig.paths().state).save(&state).unwrap();
+    running(rig)
+}
+
+#[test]
+fn add_takes_back_an_open_finished_issue_with_every_slot_busy() {
+    let (rig, runner) = seven_finished("swablu");
+    rig.forge.list_ready(7, false);
+    rig.forge.list_ready(8, false);
+    rig.claude.script([Scripted::Say(ASKS)]);
+    assert_eq!(
+        dispatched(step(&runner).unwrap()),
+        (ticket(8), vec![Skip::Finished { issue: ticket(7) }])
+    );
+    rig.ask(&runner, "add", Some("9"));
+    assert_eq!(open_items(&rig, &runner), [8, 9]);
+
+    let status = rig.ask(&runner, "add", Some("7"));
+    assert!(status.get("error").is_none(), "{status}");
+    assert_eq!(status["skipped"], json!([]));
+    assert_eq!(open_items(&rig, &runner), [8, 9]);
+    let state = StateStore::new(rig.paths().state).load().unwrap().unwrap();
+    assert!(state.finished.is_empty());
+    let lines = said(&runner);
+    assert_eq!(
+        lines.iter().filter(|line| line.starts_with("#7 skip-cleared")).count(),
+        1,
+        "{lines:?}"
+    );
+
+    rig.ask(&runner, "drop", Some("9"));
+    assert_eq!(dispatched_in(&runner, 8), [ticket(7)]);
+    assert!(said(&runner).iter().all(|line| !line.starts_with("#7 skip-cleared")));
 }
 
 #[test]
