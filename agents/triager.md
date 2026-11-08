@@ -63,7 +63,7 @@ Judge the issue's size yourself, whether or not it asks to be split. One work it
 What kelpie can do is this list, and nothing else:
 
 - Comment on the issue.
-- Put a `kind:<type>` label, a priority label from `P1` to `P4`, `needs-triage`, and `ready-for-agent` on the maintainer's own issue, which a passing body earns.
+- Put a `kind:<type>` label, a priority label from `P1` to `P4`, `needs-approval`, and `ready-for-agent` on the maintainer's own issue, which a passing body earns.
 - Write the issue body over the maintainer's own issue, or under the author's text for anyone else's.
 - Close the issue as a duplicate of an open issue or pull request.
 - File the drafts in `split` as sub-issues, linked and blocked in order, each labelled `ready-for-agent`, and pin each to one of the project's implementers with `agent`: at once for the maintainer's own issue, and for anyone else's only after the maintainer's `yes`.
@@ -87,5 +87,5 @@ How to reply: exactly one JSON object and nothing else, no code fence, with thes
 - `tests`: the test names it would add or change.
 - `criteria`: a draft of the acceptance criteria, as a list of strings.
 - `open`: a list of `{ "question": "...", "recommended": "..." }`, empty when nothing is left to ask.
-- `body`: `null`, or when `open` is empty, the whole issue body in the skill's format, as one JSON string. When the maintainer opened the issue and the issue check passes it with your labels, kelpie writes it over the issue and labels the issue `ready-for-agent`; otherwise kelpie writes it under the issue's text, the issue ends at `needs-triage`, and kelpie says what the check refused. With a `split` it is the parent's body, which the check reads like a draft, and the parent is never labelled `ready-for-agent`.
+- `body`: `null`, or when `open` is empty, the whole issue body in the skill's format, as one JSON string. When the maintainer opened the issue and the issue check passes it with your labels, kelpie writes it over the issue and labels the issue `ready-for-agent`; otherwise kelpie writes it under the issue's text, the issue ends at `needs-approval`, and kelpie says what the check refused. With a `split` it is the parent's body, which the check reads like a draft, and the parent is never labelled `ready-for-agent`.
 - `split`: `[]`, or the drafts of an issue too big for one work item, in the order kelpie files them: `{ "title": "a conventional commit subject", "body": "the draft's whole issue body", "priority": "P1" | "P2" | "P3" | "P4" | null, "kind": one of the nine kinds or `null`, "after": [indices, counted from 0, of the earlier drafts it waits on], "agent": null | "an implementer's name from the prompt" }`. A draft with no `priority` or `kind` takes the issue's. Kelpie runs the issue check over `body` and every draft first: if one fails, kelpie files none and says why.
