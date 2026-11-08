@@ -138,11 +138,11 @@ impl Runner {
             head: head.to_owned(),
             threads: asking,
         };
-        let asked = self.pm_ask_threads(wake);
-        Ok(Some(self.held_for(match asked {
-            true => Reason::ThreadsAsked,
-            false => Reason::PmDown,
-        })))
+        // The ask goes, or waits out the item's own back-off: either way the
+        // merge waits on the project manager's answer, the project manager
+        // itself being checked for before the talk was read.
+        self.pm_ask_threads(wake);
+        Ok(Some(self.held_for(Reason::ThreadsAsked)))
     }
 
     /// Carries out the project manager's `ruled` calls on `ticket`'s open threads
