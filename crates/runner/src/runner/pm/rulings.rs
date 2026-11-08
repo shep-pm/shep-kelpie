@@ -16,7 +16,7 @@ use crate::pm_answer::PmAnswer;
 use crate::runner::ruling::{self, needs_pass};
 use crate::runner::thread_replies::Settler;
 use crate::runner::voice::{RECOMMENDS, SAYS, answer_for, brief, chosen, named, settled_comment};
-use crate::runner::{Answer, RuleError, Runner};
+use crate::runner::{Action, Answer, RuleError, Runner};
 use crate::settings::RulingName;
 use crate::state::{Ruling, RulingKind, StateError, Stuck};
 use crate::ticket::TicketId;
@@ -162,6 +162,20 @@ impl Runner {
         let Some(ruled) = answer_for(&ruling.kind, key, &note) else {
             return Err(format!("option {key} is not one it lists"));
         };
+        let turn = matches!(
+            ruling.kind,
+            RulingKind::Stuck(Stuck::TurnTimeout { .. } | Stuck::TurnFailed { .. })
+        );
+        if turn && matches!(ruled, Answer::No(_)) {
+            return Err(
+                "stopping a work item is the maintainer's, so its no parks the ruling".into(),
+            );
+        }
+        if answer.ask && !turn {
+            self.notes.push(format!(
+                "ruling {id}: `ask` is for a timed-out or failed turn, so it was ignored"
+            ));
+        }
         if matches!(ruled, Answer::Yes) && warned_head(ruling) {
             return Err(
                 "a yes on a merge ruling that warns of an unread head, an unreviewed \
@@ -175,8 +189,16 @@ impl Runner {
             why: answer.why.clone(),
             unread: false,
         };
+        let resumes = matches!(ruled, Answer::Yes | Answer::Do(Action::Restore));
         if let Err(e) = self.rule_by(id, ruled, by) {
             return Err(format!("its answer could not be applied: {e}"));
+        }
+        if turn
+            && answer.ask
+            && resumes
+            && let Some(issue) = ruling.issue
+        {
+            self.ask_progress_first(issue);
         }
         // An answer about a head that is gone withdraws the ruling instead.
         let withdrawn = (self.threads_told(id)).is_some_and(|t| t.starts_with("is withdrawn"));

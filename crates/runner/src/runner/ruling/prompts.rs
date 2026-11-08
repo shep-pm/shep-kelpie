@@ -1,8 +1,47 @@
 //! What the maintainer's answer says to the worker, as its next turn
 
+use crate::runner::Runner;
 use crate::runner::gate::short;
 use crate::runner::turn::KEEP_BODY_TRUE;
 use crate::skills::split_command;
+use crate::ticket::TicketId;
+use crate::work_item::Turn;
+
+// What the project manager's resume of a timed-out or failed turn says first,
+// where it asks the worker for its progress.
+const PROGRESS_FIRST: &str = "Before you carry on, say in a few lines what you have \
+                              done so far and what is left.";
+
+impl Runner {
+    /// Puts [`PROGRESS_FIRST`] ahead of the turn work item `ticket` takes next
+    ///
+    /// A first turn with no session takes no note, and the log says so.
+    pub(in crate::runner) fn ask_progress_first(&mut self, ticket: TicketId) {
+        let mut next = self.state.clone();
+        let Some(item) = next.item_mut(ticket) else {
+            return;
+        };
+        match &item.turn {
+            Turn::Next { prompt } => {
+                let prompt = noted_prompt(PROGRESS_FIRST, prompt);
+                item.turn = Turn::Next { prompt };
+            }
+            Turn::Due => {
+                self.notes.push(format!(
+                    "work item {ticket}: the worker's session has not begun, so the request for \
+                     its progress was not sent"
+                ));
+                return;
+            }
+            _ => return,
+        }
+        if let Err(e) = self.save(next) {
+            self.notes.push(format!(
+                "cannot save the request for work item {ticket}'s progress: {e}"
+            ));
+        }
+    }
+}
 
 // Asked only when there is a pull request whose body could be stale.
 fn keep_body_true(number: Option<u64>) -> String {
