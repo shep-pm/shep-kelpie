@@ -10,10 +10,12 @@ use std::path::Path;
 
 use crate::ports::{Finding, ForgeError, Severity};
 use crate::runner::Runner;
+use crate::runner::follow_up::{deferred_of, leave_deferred, read_deferred};
 use crate::runner::pm::{Decision, Ruled, Wake};
 use crate::runner::report::{Begin, StepReport};
 use crate::runner::review::findings;
 use crate::runner::review_bot::{RULED_CLOSE, RULED_FOLLOW, RULED_PUSH, RuledThread};
+use crate::runner::talk::COMMENT_REQUEST;
 use crate::runner::turn::KEEP_BODY_TRUE;
 use crate::runner::turn::held_up::Reason;
 use crate::settings::AgentName;
@@ -126,7 +128,12 @@ impl Runner {
         if to_rule.left_out > 0 {
             self.note_threads_left_out(number, to_rule.left_out);
         }
-        let (waiting, asking) = self.split_backs(ticket, &to_rule.threads);
+        let mut threads = to_rule.threads;
+        match read_deferred(&item) {
+            Ok(found) => threads.extend(found.iter().map(ruled_deferred)),
+            Err(reason) => return Ok(Some(self.gate_failed(reason))),
+        }
+        let (waiting, asking) = self.split_backs(ticket, &threads);
         if asking.is_empty() {
             return Ok(match waiting.is_empty() {
                 true => None,
@@ -183,6 +190,13 @@ impl Runner {
         let mut fixes: Vec<&Ruled> = Vec::new();
         let mut failed: Option<String> = None;
         for call in ruled {
+            if call.thread.id.is_empty() {
+                match call.decision {
+                    Decision::Fix => fixes.push(call),
+                    _ => failed = self.settle_deferred(&item, call).err().or(failed),
+                }
+                continue;
+            }
             let id = call.thread.id.as_str();
             let (lead, body, settle) = match call.decision {
                 Decision::Fix => {
@@ -254,8 +268,17 @@ impl Runner {
         thread: &RuledThread,
         why: &str,
     ) -> Result<(String, String), String> {
+        let filed = self.file_finding(item, finding_of(thread, why))?;
+        let lead = format!("{RULED_FOLLOW}{}", filed.shown());
+        Ok(match why.is_empty() {
+            true => (format!("{lead}: "), lead),
+            false => (format!("{lead}: "), format!("{lead}: {why}")),
+        })
+    }
+
+    // Files `finding` as a follow-up issue, and returns the issue it filed or commented on
+    fn file_finding(&mut self, item: &WorkItem, finding: Finding) -> Result<TicketId, String> {
         let ticket = item.issue;
-        let finding = finding_of(thread, why);
         let before = item.follow_ups.clone();
         self.update_of(ticket, |item| {
             item.follow_ups = Some(FollowUps {
@@ -272,34 +295,39 @@ impl Runner {
             }))) => opened.into_iter().chain(commented).next(),
             Ok(Ok(_)) => None,
             // The forge would not take it, and the gate asks the ruling again.
-            Ok(Err(reason)) => return self.unfiled(ticket, before, reason),
+            Ok(Err(reason)) => return Err(self.unfiled(ticket, before, reason)),
             Err(e) => {
-                return self.unfiled(ticket, before, format!("cannot file the follow-up: {e}"));
+                let reason = format!("cannot file the follow-up: {e}");
+                return Err(self.unfiled(ticket, before, reason));
             }
         };
-        let Some(filed) = filed else {
-            return self.unfiled(ticket, before, "the filing filed nothing".to_owned());
-        };
-        let lead = format!("{RULED_FOLLOW}{}", filed.shown());
-        Ok(match why.is_empty() {
-            true => (format!("{lead}: "), lead),
-            false => (format!("{lead}: "), format!("{lead}: {why}")),
-        })
+        filed.ok_or_else(|| self.unfiled(ticket, before, "the filing filed nothing".to_owned()))
     }
 
     // A filing that did not happen takes its finding back off the item, so a later
     // ruling that settles the thread another way does not file it at the merge, and
     // the worker's deferred findings are still read there
-    fn unfiled(
-        &mut self,
-        ticket: TicketId,
-        before: Option<FollowUps>,
-        reason: String,
-    ) -> Result<(String, String), String> {
+    fn unfiled(&mut self, ticket: TicketId, before: Option<FollowUps>, reason: String) -> String {
         match self.update_of(ticket, |item| item.follow_ups = before) {
-            Ok(()) => Err(reason),
-            Err(e) => Err(format!("{reason}; cannot save the item either: {e}")),
+            Ok(()) => reason,
+            Err(e) => format!("{reason}; cannot save the item either: {e}"),
         }
+    }
+
+    // Carries out a ruling on a deferred finding, which has no thread to reply on: a
+    // `follow-up` files it, and it leaves the deferred findings either way, so the merge
+    // does not read it again. A `push-back` has no thread to stay open on and leaves it.
+    fn settle_deferred(&mut self, item: &WorkItem, call: &Ruled) -> Result<(), String> {
+        if call.decision == Decision::PushBack {
+            return Ok(());
+        }
+        let Some(finding) = deferred_of(item, &call.thread)? else {
+            return Ok(());
+        };
+        if call.decision == Decision::FollowUp {
+            self.file_finding(item, finding.clone())?;
+        }
+        leave_deferred(item, &finding)
     }
 
     // One worker turn for every thread the project manager ruled `fix`, sent as a
@@ -314,11 +342,23 @@ impl Runner {
             Phase::Ci { head, .. } => head.clone(),
             _ => None,
         };
-        let findings: Vec<Finding> = ruled
-            .iter()
-            .map(|call| finding_of(&call.thread, &call.why))
-            .collect();
-        let threads: Vec<String> = ruled.iter().map(|call| call.thread.id.clone()).collect();
+        let mut findings: Vec<Finding> = Vec::new();
+        let mut threads: Vec<String> = Vec::new();
+        let mut leaving: Vec<Finding> = Vec::new();
+        for call in ruled {
+            if !call.thread.id.is_empty() {
+                findings.push(finding_of(&call.thread, &call.why));
+                threads.push(call.thread.id.clone());
+            } else if let Some(found) = deferred_of(item, &call.thread)? {
+                // It has no thread to reply on, which its place in the list says.
+                threads.push(format!("{COMMENT_REQUEST}deferred {}", threads.len() + 1));
+                findings.push(found.clone());
+                leaving.push(found);
+            }
+        }
+        if findings.is_empty() {
+            return Ok(());
+        }
         // Every reviewer the project lists counts as having read, so the fix
         // starts no new pass and its end goes back to the gate.
         let ran: Vec<AgentName> = self.lineup.iter().map(|r| r.name.clone()).collect();
@@ -326,6 +366,11 @@ impl Runner {
         let path = findings::findings_path(&build);
         findings::write_findings_file(&build, &path, round, &findings, true)?;
         let prompt = ruled_prompt(number, findings.len(), &path);
+        // Sent for a fix, it is no longer deferred, so the worker's own deferral of it
+        // in this turn is the one the merge files.
+        for found in &leaving {
+            leave_deferred(item, found)?;
+        }
         let deferred_before = findings::deferred(&build)?;
         self.update_of(ticket, move |item| {
             item.record_held(&findings);
@@ -433,6 +478,23 @@ fn ruled_prompt(number: u64, count: usize, path: &Path) -> String {
          numbers they had.",
         path.display()
     )
+}
+
+// What a wake calls the author of a deferred finding, which no one wrote on the forge
+pub(in crate::runner) const DEFERRED_BY: &str = "deferred by the worker";
+
+// `finding`, which the worker deferred, as a thread with no forge id
+fn ruled_deferred(finding: &Finding) -> RuledThread {
+    RuledThread {
+        id: String::new(),
+        path: finding.file.clone(),
+        line: Some(finding.line).filter(|line| *line > 0),
+        author: DEFERRED_BY.to_owned(),
+        severity: Some(finding.severity),
+        what: finding.what.clone(),
+        maintainer_wrote: false,
+        said: None,
+    }
 }
 
 // `thread` as a finding the worker is sent back with, at the bot's own level where

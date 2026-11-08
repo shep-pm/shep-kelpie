@@ -3,23 +3,16 @@
 
 use super::*;
 
+const FOLLOW_UP_BOTH: &str = "{\"threads\": [\
+    {\"item\": 7, \"thread\": 1, \"decision\": \"follow-up\", \"why\": \"too big\"}, \
+    {\"item\": 7, \"thread\": 2, \"decision\": \"follow-up\", \"why\": \"too big\"}]}";
+
 #[test]
-fn a_follow_up_refused_then_a_close_leaves_the_deferred_findings_to_the_merge() {
-    let found = Finding::new(
-        Severity::High,
-        "src/lib.rs",
-        9,
-        "looks racy",
-        "two threads write the same field",
-    );
+fn a_follow_up_refused_then_a_close_does_not_file_the_refused_finding_later() {
     let rig = pm_project("threads-refused-close");
     rig.merge_auto();
-    let (rig, runner, head) = at_the_gate_found(rig, std::slice::from_ref(&found));
-    std::fs::write(
-        rig.build_7().join("deferred-findings.md"),
-        deferred(std::slice::from_ref(&found)),
-    )
-    .unwrap();
+    let (rig, runner, head) = at_the_gate_found(rig, &[racy()]);
+    defers(&rig, &[racy()]);
     open_bots(&rig, &head, &[NIT]);
     rig.forge.set_issues_down(true);
     ruled_by(&rig, &runner, FOLLOW_UP);
@@ -30,12 +23,19 @@ fn a_follow_up_refused_then_a_close_leaves_the_deferred_findings_to_the_merge() 
     ruled_by(&rig, &runner, CLOSE);
     assert_eq!(rig.forge.coderabbit.resolved(), [THREAD]);
 
-    let question = merge_ruling(&runner);
-    assert!(question.contains("looks racy"), "{question}");
+    rig.clock.advance(24 * 60 * 60);
+    ruled_by(&rig, &runner, NOTHING);
+    let asked = pm_seen(&rig);
+    let third = &asked.last().expect("a third wake").call.prompt;
     assert!(
-        !question.contains("could be shorter"),
-        "the refused follow-up is not filed at the merge: {question}"
+        third.contains("looks racy"),
+        "the deferred finding is still unruled: {third}"
     );
+    assert!(
+        !third.contains("could be shorter"),
+        "the refused follow-up is not asked again once closed: {third}"
+    );
+    assert_eq!(rig.forge.created(), [], "nothing was filed");
 }
 
 #[test]
@@ -103,57 +103,37 @@ fn a_maintainer_reply_while_the_push_back_is_decided_asks_again() {
 }
 
 #[test]
-fn deferred_findings_are_still_filed_at_the_merge_after_a_follow_up_before_it() {
-    let found = Finding::new(
-        Severity::High,
-        "src/lib.rs",
-        9,
-        "looks racy",
-        "two threads write the same field",
-    );
-    let rig = pm_project("threads-deferred");
+fn a_thread_and_a_deferred_finding_followed_up_together_are_both_filed_before_the_merge() {
+    let rig = pm_project("threads-deferred-both");
     rig.merge_auto();
-    let (rig, runner, head) = at_the_gate_found(rig, std::slice::from_ref(&found));
-    std::fs::write(
-        rig.build_7().join("deferred-findings.md"),
-        deferred(std::slice::from_ref(&found)),
-    )
-    .unwrap();
+    let (rig, runner, head) = at_the_gate_found(rig, &[racy()]);
+    defers(&rig, &[racy()]);
     open_bots(&rig, &head, &[NIT]);
 
-    ruled_by(&rig, &runner, FOLLOW_UP);
+    ruled_by(&rig, &runner, FOLLOW_UP_BOTH);
     assert_eq!(rig.forge.coderabbit.resolved(), [THREAD]);
-    let [issue] = rig.forge.created().try_into().unwrap();
-    assert_eq!(issue.labels, [READY], "the follow-up is ready for a worker");
+    assert_eq!(rig.forge.created().len(), 2, "both are filed");
 
-    let question = merge_ruling(&runner);
-    assert_eq!(rig.forge.merges(), [(71, head)], "the head merged");
+    let seen = steps(&runner, |r| matches!(r, StepReport::Finished { .. }));
     assert!(
-        question.contains("looks racy"),
-        "the deferred finding is still there to file: {question}"
+        seen.iter().all(|r| !matches!(r, StepReport::Ruling { .. })),
+        "nothing is asked at the merge: {seen:?}"
     );
+    assert_eq!(rig.forge.merges(), [(71, head)], "the head merged");
+    assert_eq!(rig.forge.created().len(), 2, "and nothing more was filed");
 }
 
-// #7's pull request, whose qwen round found `found` and whose worker fixed it,
-// then read clean by Claude. The item stands at the gate with `found` still held.
-fn at_the_gate_found(rig: Rig, found: &[Finding]) -> (Rig, Mutex<Runner>, String) {
-    let runner = rig.open().unwrap();
-    rig.ask(&runner, "add", Some("7"));
-    runner.lock().unwrap().plan_two_reads_for_the_rig();
-    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-    rig.reviewer
-        .script([ScriptedRound::Findings(found.to_vec())]);
-    rig.claude.script([
-        Scripted::Push("work.txt", "work\n"),
-        Scripted::Push("fixed.txt", "fixed\n"),
-        Scripted::Text(CLEAN),
-    ]);
-    for _ in 0..20 {
-        step(&runner).unwrap();
-        if rig.ask(&runner, "status", None)["work_item"]["phase"]["state"] == "ci" {
-            break;
-        }
-    }
-    let head = rig.forge.head_of("kelpie/7").expect("the worker pushed");
-    (rig, runner, head)
+#[test]
+fn a_push_back_on_a_deferred_finding_is_dropped_and_the_finding_stays_unruled() {
+    let rig = pm_project("threads-deferred-push-back");
+    let (rig, runner, _) = at_the_gate_found(rig, &[racy()]);
+    defers(&rig, &[racy()]);
+
+    let (acted, dropped) = ruled(&ruled_by(&rig, &runner, PUSH_BACK));
+    assert_eq!(acted, Vec::<String>::new());
+    assert_eq!(dropped.len(), 1, "{dropped:?}");
+    assert!(dropped[0].contains("no thread to reply on"), "{dropped:?}");
+    let left = std::fs::read_to_string(rig.build_7().join("deferred-findings.md")).unwrap();
+    assert!(left.contains("looks racy"), "it is still deferred: {left}");
+    assert_eq!(rig.forge.created(), []);
 }
