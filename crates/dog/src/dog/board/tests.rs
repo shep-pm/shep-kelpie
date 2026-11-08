@@ -192,20 +192,20 @@ async fn seen_plans(
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_plan_past_half_its_window_waits_until_the_window_resets() {
+async fn a_plan_waits_only_once_its_window_is_spent() {
     let (_dir, agents) = crate::test::claude_implementers();
     let view = Board::new(&agents).view();
     let now = Timestamp(EPOCH);
 
-    let past = view.status(&seen(&agents, &Gateways::default(), 60).await, now);
-    let under = view.status(&seen(&agents, &Gateways::default(), 40).await, now);
+    let spent = view.status(&seen(&agents, &Gateways::default(), 100).await, now);
+    let under = view.status(&seen(&agents, &Gateways::default(), 99).await, now);
 
     assert_eq!(
-        past["sonnet-high"]["wait"],
+        spent["sonnet-high"]["wait"],
         5 * 3600,
         "its window resets in 5 hours"
     );
-    assert_eq!(under["sonnet-high"]["wait"], 0);
+    assert_eq!(under["sonnet-high"]["wait"], 0, "99% holds nothing");
 }
 
 #[tokio::test(start_paused = true)]

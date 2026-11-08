@@ -5,8 +5,8 @@ Pacing, time, usage, settings. The dog, its leases and the forge limits are in `
 ## Pacing
 
 - A 5-hour window or a week at 100% holds every turn and dispatch until it resets; the longer hold when both apply. `pacer::spent`, `runner/pace.rs`. #15, #1596, #1785
-- Nothing else holds: the 50% mark and unreadable usage hold nothing, and the day's allowance is gone from the reading, `status` and the gauges. Usage is still read. #67, #15, #1785, #1787
-- `pacer::window` (50%) and `PARK_AT_PCT` stay, for the agent board's waits alone. `dog/board/pick.rs` #1785
+- Nothing else holds: a window under 100% and unreadable usage hold nothing, and the day's allowance is gone from the reading, `status` and the gauges. Usage is still read. #67, #15, #1785, #1787
+- The agent board's waits read the same spent rule (`pacer::spent`), so no window holds anything below 100%. `dog/board/pick.rs`
 - `add <issue>` skips no hold. #15, #1785
 - Each account paces separately; new item paces on every account its agents spend, its own agent's included. #129, #1293
 - An API agent (`login: api`, `Limit::Api`) spends credit, not a plan window: it is never paced, no plan hold stops it, and it adds no account to dispatch pacing. The dog reads no meter for it and hides `ANTHROPIC_API_KEY` from every process it starts, as it hides the Claude login. #1658, `runner/pace.rs`, `dog/availability/`, agent-files.md
