@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use super::super::Runner;
 use super::super::trigger::lock;
 use super::unpublished::Read;
-use super::{opened_by_us_or_people, ticket, untouched};
+use super::{Whose, opened_by_us_or_people, ticket, untouched};
 use crate::board::{READY, check};
 use crate::ports::{Forge, ForgeError, Issue, OpenIssue, OpenPull, Registry, Tickets, Timestamp};
 use crate::settings::{ForgeSlug, TriagePick};
@@ -139,7 +139,7 @@ impl PollJob {
                         i,
                         since,
                         pruned_through,
-                        None,
+                        Whose::Possibly,
                         true,
                         app,
                         self.taken.contains(&i.number),
@@ -312,12 +312,14 @@ impl Runner {
         // what the next pass is made on.
         self.watch_local_waits(&local)?;
         self.resume_triage()?;
+        // A go on an issue already triaged is spent, before the check reads it.
+        self.take_spent_gos(&mut open);
         // The check reads the listing before the take-back and the due list.
         // Those reach only an issue it refused.
         self.check_issues(&open, pulls.as_ref(), &busy);
         let app = self.app_login();
-        let only = match self.settings.triage.pick {
-            TriagePick::Maintainer => match self.maintainer() {
+        let maintainer = match self.settings.triage.pick {
+            TriagePick::Maintainer | TriagePick::Label => match self.maintainer() {
                 Ok(login) => Some(login),
                 Err(_) => {
                     self.triage_run.listing = Some(Listing { open, pulls });
@@ -325,6 +327,11 @@ impl Runner {
                 }
             },
             TriagePick::All | TriagePick::Off => None,
+        };
+        let whose = match (&maintainer, self.settings.triage.pick) {
+            (Some(login), TriagePick::Label) => Whose::Asked(login),
+            (Some(login), _) => Whose::Only(login),
+            (None, _) => Whose::Anyone,
         };
         // A swap a `taken` record owes is finished here, before the board reads
         // its pick, and listed as the swap leaves it.
@@ -337,11 +344,11 @@ impl Runner {
                     i,
                     since,
                     pruned_through,
-                    only.as_deref(),
+                    whose,
                     self.check_owed(i.number),
                     app.as_deref(),
                     self.taken_seen(i.number).is_some(),
-                ) && self.first_pass_owed(i.number)
+                ) && (self.first_pass_owed(i.number) || self.go_renewed(&i.labels, i.number))
                     && !self.ready_at_work(i, pulls.as_ref())
             })
             .collect();

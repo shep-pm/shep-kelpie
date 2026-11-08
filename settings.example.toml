@@ -313,7 +313,9 @@ compact_window = 200000
 # nudge_days = 3
 
 # Whether kelpie triages issues other people open. `pick` is `off`, `maintainer`
-# (only issues the maintainer filed) or `all`. Anything but `off` needs the
+# (only issues the maintainer filed), `label` (those, and any other issue the
+# maintainer puts `needs-triage` on, which kelpie takes off once it has
+# triaged the issue) or `all`. Anything but `off` needs the
 # GitHub App to cover the repo, or the runner refuses to start: the triager's
 # words would post as the maintainer. Only issues opened after `pick` was turned
 # on are listed, and `status` lists them under `triage.due`; nothing is posted
@@ -325,7 +327,7 @@ compact_window = 200000
 #
 # Whatever `pick` says, kelpie runs the issue check on each new or edited open
 # issue. The maintainer's issue that passes is labelled `ready-for-agent`, and
-# anyone else's waits at `needs-triage`. Only an issue that fails is triaged. A
+# anyone else's waits at `needs-approval`. Only an issue that fails is triaged. A
 # `ready-for-agent` you put on by hand that fails it is held off the board and
 # triaged, and keeps its label until an edit passes.
 #
@@ -335,9 +337,9 @@ compact_window = 200000
 # `per_day` is the most triage calls in any 24 hours: an issue past it stays in
 # `triage.due` for the next free place and is never dropped. `per_author_per_day`
 # is the most triage calls on one author's issues in any 24 hours: an issue past
-# it is labelled `needs-triage` with no call and no comment. `min_account_days`
+# it is labelled `needs-approval` with no call and no comment. `min_account_days`
 # is the age in days an author's account must reach, and one younger, with no
-# history in the repo, is labelled `needs-triage` the same way. `max_body_kb` is
+# history in the repo, is labelled `needs-approval` the same way. `max_body_kb` is
 # the most of an issue body the triager is given, cut at that size with a line
 # in the fence saying it was cut and how long it was; the title is never cut.
 # [app.dogs.kelpie.triage]

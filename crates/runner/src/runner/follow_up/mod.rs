@@ -4,8 +4,9 @@
 //! of scope goes into the deferred findings file in its build folder. One it
 //! shows is wrong goes into the disputed findings file, which files nothing.
 //! On merge kelpie files only findings it sent the worker itself, in its own
-//! words. A line the worker invents files nothing. Deferred findings raise a
-//! follow-up ruling for the project manager or maintainer before filing.
+//! words. A line the worker invents files nothing. With a project manager they
+//! are ruled on at the gate, before the merge; otherwise, or on a head merged by
+//! hand, they raise a follow-up ruling for the project manager or maintainer.
 //! A finding an open ticket holds gets a comment there instead.
 
 use std::path::Path;
@@ -13,6 +14,7 @@ use std::path::Path;
 use super::Runner;
 use super::report::{Begin, StepReport};
 use super::review::findings;
+use super::review_bot::RuledThread;
 use crate::board::briefing::cut;
 use crate::board::{READY, TRIAGE};
 use crate::ports::{Finding, ForgeError, NewLabel, OpenTicket, Severity};
@@ -221,7 +223,7 @@ impl Runner {
 // kelpie's own words and filed once. A file that was never written is a
 // worker with nothing to defer. A nit is never filed, though an old state
 // file may still hold one. A finding the worker disputed with a reason is not.
-fn read_deferred(item: &WorkItem) -> Result<Vec<Finding>, String> {
+pub(super) fn read_deferred(item: &WorkItem) -> Result<Vec<Finding>, String> {
     let deferred = findings::deferred(&item.build)?;
     let disputed = findings::disputed(&item.build)?;
     let wrong = |held: &Finding| {
@@ -236,6 +238,26 @@ fn read_deferred(item: &WorkItem) -> Result<Vec<Finding>, String> {
         .cloned()
         .map(|finding| relative(finding, &item.worktree))
         .collect())
+}
+
+// The deferred finding `thread` stands for, none when the worker took it out of its file
+// since the thread was made
+pub(super) fn deferred_of(
+    item: &WorkItem,
+    thread: &RuledThread,
+) -> Result<Option<Finding>, String> {
+    let line = thread.line.unwrap_or(0);
+    let found = read_deferred(item)?;
+    Ok(found
+        .into_iter()
+        .find(|f| f.file == thread.path && f.line == line && f.what == thread.what))
+}
+
+// Takes `finding` out of the deferred findings file, so the merge does not read it again
+pub(super) fn leave_deferred(item: &WorkItem, finding: &Finding) -> Result<(), String> {
+    findings::drop_deferred(&item.build, |line| {
+        line.is_same_as(finding) || relative(line.clone(), &item.worktree).is_same_as(finding)
+    })
 }
 
 // A reviewer names files by the path it sees, which can start at the worktree.

@@ -47,8 +47,10 @@ _Avoid_: shift
 The role that owns a project's merge queue, git state and gates. Kelpie's
 code does all of that. The PM's agent, an agent file whose role is `pm`
 that a project names in `agents.pm`, picks work, holds it back, unsticks
-items, answers a worker's **question** where its case, the code and the
-docs give it an argument, and answers the maintainer. It escalates a
+items, resumes a timed-out or failed turn (with a note asking what the
+worker has done so far, or not) or parks it on the maintainer, answers a
+worker's **question** where its case, the code and the docs give it an
+argument, and answers the maintainer. It escalates a
 question only where a public interface, the project's direction or a cost
 past what the item was given is at stake, and it never changes kelpie's
 settings, agent files, code or the machine. Code wakes it on a free slot
@@ -424,8 +426,9 @@ reviewer reads again because of it, and a bot that read the pull request
 before has its nits on that fix's head left open. With a project manager,
 every thread still open at the merge, nits included, goes to it, and a `fix`
 ruling sends the worker one turn for all of them. Findings the worker
-leaves out of scope go in the **deferred findings** file, which the merge
-files as follow-ups, all but its nits. A finding the worker shows is
+leaves out of scope go in the **deferred findings** file, all but its nits
+ruled on before the merge by the project manager, beside the open threads, or
+after it where there is none. A finding the worker shows is
 wrong goes in the **disputed findings** file with its reason: the next
 reviewer is shown it, and it is never filed.
 
@@ -533,10 +536,12 @@ new work items, not a cap on parking: once that many work items are parked
 on rulings that hold their work back, the board opens no new one, while
 items already open can still park past it. 0 is taken as 1: the board opens
 nothing while any such ruling waits. It leaves out the `follow-up`
-ruling of a merged pull request. The one exception: the PM may retry a stuck item, which
-answers its `stuck` ruling for the maintainer, with a yes or, for CI still
-red, a note sending the worker back. It may instead park a stuck item on an
-open fix, which keeps it parked with the ruling left for the maintainer and
+ruling of a merged pull request. The one exception: the PM may answer a
+stuck item's ruling for the maintainer, with a yes or, for CI still red, a
+note sending the worker back. On a `turn-timeout` or `turn-failed` ruling it
+resumes the turn, resumes it after a note asking what the worker has done so
+far, or parks it on the maintainer, who hears of that park alone and keeps the
+stopping of the work item. It may instead park a stuck item on an open fix, which keeps it parked with the ruling left for the maintainer and
 names the fix on its card, and never retries a `turn-failed` ruling for a turn
 kelpie could not set up, since another try meets the same fault. A merge ruling
 takes three answers:
@@ -566,9 +571,10 @@ Whether a green, reviewed pull request merges unasked, a project's
 has kelpie merge once every gate passes, and replaces only that ruling: the
 merge still asks where a safety gate holds it, such as a pull request no
 reviewer read. Pending deferred findings
-always raise a `follow-up` ruling. The project manager answers when
-`rulings.pm_decides.follow-up` allows it; otherwise the maintainer does,
-including on a project with no `agents.pm`.
+are ruled on before the merge by the project manager, and after it, as a
+`follow-up` ruling, where there is none or the head merged by hand. That ruling
+is the project manager's when `rulings.pm_decides.follow-up` allows it;
+otherwise the maintainer's, including on a project with no `agents.pm`.
 Every other ruling still asks.
 
 **Notice**:
