@@ -21,7 +21,7 @@ use crate::ticket::TicketId;
 
 mod plans;
 
-pub use plans::PlanLine;
+pub use plans::{CreditLine, PlanLine};
 
 /// How long a call in flight may show nothing before the board calls it idle
 pub const IDLE_AFTER: u64 = 10 * 60;
@@ -84,6 +84,10 @@ pub struct Briefing<'a> {
     /// The plan accounts the listed agents spend, in account order, each with
     /// what the pacer last read of its week
     pub plans: Vec<PlanLine>,
+    /// What the agent board says the month has spent of the API credit, `None`
+    /// when the board gave no answer or named no monthly size, which is what it
+    /// does while `api.monthly_credit_usd` is unset
+    pub credit: Option<CreditLine>,
     /// The board events the project manager has not read
     pub events: Vec<BoardEvent>,
     /// Whether the project manager has read the board before
@@ -307,7 +311,13 @@ pub fn render(board: &Briefing<'_>) -> String {
     rulings(&mut out, &board.rulings);
     red_on_main(&mut out, board);
     ready_queue(&mut out, board.ready.as_ref(), now);
-    agents(&mut out, &board.agents, &board.plans, now);
+    agents(
+        &mut out,
+        &board.agents,
+        &board.plans,
+        board.credit.as_ref(),
+        now,
+    );
     events(&mut out, board);
     overlap(&mut out, board);
     files(&mut out, &board.items);
@@ -518,12 +528,19 @@ fn unblocks_part(unblocks: &[TicketId]) -> String {
     format!("; unblocks {}", named.join(", "))
 }
 
-fn agents(out: &mut String, agents: &[AgentLine], plans: &[PlanLine], now: Timestamp) {
+fn agents(
+    out: &mut String,
+    agents: &[AgentLine],
+    plans: &[PlanLine],
+    credit: Option<&CreditLine>,
+    now: Timestamp,
+) {
     out.push_str("## Agents\n\n");
     if agents.is_empty() {
         out.push_str("(none)\n\n");
         return;
     }
+    let credit = credit.and_then(|credit| plans::credit_line(credit, now));
     out.push_str(
         "Implementers by name, then reviewers in their order. You name each work item's \
          agent from this list. Kelpie takes the cheapest available agent that fits when you \
@@ -543,6 +560,20 @@ fn agents(out: &mut String, agents: &[AgentLine], plans: &[PlanLine], now: Times
          ready queue is not the week's work, since the maintainer files issues all week, so \
          a short queue is no reason to spend faster.\n\n",
     );
+    if credit.is_some() {
+        out.push_str(
+            "The API credit line is a bonus on top of the plans: kelpie's API agents \
+             spend it, and it is paced across the month so its course aims at 100% by the \
+             month's end. The share left at the month's end is lost, so spend it like any \
+             budget at its reset. On course under 100%, put more work on API agents; over \
+             100%, put less by naming a plan agent for the items. The pace never reorders \
+             the agents. A standing note from you to spend the credit freely until a date \
+             (`shep kelpie tell --all`, a line with an `(until ...)` end in \
+             `pm-standing.md`) sets this pacing aside until then, and the order alone \
+             decides: a local model that can start, then API credit while the API is not \
+             held, then a plan.\n\n",
+        );
+    }
     for agent in agents {
         let kinds = match &agent.kinds {
             Some(kinds) => format!("kinds {}", kinds.join(", ")),
@@ -561,10 +592,7 @@ fn agents(out: &mut String, agents: &[AgentLine], plans: &[PlanLine], now: Times
             reading(agent, now),
         );
     }
-    if !plans.is_empty() {
-        out.push('\n');
-        plans::lines(out, plans, now);
-    }
+    plans::lines(out, plans, credit.as_deref(), now);
     out.push('\n');
 }
 

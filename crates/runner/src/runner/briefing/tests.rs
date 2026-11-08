@@ -2,6 +2,7 @@
 
 use std::sync::Mutex;
 
+use crate::lease::door::{Credit, month_around};
 use crate::ports::{AgentError, CallActivity, Cost, Timestamp, Usage};
 use crate::review_bot::Bot;
 use crate::runner::flight::advance;
@@ -611,15 +612,33 @@ fn the_agents_section_marks_a_spent_codex_week_and_a_closed_bot_window() {
     );
 }
 
-// The `## Agents` section's lines about plan accounts' weeks
-fn plan_weeks(rig: &Rig) -> Vec<String> {
+// The `## Agents` section's lines about plan accounts' weeks and the API credit
+fn pace_lines(rig: &Rig) -> Vec<String> {
     let text = board(rig);
     let section = text.split("## Agents\n").nth(1).unwrap();
     let section = section.split("\n## ").next().unwrap();
     (section.lines())
-        .filter(|l| l.contains(" week: "))
+        .filter(|l| l.contains(" week: ") || l.starts_with("API credit: "))
         .map(str::to_owned)
         .collect()
+}
+
+// The `## Agents` section's API credit line, when it shows one
+fn credit_line(rig: &Rig) -> Option<String> {
+    pace_lines(rig)
+        .into_iter()
+        .find(|l| l.starts_with("API credit: "))
+}
+
+// A credit answer for the month the rig's clock lands in, `spent` of `monthly` dollars
+fn credit(spent: f64, monthly: Option<f64>) -> Credit {
+    let (since, resets_at) = month_around(Timestamp(Rig::EPOCH));
+    Credit {
+        spent_usd: spent,
+        monthly_usd: monthly,
+        since: since.0,
+        resets_at: resets_at.0,
+    }
 }
 
 #[test]
@@ -644,7 +663,7 @@ fn the_agents_section_shows_each_listed_plan_accounts_week_used_against_elapsed(
     super::brief(&runner);
 
     assert_eq!(
-        plan_weeks(&rig),
+        pace_lines(&rig),
         [
             "Claude week: 16% used, 14% of the week gone, 5d 23h to the reset, \
              on course for 114%, read 1d ago",
@@ -663,8 +682,98 @@ fn a_plan_account_nothing_has_paced_says_it_has_no_reading() {
     let runner = rig.open().unwrap();
     super::brief(&runner);
 
-    assert_eq!(plan_weeks(&rig), ["Claude week: no reading"]);
+    assert_eq!(pace_lines(&rig), ["Claude week: no reading"]);
     drop(runner);
+}
+
+#[test]
+fn the_agents_section_shows_the_api_credit_beside_the_plans() {
+    let rig = Rig::new("koji");
+    rig.write_codex_implementer();
+    rig.allow(&["sonnet-high", "codex"]);
+    rig.meter.set(Rig::utilization(16, 0));
+    let mut codex = Rig::utilization(60, 0);
+    codex.week.resets_at = Timestamp(Rig::EPOCH + 3 * Rig::DAY);
+    rig.codex_meter.set(codex);
+    rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 2"));
+    rig.agent_board.credits(credit(40.0, Some(100.0)));
+    rig.forge.list_ready(7, false);
+    rig.forge.list_ready(8, false);
+    rig.forge.label(7, "agent:codex!");
+    let runner = rig.open().unwrap();
+    for _ in 0..4 {
+        step(&runner).unwrap();
+    }
+    rig.clock.advance(Rig::DAY + 4 * 60);
+    super::brief(&runner);
+
+    assert_eq!(
+        pace_lines(&rig),
+        [
+            "Claude week: 16% used, 14% of the week gone, 5d 23h to the reset, \
+             on course for 114%, read 1d ago",
+            "Codex week: 60% used, 71% of the week gone, 1d 23h to the reset, \
+             on course for 85%, read 1d ago",
+            "API credit: 40% used, 72% of the month gone, 8d 9h to the reset, \
+             on course for 56%",
+        ],
+        "{}",
+        board(&rig)
+    );
+    assert!(
+        board(&rig).contains("bonus on top of the plans"),
+        "the credit guidance shows with it"
+    );
+    drop(runner);
+}
+
+#[test]
+fn a_board_the_dog_cannot_answer_for_shows_no_credit_line() {
+    let rig = Rig::new("koji");
+    rig.allow(&["sonnet-high"]);
+    rig.agent_board.credits(credit(40.0, Some(100.0)));
+    rig.agent_board.unreachable();
+    let runner = rig.open().unwrap();
+    super::brief(&runner);
+
+    let text = board(&rig);
+    assert_eq!(credit_line(&rig), None, "{text}");
+    assert!(!text.contains("bonus on top of the plans"), "{text}");
+    drop(runner);
+}
+
+#[test]
+fn a_credit_answer_with_no_monthly_size_shows_no_line() {
+    let rig = Rig::new("koji");
+    rig.allow(&["sonnet-high"]);
+    rig.agent_board.credits(credit(40.0, None));
+    let runner = rig.open().unwrap();
+    super::brief(&runner);
+
+    let text = board(&rig);
+    assert_eq!(credit_line(&rig), None, "{text}");
+    assert!(text.contains("Claude week: no reading"), "{text}");
+    drop(runner);
+}
+
+#[test]
+fn the_credit_is_asked_again_only_after_the_readings_are_stale() {
+    let rig = Rig::new("acme");
+    rig.allow(&["opus-high", "sonnet-high", "qwen", "claude"]);
+    let runner = rig.open().unwrap();
+    assert_eq!(rig.agent_board.credit_asks(), 1, "the start's board");
+
+    for _ in 0..3 {
+        rig.clock.advance(9);
+        runner.lock().unwrap().board_changed();
+        super::brief(&runner);
+    }
+    assert_eq!(rig.agent_board.credit_asks(), 1, "{}", board(&rig));
+
+    rig.clock.advance(30);
+    runner.lock().unwrap().board_changed();
+    super::brief(&runner);
+    assert_eq!(rig.agent_board.credit_asks(), 2);
 }
 
 #[test]

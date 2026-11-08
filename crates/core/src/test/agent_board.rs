@@ -4,16 +4,17 @@
 //! starts by ranking every agent an ask allows in the order the ask lists
 //! them, with no wait, and by saying every agent fits every kind. A test puts
 //! some of them first, ranks its own order, with its own finishes, makes one wait,
-//! ranks nobody, says one agent does not fit a kind, notes the API's refusals, or makes the board unreachable.
+//! ranks nobody, says one agent does not fit a kind, notes the API's refusals,
+//! says what the month spent of the API credit, or makes the board unreachable.
 //! Its readings of the agents a board write asks about answer from the same
-//! ranking, and are counted apart from the picks.
+//! ranking, and are counted apart from the picks, as is each credit ask.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use crate::agent_board::Finding;
 use crate::api_refusal::Refusal;
-use crate::lease::door::{FitAsk, Fits, Pick, PickAsk};
+use crate::lease::door::{Credit, FitAsk, Fits, Pick, PickAsk};
 use crate::ports::{AgentBoard, Timestamp};
 use crate::settings::AgentName;
 
@@ -48,6 +49,9 @@ struct Book {
     refusals: Vec<Refusal>,
     // What each refusal is answered with, None until a test sets one.
     hold: Option<Timestamp>,
+    // What the credit ask answers, None until a test sets one
+    credit: Option<Credit>,
+    credit_asks: usize,
 }
 
 /// A board that ranks what a test sets
@@ -111,9 +115,19 @@ impl FakeAgentBoard {
         self.book.lock().unwrap().hold = Some(until);
     }
 
+    /// Each credit ask answers `credit`
+    pub fn credits(&self, credit: Credit) {
+        self.book.lock().unwrap().credit = Some(credit);
+    }
+
     /// What each refusal told the board, in order
     pub fn refusals(&self) -> Vec<Refusal> {
         self.book.lock().unwrap().refusals.clone()
+    }
+
+    /// How many credit asks came in
+    pub fn credit_asks(&self) -> usize {
+        self.book.lock().unwrap().credit_asks
     }
 
     /// What each pick was asked, in order
@@ -205,5 +219,14 @@ impl AgentBoard for FakeAgentBoard {
                 .cloned()
                 .unwrap_or(Fits::Yes),
         )
+    }
+
+    fn credit(&self) -> Option<Credit> {
+        let mut book = self.book.lock().unwrap();
+        book.credit_asks += 1;
+        if matches!(book.answers, Answers::Unreachable) {
+            return None;
+        }
+        book.credit
     }
 }
