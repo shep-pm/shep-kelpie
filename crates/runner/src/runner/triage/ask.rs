@@ -413,7 +413,7 @@ pub(super) const REPLY_HINT: &str = "Reply `ok` to take every recommended answer
 // Whether `body` is a triage comment that carries the questions for the author:
 // the first heading [`questions_block`] writes. A question's own text cannot
 // pass for it: [`unfenced`] took the mark out of the text the block holds.
-pub(super) fn holds_questions(body: &str) -> bool {
+pub(in crate::runner) fn holds_questions(body: &str) -> bool {
     body.contains("\u{2753} Q1 - ")
 }
 

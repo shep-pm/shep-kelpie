@@ -4,10 +4,10 @@
 //! of them: findings, open bot threads or red CI. The clock runs from then, in
 //! [`Contribution::waiting_since`]. The contributor's comment, review reply or push
 //! restarts it, as does a thumbs down on the release ask. Green CI with nothing
-//! open leaves kelpie waiting on the maintainer, which clears the clock, as does
-//! a new head.
+//! open leaves kelpie waiting on the maintainer, which clears the clock.
 //!
-//! [`Clock::due`] says when `nudge_days` and `quiet_days` have passed (`release.rs`).
+//! [`Clock::due`] says when `nudge_days` and `quiet_days` have passed (`release.rs`),
+//! and [`Clock::acts_at`] when it acts on silence (`representative/sorry.rs`).
 
 use serde::Serialize;
 
@@ -65,6 +65,16 @@ impl Clock {
     /// Whole days until the contribution counts as quiet, 0 once it does
     pub(super) fn days_to_quiet(&self, now: Timestamp) -> u64 {
         self.quiet_days.saturating_sub(self.days(now))
+    }
+
+    /// The moment the clock says kelpie acts on the contributor's silence, which
+    /// is what an ask promises and what a post that comes after it is late on
+    pub(in crate::runner) fn acts_at(&self) -> Timestamp {
+        Timestamp(
+            self.since
+                .0
+                .saturating_add(self.quiet_days.saturating_mul(DAY)),
+        )
     }
 
     /// Whole days from a restart of the clock to its quiet
