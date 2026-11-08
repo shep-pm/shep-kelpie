@@ -415,6 +415,7 @@ fn profile(call: &AgentCall) -> Vec<OsString> {
         "project".into(),
         "--settings".into(),
         call.settings.clone().into(),
+        "--exclude-dynamic-system-prompt-sections".into(),
     ];
     // An allow-list keeps a project's settings from adding tools or MCP servers.
     // An agent file's list replaces only a worker's or reviewer's tools.
