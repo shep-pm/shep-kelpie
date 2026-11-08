@@ -5,6 +5,7 @@ fn answer(choice: char, why: &str, design: bool) -> PmAnswer {
         choice,
         why: why.into(),
         design,
+        ask: false,
     }
 }
 
@@ -60,4 +61,18 @@ fn a_why_is_one_line_cut_at_350_characters() {
     assert!(got.why.starts_with("two lines word word"), "{}", got.why);
     assert_eq!(got.why.chars().count(), WHY_LONGEST);
     assert!(got.why.ends_with('…'));
+}
+
+#[test]
+fn an_ask_is_read_and_left_out_reads_as_false() {
+    let with = "{\"choice\": \"A\", \"why\": \"x\", \"design\": false, \"ask\": true}";
+    assert!(read(with, 2).unwrap().ask);
+    let without = "{\"choice\": \"A\", \"why\": \"x\", \"design\": false}";
+    assert!(!read(without, 2).unwrap().ask);
+}
+
+#[test]
+fn an_ask_that_is_no_bool_is_an_error() {
+    let text = "{\"choice\": \"A\", \"why\": \"x\", \"design\": false, \"ask\": \"yes\"}";
+    assert!(read(text, 2).unwrap_err().contains("`ask`"));
 }

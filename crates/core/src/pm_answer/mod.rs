@@ -2,8 +2,8 @@
 //!
 //! The project manager answers a ruling with one JSON object, `{"choice":
 //! "<option key>", "why": "<at most 350 characters>", "design":
-//! true|false}`. An answer kelpie cannot read is an abstention, and the
-//! ruling goes to the maintainer.
+//! true|false}`, with an optional `"ask": true|false`. An answer kelpie
+//! cannot read is an abstention, and the ruling goes to the maintainer.
 
 use serde_json::{Map, Value};
 
@@ -20,13 +20,16 @@ pub struct PmAnswer {
     /// Whether the question changes an ADR, the glossary, a public interface
     /// or the project's direction
     pub design: bool,
+    /// Whether a resume of a timed-out or failed turn first asks the worker
+    /// what it has done so far
+    pub ask: bool,
 }
 
 /// The answer in `text`, which holds options `A` to the `options`th letter
 ///
 /// `text` is the project manager's reply: the last JSON object in it with
 /// a `choice` is the answer. One that is not an object with all three
-/// fields, or whose choice is no option's key, is an error that says why,
+/// fields (`ask` may be left out), or whose choice is no option's key, is an error that says why,
 /// for the log.
 /// A `why` past [`WHY_LONGEST`] characters is cut there.
 ///
@@ -68,10 +71,16 @@ pub fn from_fields(fields: &Map<String, Value>, options: usize) -> Result<PmAnsw
             fields.get("design")
         ));
     };
+    let ask = match fields.get("ask") {
+        None => false,
+        Some(Value::Bool(ask)) => *ask,
+        other => return Err(format!("`ask` is not true or false: {other:?}")),
+    };
     Ok(PmAnswer {
         choice: key,
         why,
         design: *design,
+        ask,
     })
 }
 

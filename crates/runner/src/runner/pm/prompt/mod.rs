@@ -251,7 +251,7 @@ macro_rules! threading {
 /// answer shows again to a session that has seen the answer without it
 macro_rules! votes_key {
     () => {
-        "\"votes\": [] or [{\"ruling\": <the ruling's number>, \"choice\": \"<the option's key, such as A>\", \"why\": \"<at most 350 characters, one line>\", \"design\": true|false}]"
+        "\"votes\": [] or [{\"ruling\": <the ruling's number>, \"choice\": \"<the option's key, such as A>\", \"why\": \"<at most 350 characters, one line>\", \"design\": true|false, \"ask\": true|false (optional)}]"
     };
 }
 
@@ -266,8 +266,12 @@ macro_rules! answering {
          says so on the ruling's thread, where the maintainer can reopen it. `design` is \
          true when the question changes an ADR, the glossary, a public interface or the \
          project's direction, and sends the ruling to the maintainer with your option as \
-         the one you recommend. An over-budget ruling that `## Over-budget rulings` marks as \
-         the maintainer's takes your option as a recommendation: kelpie applies nothing, and \
+         the one you recommend. On a timed-out or failed turn's ruling, judge from the \
+         item's case: `Yes` resumes the turn; `Yes` with `\"ask\": true` resumes it after \
+         kelpie's note asking the worker what it has done so far, and `ask` is ignored on \
+         any other ruling; `No` does not stop the work item, since only the maintainer \
+         does: it parks the ruling on them with your pick and why on its card. An over-budget \
+         ruling that `## Over-budget rulings` marks as the maintainer's takes your option as a recommendation: kelpie applies nothing, and \
          the maintainer answers with your pick and why on its card. A ruling you give no \
          answer on goes to the maintainer as it stands."
     };
