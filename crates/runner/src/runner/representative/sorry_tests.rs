@@ -69,7 +69,7 @@ fn prompt(rig: &Rig) -> String {
     (rig.claude.all_seen().into_iter())
         .filter(|seen| seen.call.role == Role::Representative)
         .map(|seen| seen.call.prompt)
-        .last()
+        .next_back()
         .expect("the call was made")
 }
 
