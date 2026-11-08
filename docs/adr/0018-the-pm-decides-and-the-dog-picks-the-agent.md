@@ -93,6 +93,11 @@ What stands: the agent file's `description`, `kinds` and `tier`, the dog's readi
 - The record keeps its median hours: the estimate and `status`'s `records` read them, and only `fit` stops.
 - The `fit` answer carries the measure on the dog's door, which carries no version. A runner talking to a dog not yet restarted cannot read its `hours` answer and raises nothing, as it does for a dog out of reach. The dog's marks file holds no measure and is unchanged, and the state file keeps the `hours` variant so a ruling saved before this still loads.
 
+### Amendment, 2026-11-08: the maintainer's pin wins over the project manager's agent
+
+- The 2026-11-04 amendment opened an item on the project manager's agent even when the issue's `agent:<name>!` label pinned another one, so the label pinned only when the pick named no agent or its agent could not start.
+- The maintainer's label now wins. When it pins an agent other than the pick's, the pick's agent is never asked for, the item runs pinned on the label's agent alone, and the runner notes `#<n>: the project manager picked <agent>, but the issue's `agent:<pin>!` label pins <pin>`. A pick naming the pinned agent runs it pinned. `runner/add.rs`
+
 ## Considered options
 
 - **Keep the panel with fewer voters.** The project manager and the worker already agreed on 92 of 99 answers, and the maintainer's answers favoured no voter, so a smaller panel keeps a wait and a cost for the same answer.
