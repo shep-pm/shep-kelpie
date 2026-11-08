@@ -687,6 +687,8 @@ pub struct Queued {
     /// It started and has not finished, so it ends at its own timeout. A
     /// queued one waits for a runner that may never come.
     pub running: bool,
+    /// GitHub holds the workflow until a maintainer approves its run
+    pub held: bool,
 }
 
 /// What `rerun_run` starts again of a workflow run

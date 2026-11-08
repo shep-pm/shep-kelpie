@@ -1,4 +1,4 @@
-//! The workflow runs that failed before any job started
+//! The workflow runs with no check run
 //!
 //! A workflow file GitHub cannot read still records a failed run on the
 //! commit, but with no check run, so the pull request's check rollup never
@@ -8,8 +8,8 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use super::{gh_as, unreadable};
-use crate::ports::{Checks, ForgeError};
+use super::{gh_as, run_of, unreadable};
+use crate::ports::{Checks, ForgeError, Queued};
 use crate::settings::ForgeSlug;
 
 // What the board's listing asks of a commit's check suites, as a literal
@@ -17,13 +17,13 @@ use crate::settings::ForgeSlug;
 // the listing counts its rollup's check runs by the suite each names instead.
 macro_rules! suites_fields {
     () => {
-        "checkSuites(first: 50) { nodes { id conclusion workflowRun { file { path } } } }"
+        "checkSuites(first: 50) { nodes { id conclusion workflowRun { url file { path } } } }"
     };
 }
 pub(super) use suites_fields;
 
 const SUITES: &str = "checkSuites(first: 50) { nodes { conclusion \
-     checkRuns(first: 1) { totalCount } workflowRun { file { path } } } }";
+     checkRuns(first: 1) { totalCount } workflowRun { url file { path } } } }";
 
 /// A commit's check suites, as `SUITES` asks for them
 #[derive(Deserialize, Default)]
@@ -53,6 +53,7 @@ struct Count {
 
 #[derive(Deserialize)]
 struct Run {
+    url: Option<String>,
     file: Option<File>,
 }
 
@@ -73,6 +74,23 @@ impl Suites {
             .collect()
     }
 
+    fn held(&self) -> Vec<Queued> {
+        self.nodes
+            .iter()
+            .filter(|s| s.conclusion.as_deref() == Some("ACTION_REQUIRED"))
+            .filter(|s| s.check_runs.as_ref().is_some_and(|c| c.total_count == 0))
+            .filter_map(|s| {
+                let run = s.workflow_run.as_ref()?;
+                Some(Queued {
+                    name: run.file.as_ref()?.path.clone(),
+                    run: run.url.as_deref().and_then(run_of),
+                    running: false,
+                    held: true,
+                })
+            })
+            .collect()
+    }
+
     /// These suites, each counting the check runs of `runs`, by the suite each names
     pub(super) fn counted<'a>(mut self, runs: impl Iterator<Item = &'a str>) -> Self {
         let runs: Vec<&str> = runs.collect();
@@ -90,6 +108,15 @@ impl Suites {
     /// A pending rollup stays pending, so a red run names every failure once
     /// it ends.
     pub(super) fn fold(&self, checks: Checks) -> Checks {
+        let held = self.held();
+        if !held.is_empty() {
+            let mut queued = match checks {
+                Checks::Pending(queued) => queued,
+                _ => Vec::new(),
+            };
+            queued.extend(held);
+            return Checks::Pending(queued);
+        }
         let unstarted = self.unstarted();
         if unstarted.is_empty() {
             return checks;
@@ -175,6 +202,37 @@ mod tests {
         assert_eq!(suites().fold(Checks::Passed), failed);
         assert_eq!(suites().fold(Checks::Skipped), failed);
         assert_eq!(suites().fold(Checks::None), failed);
+    }
+
+    #[test]
+    fn a_suite_held_for_approval_keeps_the_rollup_pending() {
+        let held = br#"{"data":{"repository":{"object":{"checkSuites":{"nodes":[
+            {"conclusion":"ACTION_REQUIRED","checkRuns":{"totalCount":0},
+             "workflowRun":{"url":"https://github.com/shep-pm/shep/actions/runs/42","file":{"path":".github/workflows/test.yml"}}}
+        ]}}}}}"#;
+        let suites = parse_commit(held).unwrap();
+        for rollup in [
+            Checks::Skipped,
+            Checks::Passed,
+            Checks::None,
+            Checks::Failed(vec!["lint".into()]),
+        ] {
+            let Checks::Pending(queued) = suites.fold(rollup) else {
+                panic!("a held suite must keep the rollup pending");
+            };
+            assert_eq!(queued.len(), 1);
+            assert_eq!(queued[0].name, ".github/workflows/test.yml");
+            assert_eq!(queued[0].run, Some(42));
+            assert!(queued[0].held);
+        }
+    }
+
+    #[test]
+    fn a_suite_that_failed_to_start_still_counts_as_failed() {
+        assert_eq!(
+            suites().fold(Checks::Passed),
+            Checks::Failed(vec![".github/workflows/test.yml: started no job".into()])
+        );
     }
 
     #[test]
