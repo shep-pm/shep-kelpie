@@ -10,12 +10,13 @@ use serde_json::{Value, json};
 use super::marker::MARKER;
 use super::pick_tests::{MAINTAINER, issue, list, rig_with, status};
 use super::research::read_reply;
+use crate::board::check;
 use crate::github::ApiError;
 use crate::ports::{AgentError, CLEAN, OpenIssue, Role, Timestamp, Tools};
 use crate::runner::claim::Notes;
 use crate::runner::{Pass, Runner, advance, step};
 use crate::settings::{AuthorRole, Harness};
-use crate::state::StateStore;
+use crate::state::{CheckTriage, IssueCheck, StateStore};
 use crate::test::{
     CALL_PATIENCE, Hold, Rig, Scripted, Seen, assert_granted, git, installed_sources,
     source_folders, ticket, write_script,
@@ -151,6 +152,27 @@ pub(super) fn restart(rig: &Rig, runner: Mutex<Runner>) -> Mutex<Runner> {
 // Sets the triage record of `issue` as a crash at `step` leaves it
 pub(super) fn crashed_at(rig: &Rig, issue: u64, step: &str) {
     crashed_with(rig, json!({ "issue": issue, "comment": 101, "step": step }));
+}
+
+// What an older build left when it took `issue` back for triage: its check result
+// with `ready-for-agent` seen and the swap owed, and the record with the labels
+// that swap leaves
+pub(super) fn took_back(rig: &Rig, issue: u64, author: &str, title: &str, body: &str) {
+    let store = StateStore::new(rig.paths().state);
+    let mut saved: Value = serde_json::to_value(store.load().unwrap().unwrap()).unwrap();
+    let result = IssueCheck {
+        issue,
+        key: check::key(title, body, &[]),
+        failures: vec![body.to_owned()],
+        triage: CheckTriage::Owed,
+        ready_seen: true,
+    };
+    saved["checks"] = serde_json::to_value([result]).unwrap();
+    saved["triage"]["issues"] = json!([{
+        "issue": issue, "comment": 0, "step": "taken",
+        "author": author, "seen": ["needs-triage"],
+    }]);
+    store.save(&serde_json::from_value(saved).unwrap()).unwrap();
 }
 
 // Sets the triage record of an issue as `record` says

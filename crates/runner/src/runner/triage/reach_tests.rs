@@ -83,20 +83,18 @@ fn a_held_ready_issue_opened_before_triage_was_on_is_due_under_maintainer_pick()
     assert_eq!(commented(&rig), [30]);
 }
 
+// The check holds it off the board, so its age takes it back to the triager with
+// the label the maintainer put on still on it
 #[test]
-fn an_old_held_ready_issue_taken_back_under_hand_ready_still_gets_its_pass() {
-    let rig = turned_on_late("pick = \"maintainer\"\nhand_ready = true");
+fn an_old_held_ready_issue_keeps_its_label_and_still_gets_its_pass() {
+    let rig = turned_on_late("pick = \"maintainer\"");
     list(&rig, old(&rig, 30, MAINTAINER, &["ready-for-agent"]));
     script_one_pass(&rig);
     let runner = rig.open().unwrap();
 
     assert_eq!(step(&runner).unwrap(), None);
 
-    assert_eq!(
-        rig.github.label_takes(),
-        [(30, "ready-for-agent".to_owned())],
-        "taken back"
-    );
+    assert_eq!(rig.github.label_takes(), [], "nothing is taken back");
     assert_eq!(calls(&rig, Role::Triager).len(), 1);
     assert_eq!(commented(&rig), [30]);
 }

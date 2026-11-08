@@ -1,25 +1,31 @@
-//! The maintainer's hand-labelled `ready-for-agent` issues taken back for
-//! triage, through the runner's stand-ins
+//! The swap a `taken` record owes, and the maintainer's hand-labelled
+//! `ready-for-agent` issues that are taken back by nothing, through the runner's
+//! stand-ins
 
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 
 use super::ask_tests::{A_WORDS, asked, filed_before, record, settled_ready, wrote};
+use super::check_tests::{PASSING, PASSING_LABELS, checks};
 use super::pick_tests::{MAINTAINER, issue, list, rig_with};
-use super::research_tests::{calls, moves, nothing, reply, triage};
+use super::research_tests::{calls, moves, nothing, reply, took_back, triage};
 use crate::github::ApiError;
 use crate::ports::Role;
 use crate::runner::slots_tests::{ASKS, dispatched, issue_of};
 use crate::runner::{Runner, step};
 use crate::test::{Rig, Scripted};
 
-const HAND: &str = "pick = \"maintainer\"\nhand_ready = true";
+const PICK: &str = "pick = \"maintainer\"";
+
+// Issue 30, which the issue check refuses
+const TITLE: &str = "Crash on start";
+const BODY: &str = "It crashes when I run it.";
 
 // Issue 30 by `author`, as the forge lists it with `ready-for-agent` put on by hand
 fn hand_labelled(rig: &Rig, author: &str) {
     let mut crash = issue(rig, 30, author, 5);
-    crash.title = "Crash on start".to_owned();
-    crash.body = "It crashes when I run it.".to_owned();
+    crash.title = TITLE.to_owned();
+    crash.body = BODY.to_owned();
     crash.labels = vec!["ready-for-agent".to_owned()];
     list(rig, crash);
 }
@@ -27,8 +33,8 @@ fn hand_labelled(rig: &Rig, author: &str) {
 // Issue 30 as the forge lists it once `labels` are on it
 fn relist(rig: &Rig, labels: &[&str]) {
     let mut listed = issue(rig, 30, MAINTAINER, 5);
-    listed.title = "Crash on start".to_owned();
-    listed.body = "It crashes when I run it.".to_owned();
+    listed.title = TITLE.to_owned();
+    listed.body = BODY.to_owned();
     listed.labels = labels.iter().map(|&l| l.to_owned()).collect();
     list(rig, listed);
 }
@@ -42,10 +48,18 @@ fn on_the_board(lines: &str, author: &str) -> (Rig, Mutex<Runner>) {
     })
 }
 
+// `runner` reopened on what an older build left when it took issue 30 back
+fn reopened_as_taken(rig: &Rig, runner: Mutex<Runner>) -> Mutex<Runner> {
+    drop(runner);
+    took_back(rig, 30, MAINTAINER, TITLE, BODY);
+    rig.open().unwrap()
+}
+
+// A `taken` record finishes its swap, and the pass starts ahead of the board's pick
 #[test]
-fn a_hand_labelled_maintainer_issue_ends_the_poll_at_needs_triage_and_the_board_does_not_start_it()
-{
-    let (rig, runner) = on_the_board(HAND, MAINTAINER);
+fn a_taken_record_an_older_build_saved_still_finishes_its_swap() {
+    let (rig, runner) = on_the_board(PICK, MAINTAINER);
+    let runner = reopened_as_taken(&rig, runner);
 
     assert_eq!(
         step(&runner).unwrap(),
@@ -67,11 +81,11 @@ fn a_hand_labelled_maintainer_issue_ends_the_poll_at_needs_triage_and_the_board_
     );
 }
 
-// The issue check refuses it, so it goes to the triager whatever `hand_ready`
-// says. Without it the label stays on, and the board holds the issue.
+// The issue check refuses it, so it is held off the board and the triager reaches
+// it, with the label the maintainer put on still on it
 #[test]
-fn with_hand_ready_off_the_same_issue_goes_to_the_triager_keeping_its_label() {
-    let (rig, runner) = on_the_board("pick = \"maintainer\"", MAINTAINER);
+fn a_hand_labelled_issue_that_fails_the_check_keeps_its_label_and_goes_to_the_triager() {
+    let (rig, runner) = on_the_board(PICK, MAINTAINER);
 
     assert_eq!(
         step(&runner).unwrap(),
@@ -86,8 +100,25 @@ fn with_hand_ready_off_the_same_issue_goes_to_the_triager_keeping_its_label() {
 }
 
 #[test]
+fn no_issue_without_a_taken_record_is_taken_back() {
+    let (rig, runner) = filed_before(PICK, MAINTAINER, nothing(), |rig| {
+        hand_labelled(rig, MAINTAINER);
+    });
+    rig.github.refuse_label_removals(ApiError::Refused(500));
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(
+        rig.github.label_takes(),
+        [],
+        "no `ready-for-agent` comes off"
+    );
+    assert_eq!(record(&rig, &runner)["step"], "done", "its pass ran");
+}
+
+#[test]
 fn an_issue_someone_else_opened_goes_to_the_triager_and_is_not_taken_back() {
-    let (rig, runner) = on_the_board("pick = \"all\"\nhand_ready = true", "newcomer");
+    let (rig, runner) = on_the_board("pick = \"all\"", "newcomer");
 
     assert_eq!(
         step(&runner).unwrap(),
@@ -101,10 +132,13 @@ fn an_issue_someone_else_opened_goes_to_the_triager_and_is_not_taken_back() {
 
 #[test]
 fn an_issue_with_a_work_item_is_never_taken_back() {
-    let rig = rig_with(HAND);
+    let rig = rig_with(PICK);
     let runner = rig.open().unwrap();
     hand_labelled(&rig, MAINTAINER);
     rig.forge.list_ready(30, false);
+    took_back(&rig, 30, MAINTAINER, TITLE, BODY);
+    drop(runner);
+    let runner = rig.open().unwrap();
     rig.claude.script([Scripted::Say(ASKS)]);
     rig.ask(&runner, "add", Some("30"));
     assert_eq!(issue_of(step(&runner).unwrap()).github(), Some(30));
@@ -118,7 +152,8 @@ fn an_issue_with_a_work_item_is_never_taken_back() {
 
 #[test]
 fn an_issue_an_open_pull_request_closes_is_never_taken_back() {
-    let (rig, runner) = on_the_board(HAND, MAINTAINER);
+    let (rig, runner) = on_the_board(PICK, MAINTAINER);
+    let runner = reopened_as_taken(&rig, runner);
     rig.forge.list_open_pull(77, "Fix the crash", &[30]);
 
     step(&runner).unwrap();
@@ -128,9 +163,9 @@ fn an_issue_an_open_pull_request_closes_is_never_taken_back() {
 }
 
 // Listing the open pull requests is a call of its own, so a poll makes it only where the answer
-// is used: an issue that carries `ready-for-agent`, or one taken back whose swap is not done
+// is used: an issue a `taken` record owes a swap to, or one the pick rule may list
 #[test]
-fn the_open_pulls_are_read_only_when_a_ready_issue_or_a_taken_back_one_is_listed() {
+fn the_open_pulls_are_read_only_when_a_taken_back_issue_is_listed() {
     let pulls = |rig: &Rig| {
         rig.forge
             .pull_request_reads()
@@ -139,20 +174,21 @@ fn the_open_pulls_are_read_only_when_a_ready_issue_or_a_taken_back_one_is_listed
     };
     // Nothing is queued and the issue is the maintainer's own and decided, so no
     // research is started on it either
-    let (rig, runner) = filed_before(HAND, MAINTAINER, nothing(), |rig| {
+    let (rig, runner) = filed_before(PICK, MAINTAINER, nothing(), |rig| {
         let mut decided = issue(rig, 30, MAINTAINER, 5);
         decided.labels = vec!["needs-info".to_owned()];
         list(rig, decided);
     });
     step(&runner).unwrap();
-    assert_eq!(pulls(&rig), 0, "no issue is ready, taken back or untouched");
+    assert_eq!(pulls(&rig), 0, "no issue is taken back or untouched");
 
-    // A listed issue carries `ready-for-agent`
+    // A listed issue carries `ready-for-agent` and owes the swap its record says
     hand_labelled(&rig, MAINTAINER);
     rig.github.refuse_label_removals(ApiError::Refused(500));
+    let runner = reopened_as_taken(&rig, runner);
     rig.next_look();
     step(&runner).unwrap();
-    assert_eq!(pulls(&rig), 1, "a ready issue is listed");
+    assert_eq!(pulls(&rig), 1, "a taken-back issue is listed");
     assert_eq!(record(&rig, &runner)["step"], "taken");
 
     // The swap stayed owed, and the recorded issue is listed without the label
@@ -175,10 +211,11 @@ fn the_open_pulls_are_read_only_when_a_ready_issue_or_a_taken_back_one_is_listed
 #[test]
 fn its_answered_pass_makes_it_ready_again_and_the_next_poll_does_not_take_it_back() {
     // The forge as the swap leaves it, since the stand-in does not follow the App's writes
-    let (rig, runner) = filed_before(HAND, MAINTAINER, asked(), |rig| {
+    let (rig, runner) = filed_before(PICK, MAINTAINER, asked(), |rig| {
         hand_labelled(rig, MAINTAINER);
         rig.forge.label(30, "needs-triage");
     });
+    let runner = reopened_as_taken(&rig, runner);
     assert_eq!(step(&runner).unwrap(), None);
     relist(&rig, &["needs-triage"]);
 
@@ -210,9 +247,10 @@ fn its_answered_pass_makes_it_ready_again_and_the_next_poll_does_not_take_it_bac
 
 #[test]
 fn a_swap_the_forge_refuses_leaves_a_taken_record_and_is_finished_at_the_next_poll() {
-    let (rig, runner) = filed_before(HAND, MAINTAINER, nothing(), |rig| {
+    let (rig, runner) = filed_before(PICK, MAINTAINER, nothing(), |rig| {
         hand_labelled(rig, MAINTAINER)
     });
+    let runner = reopened_as_taken(&rig, runner);
     rig.github.refuse_label_removals(ApiError::Refused(500));
 
     step(&runner).unwrap();
@@ -236,30 +274,99 @@ fn a_swap_the_forge_refuses_leaves_a_taken_record_and_is_finished_at_the_next_po
 
 #[test]
 fn a_taken_issue_whose_ready_label_is_gone_still_gets_needs_triage_before_its_pass() {
-    let (rig, runner) = filed_before(HAND, MAINTAINER, nothing(), |rig| {
+    let (rig, runner) = filed_before(PICK, MAINTAINER, nothing(), |rig| {
         hand_labelled(rig, MAINTAINER)
     });
-    rig.github.refuse_label_removals(ApiError::Refused(500));
-    step(&runner).unwrap();
-    assert_eq!(record(&rig, &runner)["step"], "taken");
+    let runner = reopened_as_taken(&rig, runner);
 
     // The forge as a stop between the two writes leaves it
     relist(&rig, &[]);
-    rig.github.accept_label_removals();
-    rig.next_look();
     step(&runner).unwrap();
 
     assert_eq!(moves(&rig)[..2], ["label needs-triage", "comment"]);
     assert_eq!(
         rig.github.label_takes(),
+        [],
+        "ready-for-agent is not taken off where the listing shows it off already"
+    );
+}
+
+// A decision the maintainer puts on after the swap stopped is the record's match
+#[test]
+fn a_taken_record_does_not_outrank_a_decision_put_on_later() {
+    let (rig, runner) = filed_before(PICK, MAINTAINER, nothing(), |rig| {
+        hand_labelled(rig, MAINTAINER);
+    });
+    let runner = reopened_as_taken(&rig, runner);
+    rig.github.refuse_label_removals(ApiError::Refused(500));
+
+    // The maintainer answers it `needs-info` by hand
+    relist(&rig, &["ready-for-agent", "needs-info"]);
+    step(&runner).unwrap();
+
+    assert_eq!(rig.github.label_takes(), [], "the decision stands");
+    assert_eq!(
+        calls(&rig, Role::Triager).len(),
+        0,
+        "a decided issue is not due"
+    );
+}
+
+// What becomes of a `taken` record whose issue was rewritten into one the check
+// would pass: the record still owes its swap and its pass, the check reads the
+// new body only once the pass ends, and it is ready from there
+#[test]
+fn a_taken_record_whose_body_now_passes_gets_its_swap_then_its_pass() {
+    let (rig, runner) = filed_before(PICK, MAINTAINER, nothing(), |rig| {
+        hand_labelled(rig, MAINTAINER);
+    });
+    let runner = reopened_as_taken(&rig, runner);
+
+    let mut rewritten = issue(&rig, 30, MAINTAINER, 5);
+    rewritten.title = TITLE.to_owned();
+    rewritten.body = PASSING.to_owned();
+    let mut labels = PASSING_LABELS.to_vec();
+    labels.push("ready-for-agent");
+    rewritten.labels = labels.iter().map(|&l| l.to_owned()).collect();
+    list(&rig, rewritten);
+    step(&runner).unwrap();
+
+    assert_eq!(
+        rig.github.label_takes(),
         [(30, "ready-for-agent".to_owned())],
-        "ready-for-agent is not taken off twice"
+        "the record owes the swap, and the check has not read the new body"
+    );
+    assert_eq!(checks(&rig)[0]["triage"], "ran", "{}", checks(&rig));
+    assert_eq!(calls(&rig, Role::Triager).len(), 1, "and its owed pass");
+    assert_eq!(record(&rig, &runner)["step"], "done");
+
+    // The forge as the swap and the pass left it, the rewritten body still on
+    let mut after = issue(&rig, 30, MAINTAINER, 5);
+    after.title = TITLE.to_owned();
+    after.body = PASSING.to_owned();
+    let after_labels = ["needs-triage", "kind:fix", "priority: P3"];
+    after.labels = after_labels.iter().map(|&l| l.to_owned()).collect();
+    list(&rig, after);
+    rig.next_look();
+    step(&runner).unwrap();
+
+    assert_eq!(
+        moves(&rig).last().unwrap(),
+        "label ready-for-agent",
+        "the check reads the body once its pass ends: {}",
+        checks(&rig)
+    );
+    assert_eq!(
+        rig.github.label_takes().last().unwrap(),
+        &(30, "needs-triage".to_owned()),
+        "and it is ready from there"
     );
 }
 
 #[test]
 fn an_issue_is_not_taken_back_where_no_app_covers_the_repo() {
-    let (rig, runner) = on_the_board(HAND, MAINTAINER);
+    let (rig, runner) = on_the_board(PICK, MAINTAINER);
+    let runner = reopened_as_taken(&rig, runner);
     rig.without_app();
 
     let (started, _) = dispatched(step(&runner).unwrap());
@@ -272,5 +379,10 @@ fn an_issue_is_not_taken_back_where_no_app_covers_the_repo() {
             .any(|w| w.contains("ready-for-agent") || w.contains("needs-triage")),
         "{writes:?}"
     );
-    assert_eq!(triage(&rig, &runner)["issues"], serde_json::Value::Null);
+    assert_eq!(
+        record(&rig, &runner)["step"],
+        "taken",
+        "the swap stays owed"
+    );
+    assert_eq!(triage(&rig, &runner)["running"], serde_json::Value::Null);
 }
