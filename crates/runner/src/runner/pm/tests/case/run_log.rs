@@ -3,9 +3,10 @@
 
 use std::sync::Mutex;
 
-use super::super::{answered, pm_seen, step_until};
+use super::super::rulings::{answered, asking, left_to_pm, settled};
+use super::super::{answered as reported, pm_seen, question, step_until};
 use super::rig::{BODY, case, head_run, red, wake};
-use crate::ports::LogPart;
+use crate::ports::{LogPart, Role};
 use crate::runner::{Runner, StepReport};
 use crate::test::{Rig, Scripted, Seen};
 
@@ -30,7 +31,7 @@ fn wake_saying(rig: &Rig, runner: &Mutex<Runner>, reply: &'static str) -> Vec<St
     rig.ask(runner, "tell", Some("how is #7?"));
     rig.claude
         .script_for(crate::ports::Role::Pm, [Scripted::Say(reply)]);
-    let (_, _, dropped) = answered(Some(step_until(runner, |r| {
+    let (_, _, dropped) = reported(Some(step_until(runner, |r| {
         matches!(r, StepReport::PmAnswered { .. })
     })));
     dropped
@@ -40,7 +41,7 @@ fn wake_saying(rig: &Rig, runner: &Mutex<Runner>, reply: &'static str) -> Vec<St
 fn next_wake(rig: &Rig, runner: &Mutex<Runner>) -> Seen {
     rig.claude
         .script_for(crate::ports::Role::Pm, [Scripted::Say(super::rig::NOTHING)]);
-    answered(Some(step_until(runner, |r| {
+    reported(Some(step_until(runner, |r| {
         matches!(r, StepReport::PmAnswered { .. })
     })));
     pm_seen(rig).pop().unwrap()
@@ -135,4 +136,96 @@ fn a_run_the_case_holds_is_dropped_and_makes_no_read() {
         1,
         "the held log is not read again"
     );
+}
+
+/// Run 102 is green on the head of #7's pull request 71, whose ruling the project
+/// manager answers, and its whole log is `GREEN-LOG-LINE`
+fn ruling_with_green_run(project: &str) -> (Rig, Mutex<Runner>) {
+    let (rig, runner) = left_to_pm(project);
+    let head = rig.forge.head_of("kelpie/7").expect("a head");
+    rig.forge
+        .set_head_runs(&head, vec![head_run("test", 102, Some("success"))]);
+    rig.forge.set_run_log(102, LogPart::Whole, "GREEN-LOG-LINE");
+    (rig, runner)
+}
+
+/// How many wakes put ruling 71 to the project manager to answer
+fn put_to_it(rig: &Rig) -> usize {
+    (pm_seen(rig).iter())
+        .filter(|s| s.call.prompt.contains("waits on your answer"))
+        .count()
+}
+
+#[test]
+fn a_ruling_unanswered_while_a_log_is_asked_for_stays_held_and_is_asked_again() {
+    let (rig, runner) = ruling_with_green_run("case-ruling-asks-log");
+    rig.claude.script_for(
+        Role::Pm,
+        [
+            Scripted::Say(ASK),
+            Scripted::Say(super::super::rulings::answers('A', false)),
+        ],
+    );
+
+    settled(&rig, &runner);
+
+    assert_eq!(put_to_it(&rig), 2, "asked again after the log");
+    assert!(
+        pm_seen(&rig)[1].call.prompt.contains("run 102"),
+        "{}",
+        pm_seen(&rig)[1].call.prompt
+    );
+    assert_eq!(asking(&rig), None, "never held out to the maintainer");
+    assert!(
+        answered(&rig).is_some(),
+        "it answered the second time: {:?}",
+        rig.github.comments()
+    );
+    assert_eq!(rig.forge.run_log_reads(102), 1);
+}
+
+#[test]
+fn a_question_unanswered_while_a_log_is_asked_for_stays_held_and_is_asked_again() {
+    let (rig, runner) = question::asking_on_a_pull_request("case-question-asks-log");
+    let head = rig.push_by_hand("kelpie/7", "work.txt");
+    rig.forge
+        .set_head_runs(&head, vec![head_run("test", 102, Some("success"))]);
+    rig.forge.set_run_log(102, LogPart::Whole, "GREEN-LOG-LINE");
+    rig.claude.script_for(
+        Role::Pm,
+        [
+            Scripted::Say(ASK),
+            Scripted::Say(
+                "{\"answer\": {\"item\": 7, \"text\": \"Use --check.\", \"why\": \"the docs\"}}",
+            ),
+        ],
+    );
+
+    step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+
+    let calls = pm_seen(&rig);
+    assert_eq!(calls.len(), 2, "the question was put to it again");
+    assert!(calls[1].call.prompt.contains("worker asks"), "second wake");
+    assert_eq!(rig.forge.comments(), [], "the question never went out");
+    assert!(
+        rig.alerts.posts().is_empty(),
+        "the maintainer was never asked"
+    );
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"], serde_json::json!([]), "answered");
+}
+
+#[test]
+fn a_wake_with_no_new_log_to_ask_for_lets_the_ruling_go_to_the_maintainer() {
+    let (rig, runner) = ruling_with_green_run("case-ruling-no-new-log");
+    rig.claude
+        .script_for(Role::Pm, [Scripted::Say(ASK), Scripted::Say(ASK)]);
+
+    settled(&rig, &runner);
+
+    assert_eq!(put_to_it(&rig), 2, "asked again once, for the one log");
+    assert!(asking(&rig).is_some(), "the maintainer is asked at last");
+    assert_eq!(answered(&rig), None);
+    assert_eq!(rig.forge.run_log_reads(102), 1);
 }

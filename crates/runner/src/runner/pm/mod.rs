@@ -45,6 +45,7 @@ mod question;
 mod red;
 mod requests;
 mod rulings;
+mod run_log;
 mod said;
 #[cfg(test)]
 mod tests;
@@ -879,6 +880,7 @@ impl Runner {
                 self.pm.asking.remove(id);
             }
         }
+        self.pm_asks_again(&flying.wakes, &answer);
         // An item it gave no `read` on goes on to CI as it stands.
         for wake in &flying.wakes {
             if let Wake::Findings { ticket, .. } = wake {
