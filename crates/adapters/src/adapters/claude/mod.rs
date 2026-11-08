@@ -416,13 +416,12 @@ fn profile(call: &AgentCall) -> Vec<OsString> {
         "--settings".into(),
         call.settings.clone().into(),
     ];
-    // Every kind of call but an answer's runs on an allow-list, and loads no
-    // MCP server but those kelpie names, so what a project's settings allow
-    // adds nothing. An agent file's own list replaces a worker's and a
-    // reviewer's, and no other's.
+    // An allow-list keeps a project's settings from adding tools or MCP servers.
+    // An agent file's list replaces only a worker's or reviewer's tools.
     use crate::ports::Tools as Kind;
     let own = call.agent_tools.as_deref();
     let tools = match (call.role, call.tools) {
+        (_, Kind::Answer) => Some(""),
         (_, Kind::Retro) => Some(settings::RETRO_TOOLS),
         // The project manager's read of a fix it drafted reads and searches
         // alone: it writes nothing and runs no command.
@@ -430,7 +429,7 @@ fn profile(call: &AgentCall) -> Vec<OsString> {
         (Role::Pm, _) => Some(settings::PM_TOOLS),
         (_, Kind::Work) => Some(own.unwrap_or(settings::WORK_TOOLS)),
         (_, Kind::Review) => Some(own.unwrap_or(crate::settings::CLAUDE_REVIEW_TOOLS)),
-        (_, Kind::Answer | Kind::Pm) => None,
+        (_, Kind::Pm) => None,
     };
     if crate::ports::mcp::loads(call) {
         argv.extend(["--mcp-config".into(), mcp::mcp_file(&call.settings).into()]);
