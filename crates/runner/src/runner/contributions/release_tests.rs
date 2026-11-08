@@ -146,6 +146,7 @@ fn at_nudge_days_one_comment_asks_for_a_release_and_names_open_bot_threads() {
     assert_eq!(asked.len(), 1);
     assert!(asked[0].contains("bleats"), "{}", asked[0]);
     assert!(asked[0].contains("take the pull request from here"));
+    assert!(asked[0].contains("for 4 more days"), "{}", asked[0]);
     let record = held(&rig, &runner);
     assert!(record["asked"]["comment"].is_u64(), "{record}");
     assert_eq!(record["asked"]["asks"], 1);
@@ -193,6 +194,36 @@ fn silence_until_quiet_days_releases_it() {
     later(&rig, &runner, 3);
     later(&rig, &runner, 3);
     assert_eq!(held(&rig, &runner)["released"], Value::Null);
+    assert_eq!(comments(&rig), [ASKS]);
+
+    later(&rig, &runner, 1);
+
+    assert_eq!(held(&rig, &runner)["released"]["how"], "silence");
+    assert_eq!(comments(&rig), [ASKS, TAKEN]);
+}
+
+// The runner was down when the nudge came due, so the ask goes out late
+#[test]
+fn a_late_ask_states_the_full_notice() {
+    let (rig, runner) = waiting(&[ASKS]);
+
+    later(&rig, &runner, 6);
+
+    let asked = prompts(&rig);
+    assert_eq!(asked.len(), 1);
+    assert!(asked[0].contains("for 4 more days"), "{}", asked[0]);
+    assert_eq!(held(&rig, &runner)["clock"]["days_to_quiet"], 4);
+}
+
+#[test]
+fn silence_releases_only_after_the_notice_from_the_ask() {
+    let (rig, runner) = waiting(&[ASKS, TAKEN]);
+
+    later(&rig, &runner, 6);
+    assert_eq!(comments(&rig), [ASKS], "the ask went out on day 6");
+
+    later(&rig, &runner, 3);
+    assert_eq!(held(&rig, &runner)["released"], Value::Null, "day 9");
     assert_eq!(comments(&rig), [ASKS]);
 
     later(&rig, &runner, 1);

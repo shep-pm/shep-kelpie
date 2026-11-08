@@ -7,6 +7,7 @@ How kelpie asks a contributor for a release and what it takes as one. ADR 0010. 
 - `follow_release` runs once a poll, after `follow_posts` and before `follow_answers`, for a contribution with a running clock. At `Clock::due` of `Nudge` the representative posts one comment through `Voice::post`: it names the review bots' open threads (only when a bot answered the pass; findings and nits as `flagged_lines`) and asks whether kelpie may take the pull request from here, by comment or by a thumbs up or down on it. `runner/contributions/release.rs`
 - `contributions[].asked` is `{ comment, at, asks, nos?, read?, closing?, thanked? }`, left out while none is open. `asks` and `nos` count asks and nos, `read` is the last 50 `Said` replies read as `other`, `closing` is the maintainer's close, `thanked` that its thanks was posted. A push or a cleared clock drops it, unless it is closing.
 - An ask first made at `Quiet` restarts the clock, so a contributor never nudged has the whole window. One made at `Nudge` keeps it.
+- The ask states its notice from the moment it goes out, and the quiet comes no sooner than that moment plus `quiet_days - nudge_days` whole days, 4 by default, or one day when the two settings are equal. An ask that goes out late still gets the full notice, and `days_to_quiet` counts from the same moment (`contribution-talk.md`).
 
 ## The answer
 
