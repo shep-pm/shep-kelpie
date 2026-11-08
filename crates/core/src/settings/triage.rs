@@ -36,6 +36,10 @@ pub enum TriagePick {
     Off,
     /// The maintainer's own issues
     Maintainer,
+    /// The maintainer's own issues, and an outside issue only once the maintainer
+    /// puts `needs-triage` on it. Any other outside issue ends `needs-approval`
+    /// with no call.
+    Label,
     /// Every person's issues
     All,
 }
@@ -112,10 +116,10 @@ pub struct Triage {
     pub per_day: u32,
     /// The most triage calls on one author's issues in any 24 hours, up to 200,
     /// logins compared ignoring case. An issue past it is labelled
-    /// `needs-triage` with no call and no comment. 2 when absent, 0 for no cap.
+    /// `needs-approval` with no call and no comment. 2 when absent, 0 for no cap.
     pub per_author_per_day: u32,
     /// An author whose account is younger than this many days, and who has no
-    /// history in the repo, gets `needs-triage` with no call and no comment.
+    /// history in the repo, gets `needs-approval` with no call and no comment.
     /// 30 when absent, 0 for no check.
     pub min_account_days: u32,
     /// The most kilobytes of an issue body that reach the triager, which the

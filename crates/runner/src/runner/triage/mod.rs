@@ -3,7 +3,7 @@
 //! The runner lists the open issues once a board poll ([`poll_read`]) and checks
 //! them ([`checks`]). While `triage.pick` is not `off`, `status` lists as due,
 //! oldest first, each the check refused that carries no [`TRIAGE_LABELS`] but
-//! `ready-for-agent` or a `needs-triage` above `pruned_through`, opened by a person
+//! `ready-for-agent` or a `needs-approval` above `pruned_through`, opened by a person
 //! or the App after `triage.since` (a `ready-for-agent` one at any time), and under
 //! `maintainer` by the maintainer or the App. [`Runner::triage_due`] starts one research call at a time ([`flight::triage`]),
 //! on the oldest or the issue `shep kelpie triage` queued; [`research`] reads its
@@ -17,7 +17,7 @@ use serde::Serialize;
 use super::Runner;
 use super::report::Begin;
 use super::review::calls::build_call;
-use crate::board::{READY, TRIAGE};
+use crate::board::{READY, TRIAGE, TRIAGE_GO};
 use crate::ports::{
     AgentCall, AuthorAssociation, ForgeError, OpenIssue, Role, ThreadComment, Timestamp, Tools,
 };
@@ -34,6 +34,7 @@ pub(super) mod ask;
 mod checks;
 pub(super) mod comment;
 mod facts;
+mod go;
 pub(super) mod hand;
 pub(super) mod heard;
 pub(super) mod images;
@@ -57,7 +58,7 @@ use comment::NEEDS_TRIAGE;
 use images::Pictures;
 use spam::POSSIBLE_SPAM;
 
-/// The labels that say an issue has been looked at. All but `needs-triage`, a
+/// The labels that say an issue has been looked at. All but `needs-approval`, a
 /// queue state anyone may put on by hand, make the pick rule leave it alone.
 /// `possible-spam` is one of them: an issue its classifier read as spam is left
 /// alone until the maintainer says otherwise.
@@ -70,12 +71,12 @@ pub(super) const TRIAGE_LABELS: [&str; 6] = [
     POSSIBLE_SPAM,
 ];
 
-/// Which step of putting `needs-triage` on an issue failed
+/// Which step of putting `needs-approval` on an issue failed
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum WaitingLabel {
-    /// The repo's `needs-triage` label could not be made, with the forge's words
+    /// The repo's `needs-approval` label could not be made, with the forge's words
     Make(String),
-    /// The issue could not be labelled `needs-triage`, with why the forge refused
+    /// The issue could not be labelled `needs-approval`, with why the forge refused
     Label(ForgeError),
 }
 
@@ -279,7 +280,8 @@ impl Runner {
                 continue;
             }
             // A record is the issue's, to finish or to leave, unless the verb asked again.
-            if !asked && !self.first_pass_owed(issue) {
+            let renewed = self.go_renewed_listed(issue);
+            if !asked && !renewed && !self.first_pass_owed(issue) {
                 continue;
             }
             self.flights.triage_try(issue);
@@ -297,11 +299,12 @@ impl Runner {
             }
             // The limits, read from the records and the listing, before the call
             // is made.
+            let go = self.go_listed(issue);
             let waiting = (!asked)
                 .then(|| self.triage_due.iter().find(|d| d.issue == issue).cloned())
                 .flatten();
             let limited = match &waiting {
-                Some(due) => self.triage_limited(&due.author, asked),
+                Some(due) => self.triage_limited(&due.author, asked || go),
                 None => false,
             };
             if let Some(due) = &waiting
@@ -663,7 +666,7 @@ impl Runner {
         let Some(found) = open.iter().find(|i| i.number == issue) else {
             return Err(format!("#{issue} is not an open issue"));
         };
-        // `needs-triage` lets the verb through, whoever put it on: it is a queue
+        // `needs-approval` lets the verb through, whoever put it on: it is a queue
         // state, and the `possible-spam` its classifier put on is the one the
         // maintainer overrules by asking for it.
         let held = (found.labels.iter())
@@ -699,19 +702,19 @@ impl Runner {
         Ok(())
     }
 
-    // Makes the repo's `needs-triage` label, the first step of [`Self::put_waiting_label`].
+    // Makes the repo's `needs-approval` label, the first step of [`Self::put_waiting_label`].
     // `swap_ready` writes between the two steps, and `check_passed` skips this one
     // once the poll has made the label.
     fn make_waiting_label(&mut self) -> Result<(), String> {
         self.make_missing_labels([NEEDS_TRIAGE])
     }
 
-    // Labels `issue` `needs-triage`, the second step of [`Self::put_waiting_label`]
+    // Labels `issue` `needs-approval`, the second step of [`Self::put_waiting_label`]
     fn label_waiting(&self, issue: u64) -> Result<(), ForgeError> {
         self.label_issue(issue, TRIAGE, true)
     }
 
-    // Makes the repo's `needs-triage` label and labels `issue` with it. Which step
+    // Makes the repo's `needs-approval` label and labels `issue` with it. Which step
     // failed, and why
     fn put_waiting_label(&mut self, issue: u64) -> Result<(), WaitingLabel> {
         self.make_waiting_label().map_err(WaitingLabel::Make)?;
@@ -731,37 +734,60 @@ pub(super) fn opened_by_us_or_people(issue: &OpenIssue, app: Option<&str>) -> bo
     !issue.author_is_bot || is_app(&issue.author, app)
 }
 
-// Whether any of `labels` is a triage decision. `needs-triage` and `ready-for-agent`
+// Whether any of `labels` is a triage decision. `needs-approval` and `ready-for-agent`
 // are queue states, not decisions
 fn decided(labels: &[String]) -> bool {
     (labels.iter()).any(|l| l != READY && l != TRIAGE && TRIAGE_LABELS.contains(&l.as_str()))
 }
 
+// Whose issues the pick rule reaches
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Whose<'a> {
+    // Every person's
+    Anyone,
+    // Every person's, and the maintainer's `needs-triage` counts: whatever
+    // `Anyone`, `Only` or `Asked` reach, for a read made before the pick is known
+    Possibly,
+    // The maintainer's login, or the App's
+    Only(&'a str),
+    // The maintainer's login or the App's, and anyone's that carries the
+    // maintainer's `needs-triage`
+    Asked(&'a str),
+}
+
 // Whether `issue` is untouched, `owed` the triager for a failed check, and opened by
 // no bot but the App, after `since` unless it carries `ready-for-agent` or was `taken`
-// back from it, and by `only` or the App when one is named. `needs-triage` and a
-// refused `ready-for-agent` are no decision: kelpie's record is.
+// back, and by `whose`. Under `Asked` the maintainer's `needs-triage` counts past
+// `since`, `owed`, the author and a `needs-approval`, which is no decision.
 fn untouched(
     issue: &OpenIssue,
     since: Timestamp,
     pruned_through: u64,
-    only: Option<&str>,
+    whose: Whose<'_>,
     owed: bool,
     app: Option<&str>,
     taken: bool,
 ) -> bool {
+    let go = matches!(whose, Whose::Asked(_) | Whose::Possibly)
+        && issue.labels.iter().any(|l| l == TRIAGE_GO);
     let decided = (issue.labels.iter()).any(|l| {
         TRIAGE_LABELS.contains(&l.as_str())
-            && (l != TRIAGE || issue.number <= pruned_through)
+            && (l != TRIAGE || (issue.number <= pruned_through && !go))
             && l != READY
     });
     let held = taken || issue.labels.iter().any(|l| l == READY);
-    owed && !decided
+    let theirs =
+        |login: &str| issue.author.eq_ignore_ascii_case(login) || is_app(&issue.author, app);
+    let reached = match whose {
+        Whose::Anyone | Whose::Possibly => true,
+        Whose::Only(login) => theirs(login),
+        Whose::Asked(login) => go || theirs(login),
+    };
+    (owed || go)
+        && !decided
         && opened_by_us_or_people(issue, app)
-        && (held || issue.created > since)
-        && only.is_none_or(|login| {
-            issue.author.eq_ignore_ascii_case(login) || is_app(&issue.author, app)
-        })
+        && (held || go || issue.created > since)
+        && reached
 }
 
 // The question texts a questions block asks: the lines `questions_block`
@@ -789,6 +815,8 @@ mod check_tests;
 mod hand_tests;
 #[cfg(test)]
 mod images_tests;
+#[cfg(test)]
+mod label_tests;
 #[cfg(test)]
 mod limits_tests;
 #[cfg(test)]

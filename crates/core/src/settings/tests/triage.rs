@@ -53,6 +53,13 @@ fn pick_takes_off_maintainer_or_all_and_refuses_any_other_word() {
 }
 
 #[test]
+fn label_is_a_value_of_pick() {
+    let settings = parse(&with("pick = \"label\"\n")).unwrap();
+    assert_eq!(settings.triage.pick, TriagePick::Label);
+    assert!(!settings.triage.is_off());
+}
+
+#[test]
 fn max_questions_of_zero_or_above_10_is_refused_naming_it() {
     for n in [0, 11, 50] {
         let err = parse_err(&with(&format!("max_questions = {n}\n")));
