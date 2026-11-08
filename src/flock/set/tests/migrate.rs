@@ -89,7 +89,7 @@ async fn an_old_list_becomes_entries_in_the_map_and_is_removed() {
 
 // `TABLE` with `git.merging` set to `merging`, and the project manager named when `pm` says
 fn merging(merging: &str, pm: bool) -> String {
-    let table = TABLE.replace("merging = \"ask\"", &format!("merging = \"{merging}\""));
+    let table = TABLE.replace("[git]\n", &format!("[git]\nmerging = \"{merging}\"\n"));
     match pm {
         true => table.replace("[agents]\n", "[agents]\npm = \"pm\"\n"),
         false => table,
@@ -506,10 +506,7 @@ async fn the_code_graph_table_is_deleted_and_named_with_its_values_and_the_table
 // `TABLE` with the `git.issues` and `triage.hand_ready` an older build wrote put back in it
 fn with_the_keys_the_project_manager_took() -> String {
     TABLE
-        .replace(
-            "merging = \"ask\"\n",
-            "merging = \"ask\"\nissues = \"file\"\n",
-        )
+        .replace("[git]\n", "[git]\nissues = \"file\"\n")
         .replace("[triage]\n", "[triage]\nhand_ready = true\n")
 }
 
@@ -525,7 +522,7 @@ async fn the_keys_the_project_manager_took_are_deleted_and_named_with_their_valu
         "{said:?}"
     );
     let table = scene.table();
-    assert_eq!(table["git"]["merging"], "ask", "the rest is kept");
+    assert_eq!(table["git"]["remote"], "shep-pm/koji", "the rest is kept");
     assert_eq!(table["triage"]["agent"], "triager", "the rest is kept");
     assert!(table["git"].get("issues").is_none(), "{table:?}");
     assert!(table["triage"].get("hand_ready").is_none(), "{table:?}");

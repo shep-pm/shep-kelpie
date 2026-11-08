@@ -14,7 +14,6 @@ const TABLE: &str = r#"
 [git]
 checkout = CHECKOUT
 remote = "REMOTE"
-merging = "ask"
 
 [ci]
 block = true
@@ -583,7 +582,7 @@ async fn a_glob_with_one_project_prints_the_line_a_plain_set_prints() {
 async fn one_project_refusing_the_value_means_no_project_is_written_and_the_error_names_it() {
     let mut scene = Scene::holding_each(
         TABLE,
-        &TABLE.replace(r#"merging = "ask""#, r#"merging = "sometimes""#),
+        &TABLE.replace("[git]\n", "[git]\nmerging = \"sometimes\"\n"),
     )
     .await;
     let (koji, eevee) = (scene.table(), scene.table_of("eevee"));
