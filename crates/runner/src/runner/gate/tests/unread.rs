@@ -343,6 +343,56 @@ fn a_note_fix_goes_back_to_a_reviewer() {
 }
 
 #[test]
+fn a_note_fix_the_list_left_with_no_reader_raises_a_ruling_after_one_pass() {
+    let rig = {
+        let rig = Rig::new("unread-note-nobody");
+        rig.pm("pm");
+        rig.allow(&["sonnet-high", "opus", "pm"]);
+        rig.reviewers(&["opus"]);
+        rig.write_agent("opus", OPUS);
+        rig
+    };
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+
+    // The pass has no reader: `opus` reviews only `src/**`. With `merge = false`
+    // the gate asks the maintainer, whose `no` sends the worker a note.
+    through_review(&rig, &runner);
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"][0]["id"], json!("71"), "{status}");
+    assert!(
+        status["rulings"][0]["question"]
+            .as_str()
+            .is_some_and(|q| q.contains(&head[..7])),
+        "{status}"
+    );
+    rig.ask(&runner, "rule", Some("71 no rename the flag"));
+    rig.claude
+        .script_for(Role::Worker, [Scripted::Push("rename.txt", "renamed\n")]);
+    step(&runner).unwrap(); // the noted turn: pushes, and goes to CI
+    let fixed = rig.forge.head_of("kelpie/7").unwrap();
+    assert_ne!(fixed, head, "the worker pushed the fix");
+
+    // The fix goes back through one pass, which has no reader either. The gate
+    // does not send it back again: it asks the maintainer about the fix.
+    let question = merge_question(&runner);
+    assert!(
+        question.contains(&format!("Merge pull request #71 at {}", &fixed[..7])),
+        "{question}"
+    );
+    assert!(!question.contains("no reviewer read it"), "{question}");
+    assert_eq!(
+        rig.ask(&runner, "status", None)["rulings"][0]["kind"],
+        json!({ "kind": "merge", "head": fixed }),
+        "the sent-back pass cleared the note"
+    );
+    assert_eq!(rounds(&rig), (0, 0), "no reviewer ran for the fix");
+}
+
+#[test]
 fn a_late_fix_goes_back_to_a_reviewer() {
     let rig = {
         let rig = listing("unread-late", &["cubic"]);

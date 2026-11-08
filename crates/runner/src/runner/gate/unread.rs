@@ -111,13 +111,14 @@ impl Runner {
     }
 
     // The item goes back through a pass of the review, as a `no` on a warned
-    // merge ruling sends one: a new pass, the unreviewed mark taken off, and the
-    // plan's reads to run. `tried` gives each local reviewer kelpie had left out
-    // of this item's picks another go, which nothing else does once one is down.
+    // merge ruling sends one: a new pass, the unreviewed mark and the note it
+    // fixes taken off, and the plan's reads to run. `tried` gives each local
+    // reviewer kelpie had left out of this item's picks another go.
     fn read_back(&mut self, tried: bool) -> Result<Begin, StateError> {
         self.update(|item| {
             item.new_pass();
             item.unreviewed = None;
+            item.noted_from = None;
             if tried {
                 item.local_failures.clear();
             }
