@@ -1,13 +1,13 @@
 //! The gate between the worker's pull request and the merge ruling
 //!
 //! Each step looks once at the pull request's head. A label, ready or head
-//! change kelpie did not make parks the worker before anything else. A branch
-//! that changes agents' own files parks it next. A branch without the latest
-//! `main` is rebased and pushed. It is merged instead when it is adopted or
-//! holds a merge already. A conflict or a red run is the worker's next turn,
-//! naming what it names; a conflict left standing parks it on a ruling. A
-//! green run raises the merge ruling, or under `auto` merges, save a head no
-//! reviewer read, which goes back to a reviewer. A project without CI skips checks.
+//! change kelpie did not make parks the worker before anything else, and a
+//! branch changing agents' own files parks it next. A branch behind `main` is
+//! rebased and pushed, or merged when the item is adopted or holds a merge.
+//! A conflict or a red run is the worker's next turn, and a conflict left
+//! standing parks it on a ruling. A green run raises the merge ruling, or
+//! under `auto` merges, save a head no reviewer read, which goes back through
+//! a pass of the review where a project manager rules (unread.rs). No CI skips checks.
 
 use super::Runner;
 use super::claude_files::Unchecked;
