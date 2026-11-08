@@ -35,7 +35,7 @@ Whether kelpie merges the bumps bots open (Dependabot), and closes one that brea
 
 ## Red
 
-- Steps are saved one at a time in `Red.step`, so a restart repeats none: comment naming each failed check (not the e2e output tail), close the pull request (`Forge::close_pull_request`), then open an issue labelled `needs-triage` and `dependencies`. A refused step is tried again at the next poll.
+- Steps are saved one at a time in `Red.step`, so a restart repeats none: comment naming each failed check (not the e2e output tail), close the pull request (`Forge::close_pull_request`), then open an issue labelled `needs-approval` and `dependencies`. A refused step is tried again at the next poll.
 - The issue puts the call before the project manager; the bot's next bump undoes a close.
 - `RedStep::Left` is a saved value no new bump gets; it stays open until a new head.
 
