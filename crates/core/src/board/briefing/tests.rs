@@ -477,9 +477,11 @@ fn the_agents_section_lists_the_implementers_then_the_reviewers_with_tier_kinds_
          that holds up other work to the faster plan agent. On course for over 100%, lean on \
          local models. A small share left with little time left is no reason to slow down. \
          Spend the API credit and the plan week to their pace, the one further behind its \
-         reset first, since both are lost at their reset. Billed API is overflow: kelpie \
-         starts an agent billed to the API only when you name it, an `agent:<name>!` label \
-         pins it, or every other budget is out or held. The ready queue is not the week's \
+         reset first, since both are lost at their reset. Billed API is overflow you must \
+         ask for: kelpie starts an agent billed to the API only when you name it or an \
+         `agent:<name>!` label pins it, and never on its own, so an item whose only fitting \
+         agents are billed is skipped as unpicked until you name one. The ready queue is not \
+         the week's \
          work, since the maintainer files issues all week, so a short queue is no reason to \
          spend faster.\n\
          \n\
@@ -611,8 +613,8 @@ fn the_opening_spends_each_budget_by_its_reset() {
         "A local model's power is already paid for: spend one first when it can take the item.",
         "Spend the API credit and the plan week to their pace, the one further behind its \
          reset first, since both are lost at their reset.",
-        "kelpie starts an agent billed to the API only when you name it, an `agent:<name>!` \
-         label pins it, or every other budget is out or held.",
+        "kelpie starts an agent billed to the API only when you name it or an \
+         `agent:<name>!` label pins it, and never on its own",
     ] {
         assert!(opening.contains(rule), "{rule}\n{opening}");
     }
@@ -620,6 +622,16 @@ fn the_opening_spends_each_budget_by_its_reset() {
         !text.contains("while the API is not held, then a plan"),
         "no briefing text keeps the fixed order: {text}"
     );
+    for promised in [
+        "every other budget is out or held",
+        "the rest are out or held",
+    ] {
+        assert!(
+            !text.contains(promised),
+            "the briefing promises a billed agent {promised}, which startable never starts: \
+             {text}"
+        );
+    }
 }
 
 #[test]
@@ -901,7 +913,7 @@ fn the_credit_guidance_shows_with_the_credit_line_alone() {
         "bonus on top of the plans",
         "paced across the month so its course aims at 100%",
         "spend a local model that can take the item first, spend the credit and the plan \
-         week while either lasts, and billed API only when the rest are out or held",
+         week while either lasts, and billed API only for an agent you name or a label pins",
     ] {
         assert!(section.contains(part), "{part}\n{section}");
     }

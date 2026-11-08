@@ -557,9 +557,11 @@ fn agents(
          that holds up other work to the faster plan agent. On course for over 100%, lean on \
          local models. A small share left with little time left is no reason to slow down. \
          Spend the API credit and the plan week to their pace, the one further behind its \
-         reset first, since both are lost at their reset. Billed API is overflow: kelpie \
-         starts an agent billed to the API only when you name it, an `agent:<name>!` label \
-         pins it, or every other budget is out or held. The ready queue is not the week's \
+         reset first, since both are lost at their reset. Billed API is overflow you must \
+         ask for: kelpie starts an agent billed to the API only when you name it or an \
+         `agent:<name>!` label pins it, and never on its own, so an item whose only fitting \
+         agents are billed is skipped as unpicked until you name one. The ready queue is not \
+         the week's \
          work, since the maintainer files issues all week, so a short queue is no reason to \
          spend faster.\n\n",
     );
@@ -573,7 +575,8 @@ fn agents(
              to spend the credit freely until a date (`shep kelpie tell --all`, a line with \
              an `(until ...)` end in `pm-standing.md`) sets this pacing aside until then: \
              spend a local model that can take the item first, spend the credit and the plan \
-             week while either lasts, and billed API only when the rest are out or held.\n\n",
+             week while either lasts, and billed API only for an agent you name or a label \
+             pins.\n\n",
         );
     }
     for agent in agents {
