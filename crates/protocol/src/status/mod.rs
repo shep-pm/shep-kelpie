@@ -12,7 +12,7 @@ use shep_kelpie_core::board::Skip;
 use shep_kelpie_core::board::briefing::Run;
 use shep_kelpie_core::ports::{PaddockHolder, SessionId, Timestamp};
 use shep_kelpie_core::review_bot::Bot;
-use shep_kelpie_core::settings::{AgentName, Merging};
+use shep_kelpie_core::settings::AgentName;
 use shep_kelpie_core::skills::{RepoPlugin, StepSkill};
 use shep_kelpie_core::state::{self, Ruling};
 use shep_kelpie_core::ticket::TicketId;
@@ -32,12 +32,25 @@ pub use work::{
     HeldUp, PmStatus, Settled, TriageStatus, Waiting,
 };
 
+/// Whether a head that passed every gate merges unasked, as `status` shows it
+///
+/// Derived from `rulings.pm_decides.merge`: `auto` where it is `true`, `ask` where
+/// it is `false`. `auto` replaces only the merge ruling: a safety gate still raises it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Merging {
+    /// Kelpie asks for a ruling before every merge
+    Ask,
+    /// Kelpie merges once every gate passes, then posts a notice of the merge
+    Auto,
+}
+
 /// What `status` answers
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Status {
     /// The project
     pub project: String,
-    /// Who merges its green, reviewed pull requests
+    /// Whether its green, reviewed pull requests merge unasked
     pub merging: Merging,
     /// The first of `work_items`, where a status read before they existed
     /// finds the work item

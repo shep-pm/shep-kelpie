@@ -25,10 +25,11 @@ use crate::ports::{
 };
 use crate::review_bot::{Bot, Profile};
 use crate::settings::{
-    Account, ForgeSlug, Gateways, ListedReviewer, Merging, RoleAgents, Settings, SettingsError,
+    Account, ForgeSlug, Gateways, ListedReviewer, RoleAgents, Settings, SettingsError,
 };
 use crate::skills::{RepoPlugins, Skills};
 use crate::state::{ProjectState, Ruling, StateError, StateStore};
+use crate::status::Merging;
 use crate::ticket::TicketId;
 use crate::webhook::{KelpieSettings, Webhook};
 use crate::work_item::{ReviewCallState, Seat, WorkItem};

@@ -19,9 +19,10 @@ use crate::ports::{SessionId, Timestamp};
 use crate::reply::Reply;
 use crate::request::{Request, RuleAction, RuleAnswer};
 use crate::review_bot::Bot;
-use crate::settings::{AgentName, Merging, PerItemUsd};
+use crate::settings::{AgentName, PerItemUsd};
 use crate::skills::{RepoPlugin, StepSkill};
 use crate::state::{Finished, LeaseHeld, Ruling, StateError, Waiting};
+use crate::status::Merging;
 use crate::ticket::TicketId;
 use crate::work_item::{
     Attached, BotSkipped, Phase, QwenTally, Spend, Split, TestCheck, Turn, WorkItem,
@@ -64,7 +65,7 @@ const BOARD_USAGE: &str = "takes `move <issue> <position>` or `top <issue>`, or 
 pub struct Status<'a> {
     /// The project
     pub project: &'a str,
-    /// Who merges its green, reviewed pull requests, `git.merging`
+    /// Whether its green, reviewed pull requests merge unasked, as `rulings.pm_decides.merge` says
     pub merging: Merging,
     /// The first of `work_items`, where a status read before they existed
     /// finds the work item

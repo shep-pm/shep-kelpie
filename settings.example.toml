@@ -261,9 +261,7 @@ compact_window = 200000
 # sends a notice after, to the webhook, or the log when kelpie has none. Some
 # pull requests still get the ruling, which names why: one no reviewer read, one
 # with a review bot's thread above a nit open, a head no review round read, a
-# fix after a `no`, and a late bot round's fix. `settings migrate` writes it
-# from a `git.merging` an older table holds, `auto` as `true` and `ask` as
-# `false`. `security`,
+# fix after a `no`, and a late bot round's fix. `security`,
 # `contribution-merge` and `local-model-spilled` are refused as `true`, and are
 # never written.
 # `shep kelpie add`, `upgrade` and `shep kelpie settings migrate` write each
