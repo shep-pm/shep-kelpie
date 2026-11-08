@@ -9,7 +9,8 @@ use crate::runner::flight::advance;
 use crate::runner::flight::tests::Driven;
 use crate::runner::{Pass, Runner, StepReport, step};
 use crate::settings::Harness;
-use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, git};
+use crate::state::{ProjectState, StateStore};
+use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, git, ticket};
 
 fn board(rig: &Rig) -> String {
     std::fs::read_to_string(rig.paths().board).unwrap()
@@ -427,6 +428,22 @@ fn a_failure_naming_a_path_on_this_machine_is_withheld_from_the_board() {
     let failed = "] 14:13 #7: worker turn failed: (withheld: it names a path on this machine, \
                   which names its user)\n";
     assert!(text.contains(failed), "{text}");
+}
+
+#[test]
+fn a_finished_skip_names_the_add_that_takes_it_back() {
+    let rig = Rig::new("castform");
+    let mut state = ProjectState::new();
+    state.finished.push(ticket(7));
+    StateStore::new(rig.paths().state).save(&state).unwrap();
+    rig.forge.list_ready(7, false);
+    let runner = rig.open().unwrap();
+    assert_eq!(step(&runner).unwrap(), None);
+    super::brief(&runner);
+
+    let text = board(&rig);
+    let waits = "waits: kelpie finished it, and the forge has not closed it; `shep kelpie add 7` takes it back";
+    assert!(text.contains(waits), "{text}");
 }
 
 #[test]
