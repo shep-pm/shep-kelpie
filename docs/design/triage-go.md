@@ -1,0 +1,8 @@
+# The go: `needs-triage`
+
+The label a person puts on an issue to ask for its triage. The settings and the pick rule are in `triage.md`, the pass it asks for in `triage-pass.md`, and the ready path that ends it in `triage-ready.md`. #1976
+
+- `board::TRIAGE_GO` is `needs-triage`, outside `TRIAGE_LABELS`: no triage decision, so it never reads as a label put on by hand that stands, and none of a pass's labels. `crates/core/src/board/mod.rs`, `runner/triage/mod.rs`
+- Under `pick = "label"` the go is what reaches someone else's issue: `go_asked` reads it off the listing, `go_seen` whether the pass began under it (the record's `seen`, or the pass in flight), and `go_renewed` whether a go on an issue that has a record asks for a new pass. `shep kelpie triage` asks with no go. `runner/triage/{go,checks}.rs`
+- A go is spent once its pass has ended, and the labelling step takes it off the issue before `ready-for-agent` goes on, under every pick: no issue is both ready for the board and asking for a triage. Only `label` takes a spent go off at all, and only at the next poll, which would leave a `maintainer` issue asking for one the board has already taken. A take-off the forge refuses holds the step, which the next poll tries again. `runner/triage/ready.rs`
+- `take_spent_gos` runs on the listing before the check reads it: the go comes off each issue whose record's pass began under it and owes no new pass, and off the listing the poll goes on to read. A go gone from the issue while the record still holds it (this step took it, a save failed after the label came off, or the maintainer took it off) is taken out of the record, so a go put on again reads as a new ask. A write that fails is noted and tried at the next poll. `runner/triage/go.rs`
