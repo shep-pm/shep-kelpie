@@ -191,3 +191,51 @@ fn an_approved_outside_issue_is_asked_as_under_pick_all() {
     assert!(held["questions"]["at"].is_number(), "{held}");
     assert_eq!(moves(&rig), ["comment"], "asked, so no label yet");
 }
+
+#[test]
+fn a_record_still_holding_a_go_the_issue_lost_is_cleared() {
+    let (rig, runner) = asked("newcomer", FAILING, &[TRIAGE]);
+    drop(runner);
+    crashed_with(
+        &rig,
+        json!({
+            "issue": 30, "comment": 101, "step": "done",
+            "author": "newcomer", "seen": [TRIAGE, TRIAGE_GO],
+        }),
+    );
+    // The label came off but the save did not: the listing shows no go.
+    let mut lost = filed(&rig, "newcomer", FAILING, &[TRIAGE]);
+    lost.created = Timestamp(rig.clock.now().0.saturating_sub(1));
+    list(&rig, lost);
+    let runner = rig.open().unwrap();
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(record(&rig, &runner)["seen"], json!([TRIAGE]));
+
+    // The maintainer puts the go on again: it is a new ask.
+    let mut again = filed(&rig, "newcomer", FAILING, &[TRIAGE, TRIAGE_GO]);
+    again.created = Timestamp(rig.clock.now().0.saturating_sub(1));
+    list(&rig, again);
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(calls(&rig, Role::Triager).len(), 1);
+    assert_eq!(rig.github.label_takes(), []);
+}
+
+#[test]
+fn an_outside_issue_checked_under_another_pick_gets_needs_approval_under_label() {
+    let rig = rig_with("pick = \"maintainer\"");
+    rig.forge.set_repo_labels(&REPO_LABELS);
+    list(&rig, filed(&rig, "newcomer", FAILING, &[]));
+    let runner = rig.open().unwrap();
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(moves(&rig), Vec::<String>::new(), "kept, with no label");
+
+    drop(runner);
+    rig.edit_settings(|s| s.replace("pick = \"maintainer\"", "pick = \"label\""));
+    let runner = rig.open().unwrap();
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(calls(&rig, Role::Triager).len(), 0);
+    assert_eq!(moves(&rig), [format!("label {TRIAGE}")]);
+}

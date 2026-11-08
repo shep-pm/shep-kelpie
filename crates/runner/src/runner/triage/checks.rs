@@ -116,7 +116,11 @@ impl Runner {
             if let Some(at) = at {
                 kept[at].ready_seen = ready_seen;
             }
-            if at.is_some_and(|at| kept[at].key == key) && !ran {
+            let cached = at.is_some_and(|at| kept[at].key == key) && !ran;
+            // A result kept under another `pick` leaves anyone else's issue with
+            // no waiting label, which `label` owes it.
+            let revisit = cached && self.owes_waiting_label(issue, &mut poll);
+            if cached && !revisit {
                 continue;
             }
             // The label goes on before the check reads, and into the key, so
@@ -145,6 +149,7 @@ impl Runner {
                 (true, _) => (CheckTriage::None, Act::Passed),
                 (false, true) if same || decided => (CheckTriage::None, Act::Failing),
                 (false, true) => (CheckTriage::None, Act::Refused),
+                (false, false) if revisit => (kept[at.unwrap_or_default()].triage, Act::Failing),
                 (false, false) if triaged && at.is_none() => (CheckTriage::None, Act::Failing),
                 (false, false) if triaged => (CheckTriage::Edited, Act::Failing),
                 (false, false) => (CheckTriage::Owed, Act::Failing),
@@ -386,6 +391,24 @@ impl Runner {
             return true;
         }
         self.write_check_labels(issue, &[(TRIAGE, true)], &mut false, poll)
+    }
+
+    // Whether `issue`, whose last check stands, is anyone else's and waits at no
+    // label of ours, under `pick = "label"`
+    fn owes_waiting_label(&mut self, issue: &OpenIssue, poll: &mut Poll) -> bool {
+        let number = issue.number;
+        let waits = self.settings.triage.pick == TriagePick::Label
+            && !decided(&issue.labels)
+            && !carries(&issue.labels, TRIAGE)
+            && !carries(&issue.labels, READY)
+            && !self.go_asked(&issue.labels)
+            && self.triage_record(number).is_none()
+            && !self.has_work_item(number)
+            && self.split_of(number).is_none();
+        waits
+            && self
+                .poll_maintainer(poll)
+                .is_some_and(|maintainer| !self.is_own(&issue.author, &maintainer))
     }
 
     // Whether `labels` carry the maintainer's go while `pick` is `label`

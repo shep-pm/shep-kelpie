@@ -51,11 +51,18 @@ impl Runner {
     pub(super) fn take_spent_gos(&mut self, open: &mut [OpenIssue]) {
         for issue in open.iter_mut() {
             let number = issue.number;
-            let spent = self.go_asked(&issue.labels)
-                && self
-                    .triage_record(number)
-                    .is_some_and(|t| t.seen.iter().any(|l| l == TRIAGE_GO))
-                && !self.first_pass_owed(number);
+            let marked =
+                (self.triage_record(number)).is_some_and(|t| t.seen.iter().any(|l| l == TRIAGE_GO));
+            // A go gone from the issue while its record still holds it: a save
+            // that failed after the label came off, or the maintainer's take-off
+            if marked && !issue.labels.iter().any(|l| l == TRIAGE_GO) {
+                if let Err(e) = self.forget_go(number) {
+                    let why = format!("triage #{number}: cannot save the go as taken: {e}");
+                    self.notes.push(why);
+                }
+                continue;
+            }
+            let spent = self.go_asked(&issue.labels) && marked && !self.first_pass_owed(number);
             if !spent {
                 continue;
             }
