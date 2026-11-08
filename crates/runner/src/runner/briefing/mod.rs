@@ -16,11 +16,11 @@ use super::trigger::lock;
 use super::turn::held_up::HeldUp;
 use crate::agents::{Fit, Role, Tier};
 use crate::board::briefing::{
-    self, AgentLine, Briefing, Files, IDLE_AFTER, Item, Merge, Out, PlanLine, Ready, ReadyLine,
-    RedLine, RulingLine, Session, age, elapsed, quiet_for,
+    self, AgentLine, Briefing, CreditLine, Files, IDLE_AFTER, Item, Merge, Out, PlanLine, Ready,
+    ReadyLine, RedLine, RulingLine, Session, age, elapsed, quiet_for,
 };
 use crate::board::{ReadyIssue, Skip, priority, rule_order};
-use crate::lease::door::Pick;
+use crate::lease::door::{Credit, Pick};
 use crate::local_paths::Surface;
 use crate::pacer::named;
 use crate::ports::{AgentCall, PaddockHolder, Timestamp, Wait};
@@ -44,7 +44,7 @@ const RECENT: usize = 20;
 /// How often the board is written again with nothing changed, in seconds
 const REFRESH: u64 = 60;
 
-/// How long the agent board's reading of the agents is kept, in seconds
+/// How long the agent board's readings of the agents and the API credit are kept, in seconds
 const READING_KEPT: u64 = 30;
 
 /// How long a call in flight waits for its model before the project manager
@@ -69,20 +69,22 @@ pub(super) struct BoardCache {
     files: BTreeMap<TicketId, Vec<String>>,
     // Each open branch's diff as git last gave it, or why not, for the PM
     patches: BTreeMap<TicketId, Result<Vec<u8>, String>>,
-    // What the agent board last read of the implementers, with the agents it
-    // was asked about and when. None inside is a board out of reach.
+    // What the agent board last read of the implementers and of the API credit,
+    // with the agents it was asked about and when. None inside is a board out
+    // of reach.
     reading: Option<Reading>,
     git: Git,
     due: bool,
     written: Option<Timestamp>,
 }
 
-// A reading of the agents `asked`, taken at `at`
+// A reading of the agents `asked`, and of the API credit, taken at `at`
 #[derive(Debug)]
 struct Reading {
     at: Timestamp,
     asked: Vec<AgentName>,
     picks: Option<Vec<Pick>>,
+    credit: Option<Credit>,
 }
 
 /// A call in flight, as the board watches it
@@ -467,6 +469,7 @@ impl Runner {
             ready: self.ready_lines(),
             agents: self.agent_lines(),
             plans: self.plan_lines(),
+            credit: self.credit_line(),
             events,
             woken_before: self.state.pm_seen.is_some(),
             dropped,
@@ -564,9 +567,10 @@ impl Runner {
         ready
     }
 
-    // Asks the agent board about the implementers it may pick, unless it was
-    // asked about the same ones less than `READING_KEPT` seconds ago. A write
-    // happens on every change, so most reuse the last reading.
+    // Asks the agent board about the implementers it may pick and about the API
+    // credit, unless it was asked about the same implementers less than
+    // `READING_KEPT` seconds ago. A write happens on every change, so most
+    // reuse the last reading.
     fn read_agents(&mut self, now: Timestamp) {
         let asked = self.board_agents();
         let kept = self.brief.reading.as_ref().is_some_and(|last| {
@@ -574,12 +578,27 @@ impl Runner {
         });
         if !kept {
             let picks = self.ports.agent_board.reading(&asked);
+            let credit = self.ports.agent_board.credit();
             self.brief.reading = Some(Reading {
                 at: now,
                 asked,
                 picks,
+                credit,
             });
         }
+    }
+
+    // What the board last said the month spent of the API credit, as the agents
+    // section shows it. An answer naming no monthly size paces nothing.
+    fn credit_line(&self) -> Option<CreditLine> {
+        let credit = self.brief.reading.as_ref()?.credit?;
+        let monthly_usd = credit.monthly_usd?;
+        Some(CreditLine {
+            spent_usd: credit.spent_usd,
+            monthly_usd,
+            since: Timestamp(credit.since),
+            resets_at: Timestamp(credit.resets_at),
+        })
     }
 
     // What the agent board last read of `name`, when it read it

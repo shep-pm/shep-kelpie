@@ -60,6 +60,7 @@ impl View {
             .sum();
         Credit {
             spent_usd,
+            monthly_usd: self.monthly_credit(),
             since: since.0,
             resets_at: resets_at.0,
         }

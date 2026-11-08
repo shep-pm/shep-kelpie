@@ -311,7 +311,7 @@ fn a_prune_past_the_cap_lets_the_records_that_hold_no_call_go_first() {
 }
 
 // A record that closed an issue as a duplicate is kept past the cap: the issue
-// carries no `needs-triage` label, and the record is what keeps a reopened one
+// carries no `needs-approval` label, and the record is what keeps a reopened one
 // out of the due list.
 #[test]
 fn a_record_that_closed_a_duplicate_is_kept_past_the_cap() {

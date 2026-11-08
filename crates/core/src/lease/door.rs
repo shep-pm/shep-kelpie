@@ -310,6 +310,10 @@ pub enum Fits {
 pub struct Credit {
     /// What the agents billed to the API key cost, in US dollars, since `since`
     pub spent_usd: f64,
+    /// What the credit gives each month, in US dollars, from the maintainer's
+    /// `[api]` table, left off the line when the section names none
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monthly_usd: Option<f64>,
     /// The first second of the UTC month the ask landed in
     pub since: u64,
     /// The first second of the next UTC month, when the grant resets
@@ -758,6 +762,7 @@ mod tests {
     fn a_credit_answer_is_one_line_and_round_trips() {
         let credit = Credit {
             spent_usd: 12.5,
+            monthly_usd: None,
             since: 1_788_220_800,
             resets_at: 1_790_812_800,
         };
@@ -769,6 +774,19 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Answer>(&line).unwrap(),
             Answer::Credit(credit)
+        );
+        let asked = Credit {
+            monthly_usd: Some(62.5),
+            ..credit
+        };
+        let line = serde_json::to_string(&Answer::Credit(asked)).unwrap();
+        assert_eq!(
+            line,
+            r#"{"credit":{"spent_usd":12.5,"monthly_usd":62.5,"since":1788220800,"resets_at":1790812800}}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<Answer>(&line).unwrap(),
+            Answer::Credit(asked)
         );
         let ask = Ask::new(CREDIT, 42, "credit");
         assert_eq!(

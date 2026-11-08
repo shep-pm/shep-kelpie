@@ -25,7 +25,7 @@ use crate::settings::{EndpointUrl, Gateway, GatewayName, Gateways, Gone, Setting
 
 /// What every project shares
 #[dog_config]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KelpieSettings {
     /// Where rulings are posted, so the maintainer hears of them away from
@@ -35,6 +35,11 @@ pub struct KelpieSettings {
     /// How many commands may hold each counted lease at once
     #[serde(default)]
     pub leases: Leases,
+    /// The API credit's size, which Anthropic gives kelpie no call to read.
+    /// The dog reads it again every 30 seconds and carries it on its `credit`
+    /// answer.
+    #[serde(default)]
+    pub api: Api,
     /// The GPU's Prometheus metrics page, such as `nvidia_gpu_exporter`'s
     /// `/metrics`, which `status` reads. No GPU figures when absent.
     #[serde(default)]
@@ -56,6 +61,39 @@ pub struct KelpieSettings {
     #[serde(default)]
     #[schemars(extend("deprecated" = true))]
     pub agent_board: Option<Gone>,
+}
+
+/// The API credit's size, which no call reads
+///
+/// Anthropic gives kelpie no call that says what a key's credit is or what
+/// it has left, so this is the maintainer's own number. Absent is no credit
+/// line.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Api {
+    /// What the credit gives in US dollars each calendar month, which renews
+    /// on its first day in UTC, or None when the section names none
+    #[serde(default)]
+    #[schemars(extend("exclusiveMinimum" = 0))]
+    pub monthly_credit_usd: Option<f64>,
+}
+
+impl Api {
+    /// Refuses a `monthly_credit_usd` that is not a number of dollars above 0
+    ///
+    /// TOML accepts `inf` and `nan`, and serde_json writes a non-finite float
+    /// as `null`, so an accepted `inf` would reach a runner as no credit line.
+    ///
+    /// # Errors
+    ///
+    /// Why the number is no credit line
+    pub fn check(&self) -> Result<(), &'static str> {
+        let credit = self.monthly_credit_usd;
+        if credit.is_some_and(|usd| !usd.is_finite() || usd <= 0.0) {
+            return Err(NO_CREDIT);
+        }
+        Ok(())
+    }
 }
 
 /// The counted leases' capacities
@@ -278,13 +316,17 @@ const SHAPE: &str = "it takes a `[webhook]` table with `kind` (`discord` or `ntf
                      and an `https://` `url` (`http://` on a tailnet), an optional absolute \
                      `ca_cert` path, an optional one-word `token` and `trusted = true` with one, \
                      a `[leases]` table with a \
-                     `cargo-test` count, a `gpu_metrics_url`, a `codex_home` path, \
+                     `cargo-test` count, an `[api]` table with a `monthly_credit_usd` \
+                     number of US dollars above 0, a `gpu_metrics_url`, a `codex_home` path, \
                      `[gateways.<name>]` tables with `url` and `key_env`, \
                      and nothing else";
 
 /// Why `trusted` is refused without a `token`
 const NEEDS_TOKEN: &str = "needs a `token`: without one anyone who learns the topic's name \
                            can post to it, so a reply on it proves nothing";
+
+/// Why a `monthly_credit_usd` that is not dollars above 0 is refused
+const NO_CREDIT: &str = "must be a number of US dollars above 0, such as 100 or 62.5";
 
 impl KelpieSettings {
     /// Checks the webhook's `ca_cert` in the section's text: an absolute path
@@ -461,6 +503,9 @@ impl KelpieSettings {
         {
             return Err(format!("`webhook.trusted` {NEEDS_TOKEN}"));
         }
+        read.api
+            .check()
+            .map_err(|why| format!("`api.monthly_credit_usd` {why}"))?;
         // Every call to a gateway goes through kelpie's forwarder or comes from kelpie itself.
         for (name, gateway) in &read.gateways {
             Upstream::new(&gateway.base())
@@ -848,6 +893,39 @@ mod tests {
             let text = format!("[leases]\ncargo-test = {bad}\n");
             assert!(KelpieSettings::from_section(&text).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_api_credit_reads_as_a_number_of_dollars_above_zero() {
+        let credit = |text: &str| KelpieSettings::parse(text).unwrap().api.monthly_credit_usd;
+        assert_eq!(credit("[api]\nmonthly_credit_usd = 100\n"), Some(100.0));
+        assert_eq!(credit("[api]\nmonthly_credit_usd = 62.5\n"), Some(62.5));
+        assert_eq!(credit(""), None, "absent means no credit line");
+        assert_eq!(credit("[api]\n"), None, "an empty table names no size");
+    }
+
+    #[test]
+    fn an_api_credit_of_zero_a_negative_an_infinity_or_text_is_refused() {
+        for bad in ["0", "0.0", "-1", "true", "\"100\"", "inf", "-inf", "nan"] {
+            let text = format!("[api]\nmonthly_credit_usd = {bad}\n");
+            let err = parse_err(&text);
+            assert!(err.contains("monthly_credit_usd"), "{bad}: {err}");
+        }
+        let err = parse_err("[api]\ncredit = 100\n");
+        assert!(err.contains("monthly_credit_usd"), "{err}");
+    }
+
+    #[test]
+    fn the_example_shows_the_api_credit_commented_out() {
+        let text = include_str!("../../../kelpie-settings.example.toml");
+        let shown = "# [kelpie.api]\n# monthly_credit_usd = 100";
+        assert!(text.contains(shown), "the key is shown commented out");
+        assert!(
+            text.contains("first of the calendar month in UTC"),
+            "the comment says when the credit renews"
+        );
+        let read = KelpieSettings::parse(&example()).unwrap();
+        assert_eq!(read.api.monthly_credit_usd, None, "no credit line");
     }
 
     #[test]
