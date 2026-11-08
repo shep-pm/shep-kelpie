@@ -303,7 +303,12 @@ impl Runner {
         // An author who took `local` answers by rewriting the issue body, which is
         // what the next pass is made on.
         self.watch_local_waits(&local)?;
-        self.resume_triage()?;
+        // While the swap is owed, a resumed pass or a take-back would try to make
+        // `needs-approval`, be refused, and count it as the issue's failure.
+        let swap_owed = self.triage_run.label_swap_owed;
+        if !swap_owed {
+            self.resume_triage()?;
+        }
         // The check reads the listing before the take-back and the due list.
         // Those reach only an issue it refused.
         self.check_issues(&open, pulls.as_ref(), &busy);
@@ -320,7 +325,9 @@ impl Runner {
         };
         // A swap a `taken` record owes is finished here, before the board reads
         // its pick, and listed as the swap leaves it.
-        self.take_back_ready(&mut open, pulls.as_ref())?;
+        if !swap_owed {
+            self.take_back_ready(&mut open, pulls.as_ref())?;
+        }
         // Worked out from the state as it stands, so an issue that got a record
         // while the listing was read is not listed as untouched.
         let mut due: Vec<&OpenIssue> = (open.iter())

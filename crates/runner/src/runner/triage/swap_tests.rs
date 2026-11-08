@@ -208,3 +208,30 @@ fn a_saved_seen_label_is_mapped_so_it_does_not_read_as_a_hand_label() {
 
     assert_eq!(record(&rig, &runner)["seen"], json!([TRIAGE, "bug"]));
 }
+
+#[test]
+fn a_pass_left_commented_waits_out_the_swap_instead_of_failing_on_it() {
+    let rig = refused();
+    list(&rig, crash(&rig, "It crashes when I run it."));
+    drop(rig.open().unwrap());
+    crashed_with(
+        &rig,
+        json!({"issue": 30, "comment": 101, "step": "commented", "author": "newcomer"}),
+    );
+    let runner = rig.open().unwrap();
+    for _ in 0..6 {
+        rig.next_look();
+        assert_eq!(step(&runner).unwrap(), None);
+    }
+    assert_eq!(moves(&rig), Vec::<String>::new());
+
+    rig.github.accept_label_renames();
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(
+        moves(&rig),
+        [format!("make {TRIAGE}"), format!("label {TRIAGE}")]
+    );
+    assert_eq!(record(&rig, &runner)["step"], "done");
+}
