@@ -103,10 +103,8 @@ impl Runner {
         if self.pm_threads_out(ticket) {
             return Ok(Some(self.held_for(Reason::ThreadsAsked)));
         }
-        if self.draining() {
-            return Ok(Some(self.held_for(Reason::Draining)));
-        }
-        if self.pm_held_down() {
+        // A drain starts no wake, but it holds the item only if a thread needs one
+        if !self.draining() && self.pm_held_down() {
             return Ok(Some(self.held_for(Reason::PmDown)));
         }
         let talk = match self.read_talk(number) {
@@ -142,7 +140,11 @@ impl Runner {
         // merge waits on the project manager's answer, the project manager
         // itself being checked for before the talk was read.
         self.pm_ask_threads(wake);
-        Ok(Some(self.held_for(Reason::ThreadsAsked)))
+        let reason = match self.draining() {
+            true => Reason::Draining,
+            false => Reason::ThreadsAsked,
+        };
+        Ok(Some(self.held_for(reason)))
     }
 
     /// Carries out the project manager's `ruled` calls on `ticket`'s open threads

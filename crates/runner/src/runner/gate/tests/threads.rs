@@ -625,6 +625,22 @@ fn the_item_waits_with_the_project_manager_down_and_raises_no_ruling() {
 }
 
 #[test]
+fn a_drain_holds_an_item_with_an_open_thread_and_starts_no_wake() {
+    let (rig, runner, _) = at_the_gate(pm_project("threads-drain"), &[NIT]);
+    rig.ask(&runner, "drain", None);
+
+    let deadline = Instant::now() + CALL_PATIENCE;
+    let mut because = json!(null);
+    while Instant::now() < deadline && because.as_str().is_none_or(|b| !b.contains("draining")) {
+        step(&runner).unwrap();
+        because = rig.ask(&runner, "status", None)["work_item"]["held_up"]["because"].clone();
+    }
+    assert!(because.as_str().unwrap().contains("draining"), "{because}");
+    assert!(pm_seen(&rig).is_empty(), "a drain starts no wake");
+    assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
+}
+
+#[test]
 fn a_restart_with_the_ask_out_asks_again() {
     let (rig, runner, _) = at_the_gate(pm_project("threads-restart"), &[NIT]);
     let hold = Hold::default();
