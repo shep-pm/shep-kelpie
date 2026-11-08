@@ -142,21 +142,20 @@ fn the_maintainer_is_a_github_login_and_may_be_left_out() {
 }
 
 #[test]
-fn git_issues_loads_and_is_read_by_nothing() {
-    for value in [
-        r#""ask""#,
-        r#""file""#,
-        r#""skip""#,
-        r#""auto""#,
-        "false",
-        "[]",
-        "{}",
-    ] {
-        let text = EXAMPLE.replace("issues = \"ask\"", &format!("issues = {value}"));
-        parse(&text).unwrap_or_else(|e| panic!("{value}: {e}"));
-    }
-    let absent = EXAMPLE.replace("issues = \"ask\"\n", "");
-    parse(&absent).unwrap();
+fn the_keys_the_project_manager_took_are_refused_by_name_and_say_migrate_deletes_them() {
+    let text = EXAMPLE.replace(
+        "merging = \"ask\"\n",
+        "merging = \"ask\"\nissues = \"ask\"\n",
+    ) + "\n[app.dogs.kelpie.triage]\nhand_ready = true\n";
+    assert_eq!(
+        parse_err(&text),
+        "the [app.dogs.kelpie] table on shep: these are no longer settings:\n\
+         - `git.issues`, because deferred findings always raise a follow-up ruling: delete \
+         it, or run `shep kelpie settings migrate`, which does\n\
+         - `triage.hand_ready`, because the issue check decides whether a ready issue goes to \
+         the triager: delete it, or run `shep kelpie settings migrate`, which does"
+    );
+    assert!(parse(EXAMPLE).is_ok());
 }
 
 #[test]

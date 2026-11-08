@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 use super::agents::{find, unset};
 use super::gateway::GatewayName;
-use super::{AgentName, ExpertAgent, Gone, Settings, SettingsError};
+use super::{AgentName, ExpertAgent, Settings, SettingsError};
 use crate::agents::{Agents, Role, Runs};
 use crate::ports::{AuthorAssociation, Probability};
 use crate::state::TRIAGED_KEPT;
@@ -98,11 +98,6 @@ pub struct Triage {
     /// needs the GitHub App to cover the repo, since the triager would
     /// otherwise post as the maintainer.
     pub pick: TriagePick,
-    /// Read by nothing: the issue check holds a failing `ready-for-agent` issue
-    /// off the board and owes it the triager, and takes back none that passes.
-    /// A table that still holds one loads, whatever its value.
-    #[schemars(extend("deprecated" = true))]
-    pub hand_ready: Option<Gone>,
     /// Whole days without a comment from the author before kelpie hands the
     /// issue to the maintainer as it stands, above 0. 7 when absent.
     pub wait_days: NonZeroU32,
@@ -143,7 +138,6 @@ impl Default for Triage {
     fn default() -> Self {
         Self {
             pick: TriagePick::default(),
-            hand_ready: None,
             wait_days: NonZeroU32::new(7).unwrap_or(NonZeroU32::MIN),
             max_questions: NonZeroU8::new(MOST_QUESTIONS).unwrap_or(NonZeroU8::MIN),
             agent: None,
