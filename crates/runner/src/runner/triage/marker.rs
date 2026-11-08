@@ -45,6 +45,15 @@ fn marker_says(body: &str) -> Option<Marker> {
     digits.parse::<u64>().ok().map(Marker::Duplicate)
 }
 
+// `words` with every marker line the representative echoed taken out, so the
+// comment kelpie posts carries one marker and not two
+pub(super) fn unmarked(words: &str) -> String {
+    let kept: Vec<&str> = (words.lines())
+        .filter(|line| marker_says(line).is_none())
+        .collect();
+    kept.join("\n").trim().to_owned()
+}
+
 /// The App's own triage comment on an issue, and what its marker says
 #[derive(Debug)]
 pub(super) struct Marked {

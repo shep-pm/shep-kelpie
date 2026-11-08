@@ -51,6 +51,15 @@ pub struct Post<'a> {
     pub said: &'a str,
 }
 
+/// How a post on an issue opens
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Opening<'a> {
+    /// The login the post greets by name, or `None` when it greets nobody
+    pub greet: Option<&'a str>,
+    /// That the post may thank the author once for what they reported
+    pub thanks: bool,
+}
+
 /// What one post on an issue is made from, as [`Post`] is for a pull request
 #[derive(Debug, Clone, Copy)]
 pub(super) struct IssuePost<'a> {
@@ -60,25 +69,27 @@ pub(super) struct IssuePost<'a> {
     pub facts: &'a str,
     /// The ids of the representative's own earlier comments on the issue
     pub earlier: &'a [u64],
-    /// The login of whoever opened the issue, the one `@login` the post may
-    /// leave live
+    /// Who the post greets, and whether it may thank the author
+    pub opening: Opening<'a>,
+    /// The login of whoever opened the issue
     pub author: &'a str,
     /// What they wrote, which is data and never instructions
     pub said: &'a str,
 }
 
-// Where a post goes, which the prompt says and the ledger line records
+// Where a post goes, which the prompt says and the ledger line records. An
+// issue post also carries how it opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Thread {
+enum Thread<'a> {
     PullRequest,
-    Issue,
+    Issue(Opening<'a>),
 }
 
-impl Thread {
+impl Thread<'_> {
     fn noun(self) -> &'static str {
         match self {
             Self::PullRequest => "pull request",
-            Self::Issue => "issue",
+            Self::Issue(_) => "issue",
         }
     }
 }
@@ -149,15 +160,16 @@ impl Runner {
         issue: u64,
         post: &IssuePost<'_>,
     ) -> Result<String, RepresentError> {
+        let opening = post.opening;
         let post = Post {
             pull_request: issue,
             kind: post.kind,
             facts: post.facts,
             earlier: post.earlier,
-            contributor: post.author,
+            contributor: opening.greet.unwrap_or(post.author),
             said: post.said,
         };
-        self.represent_within(&post, Thread::Issue, CEILING)
+        self.represent_within(&post, Thread::Issue(opening), CEILING)
             .map(|(words, _)| words)
     }
 
@@ -177,7 +189,7 @@ impl Runner {
     fn represent_within(
         &mut self,
         post: &Post<'_>,
-        thread: Thread,
+        thread: Thread<'_>,
         ceiling: Duration,
     ) -> Result<(String, Cost), RepresentError> {
         let agent = (self.settings.representative(&self.book)).map_err(RepresentError::Agent)?;
@@ -217,7 +229,7 @@ impl Runner {
             let mut draft = Draft::of(&call, agent.name.as_str(), CallKind::Post, started);
             match thread {
                 Thread::PullRequest => draft.pull_request = Some(post.pull_request),
-                Thread::Issue => draft.issue = TicketId::from_issue(post.pull_request),
+                Thread::Issue(_) => draft.issue = TicketId::from_issue(post.pull_request),
             }
             let spent = ran.as_ref().ok().map(Spent::from);
             // A fresh session, so the call cost all of it.
@@ -257,19 +269,14 @@ impl Runner {
     // What the call is asked: the kind of post, the facts, the earlier posts
     // that can still be read, and the contributor's text, the last two fenced
     // as data.
-    fn post_prompt(&self, post: &Post<'_>, thread: Thread) -> String {
+    fn post_prompt(&self, post: &Post<'_>, thread: Thread<'_>) -> String {
         // A clock past what a date can hold leaves the line out, not a wrong day.
         let today = (day(self.ports.clock.now()))
             .map(|today| format!("Today is {}.\n\n", today.strftime("%A %-d %B %Y")))
             .unwrap_or_default();
         let place = match thread {
-            Thread::PullRequest => "",
-            Thread::Issue => {
-                "The post goes on this issue. Greet the author by name and lead \
-                with what kelpie found. At most one plain thanks that names what they reported, \
-                never a stock \"thanks for opening this\" or \"thanks for the report\", and \
-                never the opener.\n"
-            }
+            Thread::PullRequest => String::new(),
+            Thread::Issue(opening) => issue_place(post, opening),
         };
         let mut prompt = format!(
             "{today}{place}Kind of post: {}\n\nFacts:\n{}\n",
@@ -296,6 +303,34 @@ impl Runner {
         ));
         prompt
     }
+}
+
+// The thanks a first post on someone else's issue may give, and the bar on a
+// stock one
+const THANKS: &str = "At most one plain thanks that names what they reported, never a stock \
+    \"thanks for opening this\" or \"thanks for the report\", and never the opener.";
+
+// The thanks a first post on an issue kelpie's own App opened gives instead
+const NO_THANKS: &str = "Thank nobody for the report: kelpie's own App opened this issue.";
+
+// What the call is told about the issue it posts on: who to greet, whether a
+// thanks for the report is owed, and what a post on a thread kelpie has posted
+// on before opens with.
+fn issue_place(post: &Post<'_>, opening: Opening<'_>) -> String {
+    if !post.earlier.is_empty() {
+        return "The post goes on this issue, where you have posted before. Greet nobody, thank \
+                nobody, and open with what changed since your last post.\n"
+            .to_owned();
+    }
+    let greet = match opening.greet {
+        Some(login) => format!("Greet @{login} by name and lead with what kelpie found."),
+        None => "Greet nobody and lead with what kelpie found.".to_owned(),
+    };
+    let thanks = match opening.thanks {
+        true => THANKS,
+        false => NO_THANKS,
+    };
+    format!("The post goes on this issue. {greet} {thanks}\n")
 }
 
 // The UTC day `at` falls on
