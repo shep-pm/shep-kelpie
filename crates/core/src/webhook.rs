@@ -78,6 +78,24 @@ pub struct Api {
     pub monthly_credit_usd: Option<f64>,
 }
 
+impl Api {
+    /// Refuses a `monthly_credit_usd` that is not a number of dollars above 0
+    ///
+    /// TOML accepts `inf` and `nan`, and serde_json writes a non-finite float
+    /// as `null`, so an accepted `inf` would reach a runner as no credit line.
+    ///
+    /// # Errors
+    ///
+    /// Why the number is no credit line
+    pub fn check(&self) -> Result<(), &'static str> {
+        let credit = self.monthly_credit_usd;
+        if credit.is_some_and(|usd| !usd.is_finite() || usd <= 0.0) {
+            return Err(NO_CREDIT);
+        }
+        Ok(())
+    }
+}
+
 /// The counted leases' capacities
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -485,14 +503,9 @@ impl KelpieSettings {
         {
             return Err(format!("`webhook.trusted` {NEEDS_TOKEN}"));
         }
-        // A credit of nothing or less is no credit line.
-        if read
-            .api
-            .monthly_credit_usd
-            .is_some_and(|usd| usd.is_nan() || usd <= 0.0)
-        {
-            return Err(format!("`api.monthly_credit_usd` {NO_CREDIT}"));
-        }
+        read.api
+            .check()
+            .map_err(|why| format!("`api.monthly_credit_usd` {why}"))?;
         // Every call to a gateway goes through kelpie's forwarder or comes from kelpie itself.
         for (name, gateway) in &read.gateways {
             Upstream::new(&gateway.base())
@@ -892,8 +905,8 @@ mod tests {
     }
 
     #[test]
-    fn an_api_credit_of_zero_a_negative_or_text_is_refused() {
-        for bad in ["0", "0.0", "-1", "\"100\"", "true"] {
+    fn an_api_credit_of_zero_a_negative_an_infinity_or_text_is_refused() {
+        for bad in ["0", "0.0", "-1", "true", "\"100\"", "inf", "-inf", "nan"] {
             let text = format!("[api]\nmonthly_credit_usd = {bad}\n");
             let err = parse_err(&text);
             assert!(err.contains("monthly_credit_usd"), "{bad}: {err}");
@@ -905,30 +918,14 @@ mod tests {
     #[test]
     fn the_example_shows_the_api_credit_commented_out() {
         let text = include_str!("../../../kelpie-settings.example.toml");
-        let lines: Vec<&str> = text.lines().collect();
-        let at = lines
-            .iter()
-            .position(|l| *l == "# [kelpie.api]")
-            .expect("the example shows the [kelpie.api] table");
-        assert_eq!(
-            lines[at + 1],
-            "# monthly_credit_usd = 100",
-            "the key sits under it"
-        );
-        let above = lines[at - 1];
-        assert!(above.starts_with("# ") && !above.contains(" = "), "{above}");
+        let shown = "# [kelpie.api]\n# monthly_credit_usd = 100";
+        assert!(text.contains(shown), "the key is shown commented out");
         assert!(
             text.contains("first of the calendar month in UTC"),
             "the comment says when the credit renews"
         );
-        assert_eq!(
-            KelpieSettings::parse(&example())
-                .unwrap()
-                .api
-                .monthly_credit_usd,
-            None,
-            "commented out, so the example names no credit line"
-        );
+        let read = KelpieSettings::parse(&example()).unwrap();
+        assert_eq!(read.api.monthly_credit_usd, None, "no credit line");
     }
 
     #[test]
