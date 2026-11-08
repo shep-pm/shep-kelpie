@@ -9,6 +9,7 @@ use super::ask_tests::{A_WORDS, asked, filed_before, record, settled_ready, wrot
 use super::check_tests::{PASSING, PASSING_LABELS, checks};
 use super::pick_tests::{MAINTAINER, issue, list, rig_with};
 use super::research_tests::{calls, moves, nothing, reply, took_back, triage};
+use crate::board::TRIAGE;
 use crate::github::ApiError;
 use crate::ports::Role;
 use crate::runner::slots_tests::{ASKS, dispatched, issue_of};
@@ -71,7 +72,10 @@ fn a_taken_record_an_older_build_saved_still_finishes_its_swap() {
         rig.github.label_takes(),
         [(30, "ready-for-agent".to_owned())]
     );
-    assert_eq!(moves(&rig)[..2], ["label needs-triage", "comment"]);
+    assert_eq!(
+        moves(&rig)[..2],
+        [format!("label {TRIAGE}"), "comment".to_owned()]
+    );
     assert_eq!(calls(&rig, Role::Triager).len(), 1);
     let status = rig.ask(&runner, "status", None);
     assert_eq!(
@@ -213,11 +217,11 @@ fn its_answered_pass_makes_it_ready_again_and_the_next_poll_does_not_take_it_bac
     // The forge as the swap leaves it, since the stand-in does not follow the App's writes
     let (rig, runner) = filed_before(PICK, MAINTAINER, asked(), |rig| {
         hand_labelled(rig, MAINTAINER);
-        rig.forge.label(30, "needs-triage");
+        rig.forge.label(30, TRIAGE);
     });
     let runner = reopened_as_taken(&rig, runner);
     assert_eq!(step(&runner).unwrap(), None);
-    relist(&rig, &["needs-triage"]);
+    relist(&rig, &[TRIAGE]);
 
     wrote(&rig, MAINTAINER, "Q1: Linux, on start. That is all of it.");
     rig.claude
@@ -267,7 +271,10 @@ fn a_swap_the_forge_refuses_leaves_a_taken_record_and_is_finished_at_the_next_po
     rig.next_look();
     assert_eq!(step(&runner).unwrap(), None);
 
-    assert_eq!(moves(&rig)[..2], ["label needs-triage", "comment"]);
+    assert_eq!(
+        moves(&rig)[..2],
+        [format!("label {TRIAGE}"), "comment".to_owned()]
+    );
     assert_eq!(calls(&rig, Role::Triager).len(), 1);
     assert_eq!(record(&rig, &runner)["step"], "done");
 }
@@ -283,7 +290,10 @@ fn a_taken_issue_whose_ready_label_is_gone_still_gets_needs_triage_before_its_pa
     relist(&rig, &[]);
     step(&runner).unwrap();
 
-    assert_eq!(moves(&rig)[..2], ["label needs-triage", "comment"]);
+    assert_eq!(
+        moves(&rig)[..2],
+        [format!("label {TRIAGE}"), "comment".to_owned()]
+    );
     assert_eq!(
         rig.github.label_takes(),
         [],
@@ -344,7 +354,7 @@ fn a_taken_record_whose_body_now_passes_gets_its_swap_then_its_pass() {
     let mut after = issue(&rig, 30, MAINTAINER, 5);
     after.title = TITLE.to_owned();
     after.body = PASSING.to_owned();
-    let after_labels = ["needs-triage", "kind:fix", "priority: P3"];
+    let after_labels = [TRIAGE, "kind:fix", "priority: P3"];
     after.labels = after_labels.iter().map(|&l| l.to_owned()).collect();
     list(&rig, after);
     rig.next_look();
@@ -358,7 +368,7 @@ fn a_taken_record_whose_body_now_passes_gets_its_swap_then_its_pass() {
     );
     assert_eq!(
         rig.github.label_takes().last().unwrap(),
-        &(30, "needs-triage".to_owned()),
+        &(30, TRIAGE.to_owned()),
         "and it is ready from there"
     );
 }
@@ -376,7 +386,7 @@ fn an_issue_is_not_taken_back_where_no_app_covers_the_repo() {
     assert!(
         !writes
             .iter()
-            .any(|w| w.contains("ready-for-agent") || w.contains("needs-triage")),
+            .any(|w| w.contains("ready-for-agent") || w.contains(TRIAGE)),
         "{writes:?}"
     );
     assert_eq!(

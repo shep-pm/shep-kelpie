@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use super::check_tests::{FAILING, REPO_LABELS, STILL, checks, filed, told};
 use super::pick_tests::{MAINTAINER, due, issue, list, rig_with};
 use super::research_tests::{APP, WORDS, calls, reply};
+use crate::board::TRIAGE;
 use crate::ports::{OpenIssue, Role, Timestamp};
 use crate::runner::{Runner, step};
 use crate::state::StateStore;
@@ -152,7 +153,7 @@ fn a_done_issue_still_failing_gets_one_new_pass_when_the_check_version_changes()
     );
 
     // The same version again: the issue is checked, told and left alone.
-    list(&rig, filed(&rig, MAINTAINER, STILL, &["needs-triage"]));
+    list(&rig, filed(&rig, MAINTAINER, STILL, &[TRIAGE]));
     for _ in 0..3 {
         rig.next_look();
         assert_eq!(step(&runner).unwrap(), None);

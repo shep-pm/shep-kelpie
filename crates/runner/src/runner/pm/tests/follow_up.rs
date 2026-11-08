@@ -156,15 +156,20 @@ fn a_yes_from_it_files_the_findings_ready_for_agent_as_the_maintainers_yes_does(
 #[test]
 fn a_yes_asking_for_needs_triage_files_them_unread() {
     let (rig, runner) = merged_with_a_finding("jolteon", "work\n");
-    rig.claude.script([Scripted::Say(
-        "{\"follow_up\": {\"item\": 7, \"decision\": \"yes\", \"label\": \"needs-triage\", \
-         \"why\": \"the maintainer wants to read them\"}}",
-    )]);
+    rig.claude.script([Scripted::Say(Box::leak(
+        format!(
+            "{{\"follow_up\": {{\"item\": 7, \"decision\": \"yes\", \"label\": \"{TRIAGE}\", \
+         \"why\": \"the maintainer wants to read them\"}}}}",
+        )
+        .into_boxed_str(),
+    ))]);
     let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
     let (_, acted, dropped) = answered(Some(report));
     assert_eq!(
         acted,
-        ["filing 1 finding of ruling 71 on #7 as needs-triage: src/lib.rs:9"],
+        [format!(
+            "filing 1 finding of ruling 71 on #7 as {TRIAGE}: src/lib.rs:9"
+        )],
         "{dropped:?}"
     );
 
