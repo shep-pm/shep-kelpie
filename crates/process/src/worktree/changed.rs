@@ -16,11 +16,16 @@ pub fn changed_files(repo: &Path, head: &str, base: &str) -> Result<Vec<String>,
 }
 
 /// What the commit `to` holds since the commit `from`
+///
+/// Both counts are of `to`'s side alone: the commits it has that `from` does
+/// not, and the files those commits changed. A head the worker reset or
+/// rebased has none of either, and says so with `commits` zero and `files`
+/// empty, rather than naming the commits and files of the head it left.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Moved {
     /// How many commits `to` has that `from` does not
     pub commits: u32,
-    /// The files those commits changed
+    /// The files those commits changed, from the commit the two heads share
     pub files: Vec<String>,
 }
 
@@ -38,8 +43,8 @@ pub fn moved_since(
     to: &str,
 ) -> Result<Moved, WorktreeError> {
     let git = trusted(repo, worktree)?;
-    let range = format!("{from}..{to}");
-    let args = ["rev-list", "--count", range.as_str()];
+    let since = format!("{from}..{to}");
+    let args = ["rev-list", "--count", since.as_str()];
     let count = git(&args)?;
     let commits = match count.parse::<u32>() {
         Ok(n) => n,
@@ -50,7 +55,17 @@ pub fn moved_since(
             });
         }
     };
-    let names = git(&["diff", "--name-only", "--no-renames", "-z", range.as_str()])?;
+    // Three dots, so the files are those of `to`'s own commits, from the
+    // commit the two heads share: a two-dot diff would name what `from` holds
+    // that `to` does not, as if the worker had changed it.
+    let through = format!("{from}...{to}");
+    let names = git(&[
+        "diff",
+        "--name-only",
+        "--no-renames",
+        "-z",
+        through.as_str(),
+    ])?;
     Ok(Moved {
         commits,
         files: names_of(&names),
@@ -74,9 +89,10 @@ mod tests {
     use super::*;
     use crate::worktree::{clone, head};
 
-    // A checkout with one commit on `main`, and a clone of it at
-    // `<dir>/worktree` on `kelpie/7`, holding one commit for each of `files`
-    // on that branch. The tempdir, the checkout and the worktree.
+    // A checkout with one commit on `main` and `main` as its own `origin`, and
+    // a clone of it at `<dir>/worktree` on `kelpie/7`, holding one commit for
+    // each of `files` on that branch. The clone copies the remote, so it can
+    // fetch what the checkout gains. The tempdir, the checkout and the worktree.
     fn a_worktree(files: &[(&str, &str)]) -> (tempfile::TempDir, PathBuf, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path().join("repo");
@@ -85,6 +101,15 @@ mod tests {
         write_in(&repo, "base.rs", "fn base() {}\n");
         test_git(&repo, &["add", "base.rs"]);
         test_git(&repo, &["commit", "--quiet", "-m", "first"]);
+        test_git(
+            &repo,
+            &[
+                "remote",
+                "add",
+                "origin",
+                repo.as_os_str().to_str().unwrap(),
+            ],
+        );
         let worktree = dir.path().join("worktree");
         clone::make(&repo, &worktree, "kelpie/7", "main").unwrap();
         for (file, text) in files {
@@ -125,5 +150,56 @@ mod tests {
         );
 
         assert!(matches!(moved, Err(WorktreeError::Git { .. })), "{moved:?}");
+    }
+
+    #[test]
+    fn a_head_rebased_on_a_moved_checkout_holds_its_commits_and_files_too() {
+        let (_dir, repo, worktree) = a_worktree(&[("a.rs", "1\n")]);
+        let from = head(&repo, &worktree).unwrap();
+        // The checkout moves on, and the worker rebases its one commit onto it.
+        write_in(&repo, "base.rs", "fn base() {}\nfn moved_on() {}\n");
+        test_git(&repo, &["add", "base.rs"]);
+        test_git(&repo, &["commit", "--quiet", "-m", "on main"]);
+        // The clone holds no ref but its branch, so the fetch names one.
+        test_git(
+            &worktree,
+            &[
+                "fetch",
+                "--quiet",
+                "origin",
+                "main:refs/remotes/origin/main",
+            ],
+        );
+        test_git(&worktree, &["rebase", "--quiet", "origin/main"]);
+        let to = head(&repo, &worktree).unwrap();
+
+        let moved = moved_since(&repo, &worktree, &from, &to).unwrap();
+
+        assert_eq!(
+            moved,
+            Moved {
+                commits: 2,
+                files: vec!["a.rs".to_owned(), "base.rs".to_owned()],
+            },
+            "the newer head holds the checkout's commit as well as its own"
+        );
+    }
+
+    #[test]
+    fn a_head_that_moved_back_holds_no_commits_and_names_no_files() {
+        let (_dir, repo, worktree) = a_worktree(&[("a.rs", "1\n"), ("b.rs", "2\n")]);
+        let from = head(&repo, &worktree).unwrap();
+        test_git(&worktree, &["reset", "--hard", "--quiet", "HEAD~1"]);
+        let to = head(&repo, &worktree).unwrap();
+
+        let moved = moved_since(&repo, &worktree, &from, &to).unwrap();
+
+        assert_eq!(
+            moved,
+            Moved {
+                commits: 0,
+                files: Vec::new()
+            }
+        );
     }
 }

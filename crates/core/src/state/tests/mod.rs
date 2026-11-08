@@ -358,10 +358,11 @@ fn a_version_100_file_loads_with_no_ruling_borrowed() {
     assert_eq!(store.load().unwrap(), Some(loaded));
 }
 
-// A version 103 ruling has no `stuck_head`, so it loads as none, and a timed-out
-// turn's ruling that gains it saves and loads back with it.
+// A ruling from version 101, when a `Ruling` gained `borrowed`, has no
+// `stuck_head`, so it loads as none, and a timed-out turn's ruling that gains
+// one saves and loads back with it.
 #[test]
-fn a_version_103_file_loads_with_no_stuck_head() {
+fn a_version_101_file_loads_with_no_stuck_head() {
     let dir = tempfile::tempdir().unwrap();
     let store = store_in(dir.path());
     let mut state = ProjectState::new();
@@ -375,7 +376,7 @@ fn a_version_103_file_loads_with_no_stuck_head() {
         )
     });
     let mut old = serde_json::to_value(&state).unwrap();
-    old["version"] = 103.into();
+    old["version"] = 101.into();
     assert!(old["rulings"][0].get("stuck_head").is_none());
     fs::write(dir.path().join(STATE_FILE), old.to_string()).unwrap();
 

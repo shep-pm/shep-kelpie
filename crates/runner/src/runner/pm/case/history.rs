@@ -253,9 +253,13 @@ impl Runner {
             &before,
             &head,
         ) {
+            Ok(changed) if changed.commits == 0 => format!(
+                "{moved}. The newer head holds no commit the earlier one lacks, so kelpie names \
+                 nothing between them.\n\n"
+            ),
             Ok(changed) => {
                 let since = format!(
-                    "{moved}. {} and {} since",
+                    "{moved}. The newer head has {} and {} the earlier one does not",
                     count(changed.commits as usize, "commit", "commits"),
                     count(changed.files.len(), "file", "files"),
                 );
