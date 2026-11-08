@@ -480,6 +480,29 @@ async fn local_rounds_keep_is_deleted_and_named_with_its_value_and_the_table_loa
     Settings::from_table(&table, "koji", &home, &paths.folder).expect("the migrated table loads");
 }
 
+// `TABLE` with the `[code_graph]` table an older build wrote put back in it
+fn with_code_graph() -> String {
+    format!("{TABLE}\n[code_graph]\nenabled = true\nworker = false\n")
+}
+
+#[tokio::test]
+async fn the_code_graph_table_is_deleted_and_named_with_its_values_and_the_table_loads() {
+    let scene = Scene::holding(&with_code_graph()).await;
+
+    let said = scene.migrate().await.unwrap();
+
+    assert!(
+        said[1].contains("removed code_graph = { enabled = true, worker = false }"),
+        "{said:?}"
+    );
+    let table = scene.table();
+    assert!(table.get("code_graph").is_none(), "{table:?}");
+    let home = scene.shepherd.scratch("home");
+    let name = ProjectName::try_from("koji").unwrap();
+    let paths = ProjectPaths::under(&home.join("kelpie"), scene.shepherd.home(), &name);
+    Settings::from_table(&table, "koji", &home, &paths.folder).expect("the migrated table loads");
+}
+
 // `TABLE` with the `git.issues` and `triage.hand_ready` an older build wrote put back in it
 fn with_the_keys_the_project_manager_took() -> String {
     TABLE
