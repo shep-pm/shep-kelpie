@@ -1,11 +1,12 @@
 # Kelpie
 
-Kelpie runs Claude Code workers on a maintainer's projects, holds their merge
-gates and shared review resources, and keeps each agent's context small. Named
-for the working sheepdog that works a mob on its own initiative. Vocabulary
-accepted 2026-09-25, revised 2026-10-05 for the flow in ADR 0006, revised
-2026-10-06 for the code as it stands after the cleanup, and revised
-2026-11-05 for what a setting may hold in ADR 0020.
+Kelpie runs coding agents (Claude Code, pi, Codex or goose) on a maintainer's
+projects, holds their merge gates and shared review resources, and keeps each
+agent's context small. Named for the working sheepdog that works a mob on its
+own initiative. Vocabulary accepted 2026-09-25, revised 2026-10-05 for the flow
+in ADR 0006, revised 2026-10-06 for the code as it stands after the cleanup,
+revised 2026-11-05 for what a setting may hold in ADR 0020, and revised
+2026-11-08 for the agent files and the merge gate as the code has them.
 
 _Avoid_: harness (the working name before 2026-09-25), control room
 
@@ -29,8 +30,8 @@ _Avoid_: harness (the working name before 2026-09-25), control room
    worker's CI fix turn before any reviewer reads.
 5. **CI.** A red run goes back to the worker. A second red run on a head the
    worker left alone is a `stuck` ruling.
-6. **Merge.** A ruling under `ask`, kelpie's code under `auto`, as a merge
-   commit of the head the gates passed.
+6. **Merge.** A ruling where `rulings.pm_decides.merge` is `false`, kelpie's
+   code where it is `true`, as a merge commit of the head the gates passed.
 
 ## Who
 
@@ -50,14 +51,18 @@ that a project names in `agents.pm`, picks work, holds it back, unsticks
 items, resumes a timed-out or failed turn (with a note asking what the
 worker has done so far, or not) or parks it on the maintainer, answers a
 worker's **question** where its case, the code and the docs give it an
-argument, and answers the maintainer. It escalates a
+argument, rules on every open review thread of an item at the gate, asks
+for one more review read, and answers the maintainer. It escalates a
 question only where a public interface, the project's direction or a cost
 past what the item was given is at stake, and it never changes kelpie's
-settings, agent files, code or the machine. Code wakes it on a free slot
+settings, agent files, code or the machine. Among its wakes: a free slot
 with two or more ready issues, two open branches in conflict, a stuck work
-item, or a **tell** (`shep kelpie tell "<note>"`), and it reads the board,
-its own notes and the case files kelpie writes, never running git or gh.
-Kelpie checks each answer against the board before acting on it. One
+item, a call waiting long for a lease, a worker's question, a `follow-up`
+ruling, a ruling it is to answer, a red run on `main`, a review round that
+sent a finding above a nit, the open threads of an item at the gate, a run
+log it asked for, and a **tell** (`shep kelpie tell "<note>"`). It reads
+the board, its own notes and the case files kelpie writes, never running
+git or gh. Kelpie checks each answer against the board before acting on it. One
 session per project is resumed on each wake and compacted past 100k tokens
 of context. Without one, or while it is down, the board's rule picks and
 stuck items wait on their rulings.
@@ -118,9 +123,11 @@ A definition file, `<kelpie home>/agents/<name>.md`, naming what it is for
 others), its harness, the model and effort it runs on, and its prompt as the
 body. A file is a **baseline** plus a **binding**, or says both itself.
 An implementer or reviewer file may also say what it is chosen by:
-`description`, `kinds` and `tier`. Kelpie ships whole agents and baselines,
-and `add` writes the whole ones out. A project names its reviewers and its
-PM by agent, and the **agent board** picks among its implementers.
+`description`, `kinds` and `tier`. Kelpie ships seven baselines and three
+whole review bot agents; `add` writes a stub for each whole one, and
+`shep kelpie agents init` writes a bound lineup. A project names its
+reviewers and its PM by agent, and the **agent board** picks among its
+implementers.
 _Avoid_: model (one part of an agent), bot (a review bot is one kind of
 reviewer)
 
@@ -157,11 +164,13 @@ _Avoid_: max wait
 
 **Baseline**:
 A shipped agent file that says what a role does: its `role` and a body, and
-none of the binding keys. `extends: kelpie:<name>` reaches it. A role may
-have several (`reviewer` has `defect-hunter`, `standards`, `spec` and
-`security-reviewer`), and `implementer` has none. A file that extends one and
-binds nothing is unbound: the book leaves it out and `shep kelpie agents new`
-binds it. While a baseline keeps its binding keys it runs with no file.
+none of the binding keys. `extends: kelpie:<name>` reaches it. Kelpie ships
+seven, none of them bound: `defect-hunter`, `standards`, `spec` and
+`security-reviewer` for `reviewer`, then `pm`, `representative` and
+`triager`. A role may have several baselines, and `implementer` has
+none. A file that extends one and binds nothing is unbound: the book leaves
+it out and `shep kelpie agents new` binds it. A fresh install binds the
+whole lineup with `shep kelpie agents init <harness>`.
 _Avoid_: default, template
 
 **Binding**:
@@ -173,8 +182,9 @@ operator's model.
 **Lineup**:
 The candidates a review pass may pick from: every reviewer file
 `agents.allow` holds but `contributions.security_reviewer`. A contribution's
-lineup is `contributions.reviewers`, or kelpie's default pass when it names
-none. A lineup is in order only where a project named it; a pass's candidates
+lineup is its `contributions.reviewers`, which a project must name whenever
+`contributions.pick` is not `off`: kelpie has no default pass. A lineup is
+in order only where a project named it; a pass's candidates
 are picked by the board each round, so their order does not matter.
 _Avoid_: roster, pool
 
@@ -187,10 +197,12 @@ run as a `command`, an `endpoint` or a `bot`.
 **Gateway**:
 One endpoint in front of a host's model servers, such as paddock,
 named once in kelpie's own settings with the variable holding its key. A
-pi agent or an endpoint reviewer names one in place of its server's URL.
-It queues its calls, and with it kelpie holds no lock on the GPU. A worker's turn
-on one holds a lease of the gateway's own on its model, so the gateway
-evicts nothing it runs on midway; a reviewer's round takes no lease at all.
+pi or goose agent, or an endpoint reviewer, names one in place of its
+server's URL. It queues its calls, and with it kelpie holds no lock on the
+GPU. A worker's turn and a review round on a `paddock` gateway each hold a
+lease of the gateway's own on its model, so it evicts nothing it runs on
+midway; an `openai` gateway offers no lease, and a model it runs a turn on
+may be evicted.
 _Avoid_: proxy, router
 
 **Implementer**:
@@ -434,8 +446,12 @@ reviewer is shown it, and it is never filed.
 
 **Unreviewed**:
 The mark on a work item whose pass ended with no reviewer having read the
-pull request, because one was down, kept failing or reviewed no file.
-Under `auto` it gets the merge ruling instead of merging.
+pull request, because one was down, kept failing or reviewed no file. Where
+the project names `agents.pm`, this and an unread head go back through a
+pass of the review rather than to a merge ruling: a pass cut short by a
+reviewer down waits at the gate for it, and a new pass starts every 30
+minutes until one reads the head. With no project manager, and on a
+contribution, it gets the merge ruling instead of merging.
 
 **Gate**:
 The checks a pull request must pass before it merges: the review pass, CI
@@ -465,11 +481,14 @@ over a socket kelpie filters: only a list of tools passes, and a URL only to
 the project's `browser.domains`.
 
 **Hook**:
-A project's own command, which kelpie runs itself at one of its points for
-every harness and role: `publish` (text bound for the forge), `commit`,
-`push` and `handover`. It refuses with exit 2 and a reason, and a hook that
-cannot run refuses too. Apart from `worker.guard_hooks`, which are Claude
-Code hooks that only a Claude Code worker runs.
+A project's own command, which kelpie runs itself at one of its thirteen
+points for every harness and role: `publish` (text bound for the forge),
+`commit`, `push`, `handover`, `command`, `write`, `after_command`,
+`turn_start`, `turn_end`, `reset`, `ruling`, `ci` and `done`. At a gate
+point it refuses with exit 2 and a reason, and a hook that cannot run
+refuses too; at a notice point (`reset`, `ruling`, `ci` and `done`) a
+non-zero exit is only logged. Apart from `worker.guard_hooks`, which are
+Claude Code hooks that only a Claude Code worker runs.
 
 **Timings**:
 Where a work item's wall time went, by timing phase: `worker`, `review`,
@@ -527,9 +546,10 @@ A decision kelpie cannot make on its own, one of seven kinds: `merge`,
 `foreign-change` and `follow-up`. The maintainer answers it, or the project
 manager for the kinds `rulings.pm_decides` sets `true` and for a `question`
 it can argue (ADR 0018, ADR 0020).
-A `stuck` ruling's reason is one of `rebase`, `still-red`,
-`merge-refused`, `closed`, `fix-not-pushed`,
-`unpushed`, `turn-timeout` and `turn-failed`. A worker waiting on one is
+A `stuck` ruling's reason is one of `rebase`, `still-red`, `check-queued`,
+`no-checks`, `merge-refused`, `closed`, `fix-not-pushed`,
+`test-still-fails`, `unpushed`, `push-refused`, `turn-timeout`,
+`turn-failed`, `adopt-failed` and `over-budget`. A worker waiting on one is
 **parked**, and its work item gives up its slot under `concurrency.active_items`, which
 bounds model calls. `concurrency.pending_rulings` is a threshold for opening
 new work items, not a cap on parking: once that many work items are parked
@@ -572,7 +592,10 @@ that asked for it.
 Whether a green, reviewed pull request merges unasked, a project's
 `rulings.pm_decides.merge`. `false` raises a ruling before every merge. `true`
 has kelpie merge once every gate passes, and replaces only that ruling: the
-merge still asks where a safety gate holds it, such as a pull request no
+merge still asks where a safety gate holds it, such as a head carrying
+another pull request's commits, another open pull request closing the same
+issue, a comment kelpie's guard or a hook refused, or, where the project names
+no `agents.pm`, an open review thread above a nit or a pull request no
 reviewer read. Pending deferred findings
 are ruled on before the merge by the project manager, and after it, as a
 `follow-up` ruling, where there is none or the head merged by hand. That ruling
@@ -581,7 +604,7 @@ otherwise the maintainer's, including on a project with no `agents.pm`.
 Every other ruling still asks.
 
 **Notice**:
-What kelpie sends after a merge under `auto`, a work item closed with no
+What kelpie sends after a merge it made unasked, a work item closed with no
 change, a withdrawn merge ruling or a finished runner, through the same
 webhook as rulings. All but the finished runner's are also a comment on the
 work item's thread where an App covers the repo. Not a ruling: it has no id

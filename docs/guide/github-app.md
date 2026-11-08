@@ -1,6 +1,6 @@
 # The GitHub App
 
-The command that registers the App is step 5 of [Getting started](../../README.md#5-register-kelpies-github-app), and the one that installs the tools is step 3.
+The command that registers the App is step 6 of [Getting started](../../README.md#6-register-kelpies-github-app), and the one that installs the tools is step 3.
 
 ## Registering the App
 

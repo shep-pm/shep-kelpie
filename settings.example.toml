@@ -10,8 +10,8 @@
 # longer needed.
 # `shep kelpie get` prints a project's table and `shep kelpie set <key>
 # <value>` changes one key. A running runner takes a change at its next
-# wake, within a minute when idle. `git.checkout`, `git.remote`, `tickets` and
-# kelpie's gateways wait for its next start, and the log says so.
+# wake, within a minute when idle. `git.checkout`, `git.remote` and kelpie's
+# gateways wait for its next start, and the log says so.
 
 [[app]]
 name = "shep"
@@ -118,11 +118,12 @@ per_item_usd = 10
 # name is used. A `coderabbit` it holds on a repo that is not public is left
 # out of the pick and logged, not refused. Leave it out, or leave it empty
 # (`allow = []`), to allow every agent.
-# allow = ["sonnet-high", "iq3-xxs-review", "defect-hunter-lite", "pm", "representative", "security-reviewer", "triager"]
-# The project manager, from a file whose role is `pm`: kelpie's own `pm` is
-# Opus 5.5 at medium. Code wakes it when a slot is free with two or more
-# ready issues, two open branches conflict, a work item is stuck, or you
-# `shep kelpie tell` it something. It reads `board.md` and its own notes,
+# allow = ["implementer", "defect-hunter", "spec", "standards", "pm", "representative", "security-reviewer", "triager"]
+# The project manager, from a file whose role is `pm`: kelpie ships the `pm`
+# baseline with no model, and `shep kelpie agents init` binds it. Code wakes
+# it when a slot is free with two or more ready issues, two open branches
+# conflict, a work item is stuck, or you `shep kelpie tell` it something.
+# It reads `board.md` and its own notes,
 # never runs git or gh, and answers with a pick, holds, an unstick or a
 # reply, which kelpie checks against the board before acting. A pick of
 # null leaves the free slot to the board's rule. One session
@@ -242,8 +243,8 @@ compact_window = 200000
 # `command` is a file in the repo and `results` a folder in it, both relative
 # with no `..`. The host must be disposable: the project's script runs there
 # as the alias's account, and a worker edits that script. Left out, a worker's
-# ask is answered that the project has no e2e host. A runner reads these
-# when it starts. See https://github.com/shep-pm/shep-kelpie/blob/main/docs/guide/leases-and-e2e.md#end-to-end-tests.
+# ask is answered that the project has no e2e host. A change reaches a running
+# runner at its next wake. See https://github.com/shep-pm/shep-kelpie/blob/main/docs/guide/leases-and-e2e.md#end-to-end-tests.
 # [app.dogs.kelpie.e2e]
 # host = "e2e-box"
 # command = "scripts/e2e-remote.sh"
@@ -259,11 +260,16 @@ compact_window = 200000
 # `merge` is yours, which raises a merge ruling for each green, reviewed pull
 # request. Set `true`, kelpie merges a head that passed every gate unasked and
 # sends a notice after, to the webhook, or the log when kelpie has none. Some
-# pull requests still get the ruling, which names why: one no reviewer read, one
-# with a review bot's thread above a nit open, a head no review round read, a
-# fix after a `no`, and a late bot round's fix. `security`,
-# `contribution-merge` and `local-model-spilled` are refused as `true`, and are
-# never written.
+# pull requests still get the ruling, which names why: a head carrying commits
+# of another open pull request, another open pull request of the project's
+# closing the same issue, and the worker's disputed findings a guard or a hook
+# refused to post. On a project with no `agents.pm` these do too: one no
+# reviewer read, a head no review round read, a fix after a `no`, a late bot
+# round's fix, and a review bot's thread above a nit left open. With a project
+# manager those five are settled before any ruling: every open thread and the
+# deferred findings go to it, and an unread head goes back through a pass of
+# the review. `security`, `contribution-merge` and `local-model-spilled` are refused
+# as `true`, and are never written.
 # `shep kelpie add`, `upgrade` and `shep kelpie settings migrate` write each
 # kind it is missing, at the value below, and never change one it has.
 # `over-budget` is `false`: no setting lifts the spend cap, so you answer, and
@@ -273,6 +279,7 @@ compact_window = 200000
 # `full_panel_paths`, `agents.advisor`, `agents.researcher`, the `[researcher]`
 # table and `repo_setup.roles`, which the runner refuses.
 # [app.dogs.kelpie.rulings.pm_decides]
+# merge = false
 # question = false
 # agent-files = false
 # agent-fit = false
@@ -302,12 +309,11 @@ compact_window = 200000
 # `security_reviewer` is the reviewer agent that reads a contribution for
 # security, and is refused unset when security review is on. `quiet_days` and
 # `nudge_days` are whole days above 0, and `nudge_days` is below `quiet_days`.
-# The agent files are checked only when `pick` is not `off`.
-# `security_reviewer` is read when a contribution's head is; the other keys
-# are not read yet.
+# The agent files are checked only when `pick` is not `off`. A change to any
+# of these reaches a running runner at its next wake.
 # [app.dogs.kelpie.contributions]
 # pick = "off"
-# reviewers = ["defect-hunter-lite"]
+# reviewers = ["defect-hunter"]
 # security_reviewer = "security-reviewer"
 # quiet_days = 7
 # nudge_days = 3
@@ -318,12 +324,11 @@ compact_window = 200000
 # triaged the issue) or `all`. Anything but `off` needs the
 # GitHub App to cover the repo, or the runner refuses to start: the triager's
 # words would post as the maintainer. Only issues opened after `pick` was turned
-# on are listed, and `status` lists them under `triage.due`; nothing is posted
-# or labelled yet. `wait_days` is whole days above 0 without a word from the
+# on are listed, and `status` lists them under `triage.due`. `wait_days` is whole days above 0 without a word from the
 # author before kelpie treats the triage as unanswered. `max_questions` is 1 to
 # 10, the most one comment asks. `agent` is an agent file whose role is
-# `triager`. It is checked, and refused unset, only when `pick` is not `off`. A change
-# waits for the runner's next start.
+# `triager`. It is checked, and refused unset, only when `pick` is not `off`. A
+# change reaches a running runner at its next wake.
 #
 # Whatever `pick` says, kelpie runs the issue check on each new or edited open
 # issue. The maintainer's issue that passes is labelled `ready-for-agent`, and
