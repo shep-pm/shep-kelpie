@@ -384,6 +384,7 @@ mod tests {
             choice: 'A',
             why: "main moved".into(),
             design: false,
+            ask: false,
         };
 
         let worded = with_words(&ruling, &answer);
