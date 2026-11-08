@@ -319,8 +319,8 @@ impl Runner {
         // A `ready-for-agent` the issue carried when its pass began is the queue's
         // state, no answer to what the pass asked. It comes off before
         // `needs-approval` goes on, so no issue carries both.
-        let begun_with_ready = seen.iter().any(|l| l.as_str() == READY)
-            && carried.iter().any(|l| l.as_str() == READY);
+        let begun_with_ready =
+            seen.iter().any(|l| l.as_str() == READY) && carried.iter().any(|l| l.as_str() == READY);
         if begun_with_ready && !self.take_ready_back(issue)? {
             return Ok(());
         }
