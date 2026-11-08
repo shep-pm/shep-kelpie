@@ -341,13 +341,40 @@ fn the_project_manager_reading_a_fix_it_drafts_runs_on_the_read_only_tools() {
 
 #[test]
 fn an_answer_runs_on_no_tools_and_no_mcp_server() {
-    for role in [Role::Representative, Role::Worker, Role::Reviewer, Role::Pm] {
+    for role in [
+        Role::Representative,
+        Role::Worker,
+        Role::Reviewer,
+        Role::Pm,
+        Role::Triager,
+    ] {
         let mut answer = call(role, fresh());
         answer.tools = Tools::Answer;
         answer.agent_tools = Some("Bash,Read,Write".into());
         let argv = strings(&answer);
         let at = argv.iter().position(|a| a == "--tools").unwrap();
         assert_eq!(argv[at + 1], "");
+        assert_eq!(argv[at + 2], "--strict-mcp-config");
+        assert!(!argv.iter().any(|a| a == "bypassPermissions"));
+    }
+}
+
+#[test]
+fn an_answer_that_may_read_a_folder_runs_on_read_alone() {
+    for role in [
+        Role::Representative,
+        Role::Worker,
+        Role::Reviewer,
+        Role::Pm,
+        Role::Triager,
+    ] {
+        let mut answer = call(role, fresh());
+        answer.tools = Tools::Answer;
+        answer.agent_tools = Some("Bash,Read,Write".into());
+        answer.reach.read = vec![PathBuf::from("/k/answers")];
+        let argv = strings(&answer);
+        let at = argv.iter().position(|a| a == "--tools").unwrap();
+        assert_eq!(argv[at + 1], "Read");
         assert_eq!(argv[at + 2], "--strict-mcp-config");
         assert!(!argv.iter().any(|a| a == "bypassPermissions"));
     }

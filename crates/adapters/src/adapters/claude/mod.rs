@@ -421,7 +421,11 @@ fn profile(call: &AgentCall) -> Vec<OsString> {
     use crate::ports::Tools as Kind;
     let own = call.agent_tools.as_deref();
     let tools = match (call.role, call.tools) {
-        (_, Kind::Answer) => Some(""),
+        (_, Kind::Answer) => Some(if call.reach.read.is_empty() {
+            ""
+        } else {
+            "Read"
+        }),
         (_, Kind::Retro) => Some(settings::RETRO_TOOLS),
         // The project manager's read of a fix it drafted reads and searches
         // alone: it writes nothing and runs no command.
