@@ -4,6 +4,11 @@ use super::test_fails;
 use crate::runner::gate::short;
 use crate::state::Stuck;
 
+/// What leads the line the project manager adds when it parks a stuck work
+/// item on an open fix, which the card reads back so the fix it waits on is on
+/// the maintainer's card and not only in the question
+pub(in crate::runner) const PARKS: &str = "The project manager parks this on ";
+
 // The fix turns a worker had on red runs. The cap is read live, so a
 // lowered one can sit below the count.
 pub(super) fn fix_turns_had(turns: u32) -> String {
