@@ -531,11 +531,13 @@ pub(in crate::runner) fn inert(text: &str) -> String {
 
 mod card;
 mod writer;
+#[cfg(test)]
+pub(super) use self::card::DRAFT;
 pub(super) use self::writer::Writer;
 
 pub(super) use self::card::{
-    ASK_THE_MAINTAINER, BOARD, DRAFT, PROBLEM, RECOMMENDS, SAYS, answer_for, asks_the_maintainer,
-    brief, chosen, effect_of, named, phrases, settled_comment, thumbs, ticked,
+    ASK_THE_MAINTAINER, BOARD, PROBLEM, RECOMMENDS, SAYS, answer_for, asks_the_maintainer, brief,
+    chosen, draft_block, effect_of, named, phrases, settled_comment, thumbs, ticked,
 };
 
 #[cfg(test)]

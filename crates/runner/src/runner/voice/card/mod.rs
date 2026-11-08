@@ -14,6 +14,7 @@ use super::super::contributions::{
 };
 use super::super::gate::short;
 use super::super::ruling::{PARKS, needs_pass, stuck_comment};
+use super::super::untrusted::delimiter_absent_from;
 use super::super::words::{NO_NOTE, Wants};
 use super::super::{Action, Answer};
 use super::{has_high, merge_notes, open_lines};
@@ -757,12 +758,53 @@ pub(in crate::runner) const SAYS: &str = "PM says:";
 /// under the project manager's one line of words (see [`drafted`])
 pub(in crate::runner) const DRAFT: &str = "PM draft:";
 
+/// The lines that put `text`, a fix draft kelpie did not file, on a question
+///
+/// It is the [`DRAFT`] line, then the text between two lines marked with a
+/// delimiter the text does not contain, so no line of it ends the block early.
+pub(in crate::runner) fn draft_block(text: &str) -> String {
+    let delimiter = delimiter_absent_from(text);
+    format!("{DRAFT}\n{delimiter} begin\n{text}\n{delimiter} end")
+}
+
+// `question` split into what lies outside every draft block, joined, and the
+// text of each block, so the draft's own lines are never read as the project
+// manager's words. A block with no end is no block.
+fn split_drafts(question: &str) -> (String, Vec<&str>) {
+    let lead = format!("\n{DRAFT}\n");
+    let (mut outside, mut drafts, mut from) = (String::new(), Vec::new(), 0);
+    while let Some(found) = question[from..].find(&lead) {
+        let line_at = from + found + lead.len();
+        let block = question[line_at..]
+            .split_once('\n')
+            .and_then(|(line, rest)| {
+                let delimiter = line.strip_suffix(" begin")?;
+                let (text, after) = rest.split_once(&format!("\n{delimiter} end"))?;
+                Some((text, question.len() - after.len()))
+            });
+        match block {
+            Some((text, end)) => {
+                outside.push_str(&question[from..from + found]);
+                drafts.push(text);
+                from = end;
+            }
+            None => {
+                outside.push_str(&question[from..line_at]);
+                from = line_at;
+            }
+        }
+    }
+    outside.push_str(&question[from..]);
+    (outside, drafts)
+}
+
 // The project manager's latest word on the ruling, where it gave any:
 // `**Project manager: A**. Its why.`, or by name on a card whose table names
 // its options instead of lettering them, as `**Project manager: Merge**`. A
 // parked item names the fix it waits on, and a pick after it replaces that.
 fn pm_words(ruling: &Ruling, choices: &[Choice]) -> Option<String> {
-    let question = ruling.question.as_str();
+    let (outside, _) = split_drafts(&ruling.question);
+    let question = outside.as_str();
     let says = after_last(question, SAYS).map(super::inert);
     let parks = match parks_last(question) {
         true => parked(question),
@@ -787,11 +829,10 @@ fn pm_words(ruling: &Ruling, choices: &[Choice]) -> Option<String> {
 }
 
 // The fix draft kelpie put on `ruling` and did not file, whole, where it put
-// one: everything after the last [`DRAFT`] line, which is the draft as written.
+// one: the last [`draft_block`], which is the draft as written.
 fn drafted(ruling: &Ruling) -> Option<String> {
-    let lead = format!("\n{DRAFT}\n");
-    let at = ruling.question.rfind(&lead)? + lead.len();
-    let text = ruling.question[at..].trim();
+    let (_, drafts) = split_drafts(&ruling.question);
+    let text = drafts.last()?.trim();
     (!text.is_empty()).then(|| format!("**The fix kelpie drafted, and did not file**\n\n{text}"))
 }
 

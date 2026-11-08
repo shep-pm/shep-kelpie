@@ -23,7 +23,7 @@ pub(super) fn fenced(what: &str, text: &str) -> String {
     )
 }
 
-fn delimiter_absent_from(text: &str) -> String {
+pub(super) fn delimiter_absent_from(text: &str) -> String {
     (0u64..)
         .map(|n| format!("{MARK}-{n}"))
         .find(|candidate| !text.contains(candidate))

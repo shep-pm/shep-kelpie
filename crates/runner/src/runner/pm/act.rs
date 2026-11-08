@@ -15,7 +15,7 @@ use super::{Pick, Picked, StuckState, Wake, stuck_on};
 use crate::board::briefing::ticket_ref;
 use crate::runner::ruling::PARKS;
 use crate::runner::thread_replies::Settler;
-use crate::runner::voice::DRAFT;
+use crate::runner::voice::draft_block;
 use crate::runner::{Answer as Ruled, RuleError, Runner};
 use crate::settings::AgentName;
 use crate::state::{PmHeld, RulingKind, StateError, Stuck};
@@ -387,9 +387,9 @@ impl Runner {
         // them, led for the card to find, and the webhook posts the question whole.
         let words = match (why.is_empty(), draft) {
             (true, None) => format!("{lead}."),
-            (true, Some(text)) => format!("{lead}.\n\n{DRAFT}\n{text}"),
+            (true, Some(text)) => format!("{lead}.\n\n{}", draft_block(text)),
             (false, None) => format!("{lead}. PM says: {why}"),
-            (false, Some(text)) => format!("{lead}. PM says: {why}\n\n{DRAFT}\n{text}"),
+            (false, Some(text)) => format!("{lead}. PM says: {why}\n\n{}", draft_block(text)),
         };
         ruling.question = format!("{}\n\n{words}", ruling.question);
         ruling.alerted = false;

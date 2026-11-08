@@ -231,8 +231,8 @@ fn read_prompt(project: &str, draft: &FixDraft) -> String {
          - does each claim it makes hold in this code?\n\
          - does it ask for work a worker could take, with every part an issue must give one?\n\
          \n\
-         Its title: {}\n\
-         Why it is being filed: {}\n\n\
+         {}\n\n\
+         {}\n\n\
          {}\n\n\
          Answer with one JSON object and nothing else, either\n\
          \n\
@@ -242,8 +242,8 @@ fn read_prompt(project: &str, draft: &FixDraft) -> String {
          \n\
          {{\"verdict\": \"refuse\", \"why\": \"<one sentence, at most 300 characters>\"}}",
         ticket_ref(draft.item),
-        draft.draft.title,
-        draft.why,
+        fenced("Its title", &draft.draft.title),
+        fenced("Why it is being filed", &draft.why),
         fenced("The fix issue you drafted", &draft.draft.body),
     )
 }
