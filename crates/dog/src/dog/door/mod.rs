@@ -21,7 +21,7 @@ use super::e2e::Remote;
 use super::{Kept, lock_desk};
 use crate::ipc::{Listener, ServerReadHalf, ServerStream, ServerWriteHalf, split};
 use crate::lease::counted::{CARGO_TEST, Taken, Taker, Ticket};
-use crate::lease::door::{Answer, Ask, E2E, FIT, FORGE, LONGEST_LINE, PICK, REFUSED};
+use crate::lease::door::{Answer, Ask, CREDIT, E2E, FIT, FORGE, LONGEST_LINE, PICK, REFUSED};
 
 /// How long a connection has to send its ask before the dog hangs up
 const ASK_WITHIN: Duration = Duration::from_secs(10);
@@ -81,10 +81,10 @@ pub(super) async fn serve(
 /// Answers every command that knocks at `listener`, for as long as it runs,
 /// granting nothing new for `grace` from now
 ///
-/// An `e2e` ask is placed by the worktree it names under `kelpie_home`, and
-/// run through `remote`. A `pick` ask reads `board` and what is `shown`, and a
-/// `fit` ask reads `board` and writes its marks under `kelpie_home`. A waiter
-/// is listed in `waiters`, which the dog keeps to wake those a raise grants.
+/// An `e2e` ask is placed by the worktree it names under `kelpie_home` and run
+/// through `remote`. A `pick` ask reads `board` and what is `shown`, a `fit`
+/// ask reads `board` and writes its marks under `kelpie_home`, and a `credit`
+/// ask reads `board` and the desk's clock. A waiter is listed in `waiters`.
 #[expect(
     clippy::too_many_arguments,
     reason = "the dog's own state, passed once"
@@ -198,6 +198,9 @@ async fn visit(stream: ServerStream, mut place: Place, fresh_from: tokio::time::
         }
         Ok(ask) if ask.take == FIT => {
             return super::board::fit_visit(&place, ask, &mut write).await;
+        }
+        Ok(ask) if ask.take == CREDIT => {
+            return super::board::credit_visit(&place, &mut write).await;
         }
         Ok(ask) if ask.take == REFUSED => {
             return super::availability::visit(&place, ask, &mut write).await;

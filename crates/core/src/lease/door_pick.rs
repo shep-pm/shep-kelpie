@@ -1,14 +1,14 @@
-//! The agent board's pick and fit, asked at the dog's door
+//! The agent board's pick, fit and credit, asked at the dog's door
 //!
 //! The dog keeps one board for every runner, so a runner asks it which agents
-//! may start an item and whether an agent still fits a kind of work. The dog
-//! reads and orders none: the runner ranks its answer. A runner that cannot
-//! reach the dog, or cannot read its answer, gets none and starts or raises
-//! nothing.
+//! may start an item, whether an agent still fits a kind of work, and what the
+//! month has spent of the API credit. The dog reads and orders none: the runner
+//! ranks its answer. A runner that cannot reach the dog, or cannot read its
+//! answer, gets none and starts or raises nothing.
 
 use std::path::{Path, PathBuf};
 
-use super::door::{Answer, Ask, FIT, FitAsk, Fits, PICK, Pick, PickAsk, REFUSED};
+use super::door::{Answer, Ask, CREDIT, Credit, FIT, FitAsk, Fits, PICK, Pick, PickAsk, REFUSED};
 use super::door_pace::answered;
 use crate::agent_board::rank;
 use crate::api_refusal::Refusal;
@@ -97,6 +97,18 @@ pub fn refused(door: &Path, refusal: &Refusal) -> Option<Timestamp> {
     }
 }
 
+/// What the dog at `door` says the agents billed to the API key have spent this month, or None when it cannot say
+///
+/// The dog sums what its own ledgers record, and asks no API what the credit
+/// has left.
+pub fn credit(door: &Path) -> Option<Credit> {
+    let ask = Ask::new(CREDIT, std::process::id(), "credit");
+    match answered(door, &ask)? {
+        Answer::Credit(credit) => Some(credit),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +153,12 @@ mod tests {
         let nobody = Path::new("/nonexistent/kelpie/lease.sock");
 
         assert_eq!(fits(nobody, &item), None);
+    }
+
+    #[test]
+    fn a_runner_that_cannot_reach_the_dog_gets_no_credit() {
+        let nobody = Path::new("/nonexistent/kelpie/lease.sock");
+
+        assert_eq!(credit(nobody), None);
     }
 }

@@ -112,6 +112,8 @@ struct OnClaude {
     harness: Harness,
     model: NonBlank,
     effort: Effort,
+    #[serde(default)]
+    login: Option<Login>,
 }
 
 // The representative's and the triager's keys: a session on any harness.
@@ -129,6 +131,8 @@ struct Expert {
     effort: Effort,
     #[serde(default)]
     usage: Option<UsageReader>,
+    #[serde(default)]
+    login: Option<Login>,
     #[serde(default)]
     lease: Option<IgnoredAny>,
     #[serde(default)]
@@ -377,7 +381,7 @@ impl Expert {
             role,
             runs: session(&SessionKeys {
                 harness: self.harness,
-                login: Login::Plan,
+                login: self.login.unwrap_or_default(),
                 yaml,
                 model: &self.model,
                 effort: self.effort,
@@ -450,7 +454,7 @@ impl OnClaude {
             role,
             runs: session(&SessionKeys {
                 harness: self.harness,
-                login: Login::Plan,
+                login: self.login.unwrap_or_default(),
                 yaml,
                 model: &self.model,
                 effort: self.effort,
