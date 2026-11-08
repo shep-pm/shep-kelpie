@@ -7,7 +7,7 @@ use std::time::Instant;
 use serde_json::json;
 
 use crate::board::READY;
-use crate::ports::{CLEAN, Cost, Finding, Role, Severity, Standing};
+use crate::ports::{CLEAN, Cost, Finding, PullRequestState, Role, Severity, Standing};
 use crate::runner::coderabbit::tests::now;
 use crate::runner::flight::tests::Driven;
 use crate::runner::review_bot::two_bots::listing;
@@ -16,6 +16,8 @@ use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, ScriptedRound, Seen, ticke
 
 use super::ruling_report;
 
+mod more;
+
 const NIT: &str = "P3: The name could be shorter. It reads badly.";
 const THREAD: &str = "PRRT_cubic_71_0";
 const DOLLAR: u64 = 1_000_000_000;
@@ -23,6 +25,8 @@ const BACK_OFF: u64 = 30 * 60;
 
 const THREADS_HELD: &str = "its open review threads are with the project manager, so the merge \
                             waits on its answer";
+const TALK_UNREAD: &str = "what people wrote on its pull request cannot be read, so the merge \
+                          waits for a read";
 const PM_DOWN: &str = "the project manager is down, so its open review threads wait for it";
 const PUSHED_BACK: &str = "the project manager pushed back on a review thread the maintainer \
                            wrote, so the merge waits for their reply";
@@ -712,6 +716,30 @@ fn a_refused_filing_retries_and_raises_no_ruling() {
 }
 
 #[test]
+fn a_talk_that_cannot_be_read_holds_the_merge_with_the_threads_unruled() {
+    let rig = pm_project("threads-talk-down");
+    rig.merge_auto();
+    let (rig, runner, _) = at_the_gate(rig, &[NIT]);
+    rig.forge.set_talk_down(true);
+
+    waits_with(&rig, &runner, TALK_UNREAD);
+    assert!(pm_seen(&rig).is_empty(), "nothing was read to ask about");
+    assert!(
+        rig.forge.merges().is_empty(),
+        "the head does not merge past it"
+    );
+
+    rig.forge.set_talk_down(false);
+    pm_says(&rig, [NOTHING]);
+    waits_with(&rig, &runner, THREADS_HELD);
+    assert_eq!(
+        woken(&rig, 1).len(),
+        1,
+        "the thread is put to the project manager"
+    );
+}
+
+#[test]
 fn fix_after_fix_parks_on_over_budget_and_raises_no_merge_ruling() {
     let rig = pm_project("threads-budget");
     rig.edit_settings(|s| s.replace("per_item_usd = 10", "per_item_usd = 5"));
@@ -897,60 +925,4 @@ fn an_adopted_contribution_keeps_its_ruling_and_asks_nothing() {
         pm_seen(&rig).is_empty(),
         "nothing is asked of the project manager"
     );
-}
-
-#[test]
-fn deferred_findings_are_still_filed_at_the_merge_after_a_follow_up_before_it() {
-    let found = Finding::new(
-        Severity::High,
-        "src/lib.rs",
-        9,
-        "looks racy",
-        "two threads write the same field",
-    );
-    let rig = pm_project("threads-deferred");
-    rig.merge_auto();
-    let (rig, runner, head) = at_the_gate_found(rig, std::slice::from_ref(&found));
-    std::fs::write(
-        rig.build_7().join("deferred-findings.md"),
-        deferred(std::slice::from_ref(&found)),
-    )
-    .unwrap();
-    open_bots(&rig, &head, &[NIT]);
-
-    ruled_by(&rig, &runner, FOLLOW_UP);
-    assert_eq!(rig.forge.coderabbit.resolved(), [THREAD]);
-    let [issue] = rig.forge.created().try_into().unwrap();
-    assert_eq!(issue.labels, [READY], "the follow-up is ready for a worker");
-
-    let question = merge_ruling(&runner);
-    assert_eq!(rig.forge.merges(), [(71, head)], "the head merged");
-    assert!(
-        question.contains("looks racy"),
-        "the deferred finding is still there to file: {question}"
-    );
-}
-
-// #7's pull request, whose qwen round found `found` and whose worker fixed it,
-// then read clean by Claude. The item stands at the gate with `found` still held.
-fn at_the_gate_found(rig: Rig, found: &[Finding]) -> (Rig, Mutex<Runner>, String) {
-    let runner = rig.open().unwrap();
-    rig.ask(&runner, "add", Some("7"));
-    runner.lock().unwrap().plan_two_reads_for_the_rig();
-    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-    rig.reviewer
-        .script([ScriptedRound::Findings(found.to_vec())]);
-    rig.claude.script([
-        Scripted::Push("work.txt", "work\n"),
-        Scripted::Push("fixed.txt", "fixed\n"),
-        Scripted::Text(CLEAN),
-    ]);
-    for _ in 0..20 {
-        step(&runner).unwrap();
-        if rig.ask(&runner, "status", None)["work_item"]["phase"]["state"] == "ci" {
-            break;
-        }
-    }
-    let head = rig.forge.head_of("kelpie/7").expect("the worker pushed");
-    (rig, runner, head)
 }

@@ -261,7 +261,10 @@ impl Runner {
         }
         for wake in wakes {
             let Wake::Threads {
-                ticket, threads, ..
+                ticket,
+                head,
+                threads,
+                ..
             } = wake
             else {
                 continue;
@@ -274,7 +277,7 @@ impl Runner {
             // held back as a thread left unanswered is, so a forge that keeps
             // refusing does not wake the project manager for the same call.
             let mut refused = false;
-            if let Err(reason) = self.threads_ruled(*ticket, &ruled) {
+            if let Err(reason) = self.threads_ruled(*ticket, head, &ruled) {
                 self.gate_refused(*ticket, &reason);
                 dropped.push(format!("{}: {reason}", ticket_ref(*ticket)));
                 refused = true;
@@ -320,6 +323,7 @@ mod tests {
             severity: None,
             what: what.to_owned(),
             maintainer_wrote: false,
+            said: Some(1),
         }
     }
 

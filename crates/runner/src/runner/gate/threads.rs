@@ -8,12 +8,12 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::ports::{Finding, ForgeError, Severity, Talk, TalkThread};
+use crate::ports::{Finding, ForgeError, Severity};
 use crate::runner::Runner;
 use crate::runner::pm::{Decision, Ruled, Wake};
 use crate::runner::report::{Begin, StepReport};
 use crate::runner::review::findings;
-use crate::runner::review_bot::{RULED_CLOSE, RULED_FOLLOW, RULED_PUSH, RuledThread, is_reply};
+use crate::runner::review_bot::{RULED_CLOSE, RULED_FOLLOW, RULED_PUSH, RuledThread};
 use crate::runner::turn::KEEP_BODY_TRUE;
 use crate::runner::turn::held_up::Reason;
 use crate::settings::AgentName;
@@ -110,9 +110,11 @@ impl Runner {
         let talk = match self.read_talk(number) {
             Ok(Ok(talk)) => talk,
             Ok(Err(e)) => {
+                // The threads cannot be told apart from none, so the merge waits
+                // for a read that works rather than going past them unruled.
                 self.notes
                     .push(format!("cannot read what people wrote on #{number}: {e}"));
-                return Ok(None);
+                return Ok(Some(self.held_for(Reason::TalkUnread)));
             }
             Err(job) => return Ok(Some(Begin::Reads(job))),
         };
@@ -123,7 +125,7 @@ impl Runner {
         if to_rule.left_out > 0 {
             self.note_threads_left_out(number, to_rule.left_out);
         }
-        let (waiting, asking) = self.split_backs(ticket, &to_rule.threads, &talk);
+        let (waiting, asking) = self.split_backs(ticket, &to_rule.threads);
         if asking.is_empty() {
             return Ok(match waiting.is_empty() {
                 true => None,
@@ -150,18 +152,30 @@ impl Runner {
     /// Carries out the project manager's `ruled` calls on `ticket`'s open threads
     ///
     /// A `close` and a `follow-up` settle the thread, a `push-back` replies and leaves it
-    /// open for the maintainer, and every `fix` goes to the worker as one turn. A reply
-    /// the guard or a hook refuses is replaced, so the thread still settles.
-    ///
-    /// Returns why the forge refused what it would not take, which the gate asks again.
+    /// open, and every `fix` goes to the worker as one turn. An answer for a head the
+    /// item has left acts on nothing. Returns why the forge refused, which the gate asks again.
     pub(in crate::runner) fn threads_ruled(
         &mut self,
         ticket: TicketId,
+        head: &str,
         ruled: &[Ruled],
     ) -> Result<(), String> {
         let Some(item) = self.state.item(ticket).cloned() else {
             return Ok(());
         };
+        let at_the_gate = match &item.phase {
+            Phase::Ci { head: seen, .. } => seen.as_deref().is_none_or(|seen| seen == head),
+            _ => false,
+        };
+        if !at_the_gate {
+            self.notes.push(format!(
+                "the project manager's answer on {}'s threads came after the item left the gate \
+                 at {}, so it acted on none",
+                ticket.shown(),
+                head.get(..7).unwrap_or(head)
+            ));
+            return Ok(());
+        }
         let Some(number) = item.pull_request else {
             return Ok(());
         };
@@ -190,8 +204,7 @@ impl Runner {
             }
             match call.decision {
                 Decision::PushBack => {
-                    let said = self.thread_said(number, id);
-                    self.pushed_back.note(ticket, id, said);
+                    self.pushed_back.note(ticket, id, call.thread.said);
                 }
                 Decision::Close | Decision::FollowUp => {
                     self.pushed_back.forget(ticket, id);
@@ -234,6 +247,7 @@ impl Runner {
     ) -> Result<String, String> {
         let ticket = item.issue;
         let finding = finding_of(thread, why);
+        let before = item.follow_ups.clone();
         self.update_of(ticket, |item| {
             item.follow_ups = Some(FollowUps {
                 findings: vec![finding],
@@ -243,24 +257,40 @@ impl Runner {
             });
         })
         .map_err(|e| format!("cannot save the follow-up: {e}"))?;
-        let (opened, commented) = match self.file_follow_ups(ticket) {
+        let filed = match self.file_follow_ups(ticket) {
             Ok(Ok(Begin::Report(StepReport::FollowUpsFiled {
                 opened, commented, ..
-            }))) => (opened, commented),
-            Ok(Ok(_)) => return Err("the filing reported nothing".to_owned()),
+            }))) => opened.into_iter().chain(commented).next(),
+            Ok(Ok(_)) => None,
             // The forge would not take it, and the gate asks the ruling again.
-            Ok(Err(reason)) => return Err(reason),
-            Err(e) => return Err(format!("cannot file the follow-up: {e}")),
+            Ok(Err(reason)) => return self.unfiled(ticket, before, reason),
+            Err(e) => {
+                return self.unfiled(ticket, before, format!("cannot file the follow-up: {e}"));
+            }
         };
-        let filed = opened.into_iter().chain(commented).next();
         let Some(filed) = filed else {
-            return Err("the filing filed nothing".to_owned());
+            return self.unfiled(ticket, before, "the filing filed nothing".to_owned());
         };
         let number = filed.shown();
         Ok(match why.is_empty() {
             true => format!("{RULED_FOLLOW}{number}"),
             false => format!("{RULED_FOLLOW}{number}: {why}"),
         })
+    }
+
+    // A filing that did not happen takes its finding back off the item, so a later
+    // ruling that settles the thread another way does not file it at the merge, and
+    // the worker's deferred findings are still read there
+    fn unfiled(
+        &mut self,
+        ticket: TicketId,
+        before: Option<FollowUps>,
+        reason: String,
+    ) -> Result<String, String> {
+        match self.update_of(ticket, |item| item.follow_ups = before) {
+            Ok(()) => Err(reason),
+            Err(e) => Err(format!("{reason}; cannot save the item either: {e}")),
+        }
     }
 
     // One worker turn for every thread the project manager ruled `fix`, sent as a
@@ -342,28 +372,14 @@ impl Runner {
         posted.map_err(|e| format!("cannot reply to a thread on #{number}: {e}"))
     }
 
-    // The id of `id`'s last remark that is not kelpie's own, read from the pull request
-    fn thread_said(&self, number: u64, id: &str) -> Option<u64> {
-        let talk = self.ports.forge.talk(&self.remote, number).ok()?;
-        (talk.threads.iter())
-            .find(|thread| thread.id == id)
-            .and_then(last_said)
-    }
-
     // `threads`, split into those waiting on the maintainer's reply to a push-back and
     // those to put to the project manager
     fn split_backs(
         &self,
         ticket: TicketId,
         threads: &[RuledThread],
-        talk: &Talk,
     ) -> (Vec<RuledThread>, Vec<RuledThread>) {
-        let said = |t: &RuledThread| {
-            (talk.threads.iter())
-                .find(|thread| thread.id == t.id)
-                .and_then(last_said)
-        };
-        let waiting = |t: &RuledThread| self.pushed_back.waiting(ticket, &t.id, said(t));
+        let waiting = |t: &RuledThread| self.pushed_back.waiting(ticket, &t.id, t.said);
         let kept = |keep: bool| {
             (threads.iter())
                 .filter(|t| waiting(t) == keep)
@@ -416,12 +432,4 @@ fn finding_of(thread: &RuledThread, why: &str) -> Finding {
         },
         test: None,
     }
-}
-
-// The id of the thread's last remark that is not one of kelpie's replies
-fn last_said(thread: &TalkThread) -> Option<u64> {
-    (thread.remarks.iter())
-        .filter(|r| !is_reply(&r.body))
-        .map(|r| r.id)
-        .max()
 }

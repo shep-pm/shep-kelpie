@@ -47,6 +47,8 @@ pub(in crate::runner) enum Reason {
     ThreadsAsked,
     /// The project manager is down, so its open review threads wait for it
     PmDown,
+    /// The pull request's talk cannot be read, so its open review threads wait for a read
+    TalkUnread,
     /// The project manager pushed back on a thread the maintainer wrote, and the merge waits
     /// for their reply
     PushBack,
@@ -72,6 +74,11 @@ impl Reason {
             ),
             Self::ThreadsAsked => {
                 "its open review threads are with the project manager, so the merge waits on its answer".into()
+            }
+            Self::TalkUnread => {
+                "what people wrote on its pull request cannot be read, so the merge waits for a \
+                 read"
+                    .into()
             }
             Self::PmDown => {
                 "the project manager is down, so its open review threads wait for it".into()
