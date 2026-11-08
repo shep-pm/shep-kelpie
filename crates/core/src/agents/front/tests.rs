@@ -160,9 +160,11 @@ const PI_API: &str = "role: implementer\nharness: pi\nmodel: claude-sonnet-4-5\n
 #[test]
 fn a_pi_file_with_login_api_reads_as_pi_on_the_api_and_needs_a_context() {
     let reviewer = PI_API.replace("implementer", "reviewer");
+    let triager = PI_API.replace("implementer", "triager");
     for (what, keys) in [
         ("an implementer", PI_API),
         ("a reviewer", reviewer.as_str()),
+        ("a triager", triager.as_str()),
     ] {
         let agent = parse(&format!("---\n{keys}---\nLook.\n")).unwrap();
         let (model, limit) = agent.runs.session().unwrap();
