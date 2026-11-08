@@ -87,6 +87,65 @@ async fn an_old_list_becomes_entries_in_the_map_and_is_removed() {
     assert_eq!(map["turn-failed"], true);
 }
 
+// `TABLE` with `git.merging` set to `merging`, and the project manager named when `pm` says
+fn merging(merging: &str, pm: bool) -> String {
+    let table = TABLE.replace("merging = \"ask\"", &format!("merging = \"{merging}\""));
+    match pm {
+        true => table.replace("[agents]\n", "[agents]\npm = \"pm\"\n"),
+        false => table,
+    }
+}
+
+#[tokio::test]
+async fn git_merging_auto_writes_merge_true_and_names_it() {
+    for pm in [false, true] {
+        let scene = Scene::holding(&merging("auto", pm)).await;
+
+        let said = scene.migrate().await.unwrap();
+
+        let line = said.iter().find(|l| l.starts_with("project koji")).unwrap();
+        assert!(line.contains("rulings.pm_decides.merge = true"), "{said:?}");
+        assert!(
+            !line.contains("rulings.pm_decides.merge = false"),
+            "{said:?}"
+        );
+        let table = scene.table();
+        assert_eq!(
+            map_of(&table)["merge"],
+            true,
+            "with a project manager: {pm}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn git_merging_auto_turns_a_merge_false_the_table_holds_to_true() {
+    let table = merging("auto", false) + "\n[rulings]\npm_decides = { merge = false }\n";
+    let scene = Scene::holding(&table).await;
+
+    let said = scene.migrate().await.unwrap();
+
+    assert!(
+        said[0].contains("rulings.pm_decides.merge = true"),
+        "{said:?}"
+    );
+    assert_eq!(map_of(&scene.table())["merge"], true);
+}
+
+#[tokio::test]
+async fn git_merging_ask_holding_merge_true_writes_false_and_names_it() {
+    let table = merging("ask", true) + "\n[rulings]\npm_decides = { merge = true }\n";
+    let scene = Scene::holding(&table).await;
+
+    let said = scene.migrate().await.unwrap();
+
+    assert!(
+        said[0].contains("rulings.pm_decides.merge = false"),
+        "{said:?}"
+    );
+    assert_eq!(map_of(&scene.table())["merge"], false);
+}
+
 #[tokio::test]
 async fn a_second_run_has_nothing_to_migrate() {
     let mut scene = Scene::holding(&with_slack(TABLE)).await;

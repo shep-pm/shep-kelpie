@@ -24,8 +24,9 @@ pub struct Git {
     /// items opened after it: each one in flight keeps the base it was cut for.
     #[serde(default)]
     pub base: Option<BaseBranch>,
-    /// Who merges a green, reviewed pull request. While the table holds it,
-    /// it outranks `rulings.pm_decides.merge`.
+    /// Read by `settings migrate` alone, which writes `rulings.pm_decides.merge`
+    /// from it. `rulings.pm_decides.merge` decides who merges a green,
+    /// reviewed pull request.
     #[serde(default)]
     pub merging: Option<Merging>,
     /// The GitHub login kelpie mentions on a ruling it posts through its

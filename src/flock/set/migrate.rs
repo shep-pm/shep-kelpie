@@ -1,8 +1,9 @@
 //! `shep kelpie settings migrate`: writes the keys each project's table is missing
 //!
 //! `rulings.pm_alone` becomes `rulings.pm_decides`, each kind the map lacks written
-//! at its default. The keys that are gone ([`GONE_KEYS`]) and the `unlabelled`
-//! kind are deleted, each named with its value.
+//! at its default, and `merge` follows `git.merging` while the table holds it.
+//! The keys that are gone ([`GONE_KEYS`]) and the `unlabelled` kind are deleted,
+//! each named with its value.
 //! `agents.reviewers` goes too: its names join a listed `agents.allow`, and
 //! `contributions.reviewers` where the project names none. An agent kelpie once
 //! named for a project that left it unset gets that name ([`DEFAULTS`]). Each table
@@ -54,6 +55,9 @@ const ALLOW: &str = "agents.allow";
 
 /// Where they go when the project names no reviewers of its own for a contribution
 const CONTRIBUTION_REVIEWERS: &str = "contributions.reviewers";
+
+/// The key `merge_choice` writes, with the ` = ` a line naming it holds
+const MERGE_KEY: &str = "rulings.pm_decides.merge = ";
 
 /// The kind of ruling migrate deletes from `rulings.pm_decides` and the old list
 const WRITER_KIND: &str = "unlabelled";
@@ -195,6 +199,10 @@ async fn project(
     let listed = lookup(&table, PM_ALONE).is_some();
     let gone_kinds = writer_kind(&mut table);
     let mut wrote = pm_decides(&mut table);
+    if let Some(line) = merge_choice(&mut table) {
+        wrote.retain(|written| !written.starts_with(MERGE_KEY));
+        wrote.push(line);
+    }
     let (joined, gone_reviewers) = reviewers(&mut table);
     wrote.extend(joined);
     wrote.extend(defaults(&mut table, &read.kelpie));
@@ -216,6 +224,27 @@ async fn project(
     let (request, _) = checked(client, name, place, read, table).await?;
     write(client, &request).await?;
     Ok(Some(format!("project {name}: {}", said.join("; "))))
+}
+
+// Writes `rulings.pm_decides.merge` as `git.merging` says while the table
+// holds it: `true` under `auto`, and `false` under `ask` when it held `true`.
+// A `merge` that is no bool is left for the check to refuse. Says what it wrote.
+fn merge_choice(table: &mut Map<String, Value>) -> Option<String> {
+    let wanted = match table.get("git")?.get("merging")?.as_str()? {
+        "auto" => true,
+        "ask" => false,
+        _ => return None,
+    };
+    let (rulings, map) = leaves(PM_DECIDES);
+    let map = table.get_mut(rulings)?.get_mut(map)?.as_object_mut()?;
+    let held = map.get_mut("merge")?;
+    let now = held.as_bool()?;
+    // `ask` never turns a `false` on, and `auto` never leaves one off
+    if now == wanted {
+        return None;
+    }
+    *held = Value::Bool(wanted);
+    Some(format!("{MERGE_KEY}{wanted}"))
 }
 
 // Deletes the keys that are gone from `table`, and names each it deleted with

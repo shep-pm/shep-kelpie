@@ -159,6 +159,50 @@ fn green_gates_merge_with_no_ruling_and_one_notice_after() {
     assert_eq!(rig.alerts.posts().len(), 1);
 }
 
+// A head that passed every gate, the draft marked ready and the project
+// asked at once whether it merges
+fn gates_passed(rig: &Rig, runner: &Mutex<Runner>, head: &str) -> StepReport {
+    rig.forge.set_checks(head, Checks::Passed);
+    rig.verdict(runner).expect("the gate gave a verdict")
+}
+
+#[test]
+fn a_vouched_head_with_a_project_manager_and_merge_true_merges_with_no_ruling() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    drop(runner);
+    rig.edit_settings(|s| {
+        let listed = "[app.dogs.kelpie.agents]\n";
+        assert!(s.contains(listed), "the example's agents table moved");
+        let named = s.replace(listed, "[app.dogs.kelpie.agents]\npm = \"pm\"\n");
+        named + "\n[app.dogs.kelpie.rulings.pm_decides]\nmerge = true\n"
+    });
+    rig.edit_settings(|s| s.replace("merging = \"ask\"\n", ""));
+    let runner = rig.open().unwrap();
+    assert!(matches!(
+        gates_passed(&rig, &runner, &head),
+        StepReport::MarkedReady { .. }
+    ));
+    rig.clock.advance(CHECKS_SETTLE);
+    assert!(merged(step(&runner).unwrap()));
+    assert_eq!(rig.forge.merges(), [(71, head)]);
+    assert_eq!(rig.forge.comments(), [], "no ruling was posted");
+}
+
+#[test]
+fn git_merging_auto_with_merge_false_raises_the_ruling() {
+    let (rig, runner, head) = Rig::with_pull_request("golbat");
+    drop(runner);
+    rig.edit_settings(|s| {
+        let auto = s.replace("merging = \"ask\"", "merging = \"auto\"");
+        auto + "\n[app.dogs.kelpie.rulings.pm_decides]\nmerge = false\n"
+    });
+    let runner = rig.open().unwrap();
+    let report = gates_passed(&rig, &runner, &head);
+    assert!(matches!(report, StepReport::Ruling { .. }), "{report:?}");
+    assert_eq!(rig.ask(&runner, "status", None)["merging"], "ask");
+    assert_eq!(rig.forge.merges(), []);
+}
+
 #[test]
 fn a_notice_the_webhook_refuses_is_tried_again_across_a_restart_and_posted_once() {
     let (rig, runner, head) = Rig::with_pull_request("koji");
@@ -477,13 +521,13 @@ fn marked_ready_under_auto(project: &str) -> (Rig, Mutex<Runner>, String) {
 fn a_merge_started_under_auto_asks_once_the_project_is_back_on_ask() {
     let (rig, runner, head) = marked_ready_under_auto("shep");
     drop(runner);
-    rig.edit_settings(|s| s.replace("merging = \"auto\"", "merging = \"ask\""));
+    rig.edit_settings(|s| s.replace("merge = true", "merge = false"));
     let runner = rig.open().unwrap();
     rig.clock.advance(CHECKS_SETTLE);
     assert!(matches!(
         step(&runner).unwrap(),
         Some(StepReport::MergeWithdrawn { reason, .. })
-            if reason == "`git.merging` is no longer `auto`"
+            if reason == "`merge` is no longer `true`"
     ));
     let id = raised(rig.verdict(&runner));
     let status = rig.ask(&runner, "status", None);
@@ -710,7 +754,7 @@ fn a_merge_that_landed_before_a_switch_to_ask_still_gets_its_notice() {
     // The merge landed, and the runner stopped before it could save that.
     rig.forge.set_state(71, PullRequestState::Merged);
     drop(runner);
-    rig.edit_settings(|s| s.replace("merging = \"auto\"", "merging = \"ask\""));
+    rig.edit_settings(|s| s.replace("merge = true", "merge = false"));
     let runner = rig.open().unwrap();
     rig.clock.advance(CHECKS_SETTLE);
     assert!(merged(step(&runner).unwrap()));
@@ -757,7 +801,7 @@ fn with_no_merging_key_merge_true_merges_a_vouched_head_with_no_ruling() {
 }
 
 #[test]
-fn with_no_merging_key_merge_false_raises_the_ruling() {
+fn a_vouched_head_with_merge_false_raises_the_ruling() {
     let (rig, runner, head) = Rig::with_pull_request("shep");
     drop(runner);
     merging_left_to_the_map(&rig, false);
@@ -772,32 +816,4 @@ fn with_no_merging_key_merge_false_raises_the_ruling() {
     );
     assert_eq!(step(&runner).unwrap(), Some(StepReport::Alerted { id }));
     assert_eq!(rig.forge.merges(), []);
-}
-
-#[test]
-fn git_merging_outranks_the_map_while_the_table_holds_it() {
-    // `ask` raises the ruling though the map says `merge` `true`.
-    let (rig, runner, head) = Rig::with_pull_request("shep");
-    drop(runner);
-    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.rulings.pm_decides]\nmerge = true\n"));
-    let runner = rig.open().unwrap();
-    rig.forge.set_checks(&head, Checks::Passed);
-    raised(rig.verdict(&runner));
-    assert_eq!(rig.ask(&runner, "status", None)["merging"], "ask");
-    assert_eq!(rig.forge.merges(), []);
-
-    // `auto` merges though the map says `merge` `false`.
-    let (rig, runner, head) = Rig::with_pull_request("shep-auto");
-    let runner = under_auto(&rig, runner);
-    drop(runner);
-    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.rulings.pm_decides]\nmerge = false\n"));
-    let runner = rig.open().unwrap();
-    rig.forge.set_checks(&head, Checks::Passed);
-    assert!(matches!(
-        rig.verdict(&runner),
-        Some(StepReport::MarkedReady { .. })
-    ));
-    rig.clock.advance(CHECKS_SETTLE);
-    assert!(merged(step(&runner).unwrap()));
-    assert_eq!(rig.forge.merges(), [(71, head)]);
 }
