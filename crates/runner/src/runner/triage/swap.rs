@@ -22,10 +22,9 @@ const NEEDS_TRIAGE_GO: NewLabel<'static> = NewLabel {
 
 impl Runner {
     // Renames the repo's `needs-triage` to `needs-approval` where only the old one
-    // exists, and makes `needs-triage` new, which `pick = "label"` also does on a repo
-    // with neither, for the maintainer to use. A project on the local store has no
-    // labels on its repo. A swap that fails is owed again at each poll, and until it
-    // is done nothing makes `needs-approval`, which would read as a swap finished.
+    // exists, and makes `needs-triage` new, as `pick = "label"` does on a repo with
+    // neither. A local store has no repo labels. A swap that fails is owed at each
+    // poll, and until it is done nothing makes `needs-approval`.
     pub(in crate::runner) fn swap_labels(&mut self) {
         if self.local_store() {
             return;

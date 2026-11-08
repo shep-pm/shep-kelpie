@@ -331,9 +331,8 @@ impl Runner {
 
     // Makes the maintainer's passing issue ready, `needs-approval` off, and sets
     // `ready_seen`. Puts `needs-approval` on anyone else's, bar one the maintainer
-    // asked a triage of, whose pass ends there. Another triage label stands, and
-    // so does a work item, an open pull request that closes it, or the
-    // maintainer's take-off of a label it carried. Whether nothing is left.
+    // asked a triage of. Another triage label stands, and so does a work item, an
+    // open pull request that closes it, or the maintainer's take-off of a label.
     fn check_passed(&mut self, issue: &OpenIssue, ready_seen: &mut bool, poll: &mut Poll) -> bool {
         let number = issue.number;
         // A split parent is never ready: its sub-issues are what the board takes.

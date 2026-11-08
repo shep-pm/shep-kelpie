@@ -756,10 +756,8 @@ pub(super) enum Whose<'a> {
 
 // Whether `issue` is untouched, `owed` the triager for a failed check, and opened by
 // no bot but the App, after `since` unless it carries `ready-for-agent` or was `taken`
-// back from it, and by `whose`. The maintainer's `needs-triage` under `Asked` counts
-// past `since`, `owed` and the author, and past a `needs-approval` at or below
-// `pruned_through`, which only the pass or the check put on. `needs-approval` and a
-// refused `ready-for-agent` are no decision: kelpie's record is.
+// back, and by `whose`. Under `Asked` the maintainer's `needs-triage` counts past
+// `since`, `owed`, the author and a `needs-approval`, which is no decision.
 fn untouched(
     issue: &OpenIssue,
     since: Timestamp,
