@@ -6,7 +6,7 @@ The code, the rebuilt case files and the raw answers live in the experiments rep
 
 ## Material
 
-Lines of `<project>/rulings.jsonl` the maintainer answered by hand, joined to the `Ruling` step of `<project>/steps.jsonl` by the ruling's `id` and the item's `issue`. A line holds the `kind`, `id`, `issue` and `pull_request`, when it was `raised`, the `answer` that stood, `chose` when that answer was one of the ruling's options, and `stem` for a failed turn. Its `asked` is the card's opening only: `asked_of` cuts the options table at `| | Option` and clips what is left at 1200 characters. The question as it was worded comes from the step, which holds it whole, appended and never rewritten.
+Lines of `<project>/rulings.jsonl` the maintainer answered by hand, joined to the `Ruling` step of `<project>/steps.jsonl` by the ruling's `id` and the item's `issue`. A line is appended as its answer is saved, so `at` is the answer's time and `raised` the moment the ruling was asked. One holds the `kind`, `id`, `issue` and `pull_request`, when it was `raised`, the `answer` that stood, `chose` when that answer was one of the ruling's options, and `stem` for a failed turn. Its `asked` is the card's opening only: `asked_of` cuts the options table at `| | Option` and clips what is left at 1200 characters. The question as it was worded comes from the step, which holds it whole, appended and never rewritten.
 
 - A ruling the project manager answered is not material: it has no human answer to compare against.
 - A line with no `raised` is not material either, since there is no moment to cut the case at. The file holds only the rulings answered from the build that added it.
@@ -23,7 +23,7 @@ Each ruling's case is rebuilt from `cases/<issue>.md`'s parts, each as it stood 
 - the whole issue: title and body as they stood then
 - the pull request: state, draft flag, head, checks and labels, and its open review threads and conversation comments, each cut at `raised`
 - `## CI`: the runs on that head as they stood then, with the whole log of each run that had failed by then. A completed run's log never changes, so a log read now is the log it had then.
-- `## Past rulings`: the `rulings.jsonl` lines naming the item's `issue` with `at` before `raised`, newest first
+- `## Past rulings`: the `rulings.jsonl` lines naming the item's `issue` with `at` before `raised`, so answered before this ruling was asked, newest first. A ruling still waiting at `raised` belongs to the board and not here.
 - `## Spend`: what the item had cost by `raised`, rebuilt from the `usage.jsonl` call lines naming its `issue`
 - `## What the worker said`: the item's `Said` texts up to `raised`, from its transcripts where they are still on disk
 - `## Log lines`: the `steps.jsonl` steps naming the item with `at` before `raised`
@@ -44,7 +44,7 @@ One call per ruling, in a fresh session: no resume, and no other ruling in view.
 
 - The project manager's agent file (`agents/pm.md`) and wake prompt (`crates/runner/src/runner/pm/prompt/`) at one named commit, the same for every ruling in the run, recorded in the results file.
 - The harness, model and effort the plan names, the same for every ruling.
-- A folder holding the rebuilt case, the item's diff as its branch stood at `raised`, and a board cut the same way: the item's own line, and the rulings waiting at `raised`, read from the `rulings.jsonl` lines with `at` before it. The ready queue and the other open items are not rebuilt, so a ruling whose answer turns on what else was open on the board is left out and counted. A branch rewritten since `raised` holds no state to diff, and its ruling is left out too.
+- A folder holding the rebuilt case, the item's diff as its branch stood at `raised`, and a board cut the same way: the item's own line, and the rulings that were waiting at `raised`. A wait is read as an interval, `raised` to `at`, since a line is written when its answer is saved: a ruling was waiting at `raised` when its `raised` is at or before that moment and its `at` is after it. A line with no `raised` holds no interval, and a ruling never answered has no line at all, so each is named as unknown rather than placed. The ready queue and the other open items are not rebuilt, so a ruling whose answer turns on what else was open on the board is left out and counted. A branch rewritten since `raised` holds no state to diff, and its ruling is left out too.
 - No write reach, and no worktree or checkout either: those hold the code as it stands now, which is after `raised`. The answer is read from the reply, never from a file the call wrote.
 - The answer is the JSON the wake asks for, read as `crates/core/src/pm_answer/` reads it. An answer kelpie cannot read is an abstention, counted per kind, never a wrong answer.
 - Nothing is filed, posted, retried or merged. The replay answers, and acts on nothing.
