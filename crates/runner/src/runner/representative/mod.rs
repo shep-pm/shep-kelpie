@@ -298,12 +298,17 @@ impl Runner {
         }
         let what = format!("What @{} wrote", post.contributor);
         prompt.push_str(&format!(
-            "\n{}\n\nWrite the post.",
+            "\n{}\n\n{ANSWER_FIRST}\n\nWrite the post.",
             fenced(&what, post.said)
         ));
         prompt
     }
 }
+
+// Every post is a reply: it answers what its reader wrote, in the terms they
+// used, before it says anything the caller drafted.
+const ANSWER_FIRST: &str = "Open by answering what they wrote, in their own terms: an `ok` is an \
+    ok, a question gets its answer, and nothing from the facts comes before that answer.";
 
 // The thanks a first post on someone else's issue may give, and the bar on a
 // stock one

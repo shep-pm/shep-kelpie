@@ -208,13 +208,20 @@ impl Runner {
     ) -> Result<(), StateError> {
         let found = self.scrub_triage(issue, found);
         let tries = self.triage_tries.entry(issue).or_default();
+        // The answers round answers what the author wrote, so their own comments
+        // are what its comment is worded against. The issue body reaches the
+        // triager, which reads the issue again, and not the representative.
+        let said = match purpose {
+            Purpose::Answers => tries.answers.clone().unwrap_or_else(|| said.to_owned()),
+            Purpose::First | Purpose::LocalRead => said.to_owned(),
+        };
         tries.shown = shown.to_owned();
         tries.purpose = purpose;
         tries.author = Some(author.to_owned());
         tries.open = found.open.clone();
         tries.waiting = Some(Waiting {
             author: author.to_owned(),
-            said: said.to_owned(),
+            said,
             found: found.clone(),
         });
         self.say_triage(issue)
@@ -386,12 +393,13 @@ impl Runner {
             && stood.is_none()
             && !found.open.is_empty()
             && self.askable(issue, author);
-        // The login the questions go to and whose reply answers them. On an issue
-        // kelpie's own App opened, it is the maintainer: the App is nobody to ask,
-        // and its own comments can never be the answers.
-        let asked = match ask {
-            true => self.asked_login(author),
-            false => None,
+        // The login the questions go to and whose reply answers them, which the
+        // answers round is a reply to. On an issue kelpie's own App opened, it is
+        // the maintainer: the App is nobody to ask, and its own comments can never
+        // be the answers.
+        let asked = match (ask, answers) {
+            (true, _) | (false, true) => self.asked_login(author),
+            (false, false) => None,
         };
         // An issue with no priority gets one. The research naming none, or `P0`,
         // which kelpie never sets, leaves the fallback. A pass that asks its author

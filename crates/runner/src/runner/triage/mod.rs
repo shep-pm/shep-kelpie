@@ -839,6 +839,8 @@ mod reask_tests;
 #[cfg(test)]
 mod repair_tests;
 #[cfg(test)]
+mod reply_tests;
+#[cfg(test)]
 mod research_tests;
 #[cfg(test)]
 mod rewrite_tests;

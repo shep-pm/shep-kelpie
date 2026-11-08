@@ -462,14 +462,14 @@ pub(super) fn step_until(runner: &Mutex<Runner>, mut done: impl FnMut() -> bool)
 
 // The first pass ran and its questions comment is up, which the author's reply
 // has to come after
-fn questions_posted(rig: &Rig, runner: &Mutex<Runner>) {
+pub(super) fn questions_posted(rig: &Rig, runner: &Mutex<Runner>) {
     assert_eq!(step(runner).unwrap(), None);
     step_until(runner, || posted(rig).len() == 1);
 }
 
 // The poll goes by and the triager's `n`th call is made and heard, whichever
 // pass starts it
-fn answers_called(rig: &Rig, runner: &Mutex<Runner>, n: usize) {
+pub(super) fn answers_called(rig: &Rig, runner: &Mutex<Runner>, n: usize) {
     rig.next_look();
     step_until(runner, || calls(rig, Role::Triager).len() == n);
 }
