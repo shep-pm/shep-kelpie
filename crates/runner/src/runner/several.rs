@@ -7,6 +7,7 @@ use serde_json::json;
 use crate::board::Skip;
 use crate::lease::LeaseKind;
 use crate::ports::{CLEAN, Checks, Cost, Usage};
+use crate::runner::add::AddError;
 use crate::runner::coderabbit::HEARD_WAIT;
 use crate::runner::{Runner, StepReport, step};
 use crate::state::{ProjectState, StateStore};
@@ -565,14 +566,21 @@ fn add_takes_back_an_open_finished_issue_with_every_slot_busy() {
     assert!(state.finished.is_empty());
     let lines = said(&runner);
     assert_eq!(
-        lines.iter().filter(|line| line.starts_with("#7 skip-cleared")).count(),
+        lines
+            .iter()
+            .filter(|line| line.starts_with("#7 skip-cleared"))
+            .count(),
         1,
         "{lines:?}"
     );
 
     rig.ask(&runner, "drop", Some("9"));
     assert_eq!(dispatched_in(&runner, 8), [ticket(7)]);
-    assert!(said(&runner).iter().all(|line| !line.starts_with("#7 skip-cleared")));
+    assert!(
+        said(&runner)
+            .iter()
+            .all(|line| !line.starts_with("#7 skip-cleared"))
+    );
 }
 
 #[test]
@@ -591,6 +599,28 @@ fn add_with_a_free_slot_opens_an_open_finished_issue_at_once() {
     let state = StateStore::new(rig.paths().state).load().unwrap().unwrap();
     assert!(state.finished.is_empty());
     assert_eq!(status["skipped"], json!([]));
+}
+
+#[test]
+fn add_refuses_a_closed_finished_issue() {
+    for busy in [false, true] {
+        let (rig, runner) = seven_finished(if busy { "zangoose" } else { "seviper" });
+        if busy {
+            rig.ask(&runner, "add", Some("8"));
+            rig.ask(&runner, "add", Some("9"));
+        }
+        rig.forge.close_issue(7);
+        assert_eq!(
+            runner.lock().unwrap().add(ticket(7)),
+            Err(AddError::Closed(ticket(7)))
+        );
+        let state = StateStore::new(rig.paths().state).load().unwrap().unwrap();
+        assert_eq!(state.finished, [ticket(7)]);
+        assert_eq!(
+            open_items(&rig, &runner),
+            if busy { vec![8, 9] } else { vec![] }
+        );
+    }
 }
 
 #[test]
@@ -683,7 +713,8 @@ fn add_with_a_free_slot_still_opens_a_dropped_issue_at_once() {
         [7],
         "a free slot opens it at once"
     );
-    assert_eq!(rig.dropped(), [7], "`add` leaves `dropped` as it is");
+    assert!(rig.dropped().is_empty());
+    assert_eq!(rig.ask(&runner, "status", None)["skipped"], json!([]));
 }
 
 #[test]
