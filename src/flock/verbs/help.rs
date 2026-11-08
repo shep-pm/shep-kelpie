@@ -83,8 +83,8 @@ pub const TABLE: &[Row] = &[
     row("attach", "<ticket>", "steer a work item's worker here"),
     row(
         "tell",
-        "\"<note>\"",
-        "leave a note for the project manager's next wake",
+        "[--all] \"<note>\"",
+        "leave a note for the project manager (--all: every project)",
     ),
     row("pm", "", "steer the project manager's session here"),
     row("drain", "", "hold back every new call"),

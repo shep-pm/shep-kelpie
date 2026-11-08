@@ -4,7 +4,8 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 
 | file | covers | touch (`core/`: `crates/core/src/`, `dog/`: `crates/dog/src/dog/`, `adapters/`: `crates/adapters/src/`, `runner/`: `crates/runner/src/runner/`) |
 |---|---|---|
-| work.md | projects, slots, issues | `src/{issues/check,flock/verbs}.rs`, `runner/slots.rs`, `core/board/check.rs` |
+| work.md | projects, slots, issues | `src/{issues/check,flock/verbs}.rs`, `src/flock/control/tell_all.rs`, `runner/slots.rs`, `core/board/check.rs` |
+| runner-start-stop.md | `start`, `pause`, `finish`: the runner's sheep | `src/flock/{verbs,control/}` |
 | board.md | board, items, adoption | `core/board/`, `runner/{dispatch,adopt}/` |
 | pm.md | the project manager | `runner/pm/`, `core/state/pm_holds.rs` |
 | pm-pick.md | its `pick`: the list, the entry object, holds | `runner/pm/picked.rs`, `core/state/pm_holds.rs` |
@@ -16,7 +17,8 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | workers.md | runner loop, turns | `runner/{turn,flight}/` |
 | runner-lock.md | lock, hold metric | `runner/{lock_hold,off_lock}.rs` |
 | runner-lock-passes.md | queued verbs, threads | `runner/{queued,board_read,trigger}` |
-| runner-socket.md | socket, client, fallback | `runner/socket/`, `crates/client/`, `src/flock/control/socket.rs` |
+| runner-socket.md | listener, watch, opening the socket | `runner/socket/`, `core/ipc` |
+| runner-socket-client.md | the client, `Reach`, fallback | `crates/client/`, `src/flock/control/socket.rs` |
 | runner-lock-worktrees.md | worktree jobs | `runner/worktree_jobs.rs` |
 | compaction.md | when a session compacts, `COMPACT` | `runner/compact/`, `adapters/{pi/compact,goose/compact,codex/context}.rs` |
 | handover.md | in-flight turns handed on | `src/{sheep/handover/,upgrade/handover.rs}`, `runner/flight/carry/`, `adapters/process/adopt/` |

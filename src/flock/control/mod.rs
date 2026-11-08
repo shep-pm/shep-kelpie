@@ -343,12 +343,12 @@ pub async fn finish(
     Ok(lines)
 }
 
-/// What [`finish_all`] made of each project
+/// What [`finish_all`] and [`tell_all`] made of each project
 #[derive(Debug, PartialEq, Eq)]
-pub struct FinishedAll {
-    /// The lines of the projects that took `finish` or had nothing to finish
+pub struct AllProjects {
+    /// The lines of the projects the action reached, or had nothing to do
     pub lines: Vec<String>,
-    /// A line, the project and its reason, for each runner that refused or did not answer
+    /// Each project the action did not reach, as `<project>: <why>`
     pub refused: Vec<String>,
 }
 
@@ -366,8 +366,8 @@ pub async fn finish_all(
     format: Format,
     patience: Patience,
     say: &mut dyn FnMut(String),
-) -> Result<FinishedAll, String> {
-    let mut done = FinishedAll {
+) -> Result<AllProjects, String> {
+    let mut done = AllProjects {
         lines: Vec::new(),
         refused: Vec::new(),
     };
@@ -803,8 +803,12 @@ pub async fn tell(
     note: &str,
     format: Format,
 ) -> Result<Vec<String>, String> {
-    kelpie_runner(client, &flock(client).await?, project).await?;
+    let found = kelpie_runner(client, &flock(client).await?, project).await?;
     let runner = project.as_str();
+    // A stopped runner holds nothing, so a note sent to it would be lost.
+    if !matches!(found.status, ProcStatus::Online | ProcStatus::Starting) {
+        return Err(unanswered(runner, Answered::Down));
+    }
     match reach.trigger(client, runner, "tell", Some(note)).await? {
         Answered::Runner(body) => match refusal(&body) {
             Some(why) => Err(why),
@@ -942,8 +946,10 @@ pub(crate) async fn trigger(
 
 mod plain;
 mod socket;
+mod tell_all;
 
 pub use socket::Reach;
+pub use tell_all::tell_all;
 
 #[cfg(test)]
 mod tests;

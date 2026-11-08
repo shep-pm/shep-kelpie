@@ -213,7 +213,7 @@ fn sent(writes: &[Request]) -> Vec<(String, String)> {
 }
 
 // `finish_all` against the fake shepherd
-async fn finished_all(shepherd: &FakeShepherd, format: Format) -> Result<FinishedAll, String> {
+async fn finished_all(shepherd: &FakeShepherd, format: Format) -> Result<AllProjects, String> {
     let client = client(shepherd).await;
     let say = &mut |_| {};
     in_time(finish_all(&client, format, FAST, say)).await

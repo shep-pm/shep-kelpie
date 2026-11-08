@@ -119,28 +119,39 @@ async fn run(
         .map(PathBuf::from);
     let kelpie_home = crate::home::kelpie_home_of(shep_home);
     // A ruling's answer starts after its id and first word.
-    let (named, args) = split_project(args, (command == "rule").then_some(2))?;
+    let (named, words, before_dash) = split_project(args, (command == "rule").then_some(2))?;
+    // A `--` puts every word after it in the verb's own text, so only the words
+    // before it are read as flags.
+    let flags: Vec<&str> = words[..before_dash].iter().map(String::as_str).collect();
+    // Only these verbs have a JSON form, so `--json` is a word to every other verb.
+    let json = JSON_VERBS.contains(&command) && flags.contains(&"--json");
+    // `finish` takes `--all` anywhere in its line. For `tell` it is the flag
+    // only as its first word, so a note that holds the word later keeps it. To
+    // every other verb `--all` is a word.
+    let all = match command {
+        "finish" => flags.contains(&"--all"),
+        "tell" => flags.iter().copied().find(|word| *word != "--json") == Some("--all"),
+        _ => false,
+    };
     // Only `set` and `get` take a glob of projects.
     let (named, glob) = Named::split(named, command)?;
     // Only `add` takes a base: to every other verb `--base` is a word.
     let (base, args) = match command {
-        "add" => split_base(&args)?,
-        _ => (None, args),
+        "add" => split_base(&words)?,
+        _ => (None, words),
     };
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    // Only these verbs have a JSON form, so `--json` is a word to every other verb.
-    let json = JSON_VERBS.contains(&command) && args.contains(&"--json");
     let args: Vec<&str> = if json {
         args.into_iter().filter(|arg| *arg != "--json").collect()
     } else {
         args
     };
-    // Only `finish` takes `--all`, and to every other verb it is a word.
-    let all = command == "finish" && args.contains(&"--all");
-    let args: Vec<&str> = if all {
-        args.into_iter().filter(|arg| *arg != "--all").collect()
-    } else {
-        args
+    let args: Vec<&str> = match (all, command) {
+        (true, "tell") => args
+            .split_first()
+            .map_or(Vec::new(), |(_, rest)| rest.to_vec()),
+        (true, _) => args.into_iter().filter(|arg| *arg != "--all").collect(),
+        (false, _) => args,
     };
     if command == "rule" {
         return answer(dial, shep_home, &home, &kelpie_home, named.as_ref(), &args).await;
@@ -340,6 +351,16 @@ async fn run(
             let ticket = ticket.map_err(|_| format!("{text:?} is not a ticket id"))?;
             attach::attach(&reach, &client, &project().await?, ticket).await
         }
+        ("tell", []) if all => Err(USAGE.to_owned()),
+        ("tell", [_, ..]) if all && named.is_none() => {
+            let told = control::tell_all(&reach, &client, &args.join(" "), format).await?;
+            if told.refused.is_empty() {
+                return Ok(told.lines);
+            }
+            told.lines.iter().for_each(|line| println!("{line}"));
+            Err(told.refused.join("\n"))
+        }
+        ("tell", _) if all => Err(format!("name the project once\n\n{USAGE}")),
         ("tell", [_, ..]) => {
             let project = project().await?;
             control::tell(&reach, &client, &project, &args.join(" "), format).await
@@ -488,11 +509,13 @@ async fn answer(
     .await
 }
 
-/// `-p <project>`, `--project <project>` or `--project=<project>` in `args`, and the rest
+/// The project a line names, the words left for it, and how many of them a `--` leaves as flags
 ///
-/// The flag is read from anywhere before a `--`. A value with `*`, `?` or `[`
-/// is a glob over the projects' names. With `words_from`, everything after that
-/// many other arguments is words, so a ruling's answer can carry `-p`.
+/// `-p <project>`, `--project <project>` and `--project=<project>` are read from
+/// anywhere before a `--`, and every word after one is the verb's own text. A
+/// name with `*`, `?` or `[` is a glob over the projects' names. With
+/// `words_from`, everything after that many other arguments is words, so a
+/// ruling's answer can carry `-p`.
 ///
 /// # Errors
 ///
@@ -501,9 +524,10 @@ async fn answer(
 pub fn split_project(
     args: &[String],
     words_from: Option<usize>,
-) -> Result<(Option<Named>, Vec<String>), String> {
+) -> Result<(Option<Named>, Vec<String>, usize), String> {
     let mut named = None;
     let mut rest = Vec::new();
+    let mut dash = None;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         if words_from.is_some_and(|from| rest.len() >= from) {
@@ -512,6 +536,7 @@ pub fn split_project(
         }
         let name = match arg.as_str() {
             "--" => {
+                dash = Some(rest.len());
                 rest.extend(args.by_ref().cloned());
                 break;
             }
@@ -532,7 +557,8 @@ pub fn split_project(
         }
         named = Some(Named::parse(name)?);
     }
-    Ok((named, rest))
+    let flags = dash.unwrap_or(rest.len());
+    Ok((named, rest, flags))
 }
 
 /// `--base <branch>` or `--base=<branch>` from anywhere in `args` before a
