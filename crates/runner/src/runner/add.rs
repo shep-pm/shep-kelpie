@@ -57,7 +57,7 @@ pub enum AddError {
 pub enum Added {
     /// A work item opened for it at once, on the implementer it runs on
     Opened(AgentName),
-    /// No slot was free and the issue was one kelpie dropped: it waits for the next
+    /// No slot was free and kelpie dropped or finished the issue: it waits for the next
     /// free slot, which the board takes it into by priority
     Queued,
 }
@@ -67,7 +67,7 @@ pub enum Added {
 pub(super) enum Room {
     /// A slot under `concurrency.active_items` is free
     Opens,
-    /// None is free, and `ticket` is in `dropped`, so it waits for the next one
+    /// None is free, and `ticket` is dropped or finished, so it waits for the next one
     Queues,
 }
 
@@ -211,13 +211,13 @@ fn refuse_fenced(ticket: TicketId, body: &str) -> Result<(), AddError> {
 impl Runner {
     /// Takes `ticket` back into kelpie's work: at once as [`Added::Opened`], on the
     /// implementer its worker runs on, or, with no slot free and the issue one kelpie
-    /// dropped, as [`Added::Queued`] for the board to take by priority when one frees.
+    /// dropped or finished, as [`Added::Queued`] for the board to take by priority when one frees.
     ///
     /// # Errors
     ///
     /// [`AddError`] when the runner is finishing, the project has
     /// `concurrency.active_items` working or one for this issue open already with the
-    /// issue no dropped one, the issue cannot be read or is closed, or its `agent:`
+    /// issue neither dropped nor finished, the issue cannot be read or is closed, or its `agent:`
     /// label names no implementer kelpie has an agent file for, the agent board names
     /// no implementer, or the change cannot be saved. A queued one is refused too where
     /// its issue carries no `ready-for-agent`, or the board would pass it over for a
@@ -236,8 +236,7 @@ impl Runner {
     }
 
     // What an `add` of `ticket` may do now, before its issue is read: open a work item
-    // in a free slot, or queue a dropped issue for the next one. A ticket that is no
-    // dropped one is refused exactly as before.
+    // in a free slot, or queue a dropped or finished issue for the next one.
     pub(super) fn add_room(&self, ticket: TicketId) -> Result<Room, AddError> {
         if !self.picks() {
             return Err(AddError::Finishing);
@@ -282,7 +281,7 @@ impl Runner {
         Ok((listed, self.open_listed().map_err(AddError::Forge)?))
     }
 
-    // Takes `ticket`, whose issue `found` shows, out of `dropped` so the board can pick
+    // Takes `ticket`, whose issue `found` shows, out of `dropped` and `finished` so the board can pick
     // it again, and says so once. No work item opens: the board takes it by priority when
     // a slot frees, so one the board would pass over is refused first. `trim_dropped`
     // rebuilds `dropped_text` from what it keeps, so the ticket's digest goes with it.
@@ -319,7 +318,7 @@ impl Runner {
     }
 
     // Whether the board would take `ticket` into a free slot, which is what a queued add
-    // promises. `dropped` is read without `ticket`, whose own skip this add clears, and
+    // promises. `dropped` and `finished` omit `ticket`, whose own skip this add clears, and
     // the order is left out, which only sorts one issue against the others.
     fn board_takes(
         &self,
@@ -414,7 +413,12 @@ impl Runner {
         item.slack = picked.and_then(|p| p.slack);
         item.review_plan = picked.and_then(|p| p.review.clone());
         next.work_items.push(item);
+        next.finished.retain(|t| *t != ticket);
+        next.dropped.retain(|t| *t != ticket);
         self.save(next).map_err(AddError::State)?;
+        self.skipped.retain(|skip| {
+            !matches!(skip, Skip::Dropped { issue } | Skip::Finished { issue } if *issue == ticket)
+        });
         self.notes.extend(opening.note);
         self.mark_held(ticket, true);
         Ok(agent)
