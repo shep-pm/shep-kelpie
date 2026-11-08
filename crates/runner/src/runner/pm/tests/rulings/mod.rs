@@ -23,53 +23,47 @@ mod gated;
 
 /// A project whose project manager answers merge rulings, with CI green and
 /// the worker parked on merge ruling 71
+///
+/// Under `merge` `true` a head every gate passes merges unasked, and one no
+/// reviewer read goes back through a pass of the review, so the gate raises a
+/// merge ruling only over rivals, a borrowed head or a refused comment.
 pub(super) fn left_to_pm(project: &str) -> (Rig, Mutex<Runner>) {
     let (rig, runner, head) = Rig::with_pull_request_set(project, |rig| {
         rig.with_app();
         rig.maintainer("octocat");
         name_pm(rig);
     });
-    // The map starts `merge` `false`, so a test sets it here. A head every
-    // gate passes would then merge unasked, so no gate vouches for this one
-    // while the ruling is raised.
     leave_merges(&runner);
-    let vouched = unvouch(&runner);
     rig.forge.set_checks(&head, Checks::Passed);
-    assert!(matches!(
-        rig.verdict(&runner),
-        Some(StepReport::Ruling { id, .. }) if id == ticket(71)
-    ));
-    revouch(&runner, vouched);
+    runner
+        .lock()
+        .unwrap()
+        .raise(71, merge_ruling(&head))
+        .unwrap();
+    assert_eq!(
+        runner.lock().unwrap().state.rulings.len(),
+        1,
+        "the item is parked on it"
+    );
     (rig, runner)
 }
 
-/// What vouched for the head of the work item: its reviewed, unread and arrived heads
-type Vouched = (Vec<String>, Vec<String>, Option<String>);
-
-/// Takes away what vouches for the current work item's head
-fn unvouch(runner: &Mutex<Runner>) -> Vouched {
-    let mut runner = runner.lock().unwrap();
-    let focus = runner.focus.expect("a work item is current");
-    let item = runner.state.item_mut(focus).expect("it is in the state");
-    (
-        std::mem::take(&mut item.reviewed_heads),
-        std::mem::take(&mut item.sent_unread),
-        item.arrived.take(),
-    )
-}
-
-/// Gives back what [`unvouch`] took, and clears the ruling's unread head warning
-fn revouch(runner: &Mutex<Runner>, (reviewed, unread, arrived): Vouched) {
-    let mut runner = runner.lock().unwrap();
-    let focus = runner.focus.expect("a work item is current");
-    let item = runner.state.item_mut(focus).expect("it is in the state");
-    (item.reviewed_heads, item.sent_unread, item.arrived) = (reviewed, unread, arrived);
-    let ruling = &mut runner.state.rulings[0];
-    on_merge(ruling, |kind| {
-        if let RulingKind::Merge { unread_head, .. } = kind {
-            *unread_head = false;
-        }
-    });
+/// A merge ruling with nothing to warn of, as the gate raises one for a head
+/// every gate passed
+fn merge_ruling(head: &str) -> RulingKind {
+    RulingKind::Merge {
+        head: head.to_owned(),
+        unreviewed: None,
+        open_threads: None,
+        held_by: Vec::new(),
+        unread_head: false,
+        note_fix: false,
+        late_fix: false,
+        nits: None,
+        open_found: Vec::new(),
+        disputes: None,
+        rivals: Vec::new(),
+    }
 }
 
 /// Leaves merge rulings to the project manager
@@ -221,7 +215,11 @@ fn a_ruling_raised_in_a_drain_goes_to_the_maintainer_at_once() {
         name_pm(rig);
     });
     leave_merges(&runner);
-    unvouch(&runner);
+    // A head every gate passes merges unasked under `merge`, and one no reviewer
+    // read goes back through a pass of the review, so the drain raises its ruling
+    // over another open pull request covering the same issue.
+    rig.forge.open_pull_request(72, "someone/7", &[7]);
+    rig.forge.set_from_fork(72);
     rig.forge.set_checks(&head, Checks::Passed);
     rig.ask(&runner, "drain", None);
 

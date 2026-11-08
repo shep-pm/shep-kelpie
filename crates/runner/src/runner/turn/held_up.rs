@@ -52,6 +52,8 @@ pub(in crate::runner) enum Reason {
     /// The project manager pushed back on a thread the maintainer wrote, and the merge waits
     /// for their reply
     PushBack,
+    /// No reviewer read its last pass, so the merge waits for one to read the head
+    ReviewerDown(String),
 }
 
 impl Reason {
@@ -88,6 +90,9 @@ impl Reason {
                  merge waits for their reply"
                     .into()
             }
+            Self::ReviewerDown(why) => format!(
+                "no reviewer read its last review: {why}, so the merge waits for one to read it"
+            ),
         }
     }
 }

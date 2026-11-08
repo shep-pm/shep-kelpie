@@ -895,6 +895,7 @@ impl Runner {
         self.install_ran.retain(open);
         self.install_failed.retain(|issue, _| open(issue));
         self.pushed_back.keep_only(&self.state.open_tickets());
+        self.pm_reads_kept(&self.state.open_tickets());
         self.metrics.work_items(&self.state);
         Ok(())
     }

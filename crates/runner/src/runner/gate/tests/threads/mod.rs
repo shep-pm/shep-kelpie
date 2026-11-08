@@ -597,6 +597,7 @@ fn a_push_back_asks_nothing_more_until_the_maintainer_replies() {
         "Fair. I will fix it myself.",
     );
     worker_says(&rig, [Scripted::Push("theirs.txt", "theirs\n")]);
+    read_clean(&rig);
     pm_says(&rig, [NOTHING]);
     answers(&runner, 1);
 

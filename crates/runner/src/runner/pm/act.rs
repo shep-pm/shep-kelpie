@@ -252,6 +252,13 @@ impl Runner {
                 self.pm.after_end.insert(ticket, (*action, why.clone()));
                 format!("ended {named}'s idle call, to {}", action.as_str())
             }
+            (StuckState::ReviewerDown(_), _) => {
+                return Ok(Err(format!(
+                    "{} {named}: it waits at the gate for a reviewer to read it, which kelpie \
+                     tries again on its own",
+                    action.as_str()
+                )));
+            }
             (StuckState::Ruling { id, .. }, action) => {
                 self.pm.left_alone.remove(&ticket);
                 if let Err(e) = self.settle(ticket, *id, *action, why, None, None)? {
@@ -416,6 +423,11 @@ impl Runner {
         }
         if let Some(out) = self.waiting_out(ticket) {
             return Some(StuckState::AgentOut(out.agent.clone()));
+        }
+        if let Some(kept) = self.pm.read_again.get(&ticket).copied()
+            && self.read_wait_holds(ticket)
+        {
+            return Some(StuckState::ReviewerDown(kept.since));
         }
         let watched = self.flights.watched(ticket)?;
         watched.idle.then_some(StuckState::Idle(watched.started))

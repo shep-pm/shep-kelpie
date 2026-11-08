@@ -87,13 +87,20 @@ fn a_maintainer_reply_while_the_push_back_is_decided_asks_again() {
             Scripted::Say(NOTHING),
         ],
     );
-    Driven::new(&runner).started();
-    assert!(hold.entered(CALL_PATIENCE), "the wake's call never began");
+    // The head the declined comment's fix pushed goes back through a pass of the
+    // review first, so the wake comes a few passes after the ask would have
+    let driven = Driven::new(&runner);
+    let began = (0..12).any(|_| {
+        driven.pass();
+        hold.entered(std::time::Duration::from_secs(1))
+    });
+    assert!(began, "the wake's call never began");
 
     rig.forge
         .coderabbit
         .person_replies(&id, "octocat", Standing::Writer, "Wait, one more thing.");
     worker_says(&rig, [Scripted::Push("theirs.txt", "theirs\n")]);
+    read_clean(&rig);
     hold.release();
     answers(&runner, 2);
     assert_eq!(

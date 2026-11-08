@@ -1,13 +1,13 @@
 //! The gate between the worker's pull request and the merge ruling
 //!
 //! Each step looks once at the pull request's head. A label, ready or head
-//! change kelpie did not make parks the worker before anything else. A branch
-//! that changes agents' own files parks it next. A branch without the latest
-//! `main` is rebased and pushed. It is merged instead when it is adopted or
-//! holds a merge already. A conflict is the worker's next turn, naming the
-//! files. A conflict the worker left standing parks it on a ruling. A red run
-//! is the worker's next turn, naming the checks that failed. A green run
-//! raises the merge ruling, or under `auto` merges. A project without CI skips the checks.
+//! change kelpie did not make parks the worker before anything else, and a
+//! branch changing agents' own files parks it next. A branch behind `main` is
+//! rebased and pushed, or merged when the item is adopted or holds a merge.
+//! A conflict or a red run is the worker's next turn, and a conflict left
+//! standing parks it on a ruling. A green run raises the merge ruling, or
+//! under `auto` merges, save a head no reviewer read, which goes back through
+//! a pass of the review where a project manager rules (unread.rs). No CI skips checks.
 
 use super::Runner;
 use super::claude_files::Unchecked;
@@ -35,11 +35,14 @@ pub(super) mod queued;
 mod reads;
 mod rerun;
 mod threads;
+mod unread;
 
 #[cfg(test)]
 use lag::LAG_LIMIT;
 pub(super) use lag::Lags;
 pub(in crate::runner) use threads::PushedBack;
+pub(in crate::runner) use unread::READ_AGAIN;
+use unread::{Back, Unread};
 
 impl Runner {
     pub(super) fn check_ci(&mut self) -> Result<Begin, StateError> {
@@ -179,6 +182,14 @@ impl Runner {
         if let Some(begin) = self.talk_turn(&At::Ci(head.clone()))? {
             return Ok(begin);
         }
+        // A head no reviewer read goes back through a pass of the review, where
+        // the project manager rules on its item's threads, before anything else
+        // the gate would read. Only with no project manager, or on a
+        // contribution, does it come to the maintainer as a ruling.
+        let unread = match self.unread_back(&head)? {
+            Back::Done(begin) => return Ok(*begin),
+            Back::On(unread) => unread,
+        };
         // Read before the disputes are posted: a read to make sends the step
         // round again, and the post's count must not be lost to that.
         let open = match self.threads_open_read(number) {
@@ -209,21 +220,18 @@ impl Runner {
         if let Some(begin) = self.threads_hold(number, &head)? {
             return Ok(begin);
         }
-        let unreviewed = self.current().and_then(|item| item.unreviewed.clone());
-        let unread_head = self.current().is_some_and(|item| !item.vouches_for(&head));
-        // A merge ruling's `no`, or a bot's late round, sent its fix here
-        // unread, so the maintainer decides on it again, even under `auto`,
-        // and is told so. A head kelpie did not send unread itself, such as
-        // someone else's push, is not the worker's fix.
-        let Some(item) = self.current() else {
+        if self.current().is_none() {
             return Ok(Begin::Idle);
-        };
-        let fix_from = |from: &Option<String>| {
-            from.as_ref().is_some_and(|from| *from != head)
-                && !item.reviewed_heads.contains(&head)
-                && item.sent_unread.contains(&head)
-        };
-        let (note_fix, late_fix) = (fix_from(&item.noted_from), fix_from(&item.late_from));
+        }
+        // Where a project manager rules on the item's threads, these sent it back
+        // to a reviewer already, and only with none, or on a contribution, are
+        // they still set here.
+        let Unread {
+            unreviewed,
+            unread_head,
+            note_fix,
+            late_fix,
+        } = unread;
         let vouched = unreviewed.is_none()
             && !refused
             && open.holding.is_none()

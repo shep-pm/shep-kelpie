@@ -63,7 +63,8 @@ pub(super) use said::{Released, SaidHow};
 use answer::Action;
 use ci_logs::Woke;
 pub(in crate::runner) use threads::{Decision, Ruled};
-use wakes::{AgentOut, LeftAlone, held, stuck_on};
+pub(in crate::runner) use wakes::ReadWait;
+use wakes::{AgentOut, LeftAlone, ReadAgain, held, stuck_on};
 pub(super) use wakes::{StuckState, Wake};
 
 /// The context, in tokens, past which the session is compacted after a wake
@@ -181,6 +182,10 @@ pub(super) struct Desk {
     left_alone: BTreeMap<TicketId, LeftAlone>,
     // Each work item whose due turn waits for its pick since its agent is out
     agent_out: BTreeMap<TicketId, AgentOut>,
+    // Each item at the gate whose head no reviewer read, with when its current
+    // wait for one began and whether a wait of its own already woke it. In
+    // memory only: a restart starts the wait again.
+    read_again: BTreeMap<TicketId, ReadAgain>,
     // Each question ruling held back from the maintainer for its answer, with
     // when it was raised
     asking: BTreeMap<TicketId, Timestamp>,

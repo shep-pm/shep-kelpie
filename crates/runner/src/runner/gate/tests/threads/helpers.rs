@@ -227,8 +227,17 @@ pub(super) fn declined_thread(rig: &Rig, runner: &Mutex<Runner>) -> String {
             "thread 1: declined: the name is public API",
         )],
     );
+    // The head the comment's fix pushed goes back through a pass of the review,
+    // which reads it before the threads are put to the project manager.
+    read_clean(rig);
     steps(runner, |r| matches!(r, StepReport::Ended { .. }));
     id
+}
+
+// Queues the Claude round's clean read for the next pass the gate sends a fix back through
+pub(super) fn read_clean(rig: &Rig) {
+    rig.claude
+        .script_for(Role::Reviewer, [Scripted::Text(CLEAN)]);
 }
 
 // What the worker writes to defer `found`, in the deferred findings file's own format
