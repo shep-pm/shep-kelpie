@@ -4,7 +4,7 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 
 | Label in mattpocock/skills | Label in our tracker | Meaning                                  |
 | -------------------------- | -------------------- | ---------------------------------------- |
-| `needs-triage`             | `needs-triage`       | Researched by kelpie, waits on the maintainer |
+| `needs-triage`             | `needs-approval`     | Researched by kelpie, waits on the maintainer |
 | `needs-info`               | `needs-info`         | Waiting on reporter for more information |
 | `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
 | `ready-for-human`          | `ready-for-human`    | Requires human implementation            |

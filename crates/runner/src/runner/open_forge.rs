@@ -31,6 +31,7 @@ impl Runner {
         for call in [
             Runner::refresh_owner_template,
             Runner::note_coderabbit_left_out,
+            Runner::swap_labels,
             Runner::settle_labels,
             Runner::make_agent_labels,
             Runner::make_priority_labels,

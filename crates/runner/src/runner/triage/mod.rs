@@ -48,6 +48,7 @@ mod scrub;
 pub(super) mod spam;
 pub(super) mod split;
 mod split_ask;
+pub(super) mod swap;
 pub(in crate::runner) mod unpublished;
 
 use super::contributions::post::forge_is_busy;
@@ -118,6 +119,9 @@ pub(super) struct Run {
     pub(super) check_fails: BTreeMap<u64, u32>,
     /// The packages a ready issue needs, as the registry answered the polls
     pub(super) registry: unpublished::Looked,
+    /// Whether the label swap is owed: the last try failed. No triage pass
+    /// starts and nothing makes `needs-approval` until a try succeeds.
+    pub(super) label_swap_owed: bool,
 }
 
 /// An untouched issue, as `status` lists it
@@ -260,7 +264,10 @@ impl Runner {
     // tried per poll, so a failure holds up no other. With no App on the repo nothing
     // starts, as the comment could not be posted. The caller holds a free slot.
     pub(super) fn triage_due(&mut self) -> Result<Option<Begin>, StateError> {
-        let idle = self.state.triage.is_some() && !self.draining() && self.app_covers();
+        let idle = self.state.triage.is_some()
+            && !self.triage_run.label_swap_owed
+            && !self.draining()
+            && self.app_covers();
         if !idle || self.flights.triaging().is_some() {
             return Ok(None);
         }
@@ -812,6 +819,8 @@ mod scrub_tests;
 mod spam_tests;
 #[cfg(test)]
 mod split_tests;
+#[cfg(test)]
+mod swap_tests;
 #[cfg(test)]
 mod taken_off_tests;
 #[cfg(test)]
