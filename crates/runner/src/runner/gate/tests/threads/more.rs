@@ -194,3 +194,32 @@ fn a_deferred_finding_written_twice_leaves_the_file_once_it_is_closed() {
     let left = left_deferred(&rig);
     assert!(!left.contains("looks racy"), "no copy is left: {left}");
 }
+
+#[test]
+fn a_deferred_finding_with_a_test_has_it_run_again_in_the_threads_turn() {
+    let rig = pm_project("threads-deferred-test");
+    let (rig, runner, _) = at_the_gate_found(rig, &[racy()]);
+    defers(&rig, &[racy()]);
+    runner.lock().unwrap().state.work_items[0].held[0].test = Some("tests/race.rs".to_owned());
+    worker_says(
+        &rig,
+        [Scripted::PushSay(
+            "shorter.txt",
+            "shorter\n",
+            "thread 1: fixed",
+        )],
+    );
+
+    ruled_by(&rig, &runner, FIX);
+    let item = runner.lock().unwrap().state.work_items[0].clone();
+    assert_eq!(item.test_checks.len(), 1, "{:?}", item.test_checks);
+    assert!(item.test_checks[0].after.is_none(), "not run after yet");
+
+    steps(&runner, |r| matches!(r, StepReport::FixPushed { .. }));
+    let item = runner.lock().unwrap().state.work_items[0].clone();
+    assert!(
+        item.test_checks[0].after.is_some(),
+        "the test ran after the fix: {:?}",
+        item.test_checks
+    );
+}

@@ -365,7 +365,11 @@ impl Runner {
         findings::write_findings_file(&build, &path, round, &findings, true)?;
         let prompt = ruled_prompt(number, findings.len(), &path);
         let deferred_before = findings::deferred(&build)?;
+        // A reviewer's test on a finding sent again is run before the turn and after it,
+        // under this round's number, as the round that found it did.
+        let checks = self.tests_before(round, head.as_deref().unwrap_or_default(), &findings);
         self.update_of(ticket, move |item| {
+            item.test_checks.extend(checks);
             item.record_held(&findings);
             item.threads_sent = threads;
             item.thread_answers.clear();
