@@ -133,6 +133,30 @@ fn strings(call: &AgentCall) -> Vec<String> {
 }
 
 #[test]
+fn every_call_moves_the_per_machine_lines_out_of_the_system_prompt() {
+    for (role, tools, session) in [
+        (Role::Worker, Tools::Work, fresh()),
+        (Role::Reviewer, Tools::Review, fresh()),
+        (Role::Pm, Tools::Pm, fresh()),
+        (Role::Representative, Tools::Answer, fresh()),
+        (Role::Worker, Tools::Work, resume("abc")),
+    ] {
+        let mut call = call(role, session);
+        call.tools = tools;
+        for args in [argv(&call), terminal_argv(&call)] {
+            assert_eq!(
+                args.iter()
+                    .filter(|arg| *arg == "--exclude-dynamic-system-prompt-sections")
+                    .count(),
+                1,
+                "{role:?} {tools:?}: {args:?}"
+            );
+            assert!(!args.iter().any(|arg| arg == "--system-prompt"));
+        }
+    }
+}
+
+#[test]
 fn a_new_worker_session_carries_the_whole_profile() {
     assert_eq!(
         strings(&call(Role::Worker, fresh())),
@@ -147,6 +171,7 @@ fn a_new_worker_session_carries_the_whole_profile() {
             "project",
             "--settings",
             "/k/worker/settings.json",
+            "--exclude-dynamic-system-prompt-sections",
             "--tools",
             "Bash,Read,Edit,Write,Glob,Grep,Skill",
             "--strict-mcp-config",
