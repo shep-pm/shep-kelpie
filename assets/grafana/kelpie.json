@@ -1244,7 +1244,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "label_join(sum by (agent, kind) (increase(kelpie_work_item_cost_usd_total{role=\"worker\",sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_priced_total{sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])), \"agent and kind\", \" / \", \"agent\", \"kind\")",
+          "expr": "label_join(sum by (agent, kind) (increase(kelpie_work_item_cost_usd_total{role=\"worker\",sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_priced_total{sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])), \"agent_kind\", \" / \", \"agent\", \"kind\")",
           "legendFormat": "",
           "format": "table",
           "instant": true
@@ -1255,7 +1255,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "label_join(sum by (agent, kind) (increase(kelpie_work_item_cost_usd_total{role=\"reviewer\",sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_priced_total{sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])), \"agent and kind\", \" / \", \"agent\", \"kind\")",
+          "expr": "label_join(sum by (agent, kind) (increase(kelpie_work_item_cost_usd_total{role=\"reviewer\",sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_priced_total{sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])), \"agent_kind\", \" / \", \"agent\", \"kind\")",
           "legendFormat": "",
           "format": "table",
           "instant": true
@@ -1309,7 +1309,7 @@
         ]
       },
       "options": {
-        "xField": "agent and kind",
+        "xField": "agent_kind",
         "stacking": "normal",
         "orientation": "auto",
         "xTickLabelRotation": -45,
@@ -1338,7 +1338,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "label_join(sum by (agent, kind) (increase(kelpie_work_item_seconds_total{sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_finished_total{sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])) / 3600, \"agent and kind\", \" / \", \"agent\", \"kind\")",
+          "expr": "label_join(sum by (agent, kind) (increase(kelpie_work_item_seconds_total{sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_finished_total{sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])) / 3600, \"agent_kind\", \" / \", \"agent\", \"kind\")",
           "legendFormat": "",
           "format": "table",
           "instant": true
@@ -1376,7 +1376,7 @@
         ]
       },
       "options": {
-        "xField": "agent and kind",
+        "xField": "agent_kind",
         "orientation": "auto",
         "xTickLabelRotation": -45,
         "showValue": "never"

@@ -435,3 +435,33 @@ fn the_agent_and_kind_table_draws_both_its_queries_as_columns_of_one_table() {
         .collect();
     assert_no_problems(&problems);
 }
+
+// Prometheus 2.x, and 3.x with legacy name validation, refuse a `label_join` destination that is
+// not `[a-zA-Z_][a-zA-Z0-9_]*`, and the panel then shows an error and no bars.
+#[test]
+fn every_label_join_in_the_dashboard_names_a_valid_label() {
+    let problems: Vec<String> = panel_queries()
+        .iter()
+        .flat_map(|query| {
+            query
+                .split("label_join(")
+                .skip(1)
+                // The destination is the first string after the last range selector
+                .filter_map(|rest| {
+                    let tail = &rest[rest.rfind(']')?..];
+                    tail.split('"').nth(1).map(str::to_owned)
+                })
+                .map(|name| (query.clone(), name))
+                .collect::<Vec<_>>()
+        })
+        .filter(|(_, name)| {
+            let mut chars = name.chars();
+            !chars
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                || !chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+        .map(|(query, name)| format!("{query} joins into {name:?}, not a legal label name"))
+        .collect();
+    assert_no_problems(&problems);
+}
