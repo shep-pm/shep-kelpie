@@ -393,3 +393,25 @@ fn a_head_whose_checks_are_all_held_is_ruled_on_at_once() {
         "{status}"
     );
 }
+
+#[test]
+fn a_yes_to_a_held_ruling_approves_the_runs_and_waits_for_ci() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge.set_held_checks(&head, &[("test.yml", RUN)]);
+    ruling_report(rig.verdict(&runner));
+
+    rig.ask(&runner, "rule", Some("71 yes"));
+
+    assert_eq!(rig.forge.approvals(), [head.clone()]);
+    assert!(rig.forge.whole_run_reruns().is_empty());
+    assert_eq!(step(&runner).unwrap(), None, "CI settles after approval");
+    rig.forge
+        .set_checks(&head, Checks::Pending(vec![docs_in_progress()]));
+    rig.forge.set_run_in_progress(OTHER);
+    rig.clock.advance(CHECKS_SETTLE);
+    assert_eq!(step(&runner).unwrap(), None, "CI is still running");
+    assert!(rig.forge.merges().is_empty());
+    rig.forge.set_checks(&head, Checks::Passed);
+    let (_, question) = ruling_report(step(&runner).unwrap());
+    assert!(question.starts_with("Merge pull request #71"), "{question}");
+}
