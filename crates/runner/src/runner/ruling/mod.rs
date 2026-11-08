@@ -274,7 +274,7 @@ impl Runner {
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
         let ruling = next.rulings.remove(at);
-        let act = act::plan(id, &answer, &ruling.kind)?;
+        let act = act::plan(id, &answer, &ruling.kind, by)?;
         let asked = act::asked(&ruling, &answer, by);
         // Kept in the rulings history once the answer is saved.
         let record = Record::of(&ruling, &answer, now, by);
@@ -783,9 +783,17 @@ fn decide(
         (Answer::Rework(_), RulingKind::Contribution(Held::Merge { .. })) => Phase::Implement,
         (Answer::Rework(_), _) => return Err(RuleError::NotAMerge(id)),
         (
-            Answer::Yes | Answer::No(_),
+            Answer::Yes,
             RulingKind::Stuck(Stuck::CheckQueued { review, .. } | Stuck::NoChecks { review, .. }),
         ) => queued::waiting_again(review, now),
+        (Answer::No(_), RulingKind::Stuck(Stuck::CheckQueued { review, held, .. }))
+            if held.is_empty() =>
+        {
+            queued::waiting_again(review, now)
+        }
+        (Answer::No(_), RulingKind::Stuck(Stuck::NoChecks { review, .. })) => {
+            queued::waiting_again(review, now)
+        }
         // The jobs are rerun, so CI is looked at again, in the round it
         // interrupted when it did.
         (

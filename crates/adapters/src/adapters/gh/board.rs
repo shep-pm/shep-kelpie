@@ -615,6 +615,7 @@ mod tests {
                 name: "docs".into(),
                 run: Some(39_697_679_104),
                 running: true,
+                held: false,
             }])
         );
     }

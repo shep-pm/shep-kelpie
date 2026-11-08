@@ -190,6 +190,7 @@ fn a_workflow_job_named_like_a_kelpie_check_is_ci() {
             name: "kelpie".into(),
             run: Some(7),
             running: true,
+            held: false,
         }])
     );
 }
@@ -209,12 +210,14 @@ fn a_queued_check_run_is_read_with_its_workflow_run() {
                 name: "windows-gnu".into(),
                 run: Some(39_697_676_985),
                 running: false,
+                held: false,
             },
             // Still running, and listed as the gate cannot tell it from a stuck one
             Queued {
                 name: "docs".into(),
                 run: Some(39_697_679_104),
                 running: true,
+                held: false,
             },
         ])
     );
@@ -231,11 +234,13 @@ fn a_queued_check_run_whose_link_names_no_run_has_none() {
                 name: "deploy".into(),
                 run: None,
                 running: false,
+                held: false,
             },
             Queued {
                 name: "build".into(),
                 run: None,
                 running: false,
+                held: false,
             },
         ])
     );
@@ -289,6 +294,7 @@ fn a_check_run_still_in_progress_is_listed_with_its_workflow_run() {
             name: "docs".into(),
             run: Some(39_697_679_104),
             running: true,
+            held: false,
         }])
     );
 }

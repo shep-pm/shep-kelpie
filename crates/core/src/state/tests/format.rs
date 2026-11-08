@@ -95,6 +95,7 @@ fn the_file_format_is_pinned() {
         RulingKind::from(Stuck::CheckQueued {
             head: "c0ffee".into(),
             checks: vec!["windows-gnu".into()],
+            held: Vec::new(),
             run: Some(39_697_676_985),
             url: "https://github.com/shep-pm/shep/actions/runs/39697676985".into(),
             review: None,
@@ -226,13 +227,10 @@ fn the_file_format_is_pinned() {
 
 #[test]
 fn a_check_queued_written_with_a_run_or_without_one_is_read() {
-    let with_run = serde_json::json!({
-        "reason": "check-queued",
-        "head": "c0ffee",
-        "checks": ["windows-gnu"],
-        "run": 39_697_676_985_u64,
-        "url": "https://github.com/shep-pm/shep/actions/runs/39697676985",
-    });
+    let with_run = serde_json::from_str(include_str!(
+        "../../../../../fixtures/stuck-check-queued-104.json"
+    ))
+    .unwrap();
     let runless = serde_json::json!({
         "reason": "check-queued",
         "head": "c0ffee",
@@ -246,11 +244,25 @@ fn a_check_queued_written_with_a_run_or_without_one_is_read() {
         read(with_run),
         Stuck::CheckQueued {
             run: Some(39_697_676_985),
+            held,
             ..
-        }
+        } if held.is_empty()
     ));
     assert!(matches!(
         read(runless),
         Stuck::CheckQueued { run: None, .. }
     ));
+}
+
+#[test]
+fn a_held_check_queued_keeps_its_run_links_in_the_saved_shape() {
+    let value = serde_json::json!({
+        "reason": "check-queued",
+        "head": "c0ffee",
+        "checks": ["test.yml"],
+        "held": ["https://github.com/shep-pm/shep/actions/runs/42"],
+        "url": "https://github.com/shep-pm/shep/pull/71/checks",
+    });
+    let stuck: Stuck = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(serde_json::to_value(stuck).unwrap(), value);
 }

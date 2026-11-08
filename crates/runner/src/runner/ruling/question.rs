@@ -151,6 +151,19 @@ pub(in crate::runner) fn question(
                 reruns(*rerun, &trigger("rerun"))
             ),
             Stuck::CheckQueued {
+                head, checks, held, ..
+            } if !held.is_empty() => {
+                return format!(
+                    "{} on {about} at {} wait for the maintainer's approval: {}. \
+                     Approving runs the pull request's code on GitHub's runners, not on this \
+                     machine. {yes} approves the held runs and kelpie waits for CI, and {no} \
+                     sends the worker your note.",
+                    checks.join(", "),
+                    short(head),
+                    held.join(", ")
+                );
+            }
+            Stuck::CheckQueued {
                 head,
                 checks,
                 run: None,
