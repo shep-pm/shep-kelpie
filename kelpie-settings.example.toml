@@ -97,6 +97,16 @@ url = "https://ntfy.sh/your-private-topic"
 # [kelpie.leases]
 # cargo-test = 3
 
+# The size of the API credit your key draws on, in US dollars, as the billing
+# page gives it. Kelpie cannot read it: Anthropic offers no call that says what
+# a key's credit is or what it has left. The dog carries it on its `credit`
+# answer, beside the month's spend, so what is left of the credit can be worked
+# out from the two. Absent means kelpie knows of no credit line and says none.
+# The credit renews on the first of the calendar month in UTC. The dog reads it
+# again every 30 seconds, so a change needs no restart.
+# [kelpie.api]
+# monthly_credit_usd = 100
+
 # Agents are not settings: each is a file of its own, `agents/<name>.md` in
 # kelpie's home (`$SHEP_HOME/kelpie/agents/`), YAML frontmatter then a
 # Markdown body. Kelpie ships `sonnet-high` and `opus-high`, which build,

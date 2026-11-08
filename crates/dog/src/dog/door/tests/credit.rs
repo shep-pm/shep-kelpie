@@ -46,6 +46,7 @@ async fn the_dog_answers_a_credit_ask_with_the_spend_and_the_months_ends() {
         asked,
         Some(Credit {
             spent_usd: 4.0,
+            monthly_usd: None,
             since: MONTH,
             resets_at: NEXT_MONTH,
         }),
@@ -63,10 +64,46 @@ async fn a_credit_ask_before_any_ledger_is_read_answers_zero() {
         asked,
         Some(Credit {
             spent_usd: 0.0,
+            monthly_usd: None,
             since: MONTH,
             resets_at: NEXT_MONTH,
         }),
         "the dog has read no ledger, so it knows of no spend"
+    );
+}
+
+#[tokio::test]
+async fn a_credit_ask_carries_the_monthly_credit_when_one_is_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let board = no_board();
+    crate::dog::board::lock(&board).set_credit(Some(100.0));
+    let (socket, _desk) = door_in(dir.path(), 3, Availability::default(), board);
+
+    let asked = off_the_runtime(move || credit(&socket)).await;
+
+    assert_eq!(
+        asked,
+        Some(Credit {
+            spent_usd: 0.0,
+            monthly_usd: Some(100.0),
+            since: MONTH,
+            resets_at: NEXT_MONTH,
+        }),
+        "the dog carries the size it was given, beside the spend it read"
+    );
+}
+
+#[tokio::test]
+async fn a_credit_ask_leaves_the_monthly_credit_off_when_none_is_set() {
+    let (_dir, socket, _desk) = door(3);
+
+    let asked = off_the_runtime(move || credit(&socket))
+        .await
+        .expect("the dog answered");
+
+    assert_eq!(
+        asked.monthly_usd, None,
+        "no credit line, so no size on the line"
     );
 }
 
