@@ -12,6 +12,10 @@ const ONE_QUESTION: &str = "{\"type\": \"bug\", \"priority\": \"P2\", \"related\
     [], \"tests\": [], \"criteria\": [], \"open\": [{\"question\": \"Which OS crashes?\", \
     \"recommended\": \"Linux\"}], \"body\": null}";
 
+const SETTLED: &str = "{\"type\": \"bug\", \"priority\": \"P2\", \"related\": [], \"files\": [], \
+    \"tests\": [], \"criteria\": [], \"open\": [], \"body\": \"## Settled\\n\\n- Linux, on start.\\n\"}";
+const SETTLED_WORDS: &str = "That settles most of it.";
+
 /// A project with a project manager and `octocat` for its maintainer, whose
 /// open issue 44 was written by `author`
 fn rig_with_issue(project: &str, author: &str) -> Rig {
@@ -79,6 +83,39 @@ fn an_answer_to_a_lapsed_triage_question_is_not_held_for_the_project_manager() {
 
     assert_eq!(told(&runner), Vec::<String>::new(), "nothing was held");
     assert_eq!(rig.github.reactions().len(), 0, "no thumbs up");
+}
+
+#[test]
+fn an_overdue_answer_from_the_asked_maintainer_reaches_triage_alone() {
+    let rig = rig_with_issue("triage-answer-overdue", "octocat");
+    rig.claude
+        .script_for(Role::Triager, [Scripted::Say(ONE_QUESTION)]);
+    rig.claude.script_for(
+        Role::Representative,
+        [Scripted::Say("Answer the questions below.")],
+    );
+    let runner = rig.open().unwrap();
+    step(&runner).unwrap(); // lists the issue and starts its triager call
+    posted(&rig, &runner, "Which OS crashes?");
+
+    // The maintainer is the login asked, and answers past `wait_days`
+    rig.claude
+        .script_for(Role::Triager, [Scripted::Say(SETTLED)]);
+    rig.claude
+        .script_for(Role::Representative, [Scripted::Say(SETTLED_WORDS)]);
+    rig.clock.advance(2 * Rig::DAY);
+    rig.writes_on(44, "octocat", "Linux, on start.");
+    looked(&rig, &runner);
+    posted(&rig, &runner, SETTLED_WORDS);
+
+    assert_eq!(told(&runner), Vec::<String>::new(), "nothing was held");
+    assert_eq!(rig.github.reactions().len(), 0, "no thumbs up");
+    let seen = rig.claude.all_seen();
+    let second = seen.iter().filter(|s| s.call.role == Role::Triager).nth(1);
+    assert!(
+        second.is_some_and(|s| s.call.prompt.contains("Linux, on start.")),
+        "the triager read the answer"
+    );
 }
 
 #[test]
