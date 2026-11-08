@@ -16,13 +16,12 @@ use crate::runner::pm::{Decision, Ruled, Wake};
 use crate::runner::report::{Begin, StepReport};
 use crate::runner::review::findings;
 use crate::runner::review_bot::{RULED_CLOSE, RULED_FOLLOW, RULED_PUSH, RuledThread};
-use crate::runner::talk::COMMENT_REQUEST;
 use crate::runner::turn::KEEP_BODY_TRUE;
 use crate::runner::turn::held_up::Reason;
 use crate::settings::AgentName;
 use crate::state::StateError;
 use crate::ticket::TicketId;
-use crate::work_item::{FollowUps, Phase, Review, ReviewStage, Turn, WorkItem};
+use crate::work_item::{FollowUps, Phase, Review, ReviewStage, ThreadAnswer, Turn, WorkItem};
 
 // Replaces a reason the forge's guard refuses, as it names something of this machine's,
 // after the lead of the reply it stands in for, so it is still known as kelpie's own.
@@ -345,16 +344,14 @@ impl Runner {
         };
         let mut findings: Vec<Finding> = Vec::new();
         let mut threads: Vec<String> = Vec::new();
-        let mut leaving: Vec<Finding> = Vec::new();
         for call in ruled {
             if !call.thread.id.is_empty() {
                 findings.push(finding_of(&call.thread, &call.why));
                 threads.push(call.thread.id.clone());
             } else if let Some(found) = deferred_of(item, &call.thread)? {
                 // It has no thread to reply on, which its place in the list says.
-                threads.push(format!("{COMMENT_REQUEST}deferred {}", threads.len() + 1));
-                findings.push(found.clone());
-                leaving.push(found);
+                threads.push(format!("{DEFERRED_ID}{}", threads.len() + 1));
+                findings.push(found);
             }
         }
         if findings.is_empty() {
@@ -367,11 +364,6 @@ impl Runner {
         let path = findings::findings_path(&build);
         findings::write_findings_file(&build, &path, round, &findings, true)?;
         let prompt = ruled_prompt(number, findings.len(), &path);
-        // Sent for a fix, it is no longer deferred, so the worker's own deferral of it
-        // in this turn is the one the merge files.
-        for found in &leaving {
-            leave_deferred(item, found)?;
-        }
         let deferred_before = findings::deferred(&build)?;
         self.update_of(ticket, move |item| {
             item.record_held(&findings);
@@ -397,6 +389,30 @@ impl Runner {
             });
         })
         .map_err(|e| format!("cannot save the fix turn: {e}"))
+    }
+
+    /// Takes the deferred findings a fix turn was sent, and the worker answered `fixed` for,
+    /// out of the deferred findings file
+    ///
+    /// Called once the fix pushed, before the answers are forgotten. One the worker
+    /// declined or did not mention stays there, so the gate asks again or the merge files it.
+    ///
+    /// # Errors
+    /// A message naming the file when it cannot be read or written.
+    pub(in crate::runner) fn leave_fixed_deferred(&self, sent: &[Finding]) -> Result<(), String> {
+        let Some(item) = self.current() else {
+            return Ok(());
+        };
+        if item.threads_sent.len() != sent.len() {
+            return Ok(());
+        }
+        let ids = item.threads_sent.iter().zip(sent);
+        for (id, finding) in ids.filter(|(id, _)| id.starts_with(DEFERRED_ID)) {
+            if matches!(item.answer_of(id), Some(ThreadAnswer::Fixed { .. })) {
+                leave_deferred(item, finding)?;
+            }
+        }
+        Ok(())
     }
 
     // Kelpie's reply on a ruled thread, then the resolve where the ruling settles it.
@@ -483,6 +499,11 @@ fn ruled_prompt(number: u64, count: usize, path: &Path) -> String {
 
 // What a wake calls the author of a deferred finding, which no one wrote on the forge
 pub(in crate::runner) const DEFERRED_BY: &str = "deferred by the worker";
+
+// The id a deferred finding sent for a fix goes by in `threads_sent`, with its place after
+// it. It opens with `COMMENT_REQUEST`, which `answer_sent` takes as a comment with no
+// thread to reply on.
+const DEFERRED_ID: &str = "comment:deferred ";
 
 // `finding`, which the worker deferred, as a thread with no forge id
 fn ruled_deferred(finding: &Finding) -> RuledThread {

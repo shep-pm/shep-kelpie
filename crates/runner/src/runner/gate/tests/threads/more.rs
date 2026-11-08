@@ -2,6 +2,7 @@
 //! reply, through the runner's stand-ins
 
 use super::*;
+use crate::test::Rig;
 
 const FOLLOW_UP_BOTH: &str = "{\"threads\": [\
     {\"item\": 7, \"thread\": 1, \"decision\": \"follow-up\", \"why\": \"too big\"}, \
@@ -136,4 +137,60 @@ fn a_push_back_on_a_deferred_finding_is_dropped_and_the_finding_stays_unruled() 
     let left = std::fs::read_to_string(rig.build_7().join("deferred-findings.md")).unwrap();
     assert!(left.contains("looks racy"), "it is still deferred: {left}");
     assert_eq!(rig.forge.created(), []);
+}
+
+fn left_deferred(rig: &Rig) -> String {
+    std::fs::read_to_string(rig.build_7().join("deferred-findings.md")).unwrap()
+}
+
+#[test]
+fn a_deferred_finding_the_worker_declines_to_fix_stays_deferred() {
+    let rig = pm_project("threads-deferred-declined");
+    let (rig, runner, _) = at_the_gate_found(rig, &[racy()]);
+    defers(&rig, &[racy()]);
+    worker_says(
+        &rig,
+        [Scripted::PushSay(
+            "other.txt",
+            "other\n",
+            "thread 1: declined: the caller checks it",
+        )],
+    );
+
+    ruled_by(&rig, &runner, FIX);
+    steps(&runner, |r| matches!(r, StepReport::FixPushed { .. }));
+    let left = left_deferred(&rig);
+    assert!(left.contains("looks racy"), "it is not lost: {left}");
+    assert_eq!(rig.forge.created(), []);
+}
+
+#[test]
+fn a_deferred_finding_fixed_by_the_worker_leaves_the_deferred_file() {
+    let rig = pm_project("threads-deferred-fixed");
+    let (rig, runner, _) = at_the_gate_found(rig, &[racy()]);
+    defers(&rig, &[racy()]);
+    worker_says(
+        &rig,
+        [Scripted::PushSay(
+            "shorter.txt",
+            "shorter\n",
+            "thread 1: fixed",
+        )],
+    );
+
+    ruled_by(&rig, &runner, FIX);
+    steps(&runner, |r| matches!(r, StepReport::FixPushed { .. }));
+    let left = left_deferred(&rig);
+    assert!(!left.contains("looks racy"), "it is fixed: {left}");
+}
+
+#[test]
+fn a_deferred_finding_written_twice_leaves_the_file_once_it_is_closed() {
+    let rig = pm_project("threads-deferred-twice");
+    let (rig, runner, _) = at_the_gate_found(rig, &[racy()]);
+    defers(&rig, &[racy(), racy()]);
+
+    ruled_by(&rig, &runner, CLOSE);
+    let left = left_deferred(&rig);
+    assert!(!left.contains("looks racy"), "no copy is left: {left}");
 }

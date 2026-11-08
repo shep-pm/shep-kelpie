@@ -117,7 +117,7 @@ pub(in crate::runner) fn deferred_with_reasons(build: &Path) -> Result<Vec<Defer
         .collect())
 }
 
-/// Takes the first finding `is` names, and the reason under it, out of the deferred
+/// Takes every finding `is` names, and the reason under each, out of the deferred
 /// findings file in `build`. A file that does not name one is left as it is.
 ///
 /// # Errors
@@ -136,7 +136,7 @@ pub(in crate::runner) fn drop_deferred(
     let mut reason_of_dropped = false;
     for line in text.split_inclusive('\n') {
         let named = parse_findings(line).pop();
-        if !dropped && named.as_ref().is_some_and(&is) {
+        if named.as_ref().is_some_and(&is) {
             (dropped, reason_of_dropped) = (true, true);
             continue;
         }
