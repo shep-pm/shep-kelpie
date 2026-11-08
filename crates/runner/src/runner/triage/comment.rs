@@ -887,7 +887,7 @@ impl Runner {
             let Some(record) = self.triage_record(issue).cloned() else {
                 return Ok(());
             };
-            if record.asked.is_some() || record.questions.is_some() || record.local.is_some() {
+            if record.open_questions() {
                 return Ok(());
             }
             match record.step {

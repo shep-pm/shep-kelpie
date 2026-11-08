@@ -27,6 +27,7 @@ Projects, slots, the issue check. The board and work items are in `board.md`, th
 - The issue skill (`skills.md`) holds the same format; its example passing the check, and its naming every part the check reads, are tested. `core/skills/issue/mod.rs`
 - The board runs the check on each new or edited open issue, and the triager runs only on one that fails it: `triage-check.md`. ADR 0018
 - A ready issue whose `Needs:` package is unpublished waits off the board as `Skip::Unpublished`. The check reads no network, so the triage poll asks `ports.registry` (`CurlRegistry`: crates.io index, npm, PyPI) with the lock let go, and `check_holds` reads the answers, holding a package unread. The board read asks too, for an issue the poll omits. A found package is kept, a miss is asked each poll, a failed read holds nothing, noted once. `runner/triage/unpublished.rs`
+- A ready issue with open triage questions waits as `Skip::Asked`.
 - `shep kelpie`'s help and its manifest's `verb` come from one table of top-level verbs (`src/flock/verbs/help.rs`): `USAGE` is rendered from it at build time, and `schema::verb` declares one subcommand per distinct verb name of the table and of `ELSEWHERE` (the verbs `main` runs itself; a test fails on a `command ==` arm of `src/main.rs` left undeclared), so shep's `--help` and completion cannot drift from the usage. Each `about` fits 60 columns. #1639
 
 ## Not built

@@ -264,20 +264,6 @@ impl Runner {
         self.save(next)
     }
 
-    // The same, leaving `own` out of what the issue carries: the label the
-    // caller is about to write may already be on from a call whose answer was
-    // lost, and that one is kelpie's.
-    pub(super) fn triage_labelled_by_hand_but(
-        &self,
-        issue: u64,
-        own: &str,
-    ) -> Result<Option<String>, ForgeError> {
-        let carried: Vec<String> = (self.triage_labels_now(issue)?.into_iter())
-            .filter(|l| l != own)
-            .collect();
-        Ok(stood(&carried, &self.triage_seen(issue)))
-    }
-
     // Saves the record with the owed ready body dropped: a publish refusal
     // took it, so the issue ends `needs-approval` like any other
     pub(super) fn triage_ready_dropped(&mut self, issue: u64) -> Result<(), StateError> {
@@ -298,30 +284,45 @@ impl Runner {
     // ends the pass. A split of someone else's issue is then asked of the
     // maintainer in a comment of its own.
     pub(super) fn label_waiting_step(&mut self, issue: u64) -> Result<(), StateError> {
-        match self.triage_labelled_by_hand_but(issue, TRIAGE) {
-            Ok(Some(label)) => {
-                self.notes.push(format!(
-                    "triage #{issue}: `{label}` went on by hand while its labels went on, so \
-                     that stands: kelpie adds no `{TRIAGE}`"
-                ));
-                // The ask is never posted now, so a plan held for it goes too:
-                // left, it would be dated from this comment and filed on a bare
-                // `ok` nobody asked for.
-                if self.split_of(issue).is_some_and(|s| s.asked.is_some()) {
-                    let note =
-                        format!("triage #{issue}: its split was never asked, so it is dropped");
-                    self.drop_split(issue, note)?;
-                }
-                self.triage_stepped(issue, TriageStep::Done)?;
-                self.triage_tries.remove(&issue);
-                return Ok(());
-            }
-            Ok(None) => {}
+        let seen = self.triage_seen(issue);
+        let carried = match self.triage_labels_now(issue) {
+            Ok(carried) => carried,
             Err(e) => {
                 let why = format!("cannot read its labels: {e}");
                 self.triage_failed(issue, &why, !forge_is_busy(&e));
                 return Ok(());
             }
+        };
+        // `needs-approval` here is this step's own, from a call whose answer was
+        // lost. Any other triage label came by hand.
+        let owed: Vec<String> = carried
+            .iter()
+            .filter(|l| l.as_str() != TRIAGE)
+            .cloned()
+            .collect();
+        if let Some(label) = stood(&owed, &seen) {
+            self.notes.push(format!(
+                "triage #{issue}: `{label}` went on by hand while its labels went on, so \
+                 that stands: kelpie adds no `{TRIAGE}`"
+            ));
+            // The ask is never posted now, so a plan held for it goes too:
+            // left, it would be dated from this comment and filed on a bare
+            // `ok` nobody asked for.
+            if self.split_of(issue).is_some_and(|s| s.asked.is_some()) {
+                let note = format!("triage #{issue}: its split was never asked, so it is dropped");
+                self.drop_split(issue, note)?;
+            }
+            self.triage_stepped(issue, TriageStep::Done)?;
+            self.triage_tries.remove(&issue);
+            return Ok(());
+        }
+        // A `ready-for-agent` the issue carried when its pass began is the queue's
+        // state, no answer to what the pass asked. It comes off before
+        // `needs-approval` goes on, so no issue carries both.
+        let begun_with_ready =
+            seen.iter().any(|l| l.as_str() == READY) && carried.iter().any(|l| l.as_str() == READY);
+        if begun_with_ready && !self.take_ready_back(issue)? {
+            return Ok(());
         }
         if let Err(failed) = self.put_waiting_label(issue) {
             let counts = match &failed {
@@ -337,6 +338,27 @@ impl Runner {
         self.triage_stepped(issue, TriageStep::Done)?;
         self.triage_tries.remove(&issue);
         Ok(())
+    }
+
+    // Takes `ready-for-agent` off `issue` as kelpie's own take-back: the label
+    // stops being seen, so no later pass reads the take-off as the maintainer's.
+    // Whether it is off.
+    fn take_ready_back(&mut self, issue: u64) -> Result<bool, StateError> {
+        if let Err(e) = self.check_ready_unseen(issue) {
+            let why = format!("cannot save that `{READY}` is not seen: {e}");
+            self.triage_failed(issue, &why, true);
+            return Ok(false);
+        }
+        if let Err(e) = self.label_issue(issue, READY, false) {
+            let why = format!("cannot take `{READY}` off: {e}");
+            self.triage_failed(issue, &why, !forge_is_busy(&e));
+            return Ok(false);
+        }
+        self.notes.push(format!(
+            "triage #{issue}: `{READY}` was on when its pass began, so it comes off before \
+             `{TRIAGE}` goes on"
+        ));
+        Ok(true)
     }
 
     // Puts on the labels the reply gave and then `ready-for-agent`, last, taking

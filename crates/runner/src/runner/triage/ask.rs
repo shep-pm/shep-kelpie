@@ -156,9 +156,7 @@ impl Runner {
             triage
                 .issues
                 .iter()
-                .filter(|record| {
-                    record.asked.is_some() || record.questions.is_some() || record.local.is_some()
-                })
+                .filter(|record| record.open_questions())
                 .cloned()
                 .collect()
         })

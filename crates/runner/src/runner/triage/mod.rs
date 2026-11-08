@@ -811,6 +811,8 @@ mod answers_tests;
 #[cfg(test)]
 mod ask_tests;
 #[cfg(test)]
+mod asked_hold_tests;
+#[cfg(test)]
 mod check_tests;
 #[cfg(test)]
 mod greeting_tests;
