@@ -563,7 +563,7 @@ passes, and replaces only that ruling: the merge still asks where a safety
 gate holds it, such as a pull request no reviewer read. Pending deferred findings
 always raise a `follow-up` ruling. The project manager answers when
 `rulings.pm_decides.follow-up` allows it; otherwise the maintainer does,
-including on a project with no `agents.pm`. `git.issues` decides nothing.
+including on a project with no `agents.pm`.
 Every other ruling still asks.
 
 **Notice**:
