@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use serde_json::{Value, json};
 
 use super::super::contributions::security_tests::commit_on;
+use crate::board::TRIAGE;
 use crate::ports::{Checks, Clock, E2eOutcome};
 use crate::runner::{CHECKS_SETTLE, Pass, Runner, advance, step};
 use crate::state::{Bump, ProjectState, Red, RedStep, StateStore};
@@ -442,7 +443,7 @@ fn a_failed_e2e_run_closes_the_bump_with_a_comment_and_an_issue() {
     assert_eq!(rig.forge.pull_request_closings(), [50]);
     let made = rig.forge.created();
     assert_eq!(made.len(), 1);
-    assert_eq!(made[0].labels, ["needs-triage", "dependencies"]);
+    assert_eq!(made[0].labels, [TRIAGE, "dependencies"]);
     assert!(made[0].body.contains("#50"), "{}", made[0].body);
     assert!(
         rig.forge
@@ -479,8 +480,8 @@ fn a_red_bump_on_a_local_store_is_closed_and_filed_as_a_local_ticket() {
     assert_eq!(rig.forge.issue_writes(), Vec::<String>::new());
     assert!(bumps(&rig, &runner).is_empty());
     let listed = rig.ticket_verb(&["list"]);
-    let want = "k1  open  dependencies: #40, topic/40, broke [needs-triage, dependencies]";
-    assert!(listed.contains(&want.to_owned()), "{listed:?}");
+    let want = format!("k1  open  dependencies: #40, topic/40, broke [{TRIAGE}, dependencies]");
+    assert!(listed.contains(&want), "{listed:?}");
     let notes = notes(&runner);
     assert_eq!(words(&notes, "bump #40: filed ticket k1"), 1, "{notes:?}");
 }
@@ -686,7 +687,7 @@ fn a_bump_closed_by_someone_else_before_kelpie_closed_it_is_still_filed() {
     );
     let made = rig.forge.created();
     assert_eq!(made.len(), 1);
-    assert_eq!(made[0].labels, ["needs-triage", "dependencies"]);
+    assert_eq!(made[0].labels, [TRIAGE, "dependencies"]);
     assert!(bumps(&rig, &runner).is_empty());
 }
 

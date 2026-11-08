@@ -16,6 +16,7 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | github-app.md | App tokens, posting, answers | `runner/{voice,paragraphs}/`, `core/guard/gh.rs`, `worker_folder/` |
 | check-runs.md | gate check runs on a pull request's head | `runner/checks/`, `core/ports/`, `adapters/gh/`, `src/doctor/` |
 | who-answers.md | who answers | `runner/pm/rulings.rs`, `runner/agent_fit.rs` |
+| pm-words.md | the maintainer's words that answer no ruling, and the `said` calls | `runner/{thread_replies/,talk}/`, `runner/pm/{said,asked,maintainer}.rs` |
 | contributions.md | others' pull requests | `core/{settings/{contributions.rs,reviewers/},state/contributions.rs}`, `runner/contributions/` |
 | contribution-security.md | its security review | `runner/{contributions/,flight/security.rs}`, `process/worktree/` |
 | contribution-pass.md | reviewers' pass, green head | `runner/contributions/pass.rs`, `process/worktree/` |

@@ -15,5 +15,5 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | triage-local.md | local session | `runner/triage/local.rs` |
 | triage-spam.md | the spam check | `runner/triage/spam.rs` |
 | triage-reader.md | who a comment is for | `runner/triage/facts.rs` |
-| triage-hand.md | `hand_ready` take-back | `runner/triage/hand.rs` |
+| triage-hand.md | the swap a `taken` record owes | `runner/triage/hand.rs` |
 | triage-check.md | the check on every issue | `runner/triage/checks.rs` |

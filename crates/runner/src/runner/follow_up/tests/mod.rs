@@ -187,11 +187,17 @@ fn with_an_app_the_follow_up_issue_and_the_label_it_needs_are_made_through_it() 
     };
     let labels = made("labels");
     assert!(
-        labels.last().unwrap().contains(r#""name":"needs-triage""#),
+        labels
+            .last()
+            .unwrap()
+            .contains(&format!(r#""name":"{TRIAGE}""#)),
         "{labels:?}"
     );
     let [issue] = made("issues").try_into().unwrap();
-    assert!(issue.contains(r#""labels":["needs-triage"]"#), "{issue}");
+    assert!(
+        issue.contains(&format!(r#""labels":["{TRIAGE}"]"#)),
+        "{issue}"
+    );
 }
 
 #[test]

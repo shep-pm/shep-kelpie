@@ -5,7 +5,9 @@
 //! that picks an option is applied at once. It is posted headed "Answered by
 //! the project manager", where a `no <note>` reopens it. An abstention, a
 //! `design` flag or a yes on a merge ruling that warns of its head goes to
-//! the maintainer. The card shows the project manager's pick.
+//! the maintainer. The card shows the project manager's pick. An over-budget
+//! ruling the map leaves to the maintainer wakes it the same way, but only
+//! to recommend: its pick is never applied.
 
 use std::collections::BTreeMap;
 
@@ -49,6 +51,20 @@ impl Runner {
                 .pm_decides(RulingName::of(&ruling.kind))
             && brief(ruling).1 >= 2;
         answers && !self.pm_answered_before(ruling)
+    }
+
+    /// Whether the project manager recommends on `ruling` for the maintainer,
+    /// who answers it
+    ///
+    /// An over-budget ruling `rulings.pm_decides` leaves to the maintainer
+    /// (ADR 0020), with two options or more, a project manager named and no
+    /// drain. Its wake applies nothing: the pick goes on the card.
+    pub(super) fn pm_recommends_ruling(&self, ruling: &Ruling) -> bool {
+        matches!(ruling.kind, RulingKind::Stuck(Stuck::OverBudget { .. }))
+            && self.agents.pm.is_some()
+            && !self.draining()
+            && !self.settings.rulings.pm_decides(RulingName::OverBudget)
+            && brief(ruling).1 >= 2
     }
 
     // Whether the project manager already answered the failed turn `ruling`
@@ -110,7 +126,16 @@ impl Runner {
                 ..answer
             };
             let choice = answer.choice;
-            match self.pm_decides(&ruling, &answer) {
+            // A kind the map leaves to the maintainer is only recommended on.
+            let decided = match self
+                .settings
+                .rulings
+                .pm_decides(RulingName::of(&ruling.kind))
+            {
+                true => self.pm_decides(&ruling, &answer),
+                false => Err("the maintainer answers a ruling of its kind".into()),
+            };
+            match decided {
                 Ok(()) => done.push(format!("answered ruling {id} with option {choice}")),
                 Err(why) => {
                     self.pm_recommends(id, &answer);

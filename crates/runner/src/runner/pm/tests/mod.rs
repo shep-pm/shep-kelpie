@@ -23,6 +23,7 @@ mod case;
 mod code;
 mod conflicts;
 mod decide;
+mod fix;
 mod follow_up;
 mod free_slot;
 mod held;
