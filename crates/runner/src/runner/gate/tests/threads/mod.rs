@@ -1,255 +1,23 @@
 //! An open review thread holds the merge until the project manager rules on it,
 //! through the runner's stand-ins
 
-use std::sync::Mutex;
 use std::time::Instant;
 
 use serde_json::json;
 
 use crate::board::READY;
-use crate::ports::{CLEAN, Cost, Finding, PullRequestState, Role, Severity, Standing};
-use crate::runner::coderabbit::tests::now;
+use crate::ports::{Cost, PullRequestState, Role, Standing};
 use crate::runner::flight::tests::Driven;
+use crate::runner::retro::journal::{self, Entry};
 use crate::runner::review_bot::is_reply;
 use crate::runner::review_bot::two_bots::listing;
-use crate::runner::{Runner, StepReport, step};
-use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, ScriptedRound, Seen, ticket};
+use crate::runner::{StepReport, step};
+use crate::test::{CALL_PATIENCE, Hold, Scripted, ticket};
 
-use super::ruling_report;
+use helpers::*;
 
+mod helpers;
 mod more;
-
-const NIT: &str = "P3: The name could be shorter. It reads badly.";
-const THREAD: &str = "PRRT_cubic_71_0";
-const DOLLAR: u64 = 1_000_000_000;
-const BACK_OFF: u64 = 30 * 60;
-
-const THREADS_HELD: &str = "its open review threads are with the project manager, so the merge \
-                            waits on its answer";
-const TALK_UNREAD: &str = "what people wrote on its pull request cannot be read, so the merge \
-                          waits for a read";
-const PM_DOWN: &str = "the project manager is down, so its open review threads wait for it";
-const PUSHED_BACK: &str = "the project manager pushed back on a review thread the maintainer \
-                           wrote, so the merge waits for their reply";
-
-const NOTHING: &str = "{\"pick\": null}";
-const CLOSE: &str = "{\"threads\": [{\"item\": 7, \"thread\": 1, \"decision\": \"close\", \
-                     \"why\": \"the caller checks it\"}]}";
-const FIX: &str = "{\"threads\": [{\"item\": 7, \"thread\": 1, \"decision\": \"fix\", \
-                   \"why\": \"the guard is missing\"}]}";
-const FOLLOW_UP: &str = "{\"threads\": [{\"item\": 7, \"thread\": 1, \"decision\": \
-                         \"follow-up\", \"why\": \"too big for this pull request\"}]}";
-const PUSH_BACK: &str = "{\"threads\": [{\"item\": 7, \"thread\": 1, \"decision\": \
-                         \"push-back\", \"why\": \"the race is real\"}]}";
-
-// A project naming `agents.pm`, listing cubic after its qwen and Claude rounds
-fn pm_project(project: &str) -> Rig {
-    let rig = listing(project, &["cubic"]);
-    rig.pm("pm");
-    rig.allow(&["sonnet-high", "qwen", "claude", "cubic", "pm"]);
-    rig
-}
-
-// #7's pull request 71, read clean by qwen and Claude, with cubic having reviewed
-// the head on its own and left `titles` threads open on it. The item stands at the
-// gate, which has not run yet, and the returned head is the pull request's.
-fn at_the_gate(rig: Rig, titles: &[&str]) -> (Rig, Mutex<Runner>, String) {
-    let runner = rig.open().unwrap();
-    rig.ask(&runner, "add", Some("7"));
-    runner.lock().unwrap().plan_two_reads_for_the_rig();
-    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-    rig.claude
-        .script([Scripted::Push("work.txt", "work\n"), Scripted::Text(CLEAN)]);
-    step(&runner).unwrap(); // the worker's first turn: opens the pull request
-    step(&runner).unwrap(); // review round 1, qwen: clean by default
-    step(&runner).unwrap(); // review round 2, Claude: scripted clean above
-    let head = rig.forge.head_of("kelpie/7").expect("the worker pushed");
-    open_bots(&rig, &head, titles);
-    (rig, runner, head)
-}
-
-// cubic reads `head` on its own, opening one thread for each title
-fn open_bots(rig: &Rig, head: &str, titles: &[&str]) {
-    if titles.is_empty() {
-        return;
-    }
-    rig.forge
-        .coderabbit
-        .cubic_review(71, head, now(rig) + 60, titles);
-    rig.clock.advance(60);
-}
-
-// Steps until the item waits at the gate on `reason`, keeping what each step reported
-fn waits_with(rig: &Rig, runner: &Mutex<Runner>, reason: &str) -> Vec<StepReport> {
-    let deadline = Instant::now() + CALL_PATIENCE;
-    let mut seen = Vec::new();
-    while Instant::now() < deadline {
-        match step(runner).unwrap() {
-            Some(report) => seen.push(report),
-            None => std::thread::yield_now(),
-        }
-        let status = rig.ask(runner, "status", None);
-        if status["work_item"]["held_up"]["because"].as_str() == Some(reason) {
-            return seen;
-        }
-        assert!(
-            status["rulings"].as_array().unwrap().is_empty(),
-            "a ruling came while the thread waited: {status}"
-        );
-    }
-    panic!("the item never waited on {reason}: {seen:?}");
-}
-
-/// The project manager's wakes, in order
-fn pm_seen(rig: &Rig) -> Vec<Seen> {
-    rig.claude
-        .all_seen()
-        .into_iter()
-        .filter(|s| s.call.role == Role::Pm)
-        .collect()
-}
-
-// Waits until the project manager has been woken `n` times, and returns its wakes
-fn woken(rig: &Rig, n: usize) -> Vec<Seen> {
-    let deadline = Instant::now() + CALL_PATIENCE;
-    loop {
-        let seen = pm_seen(rig);
-        if seen.len() >= n {
-            return seen;
-        }
-        if Instant::now() >= deadline {
-            panic!(
-                "the project manager was woken {} times, not {n}",
-                seen.len()
-            );
-        }
-        std::thread::yield_now();
-    }
-}
-
-/// The worker's turns, in order
-fn worker(rig: &Rig) -> Vec<String> {
-    rig.claude
-        .all_calls()
-        .into_iter()
-        .filter(|c| c.role == Role::Worker)
-        .map(|c| c.prompt)
-        .collect()
-}
-
-/// Queues each `say` as the project manager's next answers, oldest first
-fn pm_says(rig: &Rig, says: impl IntoIterator<Item = &'static str>) {
-    rig.claude
-        .script_for(Role::Pm, says.into_iter().map(Scripted::Say));
-}
-
-/// Queues `steps` as the worker's next turns
-fn worker_says(rig: &Rig, steps: impl IntoIterator<Item = Scripted>) {
-    rig.claude.script_for(Role::Worker, steps);
-}
-
-// Steps until a step reports what `wanted` matches, and returns every report it saw
-fn steps(runner: &Mutex<Runner>, wanted: impl Fn(&StepReport) -> bool) -> Vec<StepReport> {
-    let deadline = Instant::now() + CALL_PATIENCE;
-    let mut seen = Vec::new();
-    while Instant::now() < deadline {
-        match step(runner).unwrap() {
-            Some(report) => {
-                let hit = wanted(&report);
-                seen.push(report);
-                if hit {
-                    return seen;
-                }
-            }
-            None => std::thread::yield_now(),
-        }
-    }
-    panic!("no step reported what the test waited for: {seen:?}")
-}
-
-// Steps until the project manager has answered `n` times, and returns every report it saw
-fn answers(runner: &Mutex<Runner>, n: usize) -> Vec<StepReport> {
-    let deadline = Instant::now() + CALL_PATIENCE;
-    let mut seen = Vec::new();
-    let mut answered = 0;
-    while Instant::now() < deadline {
-        match step(runner).unwrap() {
-            Some(report) => {
-                if matches!(report, StepReport::PmAnswered { .. }) {
-                    answered += 1;
-                }
-                seen.push(report);
-                if answered >= n {
-                    return seen;
-                }
-            }
-            None => std::thread::yield_now(),
-        }
-    }
-    panic!("the project manager answered {answered} times, not {n}: {seen:?}")
-}
-
-// What the project manager's answer came to: what kelpie acted on and dropped
-fn ruled(reports: &[StepReport]) -> (Vec<String>, Vec<String>) {
-    for report in reports {
-        if let StepReport::PmAnswered { acted, dropped, .. } = report {
-            return (acted.clone(), dropped.clone());
-        }
-    }
-    panic!("the project manager did not answer: {reports:?}")
-}
-
-// The gate's steps and the project manager's answer to them
-fn ruled_by(rig: &Rig, runner: &Mutex<Runner>, say: &'static str) -> Vec<StepReport> {
-    pm_says(rig, [say]);
-    answers(runner, 1)
-}
-
-// The merge ruling the gate raises, and what it says
-fn merge_ruling(runner: &Mutex<Runner>) -> String {
-    let seen = steps(runner, |r| matches!(r, StepReport::Ruling { .. }));
-    let (id, question) = ruling_report(seen.last().cloned());
-    assert_eq!(id, ticket(71));
-    question
-}
-
-// The maintainer opens a thread on the pull request, which the worker turns down,
-// so it stays open: its id
-fn declined_thread(rig: &Rig, runner: &Mutex<Runner>) -> String {
-    let id = rig.forge.coderabbit.person_opens(
-        71,
-        "work.txt",
-        "octocat",
-        Standing::Writer,
-        "Rename `bleats`. It reads badly.",
-    );
-    worker_says(
-        rig,
-        [Scripted::PushSay(
-            "other.txt",
-            "other\n",
-            "thread 1: declined: the name is public API",
-        )],
-    );
-    steps(runner, |r| matches!(r, StepReport::Ended { .. }));
-    id
-}
-
-// What the worker writes to defer `found`, in the deferred findings file's own format
-fn deferred(found: &[Finding]) -> String {
-    let line = |f: &Finding| format!("HIGH|{}:{}|{}|{}\n", f.file, f.line, f.what, f.why);
-    found.iter().map(line).collect()
-}
-
-// What kelpie replied on `THREAD`, last first
-fn last_reply(rig: &Rig) -> (String, String) {
-    rig.forge
-        .coderabbit
-        .replies()
-        .last()
-        .cloned()
-        .unwrap_or_default()
-}
 
 #[test]
 fn an_open_nit_holds_the_merge_and_asks_the_project_manager() {
@@ -959,4 +727,175 @@ fn an_adopted_contribution_keeps_its_ruling_and_asks_nothing() {
         pm_seen(&rig).is_empty(),
         "nothing is asked of the project manager"
     );
+}
+
+#[test]
+fn a_deferred_finding_asks_before_the_merge() {
+    let rig = pm_project("threads-deferred-asks");
+    rig.merge_auto();
+    let (rig, runner, _) = at_the_gate_found(rig, &[racy()]);
+    defers(&rig, &[racy()]);
+    pm_says(&rig, [NOTHING]);
+
+    waits_with(&rig, &runner, THREADS_HELD);
+    let [wake] = woken(&rig, 1).try_into().unwrap();
+    assert!(
+        wake.call
+            .prompt
+            .contains("1. src/lib.rs:9 (deferred by the worker, HIGH): looks racy"),
+        "{}",
+        wake.call.prompt
+    );
+    assert_eq!(rig.forge.merges(), [], "the merge waits for the ruling");
+    assert_eq!(rig.forge.created(), [], "nothing is filed before it");
+    assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
+}
+
+#[test]
+fn a_deferred_finding_followed_up_is_filed_before_the_merge_and_not_again() {
+    let rig = pm_project("threads-deferred-follow-up");
+    rig.merge_auto();
+    let (rig, runner, head) = at_the_gate_found(rig, &[racy()]);
+    defers(&rig, &[racy()]);
+
+    let (acted, dropped) = ruled(&ruled_by(&rig, &runner, FOLLOW_UP));
+    assert_eq!(dropped, Vec::<String>::new());
+    assert_eq!(
+        acted,
+        ["ruled thread 1 of #7 as follow-up: too big for this pull request"],
+        "{acted:?}"
+    );
+    let [issue] = rig.forge.created().try_into().unwrap();
+    assert_eq!(issue.labels, [READY], "the follow-up is ready for a worker");
+    assert!(issue.body.contains("looks racy"), "{}", issue.body);
+    assert!(
+        issue.body.contains("two threads write the same field"),
+        "the issue carries kelpie's own words: {}",
+        issue.body
+    );
+    assert_eq!(
+        rig.forge.coderabbit.replies(),
+        [],
+        "it has no thread to reply on"
+    );
+
+    let seen = steps(&runner, |r| matches!(r, StepReport::Finished { .. }));
+    assert!(
+        seen.iter().all(|r| !matches!(
+            r,
+            StepReport::Ruling { .. } | StepReport::FollowUpsFiled { .. }
+        )),
+        "nothing is asked or filed at the merge: {seen:?}"
+    );
+    assert_eq!(rig.forge.merges(), [(71, head)]);
+    assert_eq!(rig.forge.created().len(), 1, "filed once");
+    assert_eq!(
+        pm_seen(&rig).len(),
+        1,
+        "it is not put to the project manager again"
+    );
+}
+
+#[test]
+fn a_deferred_finding_sent_back_rides_the_threads_turn() {
+    let rig = pm_project("threads-deferred-fix");
+    rig.merge_auto();
+    let (rig, runner, head) = at_the_gate_found(rig, &[racy()]);
+    defers(&rig, &[racy()]);
+    open_bots(&rig, &head, &[NIT]);
+    let turns_before = worker(&rig).len();
+    worker_says(
+        &rig,
+        [Scripted::PushSay(
+            "shorter.txt",
+            "shorter\n",
+            "thread 1: fixed\nthread 2: fixed",
+        )],
+    );
+
+    let (acted, dropped) = ruled(&ruled_by(&rig, &runner, FIX_BOTH));
+    assert_eq!(dropped, Vec::<String>::new());
+    assert_eq!(acted.len(), 2, "{acted:?}");
+    let item = runner.lock().unwrap().state.work_items[0].clone();
+    assert_eq!(item.threads_sent.len(), 2, "both ride one turn");
+    assert_eq!(item.counts.fix_turns, 2, "the round's turn and this one");
+
+    steps(&runner, |r| matches!(r, StepReport::FixPushed { .. }));
+    let turns = worker(&rig);
+    assert_eq!(turns.len(), turns_before + 1, "one worker turn: {turns:?}");
+    let file = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
+    assert!(file.contains("thread 1|"), "{file}");
+    assert!(
+        file.contains("thread 2|HIGH|src/lib.rs:9|looks racy"),
+        "{file}"
+    );
+    let seen = steps(&runner, |r| matches!(r, StepReport::Finished { .. }));
+    assert_eq!(rig.forge.coderabbit.resolved(), [THREAD]);
+    assert_eq!(rig.forge.created(), [], "a fixed finding is filed nowhere");
+    assert!(
+        seen.iter().all(|r| !matches!(r, StepReport::Ruling { .. })),
+        "nothing is asked at the merge: {seen:?}"
+    );
+    let merges = rig.forge.merges();
+    assert_eq!(merges.len(), 1, "{merges:?}");
+    assert_ne!(merges[0].1, head, "the fix's push is what merged");
+}
+
+#[test]
+fn a_deferred_finding_closed_files_nothing_and_journals_why() {
+    let rig = pm_project("threads-deferred-close");
+    rig.merge_auto();
+    let (rig, runner, _) = at_the_gate_found(rig, &[racy()]);
+    defers(&rig, &[racy()]);
+
+    let (acted, dropped) = ruled(&ruled_by(&rig, &runner, CLOSE));
+    assert_eq!(dropped, Vec::<String>::new());
+    assert_eq!(
+        acted,
+        ["ruled thread 1 of #7 as close: the caller checks it"],
+        "{acted:?}"
+    );
+    let journaled: Vec<String> = (journal::read(&rig.paths().journal).into_iter())
+        .flat_map(|line| match line.entry {
+            Entry::Wake { acted, .. } => acted,
+            _ => Vec::new(),
+        })
+        .collect();
+    assert_eq!(journaled, acted, "the reason is in the journal");
+    let left = std::fs::read_to_string(rig.build_7().join("deferred-findings.md")).unwrap();
+    assert_eq!(left, "", "it left the deferred findings");
+
+    let seen = steps(&runner, |r| matches!(r, StepReport::Finished { .. }));
+    assert!(
+        seen.iter().all(|r| !matches!(r, StepReport::Ruling { .. })),
+        "nothing is asked at the merge: {seen:?}"
+    );
+    assert_eq!(rig.forge.created(), [], "a close files nothing");
+    assert_eq!(
+        rig.forge.coderabbit.replies(),
+        [],
+        "it has no thread to reply on"
+    );
+}
+
+#[test]
+fn a_disputed_finding_asks_nothing() {
+    let rig = pm_project("threads-deferred-disputed");
+    rig.merge_auto();
+    let (rig, runner, _) = at_the_gate_found(rig, &[racy()]);
+    defers(&rig, &[racy()]);
+    let disputed = format!("{}  the caller holds the lock\n", deferred(&[racy()]));
+    std::fs::write(rig.build_7().join("disputed-findings.md"), disputed).unwrap();
+
+    let seen = steps(&runner, |r| matches!(r, StepReport::Finished { .. }));
+    assert!(
+        seen.iter().all(|r| !matches!(r, StepReport::Ruling { .. })),
+        "{seen:?}"
+    );
+    assert!(
+        pm_seen(&rig).is_empty(),
+        "nothing is put to the project manager"
+    );
+    assert_eq!(rig.forge.created(), [], "a disputed finding is not filed");
+    assert_eq!(rig.forge.merges().len(), 1);
 }

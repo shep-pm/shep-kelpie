@@ -242,6 +242,13 @@ impl Runner {
                 ));
                 continue;
             }
+            if *decision == Decision::PushBack && thread.id.is_empty() {
+                dropped.push(format!(
+                    "push-back {named} thread {number}: it is a deferred finding with no thread \
+                     to reply on; give `fix`, `follow-up` or `close` instead"
+                ));
+                continue;
+            }
             let why = plain(&self.shown(why.clone()), WORDS);
             let because = match why.is_empty() {
                 true => String::new(),

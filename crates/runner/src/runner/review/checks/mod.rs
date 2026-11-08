@@ -39,7 +39,12 @@ impl Runner {
     ///
     /// Nothing is run when the worktree is somewhere else: the outcome there
     /// would say nothing of what the reviewer read.
-    pub(super) fn tests_before(&self, round: u32, head: &str, found: &[Finding]) -> Vec<TestCheck> {
+    pub(in crate::runner) fn tests_before(
+        &self,
+        round: u32,
+        head: &str,
+        found: &[Finding],
+    ) -> Vec<TestCheck> {
         self.clear_stranded();
         let tested: Vec<(&Finding, &str)> = found
             .iter()
