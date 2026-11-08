@@ -15,10 +15,11 @@ use crate::ticket::TicketId;
 
 /// The keys an answer takes, an object with none of them being none: `why`
 /// is left out, since an unstick inside an answer has one of its own
-const KEYS: [&str; 12] = [
+const KEYS: [&str; 13] = [
     "pick",
     "hold",
     "unstick",
+    "fix",
     "answer",
     "follow_up",
     "red",
@@ -40,6 +41,9 @@ const RED: &str = "`workflow`, a `call` of fix with a `title` and a `body`, or a
 /// What an `unstick` entry holds, as a dropped one names it
 const UNSTICK: &str = "`item`, an `action` of retry, re-scope, ask or none, and `why`";
 
+/// What a `fix` entry holds, as a dropped one names it
+const FIX: &str = "`item`, an `on` naming the open fix it waits on, and `why`";
+
 /// What the project manager answered, field by field
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct Answer {
@@ -51,6 +55,8 @@ pub(super) struct Answer {
     pub(super) hold: Option<Vec<HoldCall>>,
     /// What to do about each stuck work item the wake carried
     pub(super) unstick: Vec<Unstick>,
+    /// Each stuck work item it parks on an open fix, as the wake gave them
+    pub(super) fix: Vec<FixCall>,
     /// What to do about one worker's question
     pub(super) answer: Option<Settle>,
     /// What to do about one follow-up ruling's findings
@@ -122,6 +128,18 @@ pub(super) struct Unstick {
     /// What to do
     pub(super) action: Action,
     /// Why, which a ruling it raises carries
+    pub(super) why: String,
+}
+
+/// The project manager's call to keep one stuck work item parked on a fix
+/// that is already open
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct FixCall {
+    /// The work item's ticket, which is parked on a ruling
+    pub(super) item: TicketId,
+    /// The open fix work item it waits on
+    pub(super) on: TicketId,
+    /// Why, which the ruling it stays parked on carries
     pub(super) why: String,
 }
 
@@ -259,6 +277,22 @@ pub(super) fn read(text: &str) -> Option<Answer> {
                 value => match unstick(value) {
                     Some(u) => answer.unstick.push(u),
                     None => answer.unread.push(unread(UNSTICK)),
+                },
+            },
+            "fix" => match &value {
+                Value::Null => {}
+                // One item is one object; several are a list of them.
+                Value::Array(items) => {
+                    for item in items {
+                        match fix(item) {
+                            Some(f) => answer.fix.push(f),
+                            None => answer.unread.push(format!("`fix`: {FIX}, not {item}")),
+                        }
+                    }
+                }
+                value => match fix(value) {
+                    Some(f) => answer.fix.push(f),
+                    None => answer.unread.push(unread(FIX)),
                 },
             },
             "answer" => match &value {
@@ -462,6 +496,17 @@ fn unstick(value: &Value) -> Option<Unstick> {
     Some(Unstick {
         item,
         action,
+        why: why.trim().to_owned(),
+    })
+}
+
+fn fix(value: &Value) -> Option<FixCall> {
+    let item = ticket(value.get("item")?)?;
+    let on = ticket(value.get("on")?)?;
+    let why = value.get("why").and_then(Value::as_str).unwrap_or("");
+    Some(FixCall {
+        item,
+        on,
         why: why.trim().to_owned(),
     })
 }

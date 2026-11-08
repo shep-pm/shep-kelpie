@@ -33,6 +33,7 @@ mod call;
 mod case;
 mod ci_logs;
 mod diffs;
+mod fix;
 mod maintainer;
 mod more;
 mod notes;

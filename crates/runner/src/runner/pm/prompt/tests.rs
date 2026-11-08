@@ -243,6 +243,48 @@ fn a_resumed_wake_points_back_at_the_answer_it_already_has() {
 }
 
 #[test]
+fn the_fix_key_shows_once_on_a_wake_for_a_stuck_item_and_not_otherwise() {
+    let stuck = Wake::Stuck {
+        ticket: ticket(7),
+        what: "its turn failed".into(),
+        state: StuckState::Ruling {
+            id: ticket(7),
+            raised: Some(Timestamp(1)),
+        },
+    };
+    for fresh in [true, false] {
+        let text = wake(
+            "koji",
+            std::slice::from_ref(&stuck),
+            &[],
+            &[],
+            fresh,
+            &Notes::default(),
+            BOARD,
+        );
+        assert_eq!(
+            text.matches("\"fix\": null or {\"item\"").count(),
+            1,
+            "fresh {fresh}: {text}"
+        );
+        assert!(
+            text.contains("`fix` keeps a stuck item parked"),
+            "fresh {fresh}: {text}"
+        );
+    }
+    let text = wake(
+        "koji",
+        &[Wake::Pick(2, 1)],
+        &[],
+        &[],
+        false,
+        &Notes::default(),
+        BOARD,
+    );
+    assert!(!text.contains("\"fix\""), "{text}");
+}
+
+#[test]
 fn a_wake_for_a_stuck_item_says_to_read_its_ci_log_before_passing_it_on() {
     let stuck = Wake::Stuck {
         ticket: ticket(7),

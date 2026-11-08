@@ -39,7 +39,7 @@ use prompts::{
 };
 pub(super) use question::question;
 use stuck::fix_turns_had;
-pub(in crate::runner) use stuck::stuck_comment;
+pub(in crate::runner) use stuck::{PARKS, stuck_comment};
 
 /// The prompt for a turn resumed after the maintainer accepts a timed-out
 /// turn's ruling with a yes
