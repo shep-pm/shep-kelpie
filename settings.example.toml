@@ -275,9 +275,8 @@ compact_window = 200000
 # the project manager's recommendation is on the card. `true` has it answer.
 # The old `pm_alone` list still loads, as `true` for each kind it names, and
 # the migration turns it into the map. It also deletes the panel's `decide`,
-# `full_panel_paths`, `agents.advisor`, `agents.researcher` and `[researcher]`
-# table, and `advisor` and `researcher` from `repo_setup.roles`, which the
-# runner refuses.
+# `full_panel_paths`, `agents.advisor`, `agents.researcher`, the `[researcher]`
+# table and `repo_setup.roles`, which the runner refuses.
 # [app.dogs.kelpie.rulings.pm_decides]
 # question = false
 # agent-files = false
@@ -431,14 +430,9 @@ compact_window = 200000
 # turn on, each as `name@marketplace` with its marketplace's source as one
 # string: `github:owner/name`, `git:<url>` or `directory:<folder inside the
 # checkout>`, with `#<branch or tag>` after a `github` or `git` address.
-# `plugins`, `own`, `roles`, `parts` and `skip` still load and nothing reads
-# them: delete them.
+# `plugins`, `own`, `roles`, `parts` and `skip` are gone: the runner refuses
+# each by name until `shep kelpie settings migrate` deletes it.
 # [app.dogs.kelpie.repo_setup]
-# plugins = true
-# own = true
-# roles = ["worker", "reviewer", "pm"]
-# parts = ["skills", "agents", "commands", "hooks", "mcp"]
-# skip = ["noisy@house"]
 # extra = { "style@lab" = "github:acme/lab#v2" }
 
 # Where the project's tickets live. `github` takes them from the repo's issues.
