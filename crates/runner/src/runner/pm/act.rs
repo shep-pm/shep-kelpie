@@ -15,6 +15,7 @@ use super::{Pick, Picked, StuckState, Wake, stuck_on};
 use crate::board::briefing::ticket_ref;
 use crate::runner::ruling::PARKS;
 use crate::runner::thread_replies::Settler;
+use crate::runner::voice::DRAFT;
 use crate::runner::{Answer as Ruled, RuleError, Runner};
 use crate::settings::AgentName;
 use crate::state::{PmHeld, RulingKind, StateError, Stuck};
@@ -246,7 +247,7 @@ impl Runner {
             }
             (StuckState::Ruling { id, .. }, action) => {
                 self.pm.left_alone.remove(&ticket);
-                if let Err(e) = self.settle(ticket, *id, *action, why, None)? {
+                if let Err(e) = self.settle(ticket, *id, *action, why, None, None)? {
                     return Ok(Err(e));
                 }
                 match action {
@@ -318,7 +319,7 @@ impl Runner {
         let Some(StuckState::Ruling { id, .. }) = self.stuck(ticket) else {
             return Ok(());
         };
-        if let Err(e) = self.settle(ticket, id, action, &why, None)? {
+        if let Err(e) = self.settle(ticket, id, action, &why, None, None)? {
             self.notes.push(format!(
                 "the project manager could not act on {}: {e}",
                 ticket_ref(ticket)
@@ -327,10 +328,10 @@ impl Runner {
         Ok(())
     }
 
-    // Retries the item parked on ruling `id` as a yes would, or for CI
-    // still red sends the worker back; or puts it to the maintainer with
-    // the project manager's words added to the ruling, posted again, naming
-    // `on` as the fix it waits on where one is named.
+    // Retries the item parked on ruling `id` as a yes would, or for CI still
+    // red sends the worker back; or puts it to the maintainer with the project
+    // manager's words and any `draft` kelpie did not file added to the ruling's
+    // question, posted again, naming `on` as the fix it waits on where named.
     pub(super) fn settle(
         &mut self,
         ticket: TicketId,
@@ -338,6 +339,7 @@ impl Runner {
         action: Action,
         why: &str,
         on: Option<TicketId>,
+        draft: Option<&str>,
     ) -> Result<Result<(), String>, StateError> {
         let named = ticket_ref(ticket);
         let Some(ruling) = self.state.rulings.iter().find(|r| r.id == id) else {
@@ -381,10 +383,15 @@ impl Runner {
         };
         let mut next = self.state.clone();
         let ruling = (next.rulings.iter_mut().find(|r| r.id == id)).expect("found above");
-        ruling.question = match why.is_empty() {
-            true => format!("{}\n\n{lead}.", ruling.question),
-            false => format!("{}\n\n{lead}. PM says: {why}", ruling.question),
+        // The card holds one line of the project manager's words, so a draft goes under
+        // them, led for the card to find, and the webhook posts the question whole.
+        let words = match (why.is_empty(), draft) {
+            (true, None) => format!("{lead}."),
+            (true, Some(text)) => format!("{lead}.\n\n{DRAFT}\n{text}"),
+            (false, None) => format!("{lead}. PM says: {why}"),
+            (false, Some(text)) => format!("{lead}. PM says: {why}\n\n{DRAFT}\n{text}"),
         };
+        ruling.question = format!("{}\n\n{words}", ruling.question);
         ruling.alerted = false;
         self.save(next)?;
         Ok(Ok(()))

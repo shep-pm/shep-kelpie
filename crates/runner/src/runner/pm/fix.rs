@@ -81,7 +81,7 @@ impl Runner {
         if !issue.open {
             return Ok(Err(format!("fix {named}: {fix} is closed")));
         }
-        match self.settle(item, id, Action::Ask, why, Some(on))? {
+        match self.settle(item, id, Action::Ask, why, Some(on), None)? {
             Ok(()) => Ok(Ok(format!("parked {named} on {fix}"))),
             Err(why) => Ok(Err(why)),
         }
@@ -128,6 +128,9 @@ impl Runner {
     /// Puts `item`'s drafted fix to the maintainer with `why` and the draft,
     /// files nothing, and returns what it did in words, or why it was dropped
     ///
+    /// The draft goes whole under the ruling's words, which is what its card
+    /// renders and the webhook posts (`voice::card::drafted`).
+    ///
     /// # Errors
     ///
     /// [`StateError`] when the ruling it rewords cannot be saved.
@@ -144,12 +147,19 @@ impl Runner {
         };
         // Each part on its own, so a draft that names this machine loses its
         // body to the check and still says why kelpie filed nothing.
-        let words = format!(
-            "{why}. The fix I drafted, {}:\n{}",
+        let whole = format!(
+            "{}\n\n{}",
             self.shown(draft.title.clone()),
             self.shown(draft.body.clone()),
         );
-        match self.settle(item, id, Action::Ask, &words, None)? {
+        match self.settle(
+            item,
+            id,
+            Action::Ask,
+            &self.shown(why.to_owned()),
+            None,
+            Some(whole.as_str()),
+        )? {
             Ok(()) => Ok(Ok(format!(
                 "asked the maintainer about {named}'s fix draft, which kelpie did not file"
             ))),

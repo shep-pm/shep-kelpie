@@ -461,6 +461,54 @@ fn a_parked_stuck_card_names_the_fix_with_no_words_to_say() {
     assert!(!comment.contains("**Project manager**"), "{comment}");
 }
 
+/// What the read of a drafted fix said about it
+const REFUSED: &str = "the read found no such file in the checkout";
+
+// A stuck item whose drafted fix the read refused, as `settle` words its question
+fn draft_put_on_a_ruling(mut ruling: Ruling) -> Ruling {
+    ruling.question = format!(
+        "{}\n\nThe project manager asks you to decide. PM says: {REFUSED}\n\n{DRAFT}\n\
+         fix(board): name the lease wait\n\n\
+         Touches: `docs/guide/leases.md`\n\n\
+         ## Acceptance criteria\n\n\
+         - [ ] `docs/guide/leases.md` names the wait",
+        ruling.question
+    );
+    ruling
+}
+
+#[test]
+fn a_fix_draft_kelpie_did_not_file_is_on_the_card_whole() {
+    let refused = draft_put_on_a_ruling(ruling(ticket(1), turn_failed("it crashed")));
+    let comment = rendered(&refused);
+
+    assert!(
+        comment.contains(&format!("**Project manager**: {REFUSED}")),
+        "{comment}"
+    );
+    assert!(
+        comment.contains("**The fix kelpie drafted, and did not file**"),
+        "{comment}"
+    );
+    assert!(
+        comment.contains("fix(board): name the lease wait"),
+        "{comment}"
+    );
+    assert!(
+        comment.contains("- [ ] `docs/guide/leases.md` names the wait"),
+        "the draft is whole, not cut to one line: {comment}"
+    );
+    let (words, draft, answer) = (
+        comment.find("**Project manager**").unwrap(),
+        comment.find("**The fix kelpie drafted").unwrap(),
+        comment.find("@octocat").unwrap(),
+    );
+    assert!(
+        words < draft && draft < answer,
+        "the draft goes under the words, above the ways to answer: {comment}"
+    );
+}
+
 /// What the project manager says when it recommends after parking the item
 const LATER: &str = "the item's own change is fine, so merge it";
 

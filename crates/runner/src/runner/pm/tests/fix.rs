@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use super::asked::advanced_until;
 use super::{answered, dispatched, past_the_window, pm_seen, step_until, with_pm};
 use crate::ports::{AgentError, Session, Tools};
+use crate::runner::voice::DRAFT;
 use crate::runner::{BOARD_POLL, Runner, StepReport, advance, step};
 use crate::settings::Harness;
 use crate::test::{
@@ -286,10 +287,14 @@ fn a_retry_on_a_setup_failure_is_refused_and_named() {
 /// The draft's title, in the format an issue is written in
 const TITLE: &str = "fix(board): name the wait a worker holds for a lease";
 
-/// The draft's body, which kelpie's issue check passes
+/// The draft's body, which kelpie's issue check passes, and which is past what a
+/// ruling's one line of the project manager's words holds
 const BODY: &str = "Touches: `docs/guide/leases.md`\n\n## What to build\n\nThe guide never names \
-                   the wait. Name it.\n\n## Acceptance criteria\n\n- [ ] `docs/guide/leases.md` \
-                   names the wait\n";
+                   the wait a worker holds for a model lease, so a reader cannot tell a lease \
+                   wait from a silent turn. Name it in the leases guide, say what `status` shows \
+                   for it, and say who is told while it waits.\n\n## Acceptance criteria\n\n- [ ] \
+                   `docs/guide/leases.md` names the wait\n- [ ] it says what `status` shows for \
+                   it\n- [ ] a reader can tell a lease wait from a silent turn\n";
 
 /// Why the project manager files it
 const WHY: &str = "the guide is wrong about the wait";
@@ -423,8 +428,9 @@ fn nothing_files_before_the_read_ends() {
     assert!(rig.forge.created().is_empty(), "the read has not answered");
     assert_eq!(runner.lock().unwrap().state.order, Vec::new());
     assert!(
-        !asked(&rig, &runner, 7).contains("The fix I drafted"),
-        "the draft is not put to the maintainer either"
+        !asked(&rig, &runner, 7).contains(DRAFT),
+        "the draft is not put to the maintainer either: {}",
+        asked(&rig, &runner, 7)
     );
 
     hold.release();
@@ -455,16 +461,21 @@ fn a_refusal_files_nothing_and_the_card_gives_the_why_and_the_draft() {
         question.contains("`docs/guide/leases.md` is no file here"),
         "{question}"
     );
-    assert!(question.contains(TITLE), "{question}");
-    assert!(question.contains("## Acceptance criteria"), "{question}");
+    // The draft is past what one line of the project manager's words holds, so it
+    // reaches the maintainer under them, whole.
+    assert!(
+        question.contains(&format!("{DRAFT}\n{TITLE}")),
+        "{question}"
+    );
+    assert!(question.contains(BODY.trim_end()), "{question}");
 
-    let card = card(&rig, &runner, "The fix I drafted");
+    let card = card(&rig, &runner, DRAFT);
     assert!(
         card.contains("`docs/guide/leases.md` is no file here"),
         "{card}"
     );
     assert!(card.contains(TITLE), "{card}");
-    assert!(card.contains("## Acceptance criteria"), "{card}");
+    assert!(card.contains(BODY.trim_end()), "{card}");
     assert_eq!(rig.claude.calls().len(), 1, "the worker stays parked");
 }
 
@@ -481,7 +492,11 @@ fn a_failed_read_counts_as_a_refusal() {
     assert!(rig.forge.created().is_empty());
     let question = asked(&rig, &runner, 7);
     assert!(question.contains("the read call failed"), "{question}");
-    assert!(question.contains(TITLE), "the draft reaches the maintainer");
+    assert!(
+        question.contains(TITLE),
+        "the draft whole reaches the maintainer"
+    );
+    assert!(question.contains(BODY.trim_end()), "{question}");
 }
 
 #[test]
@@ -497,10 +512,12 @@ fn a_reply_with_no_verdict_counts_as_a_refusal() {
     assert_eq!(fix, None);
     assert_eq!(verdict, "the read gave no verdict kelpie reads");
     assert!(rig.forge.created().is_empty());
+    let question = asked(&rig, &runner, 7);
     assert!(
-        asked(&rig, &runner, 7).contains("the read gave no verdict kelpie reads"),
-        "the maintainer hears why nothing was filed"
+        question.contains("the read gave no verdict kelpie reads"),
+        "the maintainer hears why nothing was filed: {question}"
     );
+    assert!(question.contains(BODY.trim_end()), "{question}");
 }
 
 #[test]
@@ -697,6 +714,10 @@ fn a_draft_the_issue_check_refuses_makes_no_call() {
     assert!(question.contains("fails the issue check"), "{question}");
     assert!(question.contains("no `Touches:` line"), "{question}");
     assert!(question.contains(TITLE), "{question}");
+    assert!(
+        question.contains("`test` fails and something should fix it."),
+        "the draft whole reaches the maintainer: {question}"
+    );
 }
 
 #[test]
@@ -727,6 +748,11 @@ fn a_draft_naming_this_machine_makes_no_call() {
     assert!(
         !question.contains(&rig.repo().display().to_string()),
         "the path is never echoed: {question}"
+    );
+    assert!(question.contains(TITLE), "the draft reaches the maintainer");
+    assert!(
+        question.contains("(withheld:"),
+        "its body names this machine, so it is withheld whole: {question}"
     );
 }
 

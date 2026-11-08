@@ -1,13 +1,13 @@
 //! A ruling's comment in one short format
 //!
 //! Every kind renders the same way: a title, what happened, what each option
-//! does, the project manager's words, and the ways to answer. A ruling you
-//! answer with a yes or a no names each option once, under how it is answered;
-//! a worker's question and a contributor's ruling list lettered options, which
-//! is how the project manager votes and how their boxes are ticked. The same
-//! options are what a reaction or a ticked box on the comment is read against
-//! ([`thumbs`] and [`ticked`]), so what the comment offers and what kelpie
-//! accepts cannot drift apart.
+//! does, the project manager's words, any fix draft kelpie did not file, and the
+//! ways to answer. A ruling you answer with a yes or a no names each option once,
+//! under how it is answered; a worker's question and a contributor's ruling list
+//! lettered options, which is how the project manager votes and how their boxes
+//! are ticked. The same options are what a reaction or a ticked box on the
+//! comment is read against ([`thumbs`] and [`ticked`]), so what the comment
+//! offers and what kelpie accepts cannot drift apart.
 
 use super::super::contributions::{
     ADOPT_ANYWAY, CLOSE_WITH_THANKS, KEEP_WAITING, LEAVE_OPEN, flagged_lines,
@@ -84,6 +84,7 @@ pub(super) fn ruling_comment(mention: Option<&str>, ruling: &Ruling) -> String {
     });
     blocks.extend(card.on_the_board());
     blocks.extend(pm_words(ruling, &card.choices));
+    blocks.extend(drafted(ruling));
     blocks.push(match mention {
         Some(login) => answering(login, number, kind, &card.choices),
         None => unmentioned(number, kind),
@@ -105,13 +106,14 @@ pub(in crate::runner) fn brief(ruling: &Ruling) -> (String, usize) {
 /// A ruling's comment once it is settled, to edit over the one it was posted as
 ///
 /// `line` says how it was settled and that nothing waits on the maintainer.
-/// The question stays under it, with the project manager's words, and no option, tick,
-/// reaction or reply is offered.
+/// The question stays under it, with the project manager's words, any fix draft
+/// it did not file, and no option, tick, reaction or reply is offered.
 pub(in crate::runner) fn settled_comment(ruling: &Ruling, line: &str) -> String {
     let card = Card::for_ruling(ruling);
     let mut blocks = vec![line.to_owned()];
     blocks.extend(card.opening());
     blocks.extend(pm_words(ruling, &card.choices));
+    blocks.extend(drafted(ruling));
     blocks.join("\n\n")
 }
 
@@ -751,6 +753,10 @@ pub(in crate::runner) const RECOMMENDS: &str = "PM recommends:";
 /// put to the maintainer
 pub(in crate::runner) const SAYS: &str = "PM says:";
 
+/// What leads a fix draft kelpie did not file, which the maintainer reads whole
+/// under the project manager's one line of words (see [`drafted`])
+pub(in crate::runner) const DRAFT: &str = "PM draft:";
+
 // The project manager's latest word on the ruling, where it gave any:
 // `**Project manager: A**. Its why.`, or by name on a card whose table names
 // its options instead of lettering them, as `**Project manager: Merge**`. A
@@ -778,6 +784,15 @@ fn pm_words(ruling: &Ruling, choices: &[Choice]) -> Option<String> {
         (None, None, Some(words)) => format!("**Project manager**: {words}"),
         (None, None, None) => return None,
     })
+}
+
+// The fix draft kelpie put on `ruling` and did not file, whole, where it put
+// one: everything after the last [`DRAFT`] line, which is the draft as written.
+fn drafted(ruling: &Ruling) -> Option<String> {
+    let lead = format!("\n{DRAFT}\n");
+    let at = ruling.question.rfind(&lead)? + lead.len();
+    let text = ruling.question[at..].trim();
+    (!text.is_empty()).then(|| format!("**The fix kelpie drafted, and did not file**\n\n{text}"))
 }
 
 // Whether the park line is later in the question than the pick line, so the
