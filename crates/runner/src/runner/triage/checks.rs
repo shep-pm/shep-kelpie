@@ -248,6 +248,14 @@ impl Runner {
             || self.split_child_pending(issue, body)
     }
 
+    // Whether `issue`'s triage record still waits on its author's answers, or on
+    // the body their own session writes
+    fn triage_open_questions(&self, issue: u64) -> bool {
+        (self.triage_record(issue)).is_some_and(|t| {
+            t.asked.is_some() || t.questions.is_some() || t.local.is_some()
+        })
+    }
+
     // Says that `issue`'s `ready-for-agent` is not seen, because kelpie is taking it
     // back for triage and its coming off is not the maintainer's
     pub(super) fn check_ready_unseen(&mut self, issue: u64) -> Result<(), StateError> {
@@ -305,6 +313,12 @@ impl Runner {
                     .any(|t| *t == issue.ticket);
                 if ended {
                     return None;
+                }
+                // A pass that asked its author owes its labels still, and takes
+                // the queue's `ready-for-agent` back. This holds before the
+                // check's own reading, so the wait is what the board says.
+                if self.triage_open_questions(number) {
+                    return Some(Skip::Asked { issue: issue.ticket });
                 }
                 let key = check::key(&issue.title, &issue.body, &issue.labels);
                 let kept = (self.state.checks.iter()).find(|c| c.issue == number);

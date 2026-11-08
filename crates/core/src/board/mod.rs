@@ -243,6 +243,11 @@ pub enum Skip {
         /// Each part the check found missing or malformed, in its words
         failures: Vec<String>,
     },
+    /// Its triage asked questions that are not answered yet
+    Asked {
+        /// The ticket
+        issue: TicketId,
+    },
     /// A package its `Needs:` line names is not published yet, so it waits
     /// until a poll finds it out
     Unpublished {
@@ -301,6 +306,7 @@ impl Skip {
             | Self::Overlap { issue, .. }
             | Self::PathsUnread { issue, .. }
             | Self::Check { issue, .. }
+            | Self::Asked { issue }
             | Self::Unpublished { issue, .. }
             | Self::Paced { issue, .. }
             | Self::Unpicked { issue, .. }

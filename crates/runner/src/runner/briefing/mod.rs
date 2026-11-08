@@ -807,6 +807,10 @@ pub(super) fn passed_over(skip: &Skip, shown: &dyn Fn(String) -> String) -> (Str
             format!("the issue check refused it: {}", shown(failures.join("; "))),
             true,
         ),
+        Skip::Asked { .. } => (
+            "its triage asked questions that are not answered yet".into(),
+            true,
+        ),
         Skip::Unpublished { package, .. } => (
             format!(
                 "needs {} to be published, which the next poll that finds it ends",
