@@ -23,8 +23,8 @@ use super::research_tests::{
     MADE_AT_START, WORDS, calls, crash, handed, moves, reply, restart, triage,
 };
 use super::spam::POSSIBLE_SPAM;
-#[cfg(unix)]
 use crate::board::TRIAGE;
+#[cfg(unix)]
 use crate::github::ApiError;
 use crate::ports::{AuthorAssociation, ClassifierError, Clock, Role, Timestamp, Usage};
 use crate::runner::{Runner, step};
