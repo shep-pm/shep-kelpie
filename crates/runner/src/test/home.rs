@@ -30,6 +30,7 @@ impl Rig {
             harness_mcp: Mutex::new(Arc::new(crate::adapters::McpRules)),
             samples: super::RecordedSink::default(),
             classifier: FakeClassifier::new(),
+            registry: FakeRegistry::new(),
             github: FakeGithub::new(clock.clone(), "shep-pm"),
             pace: Arc::new(LocalPace::with(CallPacer::new(usize::MAX, usize::MAX))),
             agent_board: FakeAgentBoard::default(),

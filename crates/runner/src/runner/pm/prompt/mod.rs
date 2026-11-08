@@ -13,14 +13,18 @@ use crate::ports::{Finding, Wait};
 /// shows again to a session that has seen the answer without it
 macro_rules! answer_key {
     () => {
-        "\"answer\": null or {\"item\": <the work item whose worker asked, or whose follow-up you pass on>, \"text\": \"<the worker's next turn>\" or \"escalate\": \"<the choice you recommend>\", \"candidates\"?: [\"<an answer>\", ...], \"problem\": \"<optional, at most 600 characters>\", \"board\": \"<optional, at most 300 characters>\", \"why\": \"<one sentence, at most 300 characters>\"}"
+        "\"answer\": null or {\"item\": <the work item whose worker asked, or whose follow-up you pass on>, \"text\": \"<the worker's next turn>\" or \"escalate\": \"<the choice you recommend>\", \"candidates\"?: [\"<an answer>\", ...], \"problem\": \"<optional, at most 600 characters>\", \"board\": \"<optional, at most 300 characters>\", \"why\": \"<one sentence, at most 300 characters>\"} or a list of them"
     };
 }
 
 /// How a worker's question is answered, shown with the `answer` key
 macro_rules! questions {
     () => {
-        "A worker's question waits on you for one wake at most. Read its case first, \
+        "A wake may carry several questions, from several work items. Answer each one \
+         the wake carried, in its own `answer` entry or as a list of them: kelpie settles \
+         each in turn, and drops one it cannot act on, naming why. A question no entry \
+         answers goes to the maintainer after the wake, as it stands.\n\n\
+         A worker's question waits on you for one wake at most. Read its case first, \
          `cases/<issue>.md`, named on the item's line under `## Code`. Answer with `text` \
          where the case, the code and the docs give you an argument, and put that argument \
          in `why`: kelpie sends the worker `PM answered: ` and your text as its next turn, \
