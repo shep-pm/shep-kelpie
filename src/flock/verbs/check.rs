@@ -20,14 +20,14 @@ use crate::ticket::TicketId;
 
 /// Whether `issue <args>` is the check, wherever `-p` sits in it
 pub(super) fn asked(command: &str, args: &[String]) -> bool {
-    let rest = split_project(args, None).map(|(_, rest)| rest);
+    let rest = split_project(args, None).map(|(_, rest, _)| rest);
     command == "issue" && rest.is_ok_and(|rest| rest.first().is_some_and(|w| w == "check"))
 }
 
 /// Runs `issue <args>` as the check, `env` giving each variable, and returns
 /// its exit code
 pub(super) fn main(env: &dyn Fn(&str) -> Option<OsString>, args: &[String]) -> u8 {
-    let checked = split_project(args, None).and_then(|(named, rest)| match &rest[1..] {
+    let checked = split_project(args, None).and_then(|(named, rest, _)| match &rest[1..] {
         [flag, file, labels @ ..] if flag == "--draft" => {
             draft_labels(labels).and_then(|labels| check::draft(Path::new(file), &labels))
         }

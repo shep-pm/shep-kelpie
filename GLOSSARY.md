@@ -421,7 +421,9 @@ a finding at the bot's own severity.
 The one worker turn after a reviewer's findings, which counts only if it
 moves the branch's head. A fix turn sent only nits starts nothing new: no
 reviewer reads again because of it, and a bot that read the pull request
-before has its nits on that fix's head left open. Findings the worker
+before has its nits on that fix's head left open. With a project manager,
+every thread still open at the merge, nits included, goes to it, and a `fix`
+ruling sends the worker one turn for all of them. Findings the worker
 leaves out of scope go in the **deferred findings** file, which the merge
 files as follow-ups, all but its nits. A finding the worker shows is
 wrong goes in the **disputed findings** file with its reason: the next
@@ -542,7 +544,9 @@ takes three answers:
 `rework <note>`, whose change starts a new pass, as a `no` does on a
 merge ruling that warns of open bot threads, an unread pass or an unread
 head. It names open bot nits apart from the threads that hold a merge, and
-nits never do. Where an **App** covers the repo, a ruling is also answered by
+nits hold nothing where the project names no project manager. With one, the
+project manager rules on every open thread first (fix, follow up, or close as
+wrong, or push back on the maintainer's), so none reaches the ruling unruled. Where an **App** covers the repo, a ruling is also answered by
 a reply in its thread that starts with the ruling's number, as `shep kelpie rule`
 does (`99 yes`), from the one login the ruling mentions, if it has write
 access to the repo: a bare `yes` answers nothing, and a ruling that mentions

@@ -34,10 +34,12 @@ mod lag;
 pub(super) mod queued;
 mod reads;
 mod rerun;
+mod threads;
 
 #[cfg(test)]
 use lag::LAG_LIMIT;
 pub(super) use lag::Lags;
+pub(in crate::runner) use threads::PushedBack;
 
 impl Runner {
     pub(super) fn check_ci(&mut self) -> Result<Begin, StateError> {
@@ -162,7 +164,8 @@ impl Runner {
 
     // Green CI: `auto` merges by the path a yes takes. `ask` raises the merge ruling with the
     // pull request back `ready-for-human`. `auto` raises it too for a head no reviewer read,
-    // unaddressed bot threads or another open pull request's commits. Open nits hold nothing.
+    // unaddressed bot threads or another open pull request's commits. Open nits hold nothing
+    // only where the project names no project manager, which rules on every open thread first.
     fn passed(&mut self, number: u64, head: String) -> Result<Begin, StateError> {
         if self.bots_before_merge(&head)? {
             return self.review_step();
@@ -201,6 +204,11 @@ impl Runner {
             Posted::Refused(said) => (Some(said), true),
             Posted::Retry(reason) => return Ok(self.gate_failed(reason)),
         };
+        // Every open thread of a project that names a project manager is its to rule
+        // on before the merge, and the item waits in CI for the answer.
+        if let Some(begin) = self.threads_hold(number, &head)? {
+            return Ok(begin);
+        }
         let unreviewed = self.current().and_then(|item| item.unreviewed.clone());
         let unread_head = self.current().is_some_and(|item| !item.vouches_for(&head));
         // A merge ruling's `no`, or a bot's late round, sent its fix here

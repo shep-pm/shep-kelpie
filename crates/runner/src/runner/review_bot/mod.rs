@@ -14,14 +14,10 @@ mod bot_reads;
 mod failed;
 mod installed;
 mod late;
-pub(in crate::runner) use answer::{Answered, is_reply};
+pub(in crate::runner) use answer::{Answered, RULED_CLOSE, RULED_FOLLOW, RULED_PUSH, is_reply};
 mod lease;
 pub(super) mod lease_wait;
 mod on_ready;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the gate that calls it is a later slice")
-)]
 mod open;
 pub(in crate::runner) use open::RuledThread;
 mod settle;

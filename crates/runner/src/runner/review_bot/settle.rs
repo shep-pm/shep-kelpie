@@ -96,8 +96,8 @@ impl Runner {
     /// `number`, as the merge ruling names them
     ///
     /// A thread is unaddressed when it is open, not outdated and not sent to
-    /// a fix turn awaiting it. Nits are named apart, since a nit never holds
-    /// a merge.
+    /// a fix turn awaiting it. Nits are named apart, since a nit holds a merge
+    /// only where the project names a project manager.
     ///
     /// # Errors
     ///
@@ -174,7 +174,8 @@ pub(in crate::runner) struct OpenThreads {
     pub(in crate::runner) holding: Option<String>,
     /// The forge's ids of the threads in `holding`
     pub(in crate::runner) held_by: Vec<String>,
-    /// The nits, which hold nothing, if any
+    /// The nits, which hold nothing where the project names no project manager
+    /// (with one, every open thread goes to it first), if any
     pub(in crate::runner) nits: Option<String>,
     /// Every open thread with its bot, level and place, nits included, when
     /// any is above a nit

@@ -77,6 +77,10 @@ impl Runner {
         self.pm
             .run_logs
             .retain(|(ticket, ..), _| open.contains(ticket));
+        self.pm.ci_runs.retain(|ticket, _| open.contains(ticket));
+        self.pm
+            .run_log_tried
+            .retain(|(ticket, ..)| open.contains(ticket));
         let cleared = match std::fs::remove_dir_all(&dir) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
@@ -125,6 +129,8 @@ impl Runner {
             }
             said.insert(ticket, line);
         }
+        // A log asked for is read for this wake alone: one a case did not take is asked again.
+        self.pm.run_log_asks.clear();
         said
     }
 

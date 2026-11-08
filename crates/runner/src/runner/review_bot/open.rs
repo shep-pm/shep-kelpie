@@ -1,5 +1,6 @@
 //! The threads an item at the gate waits on, which a ruling on it names
 
+use super::answer::is_reply;
 use super::settle::first_sentence;
 use crate::ports::{Remark, Severity, Standing, Talk, TalkThread};
 use crate::review_bot::Thread;
@@ -24,6 +25,9 @@ pub(in crate::runner) struct RuledThread {
     pub what: String,
     /// Whether a writer spoke in it
     pub maintainer_wrote: bool,
+    /// The id of its last remark that is not one of kelpie's own replies, as it
+    /// stood when the thread was put to the project manager
+    pub said: Option<u64>,
 }
 
 /// The open threads an item waits on, and how many `case_threads` left out
@@ -86,7 +90,14 @@ impl Runner {
             author: first.author.clone(),
             severity,
             what,
-            maintainer_wrote: (thread.remarks.iter()).any(|r| r.standing == Standing::Writer),
+            // Kelpie's own replies post under the maintainer's login where no App
+            // covers the repo, so they are no sign the maintainer wrote in it.
+            maintainer_wrote: (thread.remarks.iter())
+                .any(|r| r.standing == Standing::Writer && !is_reply(&r.body)),
+            said: (thread.remarks.iter())
+                .filter(|r| !is_reply(&r.body))
+                .map(|r| r.id)
+                .max(),
         })
     }
 }
@@ -177,8 +188,24 @@ mod tests {
                 severity: Some(Severity::Low),
                 what: "The name could be shorter.".to_owned(),
                 maintainer_wrote: false,
+                said: Some(1),
             }]
         );
+    }
+
+    #[test]
+    fn kelpies_own_reply_under_the_maintainers_login_is_no_sign_they_wrote() {
+        let nit = "P3: The name could be shorter. It is long.";
+        let reply = remark(2, "octocat", Standing::Writer, "Declined: it is public API");
+        let talk = talk(vec![thread("T1", "src/a.rs", vec![cubic(nit), reply])]);
+
+        let got = ruled(&item(), &talk).threads;
+
+        let [one] = got.as_slice() else {
+            panic!("{got:?}")
+        };
+        assert!(!one.maintainer_wrote, "{one:?}");
+        assert_eq!(one.said, Some(1), "kelpie's reply is not a remark said");
     }
 
     #[test]

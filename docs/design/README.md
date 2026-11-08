@@ -15,7 +15,7 @@ Kelpie: the maintainer's dog; one runner per project builds ready issues. Asks o
 - Home never moved from `~/.kelpie`: no start, names each old file, exit 78 (`stop_exit_codes`). #311, #345
 - State file version 104 (`VERSION` in `core/state/mod.rs`); each change one way: rollback = finish or drop open items. `core/state/removed/mod.rs`
 - Business code is Rust; Tauri GUI after MVP. #5
-- A runner serves the typed protocol on `run/<project>.sock`; verbs fall back to `shep trigger`. ADR 0017. runner-socket.md
+- A runner serves the typed protocol on `run/<project>.sock`; verbs fall back to `shep trigger`. ADR 0017. runner-socket.md, runner-socket-client.md
 - Crates under `crates/` use nothing above them; the root holds the binary, verbs (`src/{flock,upgrade,sheep,doctor,issues}/`, `src/schema.rs`). ADR 0015
 - No budget numbers in worker prompts; the project manager sees each plan's weekly pace as a budget to spend by the reset (pm-board.md). No worker merges/posts as the maintainer (fence.md, github-app.md).
 

@@ -1,6 +1,6 @@
 # The runner's socket
 
-A runner answers the typed protocol on `run/<project>.sock` under kelpie's home, and the verbs ask it there first. `shep trigger` stays and answers the same JSON. The decision: ADR 0017. The types: `crates/protocol/`.
+A runner answers the typed protocol on `run/<project>.sock` under kelpie's home, and the verbs ask it there first. `shep trigger` stays and answers the same JSON. The decision: ADR 0017. The types: `crates/protocol/`. The asking side: runner-socket-client.md.
 
 ## The listener
 
@@ -35,26 +35,6 @@ A runner answers the typed protocol on `run/<project>.sock` under kelpie's home,
 - A std socket is close-on-exec, so after a handover's exec the new image binds again and replaces the stale file.
 - On Windows the same call binds a named pipe whose name `ipc::address` makes from the path. Only the non-blocking `windows` job compiles it, as `cargo check`; no test runs it.
 
-## The client
-
-`crates/client`, package `shep-kelpie-client`, using `protocol` and `core` (for `ipc`).
-
-- `connect(socket, deadline)` makes the hello. A socket that is missing or refused, a runner silent at the hello, one that answers no hello, and one below this protocol are one outcome, `Unreachable`.
-- `Connection::ask(&Request, deadline)` gives a `Reply` (a refusal is `Reply::Refused`), or a `Failure`: `TimedOut`, `Unknown` (the runner has no such request) or `Broken`.
-- `watch(socket, deadline)` sends `watch` and reads the first status before it returns, so a runner that predates it fails there (`WatchError::Failed(Failure::Unknown)`). `Watching::next()` gives the current status first, then each change, and `None` once the runner ends the stream.
-- A timeout spends the connection. A later ask sends nothing, since an answer may still arrive and would be read as the next ask's.
-
-## The verbs
-
-`src/flock/control/socket.rs`. A `Reach` holds kelpie's home and a once-flag, and `Reach::trigger` has `control::trigger`'s signature and returns its `Answered`, with the reply written as the JSON text the verbs parse. Output is unchanged, plain and `--json`.
-
-- `status`, `rule`, `tell`, `send` and `change` take `&Reach`. That covers `board`, `timings`, `gate`, `drop`, `rework`, `adopt`, `triage`, `add <ticket>`, `drain`, `undrain`, `attach` and `pm`.
-- `start`, `finish`, `finish_all`, `pause` and `src/upgrade/` keep `control::trigger`, since they must reach a stopped or older runner through the shepherd.
-- `Unreachable` and `Unknown` take the one-release path (`Reach::fallback`, the one function to delete): one line to stderr per command naming the socket path, then `shep trigger`.
-- `TimedOut` is `Answered::TimedOut` and never falls back, since the runner may have done the request. A connection that breaks after the request is sent is an error, for the same reason.
-- Text `request_of` refuses is answered `{"error": ...}` without a connection, as `shep trigger` would.
-
 ## Tests
 
 - `runner::socket::tests` serve a rig's runner under `short_tempdir()`, never the rig's own home, whose path can pass 103 bytes under a worker's `TMPDIR`. A dead socket is made by a child process that binds and exits, so no fork of the test holds the listener.
-- `flock::control::tests::socket` drives the verbs against a real runner's socket, against a scripted socket and the shepherd giving the same bodies, and against a socket that never answers.

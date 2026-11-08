@@ -577,6 +577,163 @@ async fn a_runner_that_refuses_a_tell_is_its_error() {
     assert_eq!(told, Err("koji has no project manager".into()));
 }
 
+// `tell_all` against the fake shepherd
+async fn told_all(
+    shepherd: &FakeShepherd,
+    note: &str,
+    format: Format,
+) -> Result<AllProjects, String> {
+    let client = client(shepherd).await;
+    in_time(tell_all(&reach(), &client, note, format)).await
+}
+
+// Each runner sent `tell`, with its note, in the order it was sent
+fn told(writes: &[Request]) -> Vec<(String, Option<String>)> {
+    (writes.iter())
+        .filter_map(|w| match w {
+            Request::Trigger {
+                selector: SelectorSpec::Name(sheep),
+                action,
+                params,
+            } if action == "tell" => Some((sheep.clone(), params.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+const NOTE: &str = "hold #12 until the release";
+
+#[tokio::test]
+async fn tell_all_tells_every_projects_runner() {
+    let mut shepherd = FakeShepherd::new();
+    runner(&shepherd, "koji", Path::new("/src/koji"), true);
+    runner(&shepherd, "rotom", Path::new("/src/rotom"), true);
+    let done = told_all(&shepherd, NOTE, Format::Plain).await.unwrap();
+    assert_eq!(
+        done.lines,
+        [
+            "told koji's project manager, which reads it on its next wake",
+            "told rotom's project manager, which reads it on its next wake",
+        ]
+    );
+    assert_eq!(done.refused, Vec::<String>::new());
+    let note = NOTE.to_owned();
+    assert_eq!(
+        told(&shepherd.writes()),
+        [
+            ("koji".to_owned(), Some(note.clone())),
+            ("rotom".to_owned(), Some(note)),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn tell_all_goes_on_past_a_runner_that_refuses() {
+    let mut shepherd = FakeShepherd::new();
+    runner(&shepherd, "koji", Path::new("/src/koji"), true);
+    runner(&shepherd, "rotom", Path::new("/src/rotom"), true);
+    shepherd.says("koji", &[r#"{"error":"koji has no project manager"}"#]);
+    let done = told_all(&shepherd, NOTE, Format::Plain).await.unwrap();
+    assert_eq!(done.refused, ["koji: koji has no project manager"]);
+    assert_eq!(
+        done.lines,
+        ["told rotom's project manager, which reads it on its next wake"]
+    );
+    let told = told(&shepherd.writes());
+    assert!(
+        told.contains(&("rotom".to_owned(), Some(NOTE.to_owned()))),
+        "{told:?}"
+    );
+}
+
+#[tokio::test]
+async fn tell_all_reports_a_stopped_runner_and_tells_the_rest() {
+    let mut shepherd = FakeShepherd::new();
+    runner(&shepherd, "koji", Path::new("/src/koji"), false);
+    runner(&shepherd, "rotom", Path::new("/src/rotom"), true);
+    let done = told_all(&shepherd, NOTE, Format::Plain).await.unwrap();
+    assert_eq!(done.refused, ["koji: koji's runner is not running"]);
+    assert_eq!(
+        done.lines,
+        ["told rotom's project manager, which reads it on its next wake"]
+    );
+    let told = told(&shepherd.writes());
+    assert!(told.iter().all(|(sheep, _)| sheep != "koji"), "{told:?}");
+}
+
+#[tokio::test]
+async fn tell_all_keeps_the_line_of_a_runner_that_never_answered() {
+    let shepherd = FakeShepherd::new();
+    runner(&shepherd, "koji", Path::new("/src/koji"), true);
+    runner(&shepherd, "rotom", Path::new("/src/rotom"), true);
+    shepherd.replies("koji", &[None]);
+    let done = told_all(&shepherd, NOTE, Format::Plain).await.unwrap();
+    assert_eq!(done.refused, Vec::<String>::new());
+    let [koji, rotom] = done.lines.as_slice() else {
+        panic!("{:?}", done.lines);
+    };
+    assert!(koji.contains("did not answer in time"), "{koji}");
+    assert!(koji.contains("the note may have arrived"), "{koji}");
+    assert!(koji.contains("do not tell it again"), "{koji}");
+    assert_eq!(
+        rotom,
+        "told rotom's project manager, which reads it on its next wake"
+    );
+}
+
+#[tokio::test]
+async fn tell_all_prints_each_runner_s_answer_on_a_line_with_json() {
+    let shepherd = FakeShepherd::new();
+    runner(&shepherd, "koji", Path::new("/src/koji"), true);
+    runner(&shepherd, "rotom", Path::new("/src/rotom"), true);
+    shepherd.says("koji", &[r#"{"project":"koji","told":true}"#]);
+    shepherd.replies("rotom", &[None]);
+    let done = told_all(&shepherd, NOTE, Format::Json).await.unwrap();
+    let [koji, rotom] = done.lines.try_into().unwrap();
+    assert_eq!(koji, r#"koji: {"project":"koji","told":true}"#);
+    let object: Value = serde_json::from_str(rotom.strip_prefix("rotom: ").unwrap()).unwrap();
+    assert_eq!(object["sheep"], "rotom");
+    let message = object["message"].as_str().unwrap();
+    assert!(message.contains("the note may have arrived"), "{message}");
+}
+
+#[tokio::test]
+async fn tell_all_with_no_project_says_so() {
+    let shepherd = FakeShepherd::new();
+    let done = told_all(&shepherd, NOTE, Format::Plain).await.unwrap();
+    assert_eq!(
+        done.lines,
+        ["no projects: `shep kelpie add` in a checkout sets one up"]
+    );
+}
+
+#[tokio::test]
+async fn tell_all_goes_on_past_a_name_no_project_can_have() {
+    let mut shepherd = FakeShepherd::new();
+    let mut table = crate::test::project_table(EXAMPLE);
+    table["git"]["checkout"] = Value::String("/src/odd".into());
+    let mut odd = launch(&shepherd).runner(&project("koji"), table);
+    odd.name = "odd name".into();
+    shepherd.holds(odd, true);
+    runner(&shepherd, "rotom", Path::new("/src/rotom"), true);
+    let done = told_all(&shepherd, NOTE, Format::Plain).await.unwrap();
+    assert_eq!(done.refused.len(), 1, "{:?}", done.refused);
+    assert!(
+        done.refused[0].starts_with("odd name: "),
+        "{:?}",
+        done.refused
+    );
+    assert_eq!(
+        done.lines,
+        ["told rotom's project manager, which reads it on its next wake"]
+    );
+    let told = told(&shepherd.writes());
+    assert!(
+        told.contains(&("rotom".to_owned(), Some(NOTE.to_owned()))),
+        "{told:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_runner_still_taking_its_actions_is_starting() {
     let shepherd = FakeShepherd::new();

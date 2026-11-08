@@ -32,6 +32,7 @@ fn thread(n: u32) -> RuledThread {
         severity: None,
         what: format!("Finding {n}."),
         maintainer_wrote: false,
+        said: Some(1),
     }
 }
 

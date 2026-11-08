@@ -621,7 +621,10 @@ impl Forge for FakeForge {
             return Err(ForgeError::Unreadable(output));
         }
         self.opened(number)?;
+        // As `gh` reads them: the pull request's review threads whole, the
+        // bots' among the rest.
         let mut talk = self.coderabbit.talk_of(number);
+        talk.threads.extend(self.coderabbit.talk_threads(number));
         talk.comments.extend(self.threads.remarks(number));
         talk.comments.sort_by_key(|r| r.id);
         Ok(talk)
@@ -783,6 +786,7 @@ impl Forge for FakeForge {
 
     fn run_log(&self, _repo: &ForgeSlug, run: u64, part: LogPart) -> Result<String, ForgeError> {
         self.ask()?;
+        self.wait_if_held(held::At::RunLog);
         self.run_log_of(run, part).map_err(ForgeError::Failed)
     }
 

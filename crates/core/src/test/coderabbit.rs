@@ -25,6 +25,11 @@ pub struct FakeCodeRabbit {
     // What people wrote on each pull request, and the ids the next remark gets
     talk: Arc<Mutex<HashMap<u64, Talk>>>,
     remark_ids: Arc<AtomicUsize>,
+    // Each bot thread's place in the pull request's talk, by the forge's id,
+    // so one read of it and the next name the same remark
+    thread_remarks: Arc<Mutex<HashMap<String, u64>>>,
+    // What people wrote in a bot's review thread, by that thread's id
+    thread_replies: Arc<Mutex<HashMap<String, Vec<Remark>>>>,
 }
 
 // CodeRabbit's own store on pull request `number`.
@@ -293,9 +298,17 @@ impl FakeCodeRabbit {
         let remark = self.remark(author, standing, body);
         let id = remark.id;
         let mut talk = self.talk.lock().unwrap();
-        let mut found = talk.values_mut().flat_map(|t| &mut t.threads);
-        let found = found.find(|t| t.id == thread);
-        found.expect("the thread exists").remarks.push(remark);
+        let found = (talk.values_mut())
+            .flat_map(|t| &mut t.threads)
+            .find(|t| t.id == thread);
+        match found {
+            Some(thread) => thread.remarks.push(remark),
+            // A bot's thread, whose place in the talk is built from its activity
+            None => {
+                let mut replies = self.thread_replies.lock().unwrap();
+                replies.entry(thread.to_owned()).or_default().push(remark);
+            }
+        }
         id
     }
 
@@ -311,7 +324,7 @@ impl FakeCodeRabbit {
 
     fn remark(&self, author: &str, standing: Standing, body: &str) -> Remark {
         Remark {
-            id: 7000 + self.remark_ids.fetch_add(1, Ordering::SeqCst) as u64,
+            id: self.next_remark(),
             author: author.to_owned(),
             standing,
             body: body.to_owned(),
@@ -322,6 +335,48 @@ impl FakeCodeRabbit {
     pub fn talk_of(&self, number: u64) -> Talk {
         let talk = self.talk.lock().unwrap();
         talk.get(&number).cloned().unwrap_or_default()
+    }
+
+    /// What each bot posted on `number` as review threads, as the forge lists
+    /// them in its talk: one remark each, by the login that posted it
+    pub fn talk_threads(&self, number: u64) -> Vec<TalkThread> {
+        let mut ids = self.thread_remarks.lock().unwrap();
+        let activity = self.activity.lock().unwrap();
+        let replies = self.thread_replies.lock().unwrap();
+        let mut threads: Vec<TalkThread> = Vec::new();
+        for ((seen, login), posted) in activity.iter() {
+            if *seen != number {
+                continue;
+            }
+            for thread in &posted.threads {
+                let remark = (ids.entry(thread.id.clone())).or_insert_with(|| self.next_remark());
+                let mut remarks = vec![Remark {
+                    id: *remark,
+                    author: login.clone(),
+                    standing: Standing::Bot,
+                    body: thread.body.clone(),
+                }];
+                if let Some(written) = replies.get(&thread.id) {
+                    remarks.extend(written.iter().cloned());
+                }
+                remarks.sort_by_key(|r| r.id);
+                threads.push(TalkThread {
+                    id: thread.id.clone(),
+                    path: thread.path.clone(),
+                    line: thread.line,
+                    resolved: thread.resolved,
+                    outdated: thread.outdated,
+                    remarks,
+                });
+            }
+        }
+        threads.sort_by_key(|t| t.remarks.first().map_or(0, |r| r.id));
+        threads
+    }
+
+    /// The id the next remark gets, a person's or a bot thread's
+    fn next_remark(&self) -> u64 {
+        7000 + self.remark_ids.fetch_add(1, Ordering::SeqCst) as u64
     }
 
     // Whether `id` is a thread a person opened, which a resolve closes.

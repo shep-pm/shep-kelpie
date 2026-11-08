@@ -31,12 +31,25 @@ const NOT_ADDRESSED: &str =
 
 const DECLINED: &str = "Declined: ";
 
+// What kelpie replies on a thread the project manager ruled `close`, with its reason
+pub(in crate::runner) const RULED_CLOSE: &str = "Closed as wrong: ";
+
+// What kelpie replies on a thread the project manager pushed back on, with its reason
+pub(in crate::runner) const RULED_PUSH: &str = "Pushed back: ";
+
+// What kelpie replies on a thread the project manager filed as a follow-up issue
+pub(in crate::runner) const RULED_FOLLOW: &str = "Filed as follow-up ";
+
 /// Whether `body` is a reply kelpie posts on a thread, which `gh` posts under
 /// the maintainer's own login
 ///
 /// A decline carries the worker's reason, so only its opening is known.
 pub(in crate::runner) fn is_reply(body: &str) -> bool {
-    [FIXED, NOT_FIXED, NOT_ADDRESSED].contains(&body) || body.starts_with(DECLINED)
+    [FIXED, NOT_FIXED, NOT_ADDRESSED].contains(&body)
+        || body.starts_with(DECLINED)
+        || [RULED_CLOSE, RULED_PUSH, RULED_FOLLOW]
+            .iter()
+            .any(|start| body.starts_with(start))
 }
 
 // What kelpie replies on a thread sent to the worker, and whether it

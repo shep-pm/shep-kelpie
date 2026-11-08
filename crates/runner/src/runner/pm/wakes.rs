@@ -120,10 +120,6 @@ pub(in crate::runner) enum Wake {
     },
     /// An item at the gate waits on the project manager for what becomes of
     /// each open review thread
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the step that asks is a later slice")
-    )]
     Threads {
         /// The work item's ticket
         ticket: TicketId,
@@ -133,6 +129,13 @@ pub(in crate::runner) enum Wake {
         head: String,
         /// Every open thread the item waits on
         threads: Vec<RuledThread>,
+    },
+    /// The project manager asked for a run's log, which its item's case now holds
+    RunLog {
+        /// The work item's ticket
+        ticket: TicketId,
+        /// The run, as the item's `## CI` list names it
+        run: u64,
     },
     /// A ruling waits on the project manager's answer
     Answer {
@@ -160,6 +163,9 @@ impl Wake {
             (Self::Red { workflow: a, .. }, Self::Red { workflow: b, .. }) => a == b,
             (Self::Findings { ticket: a, .. }, Self::Findings { ticket: b, .. }) => a == b,
             (Self::Threads { ticket: a, .. }, Self::Threads { ticket: b, .. }) => a == b,
+            (Self::RunLog { ticket: a, run: x }, Self::RunLog { ticket: b, run: y }) => {
+                (a, x) == (b, y)
+            }
             _ => false,
         }
     }
@@ -168,7 +174,7 @@ impl Wake {
 /// Whether nobody waits on `wake`, so it can wait [`super::HOLD_FOR`] for the rest
 ///
 /// A free slot, a `tell`, a worker's question, a follow-up ruling, a ruling to
-/// answer and a pick are each waited on: the board holds a slot, a ruling is
+/// answer, a log asked for and a pick are each waited on: the board holds a slot, a ruling is
 /// held back from the maintainer, or the maintainer is asking. A stuck item, a
 /// conflict and a lease wait are each reasons the runner itself noticed, and no
 /// one is waiting on them.

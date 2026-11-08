@@ -19,7 +19,7 @@ use super::ruling::PostJob;
 use super::trigger::lock;
 use crate::board::ReadyIssue;
 use crate::board::briefing::ticket_ref;
-use crate::ports::{AgentError, AgentReply, COMPACT, Session, SessionId, Timestamp};
+use crate::ports::{AgentError, AgentReply, COMPACT, HeadRun, Session, SessionId, Timestamp};
 use crate::settings::PmAgent;
 use crate::state::StateError;
 use crate::ticket::TicketId;
@@ -45,6 +45,7 @@ mod question;
 mod red;
 mod requests;
 mod rulings;
+mod run_log;
 mod said;
 #[cfg(test)]
 mod tests;
@@ -61,6 +62,7 @@ pub(super) use said::{Released, SaidHow};
 
 use answer::Action;
 use ci_logs::Woke;
+pub(in crate::runner) use threads::{Decision, Ruled};
 use wakes::{AgentOut, LeftAlone, held, stuck_on};
 pub(super) use wakes::{StuckState, Wake};
 
@@ -208,6 +210,12 @@ pub(super) struct Desk {
     // run's log does not change, so it is read once. An item's go when it
     // closes, and a restart forgets them all.
     run_logs: BTreeMap<(TicketId, u64, u32), String>,
+    // Each item's runs the last case listed, which a log may be asked for from
+    ci_runs: BTreeMap<TicketId, Vec<HeadRun>>,
+    // Each run attempt whose log it asked for, which the next case reads
+    run_log_asks: Vec<(TicketId, u64, u32)>,
+    // Each run attempt a case read the log of for it, so a log is read once however it came out
+    run_log_tried: BTreeSet<(TicketId, u64, u32)>,
 }
 
 impl Desk {
@@ -277,11 +285,7 @@ impl Runner {
             return false;
         };
         let ticket = *ticket;
-        // A step in a pass has not read the account's usage, so the pace is
-        // the wake's to judge, which gives the ask up if it cannot run.
-        let now = self.ports.clock.now();
-        let down = self.pm.down_until.is_some_and(|until| now < until);
-        if self.draining() || down || self.pm_held_by_terminal() {
+        if self.pm_held_down() {
             return false;
         }
         self.pm.reading.insert(ticket);
@@ -422,6 +426,18 @@ impl Runner {
     // its account's pace.
     pub(super) fn pm_available(&mut self) -> bool {
         matches!(self.pm_pace(), Some(Pace::Clear))
+    }
+
+    /// Whether no wake can be queued now: the runner drains, a failed wake holds
+    /// the project manager down, or the maintainer's terminal has it attached
+    ///
+    /// A step in a pass has not read the account's usage, so the pace is the
+    /// wake's own to judge, which gives the ask up if it cannot run.
+    pub(in crate::runner) fn pm_held_down(&mut self) -> bool {
+        let now = self.ports.clock.now();
+        self.draining()
+            || self.pm.down_until.is_some_and(|until| now < until)
+            || self.pm_held_by_terminal()
     }
 
     /// How its account's pace stands for a call, or none when no call can run:
@@ -574,6 +590,12 @@ impl Runner {
                 // The next step asks again, and nothing answered for the item.
                 Wake::Threads { ticket, .. } => {
                     self.pm.threads_out.remove(&ticket);
+                }
+                // The log is not read, and the item's case lists the run as before.
+                Wake::RunLog { ticket, run } => {
+                    self.pm
+                        .run_log_asks
+                        .retain(|(t, r, _)| (*t, *r) != (ticket, run));
                 }
                 // The ruling goes to the maintainer, who need not wait on it again.
                 Wake::Question { id, .. } | Wake::FollowUp { id, .. } => {
@@ -869,6 +891,7 @@ impl Runner {
                 self.pm.asking.remove(id);
             }
         }
+        self.pm_asks_again(&flying.wakes, &answer);
         // An item it gave no `read` on goes on to CI as it stands.
         for wake in &flying.wakes {
             if let Wake::Findings { ticket, .. } = wake {

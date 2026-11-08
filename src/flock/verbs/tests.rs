@@ -1,3 +1,5 @@
+use shep_client::shep_core::protocol::{Request, SelectorSpec};
+
 use super::*;
 use crate::ports::{ForgeError, Notification};
 use crate::settings::ForgeSlug;
@@ -41,11 +43,11 @@ fn the_project_goes_anywhere_in_the_line_before_a_double_dash() {
         "3 --project koji 7",
         "3 7 --project=koji",
     ] {
-        let (named, rest) = split_project(&words(line), None).unwrap();
+        let (named, rest, _) = split_project(&words(line), None).unwrap();
         assert_eq!(named, koji, "{line}");
         assert_eq!(rest, words("3 7"), "{line}");
     }
-    let (named, rest) = split_project(&words("14 no -- drop the -p flag"), None).unwrap();
+    let (named, rest, _) = split_project(&words("14 no -- drop the -p flag"), None).unwrap();
     assert_eq!(named, None);
     assert_eq!(rest, words("14 no drop the -p flag"));
     for refused in ["-p", "-p koji -p rotom", "-p ../koji"] {
@@ -54,9 +56,19 @@ fn the_project_goes_anywhere_in_the_line_before_a_double_dash() {
 }
 
 #[test]
+fn a_double_dash_ends_the_words_a_verb_reads_as_flags() {
+    let flaggable = |line| split_project(&words(line), None).unwrap().2;
+    assert_eq!(flaggable("--all hold"), 2);
+    assert_eq!(flaggable("-- --all hold"), 0);
+    assert_eq!(flaggable("hold -- --all"), 1);
+    assert_eq!(flaggable("-p koji --all hold"), 2);
+    assert_eq!(flaggable("--json -- --json hold"), 1);
+}
+
+#[test]
 fn a_project_with_a_glob_character_is_a_glob_wherever_the_project_goes() {
     for line in ["-p shep* 3", "3 --project=shep*", "3 -p [ks]*"] {
-        let (named, rest) = split_project(&words(line), None).unwrap();
+        let (named, rest, _) = split_project(&words(line), None).unwrap();
         assert!(matches!(named, Some(Named::Glob(_))), "{line}");
         assert_eq!(rest, words("3"), "{line}");
     }
@@ -81,12 +93,12 @@ fn a_glob_is_refused_by_every_verb_but_set_and_get_naming_those_two() {
 fn a_ruling_s_answer_keeps_a_p_as_its_own_words() {
     let koji = Named::parse("koji").ok();
     for line in ["-p koji 14 yes", "14 -p koji yes", "14 --project=koji yes"] {
-        let (named, rest) = split_project(&words(line), Some(2)).unwrap();
+        let (named, rest, _) = split_project(&words(line), Some(2)).unwrap();
         assert_eq!(named, koji, "{line}");
         assert_eq!(rest, words("14 yes"), "{line}");
     }
     let line = words("14 no pass -p koji through");
-    let (named, rest) = split_project(&line, Some(2)).unwrap();
+    let (named, rest, _) = split_project(&line, Some(2)).unwrap();
     assert_eq!(named, None);
     assert_eq!(rest, line);
 }
@@ -143,6 +155,27 @@ fn koji_shepherd(says: Option<&str>) -> crate::test::FakeShepherd {
     );
     if let Some(says) = says {
         shepherd.says("koji", &[says]);
+    }
+    shepherd
+}
+
+// A flock with a running runner for `koji` and for `rotom`, each answering its
+// triggers with the body named for it
+fn two_runners(says: &[(&str, &str)]) -> crate::test::FakeShepherd {
+    let shepherd = crate::test::FakeShepherd::new();
+    let launch = Launch {
+        kelpie: "/opt/kelpie".into(),
+        shep_home: shepherd.home().to_owned(),
+        kelpie_home: None,
+    };
+    let table = crate::test::project_table(include_str!("../../../settings.example.toml"));
+    for name in ["koji", "rotom"] {
+        let name = ProjectName::try_from(name).unwrap();
+        shepherd.holds(launch.runner(&name, table.clone()), true);
+    }
+    shepherd.holds_dog("kelpie", true);
+    for (name, body) in says {
+        shepherd.says(name, &[body]);
     }
     shepherd
 }
@@ -335,6 +368,12 @@ async fn finish_all_is_refused_with_a_project() {
 }
 
 #[tokio::test]
+async fn finish_all_after_a_double_dash_is_no_flag_and_no_project_name() {
+    let err = verb_line("finish", "-- --all", None).await.unwrap_err();
+    assert!(err.contains("\"--all\" cannot name a project"), "{err}");
+}
+
+#[tokio::test]
 async fn finish_all_finishes_every_project_and_prints_its_answer_with_json() {
     let finishing = r#"{"project":"koji","run":"finishing","work_items":[]}"#;
     let plain = verb_line("finish", "--all", Some(finishing)).await;
@@ -358,6 +397,93 @@ async fn finish_all_as_a_word_names_the_flag_when_no_project_is_called_all() {
     let err = verb_line("finish", "all", None).await.unwrap_err();
     assert!(err.contains("no kelpie runner named all"), "{err}");
     assert!(err.contains("finish --all finishes every project"), "{err}");
+}
+
+#[tokio::test]
+async fn tell_all_is_refused_with_a_project() {
+    for line in [
+        "--all -p koji hold #4",
+        "--all --project=koji hold #4",
+        "-p koji --all hold #4",
+    ] {
+        let err = verb_line("tell", line, None).await.unwrap_err();
+        assert!(err.starts_with("name the project once"), "{line}: {err}");
+    }
+}
+
+#[tokio::test]
+async fn tell_all_with_no_note_is_the_usage() {
+    let err = verb_line("tell", "--all", None).await.unwrap_err();
+    assert_eq!(err, USAGE.to_owned());
+}
+
+#[tokio::test]
+async fn tell_all_tells_every_project_and_fails_when_a_runner_refuses() {
+    let mut shepherd = two_runners(&[("koji", r#"{"error":"koji has no project manager"}"#)]);
+    let err = verb_line_on(&shepherd, "tell", "--all hold #4")
+        .await
+        .unwrap_err();
+    assert_eq!(err, "koji: koji has no project manager");
+    let told: Vec<String> = shepherd
+        .writes()
+        .iter()
+        .filter_map(|w| match w {
+            Request::Trigger {
+                selector: SelectorSpec::Name(name),
+                action,
+                ..
+            } if action == "tell" => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(told, ["koji", "rotom"]);
+}
+
+#[tokio::test]
+async fn a_note_that_holds_all_after_its_first_word_keeps_it() {
+    let mut shepherd = koji_shepherd(None);
+    let lines = verb_line_on(&shepherd, "tell", "-p koji hold --all")
+        .await
+        .unwrap();
+    assert_eq!(
+        lines,
+        ["told koji's project manager, which reads it on its next wake"]
+    );
+    assert_eq!(
+        shepherd.writes(),
+        [Request::Trigger {
+            selector: SelectorSpec::Name("koji".into()),
+            action: "tell".into(),
+            params: Some("hold --all".into()),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn a_note_after_a_double_dash_keeps_all_and_json_as_its_words() {
+    for (line, note) in [
+        ("-- --all hold", "--all hold"),
+        ("-- --json hold", "--json hold"),
+    ] {
+        let mut shepherd = koji_shepherd(None);
+        let lines = verb_line_on(&shepherd, "tell", &format!("-p koji {line}"))
+            .await
+            .unwrap();
+        assert_eq!(
+            lines,
+            ["told koji's project manager, which reads it on its next wake"],
+            "{line}"
+        );
+        assert_eq!(
+            shepherd.writes(),
+            [Request::Trigger {
+                selector: SelectorSpec::Name("koji".into()),
+                action: "tell".into(),
+                params: Some(note.into()),
+            }],
+            "{line}"
+        );
+    }
 }
 
 #[tokio::test]
