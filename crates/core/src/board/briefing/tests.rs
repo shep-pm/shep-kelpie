@@ -474,9 +474,9 @@ fn the_agents_section_lists_the_implementers_then_the_reviewers_with_tier_kinds_
          it lands, not the share left. On course to land under 100%, run more work items at \
          once and give work that holds up other work to the faster plan agent. On course for \
          over 100%, lean on local models. A small share left with little time left is no \
-         reason to slow down. The pace never reorders the agents: spend a local model that \
-         can start first, then API credit while the API is not held, then a plan, and the \
-         pace says only how far down that order to reach when the cheaper ones are busy. The \
+         reason to slow down. The pace never reorders the agents: spend the cheapest, \
+         capable agent that can start first, and the pace says only how far down that order \
+         to reach when the cheaper ones are busy. The \
          ready queue is not the week's work, since the maintainer files issues all week, so \
          a short queue is no reason to spend faster.\n\
          \n\
@@ -818,8 +818,7 @@ fn the_credit_guidance_shows_with_the_credit_line_alone() {
     for part in [
         "bonus on top of the plans",
         "paced across the month so its course aims at 100%",
-        "the order alone decides: a local model that can start, then API credit \
-         while the API is not held, then a plan",
+        "the order alone decides: the cheapest, capable agent that can start first",
     ] {
         assert!(section.contains(part), "{part}\n{section}");
     }

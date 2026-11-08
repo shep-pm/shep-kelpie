@@ -81,9 +81,8 @@ fn a_new_project_gets_its_board_at_start_with_nothing_on_it() {
              work items at once and give work that holds up other work to the faster plan \
              agent. On course for over 100%, lean on local models. A small share left with \
              little time left is no reason to slow down. The pace never reorders the agents: \
-             spend a local model that can start first, then API credit while the API is not \
-             held, then a plan, and the pace says only how far down that order to reach when \
-             the cheaper ones are busy. The ready queue is not the week's work, since the \
+             spend the cheapest, capable agent that can start first, and the pace says only \
+             how far down that order to reach when the cheaper ones are busy. The ready queue is not the week's work, since the \
              maintainer files issues all week, so a short queue is no reason to spend \
              faster.\n\
              \n\
@@ -155,7 +154,7 @@ const TWO_BRANCHES: &str = r#"# Board: acme, 2026-09-21 14:18 UTC
 
 ## Agents
 
-Implementers by name, then reviewers in their order. You name each work item's agent from this list. Kelpie takes the cheapest available agent that fits when you name none, and an `agent:<name>!` label pins. An implementer's line shows when it can start and what it typically takes and costs, and an agent marked out cannot start a work item before the time shown. To have a work item wait for an agent, hold it. A ready issue whose line says `unblocks` holds up other work, so it is worth the fastest agent that can start. A plan agent costs no dollars, but each work item spends a share of its week's limit, and a share left at the reset is lost, so a plan's week is a budget to spend by its reset, not to save. Read the pace and where it lands, not the share left. On course to land under 100%, run more work items at once and give work that holds up other work to the faster plan agent. On course for over 100%, lean on local models. A small share left with little time left is no reason to slow down. The pace never reorders the agents: spend a local model that can start first, then API credit while the API is not held, then a plan, and the pace says only how far down that order to reach when the cheaper ones are busy. The ready queue is not the week's work, since the maintainer files issues all week, so a short queue is no reason to spend faster.
+Implementers by name, then reviewers in their order. You name each work item's agent from this list. Kelpie takes the cheapest available agent that fits when you name none, and an `agent:<name>!` label pins. An implementer's line shows when it can start and what it typically takes and costs, and an agent marked out cannot start a work item before the time shown. To have a work item wait for an agent, hold it. A ready issue whose line says `unblocks` holds up other work, so it is worth the fastest agent that can start. A plan agent costs no dollars, but each work item spends a share of its week's limit, and a share left at the reset is lost, so a plan's week is a budget to spend by its reset, not to save. Read the pace and where it lands, not the share left. On course to land under 100%, run more work items at once and give work that holds up other work to the faster plan agent. On course for over 100%, lean on local models. A small share left with little time left is no reason to slow down. The pace never reorders the agents: spend the cheapest, capable agent that can start first, and the pace says only how far down that order to reach when the cheaper ones are busy. The ready queue is not the week's work, since the maintainer files issues all week, so a short queue is no reason to spend faster.
 
 - opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, such as a data migration, a release step or a change to a public interface.; starts now, typically 1h00m, cost unknown
 - sonnet-high (implementer): standard tier, every kind; Builds everyday features and anything with state, such as a store, a queue or a migration.; starts now, typically 1h00m, cost unknown

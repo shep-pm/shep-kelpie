@@ -554,9 +554,9 @@ fn agents(
          it lands, not the share left. On course to land under 100%, run more work items at \
          once and give work that holds up other work to the faster plan agent. On course for \
          over 100%, lean on local models. A small share left with little time left is no \
-         reason to slow down. The pace never reorders the agents: spend a local model that \
-         can start first, then API credit while the API is not held, then a plan, and the \
-         pace says only how far down that order to reach when the cheaper ones are busy. The \
+         reason to slow down. The pace never reorders the agents: spend the cheapest, \
+         capable agent that can start first, and the pace says only how far down that order \
+         to reach when the cheaper ones are busy. The \
          ready queue is not the week's work, since the maintainer files issues all week, so \
          a short queue is no reason to spend faster.\n\n",
     );
@@ -570,8 +570,7 @@ fn agents(
              the agents. A standing note from you to spend the credit freely until a date \
              (`shep kelpie tell --all`, a line with an `(until ...)` end in \
              `pm-standing.md`) sets this pacing aside until then, and the order alone \
-             decides: a local model that can start, then API credit while the API is not \
-             held, then a plan.\n\n",
+             decides: the cheapest, capable agent that can start first.\n\n",
         );
     }
     for agent in agents {
