@@ -14,6 +14,12 @@ use serde::{Deserialize, Serialize};
 use crate::ports::{Timestamp, Utilization, Window};
 use crate::settings::Account;
 
+/// Seconds in a day
+pub const DAY_SECS: u64 = 86_400;
+
+/// Days in the weekly window
+pub const WEEK_DAYS: u64 = 7;
+
 /// Percent of the 5-hour window at which no further turn starts
 pub const PARK_AT_PCT: u32 = 50;
 
@@ -167,6 +173,25 @@ pub fn spent_week(account: Account, week: &Window) -> Option<Hold> {
     })
 }
 
+/// The share of a 7-day week that has passed at `now`, in whole percent from 0 to 100,
+/// for the week that resets at `resets_at`
+///
+/// A reset more than a week off reads 0 and one already past reads 100.
+pub fn week_gone_pct(now: Timestamp, resets_at: Timestamp) -> u32 {
+    let week = WEEK_DAYS * DAY_SECS;
+    let left = resets_at.0.saturating_sub(now.0).min(week);
+    let gone = (week - left) * 100;
+    u32::try_from((gone + week / 2) / week).unwrap_or(100)
+}
+
+/// Where `used_pct` lands at the reset when the week keeps the pace it has had
+/// to `gone_pct`, in whole percent, or `None` while no share of the week is gone
+pub fn week_end_pct(used_pct: u32, gone_pct: u32) -> Option<u32> {
+    let gone = u64::from(gone_pct);
+    let lands = (u64::from(used_pct) * 100 + gone / 2).checked_div(gone)?;
+    Some(u32::try_from(lands).unwrap_or(u32::MAX))
+}
+
 /// `claude` for the Claude account, which reasons have always meant, else `other`
 pub fn named(account: Account, claude: &'static str, other: &'static str) -> &'static str {
     match account {
@@ -180,7 +205,6 @@ mod tests {
     use super::*;
     use crate::test::EPOCH;
 
-    const DAY_SECS: u64 = 86_400;
     const RESETS: u64 = EPOCH + 7 * DAY_SECS;
 
     fn usage(week: u32, session: u32) -> Utilization {
@@ -308,6 +332,22 @@ mod tests {
         fresh.session.resets_at = Timestamp(now.0 + 5 * 3600);
         let a = assess(Account::Claude, now, &fresh);
         assert_eq!(a.hold(), None);
+    }
+
+    #[test]
+    fn a_week_is_gone_by_the_share_of_it_that_has_passed() {
+        let gone = |resets_at: Timestamp| week_gone_pct(Timestamp(EPOCH), resets_at);
+        assert_eq!(gone(Timestamp(EPOCH + 6 * DAY_SECS)), 14);
+        assert_eq!(gone(Timestamp(EPOCH)), 100);
+        assert_eq!(gone(Timestamp(EPOCH + 8 * DAY_SECS)), 0);
+        assert_eq!(gone(Timestamp(EPOCH - DAY_SECS)), 100);
+    }
+
+    #[test]
+    fn the_week_lands_where_its_pace_so_far_takes_it() {
+        assert_eq!(week_end_pct(16, 14), Some(114));
+        assert_eq!(week_end_pct(60, 85), Some(71));
+        assert_eq!(week_end_pct(16, 0), None);
     }
 
     #[test]

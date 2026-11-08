@@ -73,7 +73,18 @@ fn a_new_project_gets_its_board_at_start_with_nothing_on_it() {
              can start and what it typically takes and costs, and an agent marked out cannot \
              start a work item before the time shown. To have a work item wait for an agent, \
              hold it. A ready issue whose line says `unblocks` holds up other work, so it is worth \
-             the fastest agent that can start.\n\
+             the fastest agent that can start. A plan agent costs no dollars, but each work \
+             item spends a share of its week's limit, and a share left at the reset is lost, \
+             so a plan's week is a budget to spend by its reset, not to save. Read the pace \
+             and where it lands, not the share left. On course to land under 100%, run more \
+             work items at once and give work that holds up other work to the faster plan \
+             agent. On course for over 100%, lean on local models. A small share left with \
+             little time left is no reason to slow down. The pace never reorders the agents: \
+             spend a local model that can start first, then API credit while the API is not \
+             held, then a plan, and the pace says only how far down that order to reach when \
+             the cheaper ones are busy. The ready queue is not the week's work, since the \
+             maintainer files issues all week, so a short queue is no reason to spend \
+             faster.\n\
              \n\
              - opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, \
              such as a data migration, a release step or a change to a public interface.; \
@@ -84,6 +95,8 @@ fn a_new_project_gets_its_board_at_start_with_nothing_on_it() {
              - claude (reviewer): standard tier, every kind; no description\n\
              - qwen (reviewer): light tier, every kind; Reads a diff for defects with the \
              maintainer's local qwen-review script, as a first pass.\n\
+             \n\
+             Claude week: no reading\n\
              \n\
              ## Recent events\n\
              \n\
@@ -141,12 +154,14 @@ const TWO_BRANCHES: &str = r#"# Board: acme, 2026-09-21 14:18 UTC
 
 ## Agents
 
-Implementers by name, then reviewers in their order. You name each work item's agent from this list. Kelpie takes the cheapest available agent that fits when you name none, and an `agent:<name>!` label pins. An implementer's line shows when it can start and what it typically takes and costs, and an agent marked out cannot start a work item before the time shown. To have a work item wait for an agent, hold it. A ready issue whose line says `unblocks` holds up other work, so it is worth the fastest agent that can start.
+Implementers by name, then reviewers in their order. You name each work item's agent from this list. Kelpie takes the cheapest available agent that fits when you name none, and an `agent:<name>!` label pins. An implementer's line shows when it can start and what it typically takes and costs, and an agent marked out cannot start a work item before the time shown. To have a work item wait for an agent, hold it. A ready issue whose line says `unblocks` holds up other work, so it is worth the fastest agent that can start. A plan agent costs no dollars, but each work item spends a share of its week's limit, and a share left at the reset is lost, so a plan's week is a budget to spend by its reset, not to save. Read the pace and where it lands, not the share left. On course to land under 100%, run more work items at once and give work that holds up other work to the faster plan agent. On course for over 100%, lean on local models. A small share left with little time left is no reason to slow down. The pace never reorders the agents: spend a local model that can start first, then API credit while the API is not held, then a plan, and the pace says only how far down that order to reach when the cheaper ones are busy. The ready queue is not the week's work, since the maintainer files issues all week, so a short queue is no reason to spend faster.
 
 - opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, such as a data migration, a release step or a change to a public interface.; starts now, typically 1h00m, cost unknown
 - sonnet-high (implementer): standard tier, every kind; Builds everyday features and anything with state, such as a store, a queue or a migration.; starts now, typically 1h00m, cost unknown
 - claude (reviewer): standard tier, every kind; no description
 - qwen (reviewer): light tier, every kind; Reads a diff for defects with the maintainer's local qwen-review script, as a first pass.
+
+Claude week: 0% used, 0% of the week gone, 6d 23h to the reset, read 5m ago
 
 ## Recent events
 
@@ -594,6 +609,62 @@ fn the_agents_section_marks_a_spent_codex_week_and_a_closed_bot_window() {
         !line("- sonnet-high ").contains("out until"),
         "{bullets:#?}"
     );
+}
+
+// The `## Agents` section's lines about plan accounts' weeks
+fn plan_weeks(rig: &Rig) -> Vec<String> {
+    let text = board(rig);
+    let section = text.split("## Agents\n").nth(1).unwrap();
+    let section = section.split("\n## ").next().unwrap();
+    (section.lines())
+        .filter(|l| l.contains(" week: "))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn the_agents_section_shows_each_listed_plan_accounts_week_used_against_elapsed() {
+    let rig = Rig::new("koji");
+    rig.write_codex_implementer();
+    rig.allow(&["sonnet-high", "codex"]);
+    rig.meter.set(Rig::utilization(16, 0));
+    let mut codex = Rig::utilization(60, 0);
+    codex.week.resets_at = Timestamp(Rig::EPOCH + 3 * Rig::DAY);
+    rig.codex_meter.set(codex);
+    rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 2"));
+    rig.forge.list_ready(7, false);
+    rig.forge.list_ready(8, false);
+    rig.forge.label(7, "agent:codex!");
+    let runner = rig.open().unwrap();
+    // #7 on Codex opens, its scripted turn fails and alerts, then #8 opens on Claude.
+    for _ in 0..4 {
+        step(&runner).unwrap();
+    }
+    rig.clock.advance(Rig::DAY + 4 * 60);
+    super::brief(&runner);
+
+    assert_eq!(
+        plan_weeks(&rig),
+        [
+            "Claude week: 16% used, 14% of the week gone, 5d 23h to the reset, \
+             on course for 114%, read 1d ago",
+            "Codex week: 60% used, 71% of the week gone, 1d 23h to the reset, \
+             on course for 85%, read 1d ago",
+        ],
+        "{}",
+        board(&rig)
+    );
+}
+
+#[test]
+fn a_plan_account_nothing_has_paced_says_it_has_no_reading() {
+    let rig = Rig::new("koji");
+    rig.allow(&["sonnet-high"]);
+    let runner = rig.open().unwrap();
+    super::brief(&runner);
+
+    assert_eq!(plan_weeks(&rig), ["Claude week: no reading"]);
+    drop(runner);
 }
 
 #[test]
