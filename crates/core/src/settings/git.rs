@@ -28,6 +28,7 @@ pub struct Git {
     /// from it. `rulings.pm_decides.merge` decides who merges a green,
     /// reviewed pull request.
     #[serde(default)]
+    #[schemars(extend("deprecated" = true))]
     pub merging: Option<Merging>,
     /// The GitHub login kelpie mentions on a ruling it posts through its
     /// App, so GitHub notifies them. The login `gh` acts as (`gh api user`)

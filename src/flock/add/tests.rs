@@ -353,6 +353,20 @@ async fn a_new_project_s_table_holds_every_kind_of_ruling_at_its_default() {
 }
 
 #[tokio::test]
+async fn a_project_add_writes_loads_with_no_merging_and_merge_false() {
+    let scene = Scene::new().await;
+    scene.add().await.unwrap();
+
+    let (runner, _) = scene.shepherd.sheep("koji").expect("a runner");
+    let table = runner.dogs.get(DOG).expect("a kelpie table").as_map();
+    assert!(table["git"].get("merging").is_none(), "{table:?}");
+    assert_eq!(table["rulings"]["pm_decides"]["merge"], false, "{table:?}");
+    let settings = scene.settings();
+    assert_eq!(settings.git.merging, None);
+    assert!(!settings.rulings.pm_decides(RulingName::Merge));
+}
+
+#[tokio::test]
 async fn a_repo_whose_default_branch_is_main_gets_it_written_as_the_base() {
     let scene = Scene::new().await;
     scene.add().await.unwrap();

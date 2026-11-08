@@ -1,2 +1,2 @@
-settings.example.toml	87
+settings.example.toml	86
 kelpie-settings.example.toml	11
