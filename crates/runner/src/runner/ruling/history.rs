@@ -59,6 +59,10 @@ pub(in crate::runner) struct Record {
     // The option the answer is, when it is one of the ruling's
     #[serde(default, skip_serializing_if = "Option::is_none")]
     chose: Option<char>,
+    // The commit the worktree stood at when the ruling was raised, for a
+    // timed-out or failed turn
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::runner) head: Option<String>,
 }
 
 impl Record {
@@ -90,6 +94,7 @@ impl Record {
             by_pm: by == Answerer::Pm,
             kind: Some(RulingName::of(&ruling.kind)),
             chose,
+            head: ruling.stuck_head.clone(),
         }
     }
 
@@ -348,6 +353,54 @@ mod tests {
             pull_request: Some(71),
             ..Ruling::new(ticket(id), why, kind)
         }
+    }
+
+    // A timed-out or failed turn's record keeps the head its ruling was raised
+    // at, and one raised with no head keeps none.
+    #[test]
+    fn a_record_keeps_its_rulings_head() {
+        let timed_out = Ruling {
+            issue: Some(ticket(7)),
+            pull_request: Some(71),
+            stuck_head: Some("c0ffee1".into()),
+            ..Ruling::new(
+                ticket(71),
+                "q",
+                RulingKind::from(Stuck::TurnTimeout { phase: None }),
+            )
+        };
+        let mut failed = failing(72, "harness exited with 1");
+        failed.stuck_head = Some("9beef12".into());
+        let headless = failing(73, "no worktree");
+
+        let kept = Record::of(&timed_out, &Answer::Yes, Timestamp(1), Answerer::Pm);
+        let other = Record::of(&failed, &Answer::Yes, Timestamp(1), Answerer::Pm);
+        let none = Record::of(&headless, &Answer::Yes, Timestamp(1), Answerer::Pm);
+
+        assert_eq!(
+            (kept.head.as_deref(), other.head.as_deref()),
+            (Some("c0ffee1"), Some("9beef12"))
+        );
+        assert_eq!(none.head, None);
+    }
+
+    // A line a build that kept no head wrote still reads, with none.
+    #[test]
+    fn a_line_an_older_build_wrote_reads_with_no_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("rulings.jsonl");
+        let line = serde_json::json!({
+            "id": 71, "at": 100, "raised": 90, "issue": 7, "pull_request": 71,
+            "asked": "q", "answer": "yes", "kind": "turn-timeout",
+        });
+        assert_eq!(line.get("head"), None);
+        std::fs::write(&file, format!("{line}\n")).unwrap();
+
+        let records = records(&file);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].head, None);
+        assert_eq!(records[0].kind, Some(RulingName::TurnTimeout));
     }
 
     // The same failure on the same work item, whitespace aside, is the one the

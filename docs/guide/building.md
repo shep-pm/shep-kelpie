@@ -64,7 +64,7 @@ A plugin that cannot load is skipped, the runner logs why and the run goes on: n
 
 A project adds a plugin the repo does not name in its `[app.dogs.kelpie.repo_setup]` table, with `extra`. It narrows nothing: the repo's `.claude` files already say what an agent working there gets. Every key is optional, an unknown key stops the runner naming it, and a change is read as the runner rereads its settings.
 
-The keys `plugins`, `own`, `roles`, `parts` and `skip` still load and nothing reads them. A project that narrowed with them gets everything the repo sets up on its next reread.
+The keys `plugins`, `own`, `roles`, `parts` and `skip` are gone: the runner refuses each by name until `shep kelpie settings migrate` deletes it, which `shep kelpie upgrade` runs. A project that narrowed with them gets everything the repo sets up once they are out of its table.
 
 - `extra`: plugins the repo does not turn on, each as `name@marketplace` with its marketplace's source as one string: `github:owner/name`, `git:<url>` or `directory:<folder inside the checkout>`, and `#<branch or tag>` after a `github` or `git` address. The kinds are those of the `source` in an `extraKnownMarketplaces` entry. A marketplace given here takes the place of the repo's of the same name, and two plugins of one marketplace must give the same source. An extra plugin that cannot load is skipped with its reason, as the repo's are. It reaches the worker, the reviewers and the project manager, as the repo's plugins do.
 
@@ -96,7 +96,7 @@ A plugin can bring MCP servers, and so can the repo's own `.mcp.json`. shep-kelp
 
 ## Code graph
 
-Where the server is installed, every project gives its reviewers and its triager a graph of the code in the worktree, served by [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp). One call answers where a symbol is, what calls it and what it touches, where a reviewer would run a series of greps. The install turns it on and removing the server turns it off. The `code_graph` keys `enabled` and `worker` still load and nothing reads them.
+Where the server is installed, every project gives its reviewers and its triager a graph of the code in the worktree, served by [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp). One call answers where a symbol is, what calls it and what it touches, where a reviewer would run a series of greps. The graph follows `shep kelpie tools install`: the install turns it on and removing the server turns it off. A worker never gets it.
 
 - `shep kelpie tools install` fetches the pinned release into `<kelpie home>/tools/bin`. It prints a line as each of its five steps starts and ends, naming each tool with its pinned version, and closes with a table of every tool and its result. A download shows a progress bar only when stderr is a terminal. Kelpie writes each call's MCP config itself and never runs the tool's own `install`, which writes to your agent config files.
 - Before each reviewer and each triage call, kelpie indexes the work item's worktree into `<kelpie home>/<project>/code-graphs/<issue>`. Indexing is local CPU and spends no tokens. It runs on the call's own thread, not under the runner's lock, so a stop ends it, and it stops after five minutes. The folder goes when the work item's worktree does.

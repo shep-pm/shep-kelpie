@@ -896,6 +896,15 @@ fn with_local_rounds(keys: &str) -> String {
 }
 
 #[test]
+fn the_code_graph_table_is_refused_by_name_and_says_migrate_deletes_it() {
+    for keys in ["", "enabled = true\nworker = false\n"] {
+        let err = parse_err(&format!("{EXAMPLE}\n[app.dogs.kelpie.code_graph]\n{keys}"));
+        assert!(err.contains("`code_graph` is no longer a setting"), "{err}");
+        assert!(err.contains("shep kelpie settings migrate"), "{err}");
+    }
+}
+
+#[test]
 fn local_rounds_default_to_kept_for_30_days() {
     let rounds = parse(EXAMPLE).unwrap().local_rounds;
     assert_eq!(rounds.keep_days.get(), 30);

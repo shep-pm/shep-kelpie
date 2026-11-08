@@ -804,8 +804,8 @@ async fn extra_instructions_the_runner_cannot_read_are_missing() {
 #[tokio::test]
 async fn the_code_graph_line_shows_only_where_the_server_is_installed() {
     let scene = Scene::new().await;
-    // The key still loads, and a missing server is no fault whatever it says.
-    scene.runs("golbat", |t| t["code_graph"] = json!({ "enabled": true }));
+    scene.runs("golbat", |_| {});
+    // A missing server is no fault.
     let report = scene.report().await;
     assert!(
         !subjects(&report)

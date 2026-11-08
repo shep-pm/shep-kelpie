@@ -137,8 +137,7 @@ fn a_call_that_reads_only_gets_no_server_it_could_write_with() {
 
 #[test]
 fn the_worker_reviewer_and_project_manager_get_the_plugins() {
-    // Keys that used to narrow are read by nothing now.
-    let rig = settled("roles = [\"worker\"]\nown = false\nplugins = false\nparts = [\"skills\"]");
+    let rig = settled("");
     let plugin = rig.paths().skills.join("repo/style");
     for role in [Role::Worker, Role::Reviewer] {
         for call in seen(&rig, role) {

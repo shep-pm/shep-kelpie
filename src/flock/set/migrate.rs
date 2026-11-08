@@ -1,9 +1,9 @@
 //! `shep kelpie settings migrate`: writes the keys each project's table is missing
 //!
 //! `rulings.pm_alone` becomes `rulings.pm_decides`, each kind the map lacks written
-//! at its default, and `merge` follows `git.merging` while the table holds it. The keys the agent board replaced and `[pacing]`
-//! ([`GONE_KEYS`]), the gone roles ([`GONE_ROLES`]) and the `unlabelled` kind are
-//! deleted, each named with its value.
+//! at its default, and `merge` follows `git.merging` while the table holds it.
+//! The keys that are gone ([`GONE_KEYS`]) and the `unlabelled` kind are deleted,
+//! each named with its value.
 //! `agents.reviewers` goes too: its names join a listed `agents.allow`, and
 //! `contributions.reviewers` where the project names none. An agent kelpie once
 //! named for a project that left it unset gets that name ([`DEFAULTS`]). Each table
@@ -21,10 +21,10 @@ use crate::settings::{PM_ALONE, PM_DECIDES, RulingName};
 use crate::shepherd::{self, Connection, DOG, Socket};
 use crate::webhook::KelpieSettings;
 
-/// The keys migrate deletes: the loader refuses the first ten by name and
+/// The keys migrate deletes: the loader refuses the first sixteen by name and
 /// ignores the rest, the four the agent board and the project manager replaced
 /// and `[pacing]`, which doctor names
-const GONE_KEYS: [&str; 15] = [
+const GONE_KEYS: [&str; 21] = [
     "rulings.decide",
     "rulings.full_panel_paths",
     "agents.advisor",
@@ -35,6 +35,12 @@ const GONE_KEYS: [&str; 15] = [
     "local_rounds.keep",
     "git.issues",
     "triage.hand_ready",
+    "repo_setup.plugins",
+    "repo_setup.own",
+    "repo_setup.roles",
+    "repo_setup.parts",
+    "repo_setup.skip",
+    "code_graph",
     "agents.implementers",
     "agents.implementer_choice",
     "agents.fallback_after",
@@ -53,12 +59,6 @@ const CONTRIBUTION_REVIEWERS: &str = "contributions.reviewers";
 
 /// The key `merge_choice` writes, with the ` = ` a line naming it holds
 const MERGE_KEY: &str = "rulings.pm_decides.merge = ";
-
-/// The list of roles that may still name a role that is gone
-const ROLES: &str = "repo_setup.roles";
-
-/// The roles migrate deletes from `repo_setup.roles`, which refuses each by name
-const GONE_ROLES: [&str; 3] = ["advisor", "researcher", "issue-writer"];
 
 /// The kind of ruling migrate deletes from `rulings.pm_decides` and the old list
 const WRITER_KIND: &str = "unlabelled";
@@ -213,7 +213,6 @@ async fn project(
         .collect();
     removed.extend(gone_keys(&mut table));
     removed.extend(gone_reviewers);
-    removed.extend(gone_roles(&mut table));
     removed.extend(gone_kinds);
     let said: Vec<String> = [("wrote", wrote.join(", ")), ("removed", removed.join(", "))]
         .into_iter()
@@ -373,22 +372,6 @@ fn carried(table: &mut Map<String, Value>, named: &[Value]) -> Option<String> {
     let list = Value::Array(named.to_vec());
     contributions.insert(key.to_owned(), list.clone());
     Some(format!("{CONTRIBUTION_REVIEWERS} = {}", inline(&list)))
-}
-
-// Deletes the roles that are gone from `repo_setup.roles`, and names each it deleted.
-fn gone_roles(table: &mut Map<String, Value>) -> Vec<String> {
-    let (outer, key) = leaves(ROLES);
-    let roles = table.get_mut(outer).and_then(|setup| setup.get_mut(key));
-    let Some(Value::Array(roles)) = roles else {
-        return Vec::new();
-    };
-    let gone = |role: &Value| role.as_str().is_some_and(|role| GONE_ROLES.contains(&role));
-    let removed = (roles.iter().filter_map(Value::as_str))
-        .filter(|role| GONE_ROLES.contains(role))
-        .map(|role| format!("{role} from {ROLES}"))
-        .collect();
-    roles.retain(|role| !gone(role));
-    removed
 }
 
 // Deletes `unlabelled` from `rulings.pm_decides` and the old list, and names each it deleted.

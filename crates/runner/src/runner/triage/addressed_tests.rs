@@ -9,6 +9,7 @@ use super::research_tests::{
     APP, WORDS, calls, crashed_with, facts, handed, moves, pump, reply, researching, triage,
     untouched,
 };
+use crate::board::TRIAGE;
 use crate::github::ApiError;
 use crate::ports::{
     BranchRun, IssueCloseReason, PullRequestState, Role, Timestamp, Workflow, WorkflowState,
@@ -135,10 +136,10 @@ fn a_number_not_in_the_listing_or_closed_or_itself_is_dropped_and_the_issue_is_t
         assert_eq!(
             moves(&rig),
             [
-                "comment",
-                "label priority: P3",
-                "make needs-triage",
-                "label needs-triage"
+                "comment".to_owned(),
+                "label priority: P3".to_owned(),
+                format!("make {TRIAGE}"),
+                format!("label {TRIAGE}"),
             ],
             "{what}"
         );
@@ -230,7 +231,7 @@ fn an_addressed_by_of_a_kind_kelpie_cannot_read_is_told_in_the_log() {
 #[test]
 fn a_closed_duplicate_gets_no_labels() {
     let (rig, runner) = untouched();
-    rig.forge.set_repo_labels(&["bug", "P2", "needs-triage"]);
+    rig.forge.set_repo_labels(&["bug", "P2", TRIAGE]);
     rig.forge
         .list_open_pull(41, "Fix the crash on start", &[30]);
     rig.claude.script_for(

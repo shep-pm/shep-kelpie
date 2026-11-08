@@ -11,7 +11,7 @@ use super::pick_tests::{MAINTAINER, issue, list, rig_with, triaging};
 use super::poll_read::read_triage;
 use super::ready_tests::said;
 use super::research_tests::{APP, WORDS, calls, moves, pump, reply, under};
-use crate::board::{ReadyIssue, Skip, SubIssues, check};
+use crate::board::{ReadyIssue, Skip, SubIssues, TRIAGE, check};
 use crate::github::ApiError;
 use crate::ports::Timestamp;
 use crate::ports::{OpenIssue, RegistryError, Role};
@@ -29,8 +29,7 @@ pub(super) const PASSING_LABELS: [&str; 2] = ["kind:fix", "priority: P2"];
 pub(super) const FAILING: &str = "It crashes when I run it.";
 
 // The labels a repo holds, so none is made on the way
-pub(super) const REPO_LABELS: [&str; 5] =
-    ["bug", "P2", "needs-triage", "ready-for-agent", "kind:fix"];
+pub(super) const REPO_LABELS: [&str; 5] = ["bug", "P2", TRIAGE, "ready-for-agent", "kind:fix"];
 
 // Issue 30 by `author`, with `body` and `labels`, opened after triage was on
 pub(super) fn filed(rig: &Rig, author: &str, body: &str, labels: &[&str]) -> OpenIssue {
@@ -118,11 +117,11 @@ fn a_first_check_of_many_passing_issues_writes_a_poll_s_share_and_carries_the_re
 #[test]
 fn a_passing_maintainers_issue_loses_its_needs_triage_and_a_hand_decision_stands() {
     let mut labels = PASSING_LABELS.to_vec();
-    labels.push("needs-triage");
+    labels.push(TRIAGE);
     let (rig, runner) = checking("pick = \"maintainer\"", MAINTAINER, PASSING, &labels);
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(moves(&rig), ["label ready-for-agent"]);
-    assert_eq!(rig.github.label_takes(), [(30, "needs-triage".to_owned())]);
+    assert_eq!(rig.github.label_takes(), [(30, TRIAGE.to_owned())]);
 
     let mut labels = PASSING_LABELS.to_vec();
     labels.push("needs-info");
@@ -152,7 +151,7 @@ fn another_persons_issue_that_passes_waits_at_needs_triage_with_no_triage_call()
     assert_eq!(calls(&rig, Role::Triager).len(), 0);
     assert_eq!(
         moves(&rig),
-        ["label needs-triage"],
+        [format!("label {TRIAGE}")],
         "it waits for the maintainer to label it ready"
     );
     assert_eq!(rig.github.comments(), []);
@@ -192,16 +191,16 @@ fn a_failing_issue_is_triaged_and_a_rewrite_that_still_fails_gets_one_comment() 
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "label bug",
-            "label P2",
-            "label kind:fix",
-            "label needs-triage"
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            "label kind:fix".to_owned(),
+            format!("label {TRIAGE}"),
         ]
     );
 
     // The forge as the pass left it: rewritten, labelled, and still short of the format
-    let labels = ["bug", "P2", "kind:fix", "needs-triage"];
+    let labels = ["bug", "P2", "kind:fix", TRIAGE];
     list(&rig, filed(&rig, MAINTAINER, STILL, &labels));
     rig.next_look();
     assert_eq!(step(&runner).unwrap(), None);
@@ -231,7 +230,7 @@ fn a_later_rewrite_the_check_refuses_replaces_kelpies_section_and_keeps_the_rest
     assert_eq!(step(&runner).unwrap(), None);
     let first = under(FAILING, STILL);
     assert_eq!(rig.github.issue_edits(), [(30, first.clone())]);
-    let labels = ["bug", "P2", "kind:fix", "needs-triage"];
+    let labels = ["bug", "P2", "kind:fix", TRIAGE];
     list(&rig, filed(&rig, MAINTAINER, &first, &labels));
     rig.next_look();
     assert_eq!(step(&runner).unwrap(), None);
@@ -264,7 +263,7 @@ pub(super) fn told() -> (Rig, Mutex<Runner>) {
     let (rig, runner) = checking("pick = \"maintainer\"", MAINTAINER, FAILING, &[]);
     rig.claude.script_for(Role::Triager, [reply(json!({}))]);
     assert_eq!(step(&runner).unwrap(), None);
-    list(&rig, filed(&rig, MAINTAINER, STILL, &["needs-triage"]));
+    list(&rig, filed(&rig, MAINTAINER, STILL, &[TRIAGE]));
     rig.next_look();
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(rig.github.comments().len(), 2);
@@ -276,7 +275,7 @@ fn a_retry_after_a_lost_reply_posts_the_still_failing_comment_once() {
     let (rig, runner) = checking("pick = \"maintainer\"", MAINTAINER, FAILING, &[]);
     rig.claude.script_for(Role::Triager, [reply(json!({}))]);
     assert_eq!(step(&runner).unwrap(), None);
-    list(&rig, filed(&rig, MAINTAINER, STILL, &["needs-triage"]));
+    list(&rig, filed(&rig, MAINTAINER, STILL, &[TRIAGE]));
     rig.github.refuse_comments(ApiError::Refused(422));
     rig.next_look();
     assert_eq!(step(&runner).unwrap(), None);
@@ -298,7 +297,7 @@ fn a_still_failing_comment_the_forge_keeps_refusing_is_given_up() {
     let (rig, runner) = checking("pick = \"maintainer\"", MAINTAINER, FAILING, &[]);
     rig.claude.script_for(Role::Triager, [reply(json!({}))]);
     assert_eq!(step(&runner).unwrap(), None);
-    list(&rig, filed(&rig, MAINTAINER, STILL, &["needs-triage"]));
+    list(&rig, filed(&rig, MAINTAINER, STILL, &[TRIAGE]));
     rig.github.refuse_comments(ApiError::Refused(422));
     for _ in 0..CHECK_TRIES + 2 {
         rig.next_look();
@@ -390,7 +389,7 @@ fn a_maintainers_edit_made_while_the_triager_ran_survives_its_rewrite() {
         rig.claude.script_for(Role::Triager, [reply(json!({}))]);
         rig.claude
             .script_for(Role::Representative, [Scripted::Say(WORDS)]);
-        let labels = ["bug", "P2", "kind:fix", "needs-triage"];
+        let labels = ["bug", "P2", "kind:fix", TRIAGE];
         list(&rig, filed(&rig, MAINTAINER, edited, &labels));
         rig.next_look();
         assert_eq!(step(&runner).unwrap(), None);
@@ -402,7 +401,7 @@ fn a_maintainers_edit_made_while_the_triager_ran_survives_its_rewrite() {
 fn an_edit_that_passes_makes_the_issue_ready_with_no_second_call() {
     let (rig, runner) = told();
     let mut labels = PASSING_LABELS.to_vec();
-    labels.push("needs-triage");
+    labels.push(TRIAGE);
     list(&rig, filed(&rig, MAINTAINER, PASSING, &labels));
     rig.next_look();
 
@@ -412,7 +411,7 @@ fn an_edit_that_passes_makes_the_issue_ready_with_no_second_call() {
     assert_eq!(moves(&rig).last().unwrap(), "label ready-for-agent");
     assert_eq!(
         rig.github.label_takes().last().unwrap(),
-        &(30, "needs-triage".to_owned())
+        &(30, TRIAGE.to_owned())
     );
 }
 
@@ -423,7 +422,7 @@ fn an_edit_that_still_fails_is_triaged_again() {
     rig.claude
         .script_for(Role::Representative, [Scripted::Say(WORDS)]);
     let edited = "It crashes when I run it, on Linux.";
-    list(&rig, filed(&rig, MAINTAINER, edited, &["needs-triage"]));
+    list(&rig, filed(&rig, MAINTAINER, edited, &[TRIAGE]));
     rig.next_look();
 
     assert_eq!(step(&runner).unwrap(), None);

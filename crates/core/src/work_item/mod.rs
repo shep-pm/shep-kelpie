@@ -278,7 +278,7 @@ pub struct WorkItem {
     /// worktree was resumed with no ruling. A fourth ceiling raises one.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub ceiling_resumes: u32,
-    /// Whether the forge refused a merge under `auto` since the last
+    /// Whether the forge refused a merge under `merge = true` since the last
     /// ruling on one. A second refusal raises a `stuck` ruling for `merge-refused`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub merge_refused: bool,
@@ -309,7 +309,7 @@ pub struct WorkItem {
     /// refusal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pull_request_refused: Option<String>,
-    /// The head of the last merge under `auto` that answered an error. A
+    /// The head of the last merge under `merge = true` that answered an error. A
     /// pull request later found merged at it is kelpie's merge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_tried: Option<String>,
@@ -440,14 +440,14 @@ pub enum Phase {
         /// before there is one
         id: TicketId,
     },
-    /// The maintainer said yes, or every gate passed under `auto`: merging this head
+    /// The maintainer said yes, or every gate passed under `merge = true`: merging this head
     Merge {
         /// The head the ruling, or the gate, was about
         head: String,
         /// When kelpie marked the draft ready, which can start a fresh CI run
         #[serde(default)]
         readied: Option<Timestamp>,
-        /// Whether the gate started it under `auto`, with no ruling asked
+        /// Whether the gate started it under `merge = true`, with no ruling asked
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         auto: bool,
     },
