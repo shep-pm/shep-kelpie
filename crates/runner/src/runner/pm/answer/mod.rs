@@ -15,11 +15,12 @@ use crate::ticket::TicketId;
 
 /// The keys an answer takes, an object with none of them being none: `why`
 /// is left out, since an unstick inside an answer has one of its own
-const KEYS: [&str; 13] = [
+const KEYS: [&str; 14] = [
     "pick",
     "hold",
     "unstick",
     "fix",
+    "run_log",
     "answer",
     "follow_up",
     "red",
@@ -45,6 +46,9 @@ const UNSTICK: &str = "`item`, an `action` of retry, re-scope, ask or none, and 
 const FIX: &str = "`item`, then `on` naming the open fix it waits on or a `title` and a `body` \
                    for the fix it drafts, and `why`";
 
+/// What a `run_log` entry holds, as a dropped one names it
+const RUN_LOG: &str = "`item` and the `run` number of a run on its `## CI` list";
+
 /// What an `answer` entry holds, as a dropped one names it
 const SETTLE: &str = "`item`, then `text` or `escalate`, and `why`";
 
@@ -61,6 +65,8 @@ pub(super) struct Answer {
     pub(super) unstick: Vec<Unstick>,
     /// Each stuck work item it parks on an open fix, as the wake gave them
     pub(super) fix: Vec<FixCall>,
+    /// Each run whose whole log it asks the next wake to carry
+    pub(super) run_log: Vec<RunLogCall>,
     /// What to do about each worker's question the wake carried, in order
     pub(super) answer: Vec<Settle>,
     /// What to do about one follow-up ruling's findings
@@ -122,6 +128,15 @@ pub(super) enum RedHow {
     /// Asks the maintainer, because it cannot tell a flake from a break, with
     /// the log lines it read
     Ask { log: String },
+}
+
+/// The project manager's ask for the log of one run on an item's pull request
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RunLogCall {
+    /// The work item's ticket
+    pub(super) item: TicketId,
+    /// The run, as the case's `## CI` list names it
+    pub(super) run: u64,
 }
 
 /// The project manager's call on one stuck work item
@@ -289,6 +304,24 @@ pub(super) fn read(text: &str) -> Option<Answer> {
                 value => match unstick(value) {
                     Some(u) => answer.unstick.push(u),
                     None => answer.unread.push(unread(UNSTICK)),
+                },
+            },
+            "run_log" => match &value {
+                Value::Null => {}
+                // One run is one object; several are a list of them.
+                Value::Array(items) => {
+                    for item in items {
+                        match run_log(item) {
+                            Some(r) => answer.run_log.push(r),
+                            None => answer
+                                .unread
+                                .push(format!("`run_log`: {RUN_LOG}, not {item}")),
+                        }
+                    }
+                }
+                value => match run_log(value) {
+                    Some(r) => answer.run_log.push(r),
+                    None => answer.unread.push(unread(RUN_LOG)),
                 },
             },
             "fix" => match &value {
@@ -523,6 +556,13 @@ fn unstick(value: &Value) -> Option<Unstick> {
         item,
         action,
         why: why.trim().to_owned(),
+    })
+}
+
+fn run_log(value: &Value) -> Option<RunLogCall> {
+    Some(RunLogCall {
+        item: ticket(value.get("item")?)?,
+        run: value.get("run")?.as_u64()?,
     })
 }
 

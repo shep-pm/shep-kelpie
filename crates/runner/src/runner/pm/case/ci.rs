@@ -1,4 +1,5 @@
-//! A case's CI part: every run on the pull request's head, then the whole log of each that failed
+//! A case's CI part: every run on the pull request's head, then the whole log of each that
+//! failed and each the project manager asked for
 //!
 //! A completed run's log does not change, so the runner keeps each one it read
 //! in memory, by item, run and attempt, and a wake reads only the logs it lacks. The
@@ -38,17 +39,18 @@ impl Runner {
         let runs = (found.and_then(|l| l.head_runs(head)).cloned())
             .unwrap_or_else(|| self.ports.forge.head_runs(&self.remote, head));
         let mut fresh = BTreeMap::new();
-        for run in runs.iter().flatten().filter(|r| ended_red(r)) {
+        for run in runs.iter().flatten() {
             let key = (run.run, run.attempt);
+            let part = match (ended_red(run), self.asked_log(ticket, key)) {
+                (true, _) => LogPart::Failed,
+                (false, true) => LogPart::Whole,
+                (false, false) => continue,
+            };
             if self.pm.run_logs.contains_key(&(ticket, key.0, key.1)) {
                 continue;
             }
             let read = (found.and_then(|l| l.run_log(run.run, run.attempt)).cloned())
-                .unwrap_or_else(|| {
-                    self.ports
-                        .forge
-                        .run_log(&self.remote, run.run, LogPart::Failed)
-                });
+                .unwrap_or_else(|| self.ports.forge.run_log(&self.remote, run.run, part));
             fresh.insert(key, read);
         }
         CiReads {
@@ -58,10 +60,21 @@ impl Runner {
         }
     }
 
+    // Whether the project manager asked for attempt `key.1` of run `key.0` on `ticket`
+    fn asked_log(&self, ticket: TicketId, key: (u64, u32)) -> bool {
+        self.pm.run_log_asks.contains(&(ticket, key.0, key.1))
+    }
+
     // Keeps each log `ci` read, so a later wake does not read it again. A log
-    // that could not be read is asked for again.
+    // asked for is tried once its read is in a case, kept or not.
     pub(super) fn keep_run_logs(&mut self, ticket: TicketId, ci: CiReads) {
+        if let Ok(runs) = &ci.runs {
+            self.pm.ci_runs.insert(ticket, runs.clone());
+        }
         for ((run, attempt), read) in ci.fresh {
+            if self.asked_log(ticket, (run, attempt)) {
+                self.pm.run_log_tried.insert((ticket, run, attempt));
+            }
             if let Ok(text) = read {
                 self.pm.run_logs.insert((ticket, run, attempt), text);
             }
@@ -114,20 +127,31 @@ impl Runner {
                 runs.len()
             );
         }
-        for run in runs.iter().filter(|r| ended_red(r)) {
+        let held = |r: &&HeadRun| {
+            ended_red(r)
+                || self.pm.run_logs.contains_key(&(ticket, r.run, r.attempt))
+                || ci.fresh.contains_key(&(r.run, r.attempt))
+        };
+        for run in runs.iter().filter(held) {
             let _ = write!(
                 out,
                 "\n### Log of `{}`, run {}\n\n",
                 plain(&run.workflow),
                 run.run
             );
-            self.run_log_part(out, ticket, (run.run, run.attempt), ci);
+            self.run_log_part(out, ticket, (run.run, run.attempt), (ci, ended_red(run)));
         }
         None
     }
 
-    // One failed run's log, quoted, or what became of it
-    fn run_log_part(&self, out: &mut String, ticket: TicketId, key: (u64, u32), ci: &CiReads) {
+    // One run's log, quoted, or what became of it
+    fn run_log_part(
+        &self,
+        out: &mut String,
+        ticket: TicketId,
+        key: (u64, u32),
+        (ci, red): (&CiReads, bool),
+    ) {
         let run = key.0;
         let read = match (
             self.pm.run_logs.get(&(ticket, key.0, key.1)),
@@ -152,10 +176,14 @@ impl Runner {
                 );
             }
             Err(e) => {
+                // A failed run's log is read again at the next wake, and a log asked for is not.
+                let again = match red {
+                    true => "It is asked for again at the next wake.",
+                    false => "It is not asked for again.",
+                };
                 let _ = writeln!(
                     out,
-                    "The log of run {run} could not be read just now ({}). It is asked for again \
-                     at the next wake.",
+                    "The log of run {run} could not be read just now ({}). {again}",
                     cause(e)
                 );
             }

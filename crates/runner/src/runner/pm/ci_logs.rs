@@ -156,7 +156,15 @@ impl Runner {
             .filter(|(ticket, ..)| open.contains(ticket))
             .map(|&(_, run, attempt)| (run, attempt))
             .collect();
-        if heads.is_empty() && runs.is_empty() && ends.is_empty() && pulls.is_empty() {
+        let asked: Vec<(u64, u32)> = (self.pm.run_log_asks.iter())
+            .map(|&(_, run, attempt)| (run, attempt))
+            .collect();
+        if heads.is_empty()
+            && runs.is_empty()
+            && ends.is_empty()
+            && pulls.is_empty()
+            && asked.is_empty()
+        {
             return None;
         }
         let told = parked
@@ -172,6 +180,7 @@ impl Runner {
             ends,
             pulls,
             kept,
+            asked,
             told,
             steps: self.steps_file(),
         })
@@ -218,6 +227,8 @@ pub(super) struct LogsJob {
     pulls: Vec<u64>,
     // Each run attempt whose log a case already holds, which is not read again
     kept: BTreeSet<(u64, u32)>,
+    // Each run attempt whose whole log the project manager asked for
+    asked: Vec<(u64, u32)>,
     // Each parked item's worker session, whose transcript its case reads
     told: Vec<(TicketId, SessionId)>,
     // The steps file, which each case reads its log lines from
@@ -239,7 +250,7 @@ pub(super) struct Logs {
     talks: BTreeMap<u64, Result<Talk, ForgeError>>,
     // By head, every run on it
     head_runs: BTreeMap<String, Result<Vec<HeadRun>, ForgeError>>,
-    // By run, its failed log in whole, for each failed run no case held yet
+    // By run, its failed log in whole, and the whole log of each run asked for, for each no case held yet
     run_logs: BTreeMap<(u64, u32), Result<String, ForgeError>>,
     // By ticket, its log lines and what its worker said
     told: BTreeMap<TicketId, Told>,
@@ -289,6 +300,7 @@ impl LogsJob {
             ends,
             pulls,
             kept,
+            asked,
             told,
             steps,
         } = self;
@@ -332,6 +344,11 @@ impl LogsJob {
                 }
             }
             head_runs.insert(head.to_owned(), listed);
+        }
+        for key in asked {
+            if !kept.contains(&key) && !run_logs.contains_key(&key) {
+                run_logs.insert(key, forge.run_log(&remote, key.0, LogPart::Whole));
+            }
         }
         // The steps file is read once, and each parked item's transcript once
         let sessions = told.iter().map(|(_, session)| session.0.clone()).collect();
