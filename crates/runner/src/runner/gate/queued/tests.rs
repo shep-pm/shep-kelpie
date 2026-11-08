@@ -415,3 +415,29 @@ fn a_yes_to_a_held_ruling_approves_the_runs_and_waits_for_ci() {
     let (_, question) = ruling_report(step(&runner).unwrap());
     assert!(question.starts_with("Merge pull request #71"), "{question}");
 }
+
+#[test]
+fn a_no_to_a_held_ruling_sends_the_worker_its_note() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge.set_held_checks(&head, &[("test.yml", RUN)]);
+    ruling_report(rig.verdict(&runner));
+
+    rig.ask(&runner, "rule", Some("71 no remove the unsafe workflow"));
+
+    assert!(rig.forge.approvals().is_empty());
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["work_item"]["phase"]["state"], "implement",
+        "{status}"
+    );
+    rig.claude.script([Scripted::Text("workflow removed")]);
+    step(&runner).unwrap();
+    let seen = rig.claude.all_seen();
+    assert!(
+        seen.last()
+            .unwrap()
+            .call
+            .prompt
+            .contains("remove the unsafe workflow")
+    );
+}
