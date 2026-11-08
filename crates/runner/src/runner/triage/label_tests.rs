@@ -72,3 +72,23 @@ fn the_maintainers_own_issue_triages_with_no_label() {
 
     assert_eq!(calls(&rig, Role::Triager).len(), 1);
 }
+
+#[test]
+fn the_pass_takes_the_go_off_and_ends_at_needs_approval() {
+    let (rig, runner) = asked("newcomer", FAILING, &[]);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(calls(&rig, Role::Triager).len(), 1);
+    assert_eq!(rig.github.comments().len(), 1);
+    let moved = moves(&rig);
+    assert_eq!(moved.last(), Some(&format!("label {TRIAGE}")), "{moved:?}");
+
+    // At the next poll the go is spent and comes off. The listing still shows
+    // it, since the stand-in's listing does not follow the writes.
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(rig.github.label_takes(), [(30, TRIAGE_GO.to_owned())]);
+    assert_eq!(calls(&rig, Role::Triager).len(), 1, "nothing starts again");
+    assert_eq!(rig.github.comments().len(), 1);
+}

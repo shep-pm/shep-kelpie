@@ -34,6 +34,7 @@ pub(super) mod ask;
 mod checks;
 pub(super) mod comment;
 mod facts;
+mod go;
 pub(super) mod hand;
 pub(super) mod heard;
 pub(super) mod images;
@@ -297,11 +298,12 @@ impl Runner {
             }
             // The limits, read from the records and the listing, before the call
             // is made.
+            let go = self.go_listed(issue);
             let waiting = (!asked)
                 .then(|| self.triage_due.iter().find(|d| d.issue == issue).cloned())
                 .flatten();
             let limited = match &waiting {
-                Some(due) => self.triage_limited(&due.author, asked),
+                Some(due) => self.triage_limited(&due.author, asked || go),
                 None => false,
             };
             if let Some(due) = &waiting
@@ -742,6 +744,9 @@ fn decided(labels: &[String]) -> bool {
 pub(super) enum Whose<'a> {
     // Every person's
     Anyone,
+    // Every person's, and the maintainer's `needs-triage` counts: whatever
+    // `Anyone`, `Only` or `Asked` reach, for a read made before the pick is known
+    Possibly,
     // The maintainer's login, or the App's
     Only(&'a str),
     // The maintainer's login or the App's, and anyone's that carries the
@@ -764,7 +769,8 @@ fn untouched(
     app: Option<&str>,
     taken: bool,
 ) -> bool {
-    let go = matches!(whose, Whose::Asked(_)) && issue.labels.iter().any(|l| l == TRIAGE_GO);
+    let go = matches!(whose, Whose::Asked(_) | Whose::Possibly)
+        && issue.labels.iter().any(|l| l == TRIAGE_GO);
     let decided = (issue.labels.iter()).any(|l| {
         TRIAGE_LABELS.contains(&l.as_str())
             && (l != TRIAGE || (issue.number <= pruned_through && !go))
@@ -773,7 +779,7 @@ fn untouched(
     let held = taken || issue.labels.iter().any(|l| l == READY);
     let theirs = |login: &str| issue.author.eq_ignore_ascii_case(login) || is_app(&issue.author, app);
     let reached = match whose {
-        Whose::Anyone => true,
+        Whose::Anyone | Whose::Possibly => true,
         Whose::Only(login) => theirs(login),
         Whose::Asked(login) => go || theirs(login),
     };

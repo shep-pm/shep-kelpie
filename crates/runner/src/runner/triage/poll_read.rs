@@ -139,7 +139,7 @@ impl PollJob {
                         i,
                         since,
                         pruned_through,
-                        Whose::Anyone,
+                        Whose::Possibly,
                         true,
                         app,
                         self.taken.contains(&i.number),
@@ -312,6 +312,8 @@ impl Runner {
         // what the next pass is made on.
         self.watch_local_waits(&local)?;
         self.resume_triage()?;
+        // A go on an issue already triaged is spent, before the check reads it.
+        self.take_spent_gos(&mut open);
         // The check reads the listing before the take-back and the due list.
         // Those reach only an issue it refused.
         self.check_issues(&open, pulls.as_ref(), &busy);
