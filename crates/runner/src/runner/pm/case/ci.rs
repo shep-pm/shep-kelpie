@@ -9,8 +9,10 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use super::{cause, plain};
+use crate::board::briefing::ticket_ref;
 use crate::ports::{ForgeError, HEAD_RUNS_LIMIT, HeadRun, LogPart};
 use crate::runner::Runner;
+use crate::runner::pm::Wake;
 use crate::ticket::TicketId;
 
 // How a run concludes when it failed: its log is read. A job `timeout-minutes`
@@ -38,17 +40,18 @@ impl Runner {
         let runs = (found.and_then(|l| l.head_runs(head)).cloned())
             .unwrap_or_else(|| self.ports.forge.head_runs(&self.remote, head));
         let mut fresh = BTreeMap::new();
-        for run in runs.iter().flatten().filter(|r| ended_red(r)) {
+        for run in runs.iter().flatten() {
             let key = (run.run, run.attempt);
+            let part = match (ended_red(run), self.asked_log(ticket, key)) {
+                (true, _) => LogPart::Failed,
+                (false, true) => LogPart::Whole,
+                (false, false) => continue,
+            };
             if self.pm.run_logs.contains_key(&(ticket, key.0, key.1)) {
                 continue;
             }
             let read = (found.and_then(|l| l.run_log(run.run, run.attempt)).cloned())
-                .unwrap_or_else(|| {
-                    self.ports
-                        .forge
-                        .run_log(&self.remote, run.run, LogPart::Failed)
-                });
+                .unwrap_or_else(|| self.ports.forge.run_log(&self.remote, run.run, part));
             fresh.insert(key, read);
         }
         CiReads {
@@ -58,9 +61,46 @@ impl Runner {
         }
     }
 
+    // Whether the project manager asked for attempt `key.1` of run `key.0` on `ticket`
+    fn asked_log(&self, ticket: TicketId, key: (u64, u32)) -> bool {
+        self.pm.run_log_asks.contains(&(ticket, key.0, key.1))
+    }
+
+    // Queues a wake that carries the log of run `run` on `ticket`'s list, or says why not
+    pub(in crate::runner::pm) fn ask_run_log(
+        &mut self,
+        ticket: TicketId,
+        run: u64,
+    ) -> Result<String, String> {
+        let named = ticket_ref(ticket);
+        let listed = self.pm.ci_runs.get(&ticket).into_iter().flatten();
+        let mut listed = listed.filter(|r| r.run == run).peekable();
+        if listed.peek().is_none() {
+            return Err(format!(
+                "run_log {named} run {run}: the run is not on its `## CI` list"
+            ));
+        }
+        let open = listed
+            .map(|r| (ticket, run, r.attempt))
+            .find(|key| !self.pm.run_logs.contains_key(key));
+        let Some(key) = open else {
+            return Err(format!(
+                "run_log {named} run {run}: its case already holds the log"
+            ));
+        };
+        if !self.pm.run_log_asks.contains(&key) {
+            self.pm.run_log_asks.push(key);
+        }
+        self.pm_due(Wake::RunLog { ticket, run });
+        Ok(format!("asked for the log of run {run} on {named}"))
+    }
+
     // Keeps each log `ci` read, so a later wake does not read it again. A log
     // that could not be read is asked for again.
     pub(super) fn keep_run_logs(&mut self, ticket: TicketId, ci: CiReads) {
+        if let Ok(runs) = &ci.runs {
+            self.pm.ci_runs.insert(ticket, runs.clone());
+        }
         for ((run, attempt), read) in ci.fresh {
             if let Ok(text) = read {
                 self.pm.run_logs.insert((ticket, run, attempt), text);
@@ -114,7 +154,12 @@ impl Runner {
                 runs.len()
             );
         }
-        for run in runs.iter().filter(|r| ended_red(r)) {
+        let held = |r: &&HeadRun| {
+            ended_red(r)
+                || self.pm.run_logs.contains_key(&(ticket, r.run, r.attempt))
+                || ci.fresh.contains_key(&(r.run, r.attempt))
+        };
+        for run in runs.iter().filter(held) {
             let _ = write!(
                 out,
                 "\n### Log of `{}`, run {}\n\n",

@@ -171,6 +171,12 @@ impl Runner {
                 Err(why) => dropped.push(why),
             }
         }
+        for call in &answer.run_log {
+            match self.ask_run_log(call.item, call.run) {
+                Ok(done) => acted.push(done),
+                Err(why) => dropped.push(why),
+            }
+        }
         // Each question the wake carried settles on its own, so one that cannot
         // act leaves the others standing. One item is settled once, whichever
         // entry named it first.

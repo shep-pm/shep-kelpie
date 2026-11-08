@@ -40,6 +40,7 @@ fn the_last_object_after_the_reasoning_is_the_answer() {
                 how: FixHow::On(ticket(12)),
                 why: "a machine fault".into(),
             }],
+            run_log: Vec::new(),
             answer: Vec::new(),
             follow_up: None,
             red: Vec::new(),
