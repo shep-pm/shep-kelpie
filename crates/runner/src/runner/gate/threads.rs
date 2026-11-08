@@ -21,7 +21,8 @@ use crate::state::StateError;
 use crate::ticket::TicketId;
 use crate::work_item::{FollowUps, Phase, Review, ReviewStage, Turn, WorkItem};
 
-// Replaces a reason the forge's guard refuses, as it names something of this machine's.
+// Replaces a reason the forge's guard refuses, as it names something of this machine's,
+// after the lead of the reply it stands in for, so it is still known as kelpie's own.
 const UNPOSTABLE: &str = "The project manager's reason names something on the machine kelpie \
                           runs on, so it is not posted.";
 
@@ -183,22 +184,30 @@ impl Runner {
         let mut failed: Option<String> = None;
         for call in ruled {
             let id = call.thread.id.as_str();
-            let (body, settle) = match call.decision {
+            let (lead, body, settle) = match call.decision {
                 Decision::Fix => {
                     fixes.push(call);
                     continue;
                 }
-                Decision::Close => (format!("{RULED_CLOSE}{}", call.why), true),
-                Decision::PushBack => (format!("{RULED_PUSH}{}", call.why), false),
+                Decision::Close => (
+                    RULED_CLOSE.to_owned(),
+                    format!("{RULED_CLOSE}{}", call.why),
+                    true,
+                ),
+                Decision::PushBack => (
+                    RULED_PUSH.to_owned(),
+                    format!("{RULED_PUSH}{}", call.why),
+                    false,
+                ),
                 Decision::FollowUp => match self.file_ruled(&item, &call.thread, &call.why) {
-                    Ok(said) => (said, true),
+                    Ok((lead, said)) => (lead, said, true),
                     Err(why) => {
                         failed = Some(why);
                         continue;
                     }
                 },
             };
-            if let Err(why) = self.say_on(number, id, &body, settle) {
+            if let Err(why) = self.say_on(number, id, (&lead, &body), settle) {
                 failed = Some(why);
                 continue;
             }
@@ -238,13 +247,13 @@ impl Runner {
     }
 
     // Files `thread`'s finding as a follow-up issue, and returns what kelpie replies
-    // on the thread with: the number of the issue it filed or commented on
+    // on the thread with, and its lead: the number of the issue it filed or commented on
     fn file_ruled(
         &mut self,
         item: &WorkItem,
         thread: &RuledThread,
         why: &str,
-    ) -> Result<String, String> {
+    ) -> Result<(String, String), String> {
         let ticket = item.issue;
         let finding = finding_of(thread, why);
         let before = item.follow_ups.clone();
@@ -271,10 +280,10 @@ impl Runner {
         let Some(filed) = filed else {
             return self.unfiled(ticket, before, "the filing filed nothing".to_owned());
         };
-        let number = filed.shown();
+        let lead = format!("{RULED_FOLLOW}{}", filed.shown());
         Ok(match why.is_empty() {
-            true => format!("{RULED_FOLLOW}{number}"),
-            false => format!("{RULED_FOLLOW}{number}: {why}"),
+            true => (format!("{lead}: "), lead),
+            false => (format!("{lead}: "), format!("{lead}: {why}")),
         })
     }
 
@@ -286,7 +295,7 @@ impl Runner {
         ticket: TicketId,
         before: Option<FollowUps>,
         reason: String,
-    ) -> Result<String, String> {
+    ) -> Result<(String, String), String> {
         match self.update_of(ticket, |item| item.follow_ups = before) {
             Ok(()) => Err(reason),
             Err(e) => Err(format!("{reason}; cannot save the item either: {e}")),
@@ -344,16 +353,32 @@ impl Runner {
         .map_err(|e| format!("cannot save the fix turn: {e}"))
     }
 
-    // Kelpie's reply on a ruled thread, and the resolve where the ruling settles it.
-    // A reason the guard or a hook of the project's refuses is replaced, so the thread
-    // still settles; a hook that failed to run is left for the next try.
-    fn say_on(&mut self, number: u64, id: &str, body: &str, settle: bool) -> Result<(), String> {
+    // Kelpie's reply on a ruled thread, then the resolve where the ruling settles it.
+    // The reply goes first: a resolved thread leaves the gate's reads, so a reply that
+    // failed after it would never be tried again. A refused reason is replaced after
+    // the reply's `lead`, so the thread settles; a hook that failed to run is retried.
+    fn say_on(
+        &mut self,
+        number: u64,
+        id: &str,
+        (lead, body): (&str, &str),
+        settle: bool,
+    ) -> Result<(), String> {
         let app = self.app_covers();
         let (forge, voice) = (&self.ports.forge, &self.ports.voice);
         let reply = |text: &str| match app {
             true => voice.reply_to_thread(&self.remote, id, text),
             false => forge.reply_to_thread(&self.remote, id, text),
         };
+        let mut posted = reply(body);
+        match &posted {
+            Err(ForgeError::LocalPath { .. }) => posted = reply(&format!("{lead}{UNPOSTABLE}")),
+            Err(ForgeError::Hook { refusal, .. }) if !refusal.failed => {
+                posted = reply(&format!("{lead}{HOOK_REFUSED}"))
+            }
+            _ => {}
+        }
+        posted.map_err(|e| format!("cannot reply to a thread on #{number}: {e}"))?;
         if settle {
             let done = match app {
                 true => voice.resolve_thread(&self.remote, id),
@@ -361,15 +386,7 @@ impl Runner {
             };
             done.map_err(|e| format!("cannot resolve a thread on #{number}: {e}"))?;
         }
-        let mut posted = reply(body);
-        match &posted {
-            Err(ForgeError::LocalPath { .. }) => posted = reply(UNPOSTABLE),
-            Err(ForgeError::Hook { refusal, .. }) if !refusal.failed => {
-                posted = reply(HOOK_REFUSED)
-            }
-            _ => {}
-        }
-        posted.map_err(|e| format!("cannot reply to a thread on #{number}: {e}"))
+        Ok(())
     }
 
     // `threads`, split into those waiting on the maintainer's reply to a push-back and

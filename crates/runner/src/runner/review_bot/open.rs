@@ -90,7 +90,10 @@ impl Runner {
             author: first.author.clone(),
             severity,
             what,
-            maintainer_wrote: (thread.remarks.iter()).any(|r| r.standing == Standing::Writer),
+            // Kelpie's own replies post under the maintainer's login where no App
+            // covers the repo, so they are no sign the maintainer wrote in it.
+            maintainer_wrote: (thread.remarks.iter())
+                .any(|r| r.standing == Standing::Writer && !is_reply(&r.body)),
             said: (thread.remarks.iter())
                 .filter(|r| !is_reply(&r.body))
                 .map(|r| r.id)
@@ -188,6 +191,21 @@ mod tests {
                 said: Some(1),
             }]
         );
+    }
+
+    #[test]
+    fn kelpies_own_reply_under_the_maintainers_login_is_no_sign_they_wrote() {
+        let nit = "P3: The name could be shorter. It is long.";
+        let reply = remark(2, "octocat", Standing::Writer, "Declined: it is public API");
+        let talk = talk(vec![thread("T1", "src/a.rs", vec![cubic(nit), reply])]);
+
+        let got = ruled(&item(), &talk).threads;
+
+        let [one] = got.as_slice() else {
+            panic!("{got:?}")
+        };
+        assert!(!one.maintainer_wrote, "{one:?}");
+        assert_eq!(one.said, Some(1), "kelpie's reply is not a remark said");
     }
 
     #[test]

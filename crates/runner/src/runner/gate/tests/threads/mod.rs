@@ -10,6 +10,7 @@ use crate::board::READY;
 use crate::ports::{CLEAN, Cost, Finding, PullRequestState, Role, Severity, Standing};
 use crate::runner::coderabbit::tests::now;
 use crate::runner::flight::tests::Driven;
+use crate::runner::review_bot::is_reply;
 use crate::runner::review_bot::two_bots::listing;
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, ScriptedRound, Seen, ticket};
@@ -535,14 +536,47 @@ fn a_close_whose_reply_is_refused_still_settles_the_thread() {
         rig.forge.coderabbit.replies(),
         [(
             THREAD.to_owned(),
-            "The project manager's reason names something on the machine kelpie runs on, \
-             so it is not posted."
+            "Closed as wrong: The project manager's reason names something on the machine \
+             kelpie runs on, so it is not posted."
                 .to_owned()
         )]
+    );
+    assert!(
+        is_reply(&last_reply(&rig).1),
+        "the replacement is still known as kelpie's own"
     );
     assert_eq!(rig.forge.coderabbit.resolved(), [THREAD]);
     let item = runner.lock().unwrap().state.work_items[0].clone();
     assert_eq!(item.threads_accepted, [THREAD]);
+}
+
+#[test]
+fn a_close_whose_reply_fails_is_tried_again_with_the_thread_still_open() {
+    let (rig, runner, _) = at_the_gate(pm_project("threads-reply-down"), &[NIT]);
+    rig.forge.coderabbit.set_reply_down(true);
+
+    let (_, dropped) = ruled(&ruled_by(&rig, &runner, CLOSE));
+
+    assert_eq!(dropped.len(), 1, "{dropped:?}");
+    assert!(dropped[0].contains("cannot reply"), "{dropped:?}");
+    assert_eq!(
+        rig.forge.coderabbit.resolved(),
+        Vec::<String>::new(),
+        "a thread whose reply failed stays open to be tried again"
+    );
+
+    rig.clock.advance(BACK_OFF);
+    rig.forge.coderabbit.set_reply_down(false);
+    ruled_by(&rig, &runner, CLOSE);
+
+    assert_eq!(
+        last_reply(&rig),
+        (
+            THREAD.to_owned(),
+            "Closed as wrong: the caller checks it".to_owned()
+        )
+    );
+    assert_eq!(rig.forge.coderabbit.resolved(), [THREAD]);
 }
 
 #[test]
