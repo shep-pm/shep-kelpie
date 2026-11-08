@@ -537,6 +537,7 @@ fn a_triage_label_put_on_while_the_call_ran_stands_and_the_body_is_kept() {
         said.contains("stands, so kelpie labels it no further"),
         "{said}"
     );
+    assert!(!said.contains("Kelpie labels it:"), "{said}");
     assert!(!said.contains(&format!("ends at `{TRIAGE}`")), "{said}");
     assert_eq!(moves(&rig), ["comment"], "nothing more is labelled");
     assert_eq!(rig.forge.issue_labels(30), ["needs-info"]);

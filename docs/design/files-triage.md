@@ -11,7 +11,8 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | triage-ready.md | the maintainer's issue rewritten, its repair, the ready path, a saved split filed | `runner/triage/{ready,rewrite,split}.rs`, `runner/flight/triage.rs`, `core/state/triage.rs` |
 | triage-priority.md | the priority a pass puts on, and the labels made | `runner/triage/{comment,facts}.rs`, `runner/claim.rs` |
 | triage-images.md | an issue's images | `runner/triage/images.rs`, `adapters/gh/attachment.rs` |
-| triage-author.md | author's round: ask, answers, silence | `runner/triage/{ask,heard}.rs` |
+| triage-author.md | author's round: who is asked, the roles, the questions comment | `runner/triage/ask.rs` |
+| triage-answers.md | hearing a reply, `ok`, the answers pass, silence | `runner/triage/{ask,heard}.rs`, `runner/thread_replies/` |
 | triage-local.md | local session | `runner/triage/local.rs` |
 | triage-spam.md | the spam check | `runner/triage/spam.rs` |
 | triage-reader.md | who a comment is for | `runner/triage/facts.rs` |

@@ -1,6 +1,6 @@
 # Triage
 
-Kelpie's triage of issues other people open (#887): the settings, the agent, the pick rule, the verb and `status`. The issue check that owes an issue its triage is in `triage-check.md`, the limits in `triage-limits.md`, one issue's pass in `triage-pass.md`, its rewrite and ready path in `triage-ready.md`, the author's round, its ask and its own session in `triage-author.md`, the classifier check in `triage-spam.md`, and the swap a `taken` record owes in `triage-hand.md`.
+Kelpie's triage of issues other people open (#887): the settings, the agent, the pick rule, the verb and `status`. The issue check that owes an issue its triage is in `triage-check.md`, the limits in `triage-limits.md`, one issue's pass in `triage-pass.md`, its rewrite and ready path in `triage-ready.md`, the author's round in `triage-author.md` and `triage-answers.md`, the classifier check in `triage-spam.md`, and the swap a `taken` record owes in `triage-hand.md`.
 
 - `[app.dogs.kelpie.triage]`, an absent table meaning `pick = "off"`, with `deny_unknown_fields`. `crates/core/src/settings/triage.rs`
   - `pick`: `off` (default), `maintainer` (only the maintainer's issues), `label` or `all`

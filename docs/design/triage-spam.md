@@ -1,6 +1,6 @@
 # Triage's spam check
 
-The classifier an issue goes through after its limits and before its research call (#895): the settings, the port, what a hit does and what a failure does. The settings and pick rule are in `triage.md`, the pass itself in `triage-pass.md`, the author's round in `triage-author.md`.
+The classifier an issue goes through after its limits and before its research call (#895): the settings, the port, what a hit does and what a failure does. The settings and pick rule are in `triage.md`, the pass itself in `triage-pass.md`, the author's round in `triage-author.md` and `triage-answers.md`.
 
 - `[app.dogs.kelpie.triage.spam]`, an absent table meaning no check, with `deny_unknown_fields`. `crates/core/src/settings/triage.rs`
   - `gateway`: a gateway named in kelpie's own `[gateways.<name>]`. Absent means no check at all. `Gateways::check_triage_spam` refuses a start, a `reread` and a `shep kelpie set` whose gateway kelpie's settings lack or cannot dial, naming `triage.spam.gateway`. A gateway whose key is unset is not refused there either: kelpie cannot ask it, so the check is off for the run and told once, and the runner starts. `crates/core/src/settings/gateway.rs`, `crates/runner/src/runner/mod.rs`, `runner/reread/`, `src/flock/set/mod.rs`

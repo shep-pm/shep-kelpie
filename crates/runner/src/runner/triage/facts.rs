@@ -75,16 +75,20 @@ pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: 
         ask,
         settled,
         fallback,
+        stood,
         ..
     } = wording;
     let mut facts = String::from("Kelpie read the issue against the repo's main branch.\n");
-    if !labels.is_empty() {
-        let when = match ask {
-            true => " when this triage ends",
-            false => "",
+    // A stand by hand means kelpie labels nothing, and an ask owes its labels
+    // with the rest when the wait ends: only a pass that labels beside its
+    // comment can tell the reader the labels are there to see.
+    if !labels.is_empty() && !stood {
+        let (when, seen) = match ask {
+            true => (" when this triage ends", "not on the issue yet"),
+            false => ("", "already on the issue"),
         };
         facts.push_str(&format!(
-            "\nKelpie labels it: {}{when}.\n",
+            "\nKelpie labels it: {}{when}. The labels are {seen}.\n",
             labels.join(", ")
         ));
     }
@@ -98,6 +102,8 @@ pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: 
         let related: Vec<String> = found.related.iter().map(|(n, _)| format!("#{n}")).collect();
         facts.push_str(&format!("\nRelated open issues: {}.\n", related.join(", ")));
     }
+    // Each list is on the issue with kelpie's report, so the comment names one
+    // only where it changes what the reader does next.
     let lists = [
         ("Files the work would touch", &found.files, "`"),
         ("Tests that would pin it", &found.tests, "`"),
@@ -107,7 +113,7 @@ pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: 
         if items.is_empty() {
             continue;
         }
-        facts.push_str(&format!("\n{heading}:\n"));
+        facts.push_str(&format!("\n{heading}, already on the issue:\n"));
         for item in items {
             facts.push_str(&format!("- {quote}{item}{quote}\n"));
         }
