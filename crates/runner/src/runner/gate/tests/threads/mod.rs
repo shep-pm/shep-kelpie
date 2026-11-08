@@ -773,7 +773,11 @@ fn a_deferred_finding_followed_up_is_filed_before_the_merge_and_not_again() {
         "the issue carries kelpie's own words: {}",
         issue.body
     );
-    assert_eq!(rig.forge.coderabbit.replies(), [], "it has no thread to reply on");
+    assert_eq!(
+        rig.forge.coderabbit.replies(),
+        [],
+        "it has no thread to reply on"
+    );
 
     let seen = steps(&runner, |r| matches!(r, StepReport::Finished { .. }));
     assert!(
@@ -785,7 +789,11 @@ fn a_deferred_finding_followed_up_is_filed_before_the_merge_and_not_again() {
     );
     assert_eq!(rig.forge.merges(), [(71, head)]);
     assert_eq!(rig.forge.created().len(), 1, "filed once");
-    assert_eq!(pm_seen(&rig).len(), 1, "it is not put to the project manager again");
+    assert_eq!(
+        pm_seen(&rig).len(),
+        1,
+        "it is not put to the project manager again"
+    );
 }
 
 #[test]
@@ -817,7 +825,10 @@ fn a_deferred_finding_sent_back_rides_the_threads_turn() {
     assert_eq!(turns.len(), turns_before + 1, "one worker turn: {turns:?}");
     let file = std::fs::read_to_string(rig.build_7().join("review-findings.md")).unwrap();
     assert!(file.contains("thread 1|"), "{file}");
-    assert!(file.contains("thread 2|HIGH|src/lib.rs:9|looks racy"), "{file}");
+    assert!(
+        file.contains("thread 2|HIGH|src/lib.rs:9|looks racy"),
+        "{file}"
+    );
     let seen = steps(&runner, |r| matches!(r, StepReport::Finished { .. }));
     assert_eq!(rig.forge.coderabbit.resolved(), [THREAD]);
     assert_eq!(rig.forge.created(), [], "a fixed finding is filed nowhere");
@@ -860,7 +871,11 @@ fn a_deferred_finding_closed_files_nothing_and_journals_why() {
         "nothing is asked at the merge: {seen:?}"
     );
     assert_eq!(rig.forge.created(), [], "a close files nothing");
-    assert_eq!(rig.forge.coderabbit.replies(), [], "it has no thread to reply on");
+    assert_eq!(
+        rig.forge.coderabbit.replies(),
+        [],
+        "it has no thread to reply on"
+    );
 }
 
 #[test]
@@ -877,7 +892,10 @@ fn a_disputed_finding_asks_nothing() {
         seen.iter().all(|r| !matches!(r, StepReport::Ruling { .. })),
         "{seen:?}"
     );
-    assert!(pm_seen(&rig).is_empty(), "nothing is put to the project manager");
+    assert!(
+        pm_seen(&rig).is_empty(),
+        "nothing is put to the project manager"
+    );
     assert_eq!(rig.forge.created(), [], "a disputed finding is not filed");
     assert_eq!(rig.forge.merges().len(), 1);
 }

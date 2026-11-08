@@ -2,6 +2,7 @@
 //!
 //! A project that names `agents.pm` puts every open thread of its own work item to the
 //! project manager before the merge, nits included, and the item waits in CI for its answer.
+//! The worker's deferred findings go with them, each as a thread with no forge id.
 //! A thread only someone outside the project wrote in reaches no model and holds nothing.
 //! A contribution's threads stay the maintainer's, with the merge ruling as it is.
 

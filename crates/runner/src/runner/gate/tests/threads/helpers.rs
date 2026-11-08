@@ -20,7 +20,8 @@ pub(super) const THREADS_HELD: &str = "its open review threads are with the proj
                             waits on its answer";
 pub(super) const TALK_UNREAD: &str = "what people wrote on its pull request cannot be read, so the merge \
                           waits for a read";
-pub(super) const PM_DOWN: &str = "the project manager is down, so its open review threads wait for it";
+pub(super) const PM_DOWN: &str =
+    "the project manager is down, so its open review threads wait for it";
 pub(super) const PUSHED_BACK: &str = "the project manager pushed back on a review thread the maintainer \
                            wrote, so the merge waits for their reply";
 
@@ -141,7 +142,10 @@ pub(super) fn worker_says(rig: &Rig, steps: impl IntoIterator<Item = Scripted>) 
 }
 
 // Steps until a step reports what `wanted` matches, and returns every report it saw
-pub(super) fn steps(runner: &Mutex<Runner>, wanted: impl Fn(&StepReport) -> bool) -> Vec<StepReport> {
+pub(super) fn steps(
+    runner: &Mutex<Runner>,
+    wanted: impl Fn(&StepReport) -> bool,
+) -> Vec<StepReport> {
     let deadline = Instant::now() + CALL_PATIENCE;
     let mut seen = Vec::new();
     while Instant::now() < deadline {

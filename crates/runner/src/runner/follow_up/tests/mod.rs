@@ -934,7 +934,11 @@ fn a_head_merged_by_hand_keeps_the_ruling_after_the_merge() {
     let Some(StepReport::Ruling { question, .. }) = report else {
         panic!("expected a follow-up ruling after the merge, got {report:?}");
     };
-    assert_eq!(rig.forge.merges(), [], "the maintainer merged it, not kelpie");
+    assert_eq!(
+        rig.forge.merges(),
+        [],
+        "the maintainer merged it, not kelpie"
+    );
     assert!(question.contains("src/lib.rs:9 looks racy"), "{question}");
     assert_eq!(rig.forge.created(), [], "nothing is filed before the yes");
 }
