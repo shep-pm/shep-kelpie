@@ -19,6 +19,10 @@ use crate::ports::{CallActivity, Cost, Timestamp, Wait};
 use crate::state::BoardEvent;
 use crate::ticket::TicketId;
 
+mod plans;
+
+pub use plans::PlanLine;
+
 /// How long a call in flight may show nothing before the board calls it idle
 pub const IDLE_AFTER: u64 = 10 * 60;
 
@@ -77,6 +81,9 @@ pub struct Briefing<'a> {
     /// The implementers the agent board may pick, by name, then the
     /// project's reviewers in their order
     pub agents: Vec<AgentLine>,
+    /// The plan accounts the listed agents spend, in account order, each with
+    /// what the pacer last read of its week
+    pub plans: Vec<PlanLine>,
     /// The board events the project manager has not read
     pub events: Vec<BoardEvent>,
     /// Whether the project manager has read the board before
@@ -300,7 +307,7 @@ pub fn render(board: &Briefing<'_>) -> String {
     rulings(&mut out, &board.rulings);
     red_on_main(&mut out, board);
     ready_queue(&mut out, board.ready.as_ref(), now);
-    agents(&mut out, &board.agents, now);
+    agents(&mut out, &board.agents, &board.plans, now);
     events(&mut out, board);
     overlap(&mut out, board);
     files(&mut out, &board.items);
@@ -511,7 +518,7 @@ fn unblocks_part(unblocks: &[TicketId]) -> String {
     format!("; unblocks {}", named.join(", "))
 }
 
-fn agents(out: &mut String, agents: &[AgentLine], now: Timestamp) {
+fn agents(out: &mut String, agents: &[AgentLine], plans: &[PlanLine], now: Timestamp) {
     out.push_str("## Agents\n\n");
     if agents.is_empty() {
         out.push_str("(none)\n\n");
@@ -524,7 +531,17 @@ fn agents(out: &mut String, agents: &[AgentLine], now: Timestamp) {
          start and what it typically takes and costs, and an agent marked out cannot start a \
          work item before the time shown. To have a work item wait for an agent, hold it. \
          A ready issue whose line says `unblocks` holds up other work, so it is worth the \
-         fastest agent that can start.\n\n",
+         fastest agent that can start. A plan agent costs no dollars, but each work item \
+         spends a share of its week's limit, and a share left at the reset is lost, so a \
+         plan's week is a budget to spend by its reset, not to save. Read the pace and where \
+         it lands, not the share left. On course to land under 100%, run more work items at \
+         once and give work that holds up other work to the faster plan agent. On course for \
+         over 100%, lean on local models. A small share left with little time left is no \
+         reason to slow down. The pace never reorders the agents: spend a local model that \
+         can start first, then API credit while the API is not held, then a plan, and the \
+         pace says only how far down that order to reach when the cheaper ones are busy. The \
+         ready queue is not the week's work, since the maintainer files issues all week, so \
+         a short queue is no reason to spend faster.\n\n",
     );
     for agent in agents {
         let kinds = match &agent.kinds {
@@ -543,6 +560,10 @@ fn agents(out: &mut String, agents: &[AgentLine], now: Timestamp) {
             agent.description.as_deref().unwrap_or("no description"),
             reading(agent, now),
         );
+    }
+    if !plans.is_empty() {
+        out.push('\n');
+        plans::lines(out, plans, now);
     }
     out.push('\n');
 }
