@@ -11,6 +11,7 @@ use super::pick_tests::{MAINTAINER, issue, list, rig_with};
 use super::research_tests::{
     APP, calls, crashed_with, facts, handed, moves, reply, restart, triage, under,
 };
+use crate::board::TRIAGE;
 use crate::github::ApiError;
 use crate::ports::{Clock, ForgeError, Role};
 use crate::runner::{Runner, step};
@@ -28,7 +29,7 @@ const REPO_LABELS: [&str; 8] = [
     "enhancement",
     "P1",
     "P2",
-    "needs-triage",
+    TRIAGE,
     "needs-info",
     "ready-for-agent",
 ];
@@ -254,7 +255,12 @@ fn an_outside_issue_is_asked_under_pick_all_and_ends_needs_triage_under_pick_mai
     assert_eq!(held["step"], "done");
     assert_eq!(
         moves(&rig),
-        ["comment", "label bug", "label P2", "label needs-triage"],
+        [
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}")
+        ],
         "an outside author is not asked"
     );
     assert!(!posted(&rig)[0].contains("<details>"), "{:?}", posted(&rig));
@@ -334,7 +340,12 @@ fn an_issue_kelpie_opened_is_not_asked_with_no_maintainer_login() {
 
     assert_eq!(
         moves(&rig),
-        ["comment", "label bug", "label P2", "label needs-triage"],
+        [
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}")
+        ],
         "nothing waits on an author"
     );
     let held = record(&rig, &runner);
@@ -386,7 +397,12 @@ fn an_app_s_wait_ends_on_silence_when_its_maintainer_login_is_lost() {
     );
     assert_eq!(
         moves(&rig),
-        ["comment", "label bug", "label P2", "label needs-triage"],
+        [
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}")
+        ],
         "the wait ended as an unasked pass"
     );
     let held = record(&rig, &runner);
@@ -468,7 +484,12 @@ fn silence_for_wait_days_hands_the_issue_to_the_maintainer_and_asks_nothing_more
     assert_eq!(posted(&rig).len(), 1, "no second ask");
     assert_eq!(
         moves(&rig),
-        ["comment", "label bug", "label P2", "label needs-triage"]
+        [
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}")
+        ]
     );
     assert_eq!(worded(&rig), 1, "nothing was there to read");
     assert_eq!(calls(&rig, Role::Triager).len(), 1);
@@ -503,10 +524,10 @@ fn silence_after_a_pass_that_named_no_priority_ends_with_p3_on_the_issue() {
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "label bug",
-            "label priority: P3",
-            "label needs-triage"
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label priority: P3".to_owned(),
+            format!("label {TRIAGE}"),
         ]
     );
     assert_eq!(record(&rig, &runner)["step"], "done");
@@ -655,9 +676,9 @@ fn a_questions_comment_found_on_the_issue_waits_under_a_hand_needs_triage() {
     let mut by_hand = issue(&rig, 30, MAINTAINER, 5);
     by_hand.title = "Crash on start".to_owned();
     by_hand.body = "It crashes when I run it.".to_owned();
-    by_hand.labels = vec!["needs-triage".to_owned()];
+    by_hand.labels = vec![TRIAGE.to_owned()];
     list(&rig, by_hand);
-    rig.forge.label(30, "needs-triage");
+    rig.forge.label(30, TRIAGE);
     rig.github.refuse_comments(ApiError::Refused(502));
     assert_eq!(step(&runner).unwrap(), None);
     let posted = format!(
@@ -697,9 +718,9 @@ fn a_hand_needs_triage_that_landed_before_the_post_does_not_end_the_wait() {
     let mut by_hand = issue(&rig, 30, MAINTAINER, 5);
     by_hand.title = "Crash on start".to_owned();
     by_hand.body = "It crashes when I run it.".to_owned();
-    by_hand.labels = vec!["needs-triage".to_owned()];
+    by_hand.labels = vec![TRIAGE.to_owned()];
     list(&rig, by_hand);
-    rig.forge.label(30, "needs-triage");
+    rig.forge.label(30, TRIAGE);
     rig.next_look();
     assert_eq!(step(&runner).unwrap(), None);
     let held = record(&rig, &runner);

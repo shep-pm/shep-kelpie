@@ -10,6 +10,7 @@ use super::pick_tests::{MAINTAINER, issue, list, rig_with};
 use super::research_tests::{
     WORDS, calls, crashed_with, facts, moves, nothing, pump, reply, triage, under,
 };
+use crate::board::TRIAGE;
 use crate::github::ApiError;
 use crate::ports::Role;
 use crate::runner::{Pass, Runner, advance, step};
@@ -71,7 +72,7 @@ const REPO_LABELS: [&str; 8] = [
     "enhancement",
     "P1",
     "P2",
-    "needs-triage",
+    TRIAGE,
     "needs-info",
     "ready-for-agent",
 ];
@@ -83,7 +84,7 @@ const BOARD_LABELS: [&str; 9] = [
     "enhancement",
     "priority: P1",
     "priority: P2",
-    "needs-triage",
+    TRIAGE,
     "needs-info",
     "ready-for-agent",
     "wontfix",
@@ -128,11 +129,11 @@ fn a_maintainer_issue_it_is_sure_of_gets_the_new_body_its_labels_and_ready_for_a
 #[test]
 fn a_needs_triage_put_on_by_hand_comes_off_when_the_issue_is_made_ready() {
     let (rig, runner) = filed_before("maintainer", MAINTAINER, |rig| {
-        rig.forge.label(30, "needs-triage");
+        rig.forge.label(30, TRIAGE);
         let mut by_hand = issue(rig, 30, MAINTAINER, 5);
         by_hand.title = "Crash on start".to_owned();
         by_hand.body = "It crashes when I run it.".to_owned();
-        by_hand.labels = vec!["needs-triage".to_owned()];
+        by_hand.labels = vec![TRIAGE.to_owned()];
         list(rig, by_hand);
     });
     rig.claude.script_for(Role::Triager, [reply(sure())]);
@@ -142,7 +143,7 @@ fn a_needs_triage_put_on_by_hand_comes_off_when_the_issue_is_made_ready() {
     assert_eq!(rig.github.issue_edits(), [(30, BODY.trim_end().to_owned())]);
     assert_eq!(
         rig.github.label_takes(),
-        [(30, "needs-triage".to_owned())],
+        [(30, TRIAGE.to_owned())],
         "the hand-put label is not read as one that stands"
     );
     assert_eq!(
@@ -173,11 +174,11 @@ fn an_outside_issue_it_is_sure_of_still_ends_needs_triage() {
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "label bug",
-            "label P2",
-            "label kind:fix",
-            "label needs-triage"
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            "label kind:fix".to_owned(),
+            format!("label {TRIAGE}"),
         ]
     );
     assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "done");
@@ -207,11 +208,11 @@ fn a_rewrite_the_check_refuses_goes_under_the_body_and_ends_needs_triage() {
         assert_eq!(
             moves(&rig),
             [
-                "comment",
-                "label bug",
-                "label P2",
-                "label kind:fix",
-                "label needs-triage"
+                "comment".to_owned(),
+                "label bug".to_owned(),
+                "label P2".to_owned(),
+                "label kind:fix".to_owned(),
+                format!("label {TRIAGE}"),
             ],
             "{body}"
         );
@@ -272,8 +273,7 @@ fn a_reply_with_no_priority_gets_p3_and_the_issue_passes_the_check() {
 #[test]
 fn a_fallback_the_forge_would_not_make_is_not_said_to_be_set() {
     let (rig, runner) = filed_at("maintainer", MAINTAINER, &BOARD_LABELS, |_| {});
-    rig.forge
-        .set_repo_labels(&["bug", "kind:fix", "needs-triage"]);
+    rig.forge.set_repo_labels(&["bug", "kind:fix", TRIAGE]);
     rig.github.fail_next(ApiError::Refused(403));
     let found = json!({ "type": "bug", "kind": "fix", "body": BODY });
     rig.claude.script_for(Role::Triager, [reply(found)]);
@@ -343,18 +343,18 @@ fn a_body_naming_a_local_path_is_refused_and_the_issue_ends_needs_triage() {
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "label bug",
-            "label P2",
-            "label kind:fix",
-            "label needs-triage"
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            "label kind:fix".to_owned(),
+            format!("label {TRIAGE}"),
         ]
     );
     assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "done");
     let told: Vec<String> = runner.lock().unwrap().take_notes();
     assert!(
         told.iter()
-            .any(|n| n.starts_with("triage #30:") && n.contains("needs-triage")),
+            .any(|n| n.starts_with("triage #30:") && n.contains(TRIAGE)),
         "{told:?}"
     );
 }
@@ -389,12 +389,12 @@ fn a_body_a_hook_refused_is_said_on_the_issue_and_the_issue_ends_needs_triage() 
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "comment",
-            "label bug",
-            "label P2",
-            "label kind:fix",
-            "label needs-triage"
+            "comment".to_owned(),
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            "label kind:fix".to_owned(),
+            format!("label {TRIAGE}"),
         ],
         "the triage comment, the notice that the rewrite was refused, then the labels"
     );
@@ -537,7 +537,7 @@ fn a_triage_label_put_on_while_the_call_ran_stands_and_the_body_is_kept() {
         said.contains("stands, so kelpie labels it no further"),
         "{said}"
     );
-    assert!(!said.contains("ends at `needs-triage`"), "{said}");
+    assert!(!said.contains(&format!("ends at `{TRIAGE}`")), "{said}");
     assert_eq!(moves(&rig), ["comment"], "nothing more is labelled");
     assert_eq!(rig.forge.issue_labels(30), ["needs-info"]);
     assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "done");
@@ -560,7 +560,7 @@ fn a_triage_label_put_on_while_the_comment_is_worded_stands_and_the_body_is_kept
     std::thread::scope(|scope| {
         let posting = scope.spawn(|| step(&runner).unwrap());
         assert!(hold.entered(CALL_PATIENCE), "the comment was never worded");
-        rig.forge.label(30, "needs-triage");
+        rig.forge.label(30, TRIAGE);
         hold.release();
         posting.join().unwrap();
     });
@@ -571,7 +571,7 @@ fn a_triage_label_put_on_while_the_comment_is_worded_stands_and_the_body_is_kept
         "the body is kept as the author wrote it"
     );
     assert_eq!(moves(&rig), ["comment"], "nothing more is labelled");
-    assert_eq!(rig.forge.issue_labels(30), ["needs-triage"]);
+    assert_eq!(rig.forge.issue_labels(30), [TRIAGE]);
     assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "done");
 }
 
@@ -706,11 +706,11 @@ fn a_board_named_priority_label_is_the_one_that_goes_on_an_issue_that_ends_needs
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "label bug",
-            "label priority: P2",
-            "label kind:fix",
-            "label needs-triage"
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label priority: P2".to_owned(),
+            "label kind:fix".to_owned(),
+            format!("label {TRIAGE}"),
         ]
     );
 }
@@ -733,19 +733,24 @@ fn an_issue_triaged_again_and_now_sure_loses_the_needs_triage_of_the_first_pass(
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(
         moves(&rig),
-        ["comment", "label bug", "label P2", "label needs-triage"],
+        [
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}")
+        ],
         "the first pass is not sure of it, so it ends `needs-triage`"
     );
     assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "done");
 
     // The issue as the first pass left it, on the forge as on the board's
     // list, asked again
-    for label in ["bug", "P2", "needs-triage"] {
+    for label in ["bug", "P2", TRIAGE] {
         rig.forge.label(30, label);
     }
     let mut left = issue(&rig, 30, MAINTAINER, 5);
     left.title = "Crash on start".to_owned();
-    left.labels = vec!["bug".to_owned(), "P2".to_owned(), "needs-triage".to_owned()];
+    left.labels = vec!["bug".to_owned(), "P2".to_owned(), TRIAGE.to_owned()];
     list(&rig, left);
     let reply = rig.ask(&runner, "triage", Some("30"));
     assert_eq!(reply.get("error"), None, "{reply}");
@@ -758,7 +763,7 @@ fn an_issue_triaged_again_and_now_sure_loses_the_needs_triage_of_the_first_pass(
     );
     assert_eq!(
         rig.github.label_takes(),
-        [(30, "needs-triage".to_owned())],
+        [(30, TRIAGE.to_owned())],
         "`needs-triage` came off before `ready-for-agent` went on"
     );
     // The first pass's end is checked again before the second pass, and the
@@ -766,15 +771,15 @@ fn an_issue_triaged_again_and_now_sure_loses_the_needs_triage_of_the_first_pass(
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "label bug",
-            "label P2",
-            "label needs-triage",
-            "comment",
-            "comment",
-            "label bug",
-            "label kind:fix",
-            "label ready-for-agent",
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}"),
+            "comment".to_owned(),
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label kind:fix".to_owned(),
+            "label ready-for-agent".to_owned(),
         ]
     );
     assert!(
@@ -798,10 +803,10 @@ fn a_restarted_pass_knows_its_own_needs_triage_from_the_record() {
         &rig,
         json!({
             "issue": 30, "comment": 101, "step": "commented", "labels": ["bug", "P2"],
-            "ready_body": BODY, "seen": ["bug", "P2", "needs-triage"],
+            "ready_body": BODY, "seen": ["bug", "P2", TRIAGE],
         }),
     );
-    for label in ["bug", "P2", "needs-triage"] {
+    for label in ["bug", "P2", TRIAGE] {
         rig.forge.label(30, label);
     }
     let runner = rig.open().unwrap();
@@ -813,7 +818,7 @@ fn a_restarted_pass_knows_its_own_needs_triage_from_the_record() {
         [(30, BODY.to_owned())],
         "the owed rewrite goes on, as the comment promised"
     );
-    assert_eq!(rig.github.label_takes(), [(30, "needs-triage".to_owned())]);
+    assert_eq!(rig.github.label_takes(), [(30, TRIAGE.to_owned())]);
     assert_eq!(moves(&rig), ["label bug", "label ready-for-agent"]);
     assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "ready");
     let told: Vec<String> = runner.lock().unwrap().take_notes();
@@ -834,10 +839,10 @@ fn a_ready_for_agent_already_on_the_issue_is_not_read_as_a_label_put_by_hand() {
         &rig,
         json!({
             "issue": 30, "comment": 101, "step": "body-written", "labels": ["bug", "P2"],
-            "seen": ["needs-triage"],
+            "seen": [TRIAGE],
         }),
     );
-    rig.forge.label(30, "needs-triage");
+    rig.forge.label(30, TRIAGE);
     rig.forge.label(30, "ready-for-agent");
     let runner = rig.open().unwrap();
 
@@ -847,7 +852,7 @@ fn a_ready_for_agent_already_on_the_issue_is_not_read_as_a_label_put_by_hand() {
         moves(&rig),
         ["label bug", "label P2", "label ready-for-agent"]
     );
-    assert_eq!(rig.github.label_takes(), [(30, "needs-triage".to_owned())]);
+    assert_eq!(rig.github.label_takes(), [(30, TRIAGE.to_owned())]);
     assert_eq!(
         triage(&rig, &runner)["issues"][0]["step"],
         "ready",

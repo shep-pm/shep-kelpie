@@ -8,6 +8,7 @@ use super::ask_tests::{A_WORDS, ASK_WORDS, asked, filed, posted, settled_ready, 
 use super::marker::{MARKER, duplicate_marker};
 use super::pick_tests::{MAINTAINER, issue, list, rig_with};
 use super::research_tests::{WORDS, facts, moves, reply, triage, untouched};
+use crate::board::TRIAGE;
 use crate::ports::{ForgeError, Role};
 use crate::runner::step;
 use crate::test::{Rig, Scripted};
@@ -53,7 +54,10 @@ fn a_maintainer_pass_that_is_not_sure_speaks_to_them_and_recommends_a_priority()
     assert!(!said.contains("ready for an agent"), "{said}");
     assert!(!said.contains("The maintainer triages it next"), "{said}");
     assert_eq!(posted(&rig), [format!("{ASK_WORDS}\n\n{MARKER}")]);
-    assert_eq!(moves(&rig).last().unwrap(), "label needs-triage");
+    assert_eq!(
+        moves(&rig).last().unwrap(),
+        format!("label {TRIAGE}").as_str()
+    );
 }
 
 #[test]
