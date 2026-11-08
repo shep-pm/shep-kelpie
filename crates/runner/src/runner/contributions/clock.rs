@@ -7,8 +7,7 @@
 //! nothing open clears it, as does a new head.
 //!
 //! [`Clock::due`] says when `nudge_days` and `quiet_days` have passed, or when an
-//! open ask's own notice has run (`release.rs`), and [`Clock::acts_at`] is that
-//! moment (`representative/sorry.rs`).
+//! open ask's notice has run (`release.rs`), and [`Clock::acts_at`] is that moment.
 
 use serde::Serialize;
 
