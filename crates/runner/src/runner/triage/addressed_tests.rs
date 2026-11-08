@@ -70,15 +70,14 @@ fn the_duplicate_close_thanks_names_the_report_and_is_never_the_opener() {
 
     assert_eq!(step(&runner).unwrap(), None);
 
-    // The thanks names what they reported and is told to come after the
-    // greeting and the finding, so it never opens the comment, and the stock
-    // "thank them for the report" is gone from the instruction.
+    // The thanks names what they reported and never opens the comment, and the
+    // stock "thank them for the report" is gone from the instruction.
     let said = facts(&rig);
     assert!(
-        said.contains("thank them in one plain line that names what they reported"),
+        said.contains("At most one plain thanks that names what they reported"),
         "{said}"
     );
-    assert!(said.contains("never as the opener"), "{said}");
+    assert!(said.contains("never the opener"), "{said}");
     assert!(!said.contains("thank them for the report"), "{said}");
 }
 

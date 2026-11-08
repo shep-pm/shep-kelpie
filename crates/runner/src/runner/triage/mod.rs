@@ -35,6 +35,7 @@ mod checks;
 pub(super) mod comment;
 mod facts;
 mod go;
+pub(super) mod greeting;
 pub(super) mod hand;
 pub(super) mod heard;
 pub(super) mod images;
@@ -811,6 +812,8 @@ mod answers_tests;
 mod ask_tests;
 #[cfg(test)]
 mod check_tests;
+#[cfg(test)]
+mod greeting_tests;
 #[cfg(test)]
 mod hand_tests;
 #[cfg(test)]

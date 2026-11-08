@@ -4,6 +4,7 @@ use super::super::Runner;
 use super::super::contributions::post::refused_text;
 use super::super::representative::IssuePost;
 use super::facts::refused_facts;
+use super::marker::unmarked;
 use super::research::Found;
 use crate::local_paths::{Leak, Surface};
 use crate::ports::ForgeError;
@@ -58,7 +59,7 @@ impl Runner {
                     if let Some(tries) = self.triage_tries.get_mut(&issue) {
                         tries.refused = None;
                     }
-                    return Some(words);
+                    return Some(unmarked(&words));
                 }
                 Some(leak) => {
                     self.triage_tries.entry(issue).or_default().refused = Some(leak);

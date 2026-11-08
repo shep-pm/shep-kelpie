@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use super::reading::{self, Read};
-use super::{IssuePost, Post, RepresentError, Thread, moment, unremoved};
+use super::{IssuePost, Opening, Post, RepresentError, Thread, moment, unremoved};
 use crate::ports::{AgentError, Clock, Cost, Reach, Role, Session, Timestamp, Tools, Usage};
 use crate::runner::Runner;
 use crate::settings::Harness;
@@ -392,6 +392,10 @@ fn an_issue_post_says_issue_and_records_the_issue_on_its_ledger_line() {
         kind: "Write the triage comment",
         facts: "It is a bug.",
         earlier: &[before],
+        opening: Opening {
+            greet: Some(CONTRIBUTOR),
+            thanks: true,
+        },
         author: CONTRIBUTOR,
         said: "It crashes",
     };
@@ -400,7 +404,10 @@ fn an_issue_post_says_issue_and_records_the_issue_on_its_ledger_line() {
 
     assert_eq!(words, "Thanks @Newcomer, cc `@other`.");
     let prompt = calls(&rig).remove(0).call.prompt;
-    assert!(prompt.contains("The post goes on this issue."), "{prompt}");
+    assert!(
+        prompt.contains("The post goes on this issue, where you have posted before."),
+        "{prompt}"
+    );
     assert!(
         prompt.contains("Your earlier posts on this issue, oldest first,"),
         "{prompt}"
@@ -420,20 +427,29 @@ fn an_issue_post_says_issue_and_records_the_issue_on_its_ledger_line() {
     assert_eq!(mine[0].pull_request, None);
 }
 
+// An issue post with no earlier post of kelpie's, greeting `login`
+fn opening<'a>(earlier: &'a [u64], greet: Option<&'a str>, thanks: bool) -> IssuePost<'a> {
+    IssuePost {
+        kind: "Write the triage comment",
+        facts: "It is a bug.",
+        earlier,
+        opening: Opening { greet, thanks },
+        author: CONTRIBUTOR,
+        said: "It crashes",
+    }
+}
+
 #[test]
 fn an_issue_post_prompt_greets_by_name_leads_with_findings_and_bars_the_stock_thanks() {
     let (rig, runner) = running();
     rig.claude
         .script_for(Role::Representative, [Scripted::Say("Ok.")]);
-    let post = IssuePost {
-        kind: "Write the triage comment",
-        facts: "It is a bug.",
-        earlier: &[],
-        author: CONTRIBUTOR,
-        said: "It crashes",
-    };
 
-    runner.lock().unwrap().represent_issue(9, &post).unwrap();
+    runner
+        .lock()
+        .unwrap()
+        .represent_issue(9, &opening(&[], Some(CONTRIBUTOR), true))
+        .unwrap();
 
     // The one line the issue thread adds, so every issue kind gets the whole
     // rule wherever it is worded from: greet by name, lead with the findings,
@@ -442,7 +458,7 @@ fn an_issue_post_prompt_greets_by_name_leads_with_findings_and_bars_the_stock_th
     let prompt = calls(&rig).remove(0).call.prompt;
     assert!(prompt.contains("The post goes on this issue."), "{prompt}");
     assert!(
-        prompt.contains("Greet the author by name and lead with what kelpie found."),
+        prompt.contains("Greet @newcomer by name and lead with what kelpie found."),
         "{prompt}"
     );
     assert!(
@@ -457,6 +473,82 @@ fn an_issue_post_prompt_greets_by_name_leads_with_findings_and_bars_the_stock_th
 }
 
 #[test]
+fn a_first_issue_post_is_asked_to_greet_and_a_later_one_is_not() {
+    let (rig, runner) = running();
+    let before = rig
+        .forge
+        .threads
+        .write(9, "kelpie-octocat", "I asked which file.", Timestamp(1));
+    rig.claude.script_for(
+        Role::Representative,
+        [Scripted::Say("Ok."), Scripted::Say("Ok.")],
+    );
+
+    runner
+        .lock()
+        .unwrap()
+        .represent_issue(9, &opening(&[], Some(CONTRIBUTOR), true))
+        .unwrap();
+    runner
+        .lock()
+        .unwrap()
+        .represent_issue(9, &opening(&[before], Some(CONTRIBUTOR), true))
+        .unwrap();
+
+    let seen = calls(&rig);
+    let first = &seen[0].call.prompt;
+    assert!(
+        first.contains("Greet @newcomer by name and lead with what kelpie found."),
+        "{first}"
+    );
+    assert!(
+        first.contains("At most one plain thanks that names what they reported"),
+        "{first}"
+    );
+
+    // A thread kelpie has posted on is no one's first greeting, and its post
+    // opens with what changed.
+    let later = &seen[1].call.prompt;
+    assert!(
+        later.contains(
+            "The post goes on this issue, where you have posted before. Greet nobody, thank \
+             nobody, and open with what changed since your last post."
+        ),
+        "{later}"
+    );
+    assert!(!later.contains("Greet @newcomer"), "{later}");
+    assert!(!later.contains("plain thanks"), "{later}");
+}
+
+#[test]
+fn an_issue_post_that_greets_nobody_thanks_nobody_for_the_report() {
+    let (rig, runner) = running();
+    rig.claude
+        .script_for(Role::Representative, [Scripted::Say("Ok.")]);
+
+    runner
+        .lock()
+        .unwrap()
+        .represent_issue(9, &opening(&[], None, false))
+        .unwrap();
+
+    let prompt = calls(&rig).remove(0).call.prompt;
+    assert!(
+        prompt.contains("Greet nobody and lead with what kelpie found."),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("Thank nobody for the report: kelpie's own App opened this issue."),
+        "{prompt}"
+    );
+    assert!(!prompt.contains("At most one plain thanks"), "{prompt}");
+    assert!(
+        prompt.contains(&format!("What @{CONTRIBUTOR} wrote")),
+        "{prompt}"
+    );
+}
+
+#[test]
 fn a_pull_request_post_prompt_carries_no_issue_thanks_rule() {
     let (rig, runner) = running();
     rig.claude
@@ -465,8 +557,10 @@ fn a_pull_request_post_prompt_carries_no_issue_thanks_rule() {
     represent(&runner, &post(&[], "Hello")).unwrap();
 
     let prompt = calls(&rig).remove(0).call.prompt;
-    assert!(!prompt.contains("Greet the author by name"), "{prompt}");
+    assert!(!prompt.contains("Greet @"), "{prompt}");
+    assert!(!prompt.contains("Greet nobody"), "{prompt}");
     assert!(!prompt.contains("plain thanks"), "{prompt}");
+    assert!(!prompt.contains("The post goes on this issue"), "{prompt}");
 }
 
 // Wednesday 14 October 2026, midday in UTC

@@ -27,14 +27,6 @@ const SKILL: &str = "grill-with-docs";
 pub(super) const SKILL_WHERE: &str = "The `grill-with-docs` skill is from mattpocock/skills. Kelpie's own \
     copy of it is in `shep-pm/shep-kelpie` at `skills/skills/engineering/grill-with-docs`.";
 
-/// What kind of post the representative is asked for on the pass that reads the
-/// issue again after its author's own session rewrote its body
-pub(in crate::runner) const LOCAL_READ_KIND: &str = "Write the triage comment on this issue, which kelpie read again \
-    after its author's own session rewrote its body from kelpie's prompt. Greet the author, say \
-    what kelpie now found, and ask only the questions still open. This is the last round: what \
-    is still open goes to the maintainer. It is a comment, not a review: no verdict, and nothing \
-    promised.";
-
 impl Runner {
     // The first comment that asks the author: the representative's words, the
     // questions code lists with each recommended answer, and the prompt in a

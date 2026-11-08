@@ -15,6 +15,7 @@ use super::super::representative::IssuePost;
 use super::addressed::Cover;
 use super::ask::{self, Purpose};
 use super::facts::{Reader, Wording, duplicate_facts, facts};
+use super::greeting::{ANSWERS_KIND, ASK_KIND, DUPLICATE_KIND, KIND, LOCAL_READ_KIND};
 use super::marker::{MARKER, duplicate_marker};
 use super::ready;
 use super::research::{Addressed, Found, Question};
@@ -39,37 +40,6 @@ pub(super) const NEEDS_TRIAGE: NewLabel<'static> = NewLabel {
 
 // The priority an issue gets when the research names none
 pub(super) const FALLBACK_PRIORITY: &str = "P3";
-
-/// What kind of post the representative is asked for
-const KIND: &str = "Write the first triage comment on this issue, from what kelpie found in the \
-    repo. Greet the author, say what was found, and ask only the questions listed. It is a \
-    comment, not a review: no verdict, and nothing promised.";
-
-/// What kind of post the representative is asked for on an issue whose author
-/// is asked to settle the open questions: kelpie lists them under the words,
-/// with a collapsed prompt for the author's own terminal
-const ASK_KIND: &str = "Write the lead-in to the first triage comment on this issue, from what \
-    kelpie found in the repo. Greet the author, say what was found, and say kelpie asks the open \
-    questions below and they can answer them all in one comment, or settle them in their own \
-    terminal with the prompt kelpie put in the collapsed section, and that the maintainer \
-    triages what is still open. Do not restate or renumber the questions or the prompt: kelpie \
-    posts them under your words. It is a comment, not a review: no verdict, and nothing \
-    promised.";
-
-/// What kind of post the representative is asked for on the second pass, the
-/// one that reads the author's answers
-const ANSWERS_KIND: &str = "Write the triage comment that reads this issue again after its \
-    author answered kelpie's questions. Greet the author, say what kelpie now found, and ask \
-    only the questions still open. It is the last round: what is still open goes to the \
-    maintainer. It is a comment, not a review: no verdict, and nothing promised.";
-
-/// What kind of post the representative is asked for on an issue that
-/// something else already covers
-const DUPLICATE_KIND: &str = "Write the short comment that closes this issue as a duplicate. Greet \
-    the author, name the open issue or pull request that already covers it and say why in one \
-    sentence, say kelpie is closing the issue as a duplicate of it, and thank them in one plain \
-    line that names what they reported, never as the opener. It is a comment, not a review: no \
-    verdict, and nothing promised.";
 
 /// What the representative is told of a comment posted to an author who is not
 /// the maintainer
@@ -512,7 +482,7 @@ impl Runner {
         let answers_body = answers_body.or(rewrite);
         let kind = match (answers, local, ask) {
             (true, _, _) => ANSWERS_KIND,
-            (false, true, _) => super::local::LOCAL_READ_KIND,
+            (false, true, _) => LOCAL_READ_KIND,
             (false, false, true) => ASK_KIND,
             (false, false, false) => KIND,
         };
@@ -571,16 +541,14 @@ impl Runner {
             .collect();
         // The asked login is someone other than the author only on an issue the
         // App opened, where the maintainer is notified under the words.
-        let greeted = asked.as_deref().unwrap_or(author);
-        let asked_cc = match greeted.eq_ignore_ascii_case(author) {
-            true => None,
-            false => Some(greeted),
-        };
+        let asked_cc = (asked.as_deref()).filter(|asked| !asked.eq_ignore_ascii_case(author));
+        let opening = self.triage_opening(author, asked.as_deref());
         let post = IssuePost {
             kind,
             facts: &facts,
             earlier: &earlier,
-            author: greeted,
+            opening,
+            author,
             said,
         };
         let Some(words) = self.word_triage(issue, &post) else {
@@ -657,6 +625,7 @@ impl Runner {
             kind: DUPLICATE_KIND,
             facts: &facts,
             earlier: &earlier,
+            opening: self.triage_opening(author, None),
             author,
             said,
         };
