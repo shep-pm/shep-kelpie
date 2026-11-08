@@ -959,3 +959,22 @@ fn a_rework_answer_after_the_release_landed_takes_the_pull_request_over_with_the
         "{text}"
     );
 }
+
+#[test]
+fn the_merge_ruling_names_rulings_pm_decides() {
+    let (rig, runner, _head) = ruled_on();
+    let question = |rig: &Rig, runner: &Mutex<Runner>| {
+        let waiting = rulings(rig, runner);
+        assert_eq!(waiting.len(), 1);
+        waiting[0]["question"].as_str().unwrap().to_owned()
+    };
+
+    let asked = question(&rig, &runner);
+    assert!(asked.contains("`rulings.pm_decides`"), "{asked}");
+    assert!(!asked.contains("git.merging"), "{asked}");
+
+    let (rig, runner, _head) = ruled_on_an_organizations_fork();
+    let asked = question(&rig, &runner);
+    assert!(asked.contains("`rulings.pm_decides`"), "{asked}");
+    assert!(!asked.contains("git.merging"), "{asked}");
+}
