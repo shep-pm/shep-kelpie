@@ -12,6 +12,7 @@ use super::ask_tests::{
 use super::marker::MARKER;
 use super::pick_tests::{MAINTAINER, issue, list};
 use super::research_tests::{calls, crashed_with, moves, nothing, pump, reply, restart, under};
+use crate::board::TRIAGE;
 use crate::ports::Role;
 use crate::runner::{Pass, Runner, advance, step};
 use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
@@ -78,11 +79,11 @@ fn answers_on_an_outside_issue_go_under_the_authors_text_and_end_needs_triage() 
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "comment",
-            "label bug",
-            "label P2",
-            "label needs-triage"
+            "comment".to_owned(),
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}"),
         ]
     );
     assert_eq!(record(&rig, &runner)["step"], "done");
@@ -109,7 +110,12 @@ fn the_priority_the_issue_was_filed_with_stands_over_the_one_the_answers_pass_ra
 
     assert_eq!(
         moves(&rig),
-        ["comment", "comment", "label bug", "label needs-triage"]
+        [
+            "comment".to_owned(),
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            format!("label {TRIAGE}")
+        ]
     );
     assert_eq!(rig.github.label_takes(), []);
 }
@@ -134,11 +140,11 @@ fn a_question_still_open_after_the_answers_ends_needs_triage_with_no_second_roun
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "comment",
-            "label bug",
-            "label P2",
-            "label needs-triage"
+            "comment".to_owned(),
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}"),
         ]
     );
     // The comment that ends the round is worded from what is still open.
@@ -192,11 +198,11 @@ fn a_restart_while_waiting_on_the_answers_keeps_the_questions_and_their_clock() 
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "comment",
-            "label bug",
-            "label P2",
-            "label needs-triage"
+            "comment".to_owned(),
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}"),
         ]
     );
 }
@@ -217,7 +223,14 @@ fn a_restart_at_the_answers_step_writes_the_body_once_and_labels_it() {
     assert_eq!(step(&runner).unwrap(), None);
 
     assert_eq!(rig.github.issue_edits(), [(30, body.to_owned())]);
-    assert_eq!(moves(&rig), ["label bug", "label P2", "label needs-triage"]);
+    assert_eq!(
+        moves(&rig),
+        [
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}")
+        ]
+    );
     assert_eq!(rig.claude.all_seen().len(), 0, "no call and no new wording");
     assert_eq!(record(&rig, &runner)["step"], "done");
 }
@@ -365,12 +378,12 @@ fn answers_a_hook_refused_still_put_the_type_and_priority_on() {
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "comment",
-            "comment",
-            "label bug",
-            "label P2",
-            "label needs-triage",
+            "comment".to_owned(),
+            "comment".to_owned(),
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}"),
         ],
         "the type and priority the pass found are not lost with the body"
     );
@@ -416,11 +429,11 @@ fn answers_whose_issue_body_cannot_be_read_post_nothing_and_are_tried_again() {
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "comment",
-            "label bug",
-            "label P2",
-            "label needs-triage",
+            "comment".to_owned(),
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}"),
         ]
     );
     assert_eq!(record(&rig, &runner)["step"], "done");

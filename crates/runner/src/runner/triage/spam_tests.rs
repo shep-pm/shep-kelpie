@@ -24,6 +24,7 @@ use super::research_tests::{
 };
 use super::spam::POSSIBLE_SPAM;
 #[cfg(unix)]
+use crate::board::TRIAGE;
 use crate::github::ApiError;
 use crate::ports::{AuthorAssociation, ClassifierError, Clock, Role, Timestamp, Usage};
 use crate::runner::{Runner, step};
@@ -240,10 +241,10 @@ fn an_issue_under_the_threshold_is_researched() {
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "label priority: P3",
-            "make needs-triage",
-            "label needs-triage"
+            "comment".to_owned(),
+            "label priority: P3".to_owned(),
+            format!("make {TRIAGE}"),
+            format!("label {TRIAGE}"),
         ],
         "and nothing was labelled possible-spam"
     );
@@ -757,7 +758,10 @@ fn a_triage_limit_holds_the_issue_before_the_classifier_is_asked() {
     assert_eq!(rig.classifier.count(), 0, "no question about a held issue");
     assert_eq!(record(&rig, &runner, 30)["held"], "author-cap");
     assert_eq!(record(&rig, &runner, 30).get("spam"), None);
-    assert_eq!(moves(&rig), ["make needs-triage", "label needs-triage"]);
+    assert_eq!(
+        moves(&rig),
+        [format!("make {TRIAGE}"), format!("label {TRIAGE}")]
+    );
 }
 
 #[test]

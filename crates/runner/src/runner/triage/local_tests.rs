@@ -12,6 +12,7 @@ use super::ask_tests::{
 use super::marker::MARKER;
 use super::pick_tests::{MAINTAINER, issue, list};
 use super::research_tests::{calls, moves, nothing, reply, restart, under};
+use crate::board::TRIAGE;
 use crate::ports::{OpenIssue, Role};
 use crate::runner::{Pass, Runner, advance, step};
 use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
@@ -225,11 +226,11 @@ fn an_edited_outside_issue_ends_needs_triage() {
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "comment",
-            "label bug",
-            "label P2",
-            "label needs-triage",
+            "comment".to_owned(),
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}"),
         ]
     );
     assert_eq!(calls(&rig, Role::Triager).len(), 2);
@@ -273,11 +274,11 @@ fn a_question_still_open_after_the_edit_ends_needs_triage_with_no_further_ask() 
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "comment",
-            "label bug",
-            "label P2",
-            "label needs-triage",
+            "comment".to_owned(),
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}"),
         ]
     );
     assert_eq!(
@@ -372,7 +373,12 @@ fn no_edit_for_wait_days_ends_needs_triage() {
     assert_eq!(posted(&rig).len(), 1, "no post");
     assert_eq!(
         moves(&rig),
-        ["comment", "label bug", "label P2", "label needs-triage"]
+        [
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}")
+        ]
     );
     assert_eq!(calls(&rig, Role::Triager).len(), 1);
     let held = record(&rig, &runner);
@@ -410,12 +416,12 @@ fn a_body_rewritten_by_the_deadline_is_read_and_not_ended_as_silence() {
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "comment",
-            "label bug",
-            "label P2",
-            "label needs-triage",
-            "comment",
+            "comment".to_owned(),
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}"),
+            "comment".to_owned(),
         ]
     );
     assert_eq!(record(&rig, &runner)["step"], "done");
@@ -455,11 +461,11 @@ fn a_restart_while_waiting_on_local_keeps_the_body_hash_and_its_clock() {
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "comment",
-            "label bug",
-            "label P2",
-            "label needs-triage",
+            "comment".to_owned(),
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}"),
         ]
     );
     assert_eq!(record(&rig, &runner)["step"], "done");
@@ -623,11 +629,11 @@ fn a_body_rewritten_again_under_the_local_read_call_is_not_answered_by_it() {
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "comment",
-            "label bug",
-            "label P2",
-            "label needs-triage",
+            "comment".to_owned(),
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("label {TRIAGE}"),
         ],
         "the newer body is what the round ends on"
     );
