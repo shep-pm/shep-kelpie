@@ -11,6 +11,7 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | review-more.md | a pass runs the plan, a finding asks for one more read | `runner/review/one_more.rs`, `runner/pm/more.rs` |
 | local-review.md | local reviewers, kept rounds | `runner/review/keep.rs`, `core/settings/{local_rounds,local}.rs`, `adapters/local/` |
 | merge.md | CI, catch-up, merge | `runner/{gate,merge}/`, `runner/close_merged.rs` |
+| gate-unread.md | a head no reviewer read: the pass back, the reviewer wait | `runner/gate/unread.rs`, `runner/pm/wakes.rs`, `core/work_item/local.rs` |
 | main-ci.md | red on `main` | `runner/main_ci/` |
 | stuck-checks.md | stuck checks | `runner/gate/queued/` |
 | github-app.md | App tokens, posting, answers | `runner/{voice,paragraphs}/`, `core/guard/gh.rs`, `worker_folder/` |

@@ -240,7 +240,8 @@ fn declined_thread(rig: &Rig, runner: &Mutex<Runner>) -> String {
 
 // Queues the Claude round's clean read for the next pass the gate sends a fix back through
 fn read_clean(rig: &Rig) {
-    rig.claude.script_for(Role::Reviewer, [Scripted::Text(CLEAN)]);
+    rig.claude
+        .script_for(Role::Reviewer, [Scripted::Text(CLEAN)]);
 }
 
 // What the worker writes to defer `found`, in the deferred findings file's own format

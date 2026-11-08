@@ -89,12 +89,10 @@ fn a_maintainer_reply_while_the_push_back_is_decided_asks_again() {
     // The head the declined comment's fix pushed goes back through a pass of the
     // review first, so the wake comes a few passes after the ask would have
     let driven = Driven::new(&runner);
-    let began = (0..12)
-        .map(|_| {
-            driven.pass();
-            hold.entered(std::time::Duration::from_secs(1))
-        })
-        .any(|entered| entered);
+    let began = (0..12).any(|_| {
+        driven.pass();
+        hold.entered(std::time::Duration::from_secs(1))
+    });
     assert!(began, "the wake's call never began");
 
     rig.forge

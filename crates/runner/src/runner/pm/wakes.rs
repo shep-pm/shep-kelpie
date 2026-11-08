@@ -13,8 +13,8 @@ use crate::board::briefing::{age, date_time, elapsed, ticket_ref};
 
 use super::requests;
 use crate::ports::{Finding, PaddockHolder, Timestamp, Wait};
-use crate::runner::gate::READ_AGAIN;
 use crate::runner::Runner;
+use crate::runner::gate::READ_AGAIN;
 use crate::runner::review_bot::RuledThread;
 use crate::runner::voice::brief;
 use crate::settings::AgentName;
@@ -334,14 +334,10 @@ impl Runner {
     /// gone out for it.
     pub(in crate::runner) fn pm_read_wait(&mut self, ticket: TicketId, wait: u64) -> ReadWait {
         let now = self.ports.clock.now();
-        let kept = self
-            .pm
-            .read_again
-            .entry(ticket)
-            .or_insert(ReadAgain {
-                since: now,
-                woken: false,
-            });
+        let kept = self.pm.read_again.entry(ticket).or_insert(ReadAgain {
+            since: now,
+            woken: false,
+        });
         if now.0.saturating_sub(kept.since.0) < wait {
             return ReadWait::Running;
         }
@@ -494,9 +490,7 @@ impl Runner {
         };
         let until = match state {
             StuckState::Ruling { .. } => None,
-            StuckState::Idle(..)
-            | StuckState::AgentOut(..)
-            | StuckState::ReviewerDown(..) => {
+            StuckState::Idle(..) | StuckState::AgentOut(..) | StuckState::ReviewerDown(..) => {
                 Some(Timestamp(at.0.saturating_add(quiet_backoff(nones))))
             }
         };

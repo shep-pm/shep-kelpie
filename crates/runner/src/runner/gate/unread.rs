@@ -8,10 +8,10 @@
 //! project with no `agents.pm`, and an adopted contribution, keep the warned
 //! merge ruling, which names what it warns of.
 
+use crate::runner::Runner;
 use crate::runner::pm::ReadWait;
 use crate::runner::report::Begin;
 use crate::runner::turn::held_up::Reason;
-use crate::runner::Runner;
 use crate::state::StateError;
 use crate::work_item::{Phase, Review};
 
@@ -47,18 +47,17 @@ pub(super) enum Back {
     /// it sends nothing back: with no project manager, or on a contribution
     On(Unread),
     /// The item went back through a pass of the review, or waits for a reviewer
-    Done(Begin),
+    Done(Box<Begin>),
 }
 
 impl Runner {
     /// Whether `head` goes back through a pass of the review instead of a merge
     /// ruling, on a project whose project manager rules on its items' threads
     ///
-    /// A pass that ended short of its reads waits rather than going back at
-    /// once: its reviewers are down, so a new pass would read nothing and cost
-    /// nothing, and the loop would end only when one came back. Each
-    /// [`READ_AGAIN`] that ends unread starts one new pass, and the first of
-    /// them wakes the project manager.
+    /// A pass that ended short of its reads waits rather than going back at once:
+    /// its reviewers are down, so a new pass would read nothing. Each
+    /// [`READ_AGAIN`] that ends unread starts one, the first waking the project
+    /// manager.
     pub(super) fn unread_back(&mut self, head: &str) -> Result<Back, StateError> {
         let unread = self.unread_of(head);
         let Some(ticket) = self.current().map(|item| item.issue) else {
@@ -73,17 +72,19 @@ impl Runner {
         }
         match unread.unreviewed {
             Some(why) => match self.pm_read_wait(ticket, READ_AGAIN) {
-                ReadWait::Running => Ok(Back::Done(self.held_for(Reason::ReviewerDown(why)))),
+                ReadWait::Running => Ok(Back::Done(Box::new(
+                    self.held_for(Reason::ReviewerDown(why)),
+                ))),
                 ReadWait::Ended { wake } => {
                     if wake {
                         self.pm_ask_unread(ticket);
                     }
-                    Ok(Back::Done(self.read_back(true)?))
+                    Ok(Back::Done(Box::new(self.read_back(true)?)))
                 }
             },
             None => {
                 self.pm_read_clear(ticket);
-                Ok(Back::Done(self.read_back(false)?))
+                Ok(Back::Done(Box::new(self.read_back(false)?)))
             }
         }
     }

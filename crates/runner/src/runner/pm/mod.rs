@@ -63,8 +63,8 @@ pub(super) use said::{Released, SaidHow};
 use answer::Action;
 use ci_logs::Woke;
 pub(in crate::runner) use threads::{Decision, Ruled};
-use wakes::{AgentOut, LeftAlone, ReadAgain, held, stuck_on};
 pub(in crate::runner) use wakes::ReadWait;
+use wakes::{AgentOut, LeftAlone, ReadAgain, held, stuck_on};
 pub(super) use wakes::{StuckState, Wake};
 
 /// The context, in tokens, past which the session is compacted after a wake

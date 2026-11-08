@@ -187,7 +187,7 @@ impl Runner {
         // the gate would read. Only with no project manager, or on a
         // contribution, does it come to the maintainer as a ruling.
         let unread = match self.unread_back(&head)? {
-            Back::Done(begin) => return Ok(begin),
+            Back::Done(begin) => return Ok(*begin),
             Back::On(unread) => unread,
         };
         // Read before the disputes are posted: a read to make sends the step
