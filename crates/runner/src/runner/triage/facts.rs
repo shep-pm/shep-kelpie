@@ -84,7 +84,7 @@ pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: 
             false => "",
         };
         facts.push_str(&format!(
-            "\nKelpie labels it: {}{when}.\n",
+            "\nKelpie labels it: {}{when}. The labels are already on the issue.\n",
             labels.join(", ")
         ));
     }
@@ -98,6 +98,8 @@ pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: 
         let related: Vec<String> = found.related.iter().map(|(n, _)| format!("#{n}")).collect();
         facts.push_str(&format!("\nRelated open issues: {}.\n", related.join(", ")));
     }
+    // Each list is on the issue with kelpie's report, so the comment names one
+    // only where it changes what the reader does next.
     let lists = [
         ("Files the work would touch", &found.files, "`"),
         ("Tests that would pin it", &found.tests, "`"),
@@ -107,7 +109,7 @@ pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: 
         if items.is_empty() {
             continue;
         }
-        facts.push_str(&format!("\n{heading}:\n"));
+        facts.push_str(&format!("\n{heading}, already on the issue:\n"));
         for item in items {
             facts.push_str(&format!("- {quote}{item}{quote}\n"));
         }

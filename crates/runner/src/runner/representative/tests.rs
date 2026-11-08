@@ -548,6 +548,41 @@ fn an_issue_post_that_greets_nobody_thanks_nobody_for_the_report() {
     );
 }
 
+// Every post is a reply, on an issue or a pull request alike: it answers what
+// its reader wrote before it says anything the caller drafted.
+#[test]
+fn every_post_is_asked_to_answer_what_its_reader_wrote_first() {
+    let (rig, runner) = running();
+    rig.claude.script_for(
+        Role::Representative,
+        [Scripted::Say("Ok."), Scripted::Say("Ok.")],
+    );
+
+    represent(&runner, &post(&[], "ok")).unwrap();
+    runner
+        .lock()
+        .unwrap()
+        .represent_issue(9, &opening(&[], Some(CONTRIBUTOR), true))
+        .unwrap();
+
+    let seen = calls(&rig);
+    for prompt in [&seen[0].call.prompt, &seen[1].call.prompt] {
+        let wrote = prompt
+            .find("What @newcomer wrote")
+            .expect("the block naming the reader");
+        let answer = prompt
+            .find("Open by answering what they wrote")
+            .expect("the reply-first line");
+        assert!(answer > wrote, "the line follows the block: {prompt}");
+        assert!(prompt.contains("an `ok` is an ok"), "{prompt}");
+        assert!(prompt.contains("a question gets its answer"), "{prompt}");
+        assert!(
+            prompt.contains("nothing from the facts comes before that answer"),
+            "{prompt}"
+        );
+    }
+}
+
 #[test]
 fn a_pull_request_post_prompt_carries_no_issue_thanks_rule() {
     let (rig, runner) = running();
