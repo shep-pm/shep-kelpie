@@ -26,4 +26,5 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | contribution-release.md | asking for a release: its answers | `runner/contributions/{release,ruling}.rs` |
 | contribution-merge.md | merge ruling: yes, thanks, no | `runner/contributions/{merge,ruling}.rs`, `core/settings/rulings.rs` |
 | representative.md | agent file, `agents.representative`, post wording | `runner/representative/`, `core/{agents/front,settings/agents}/`, `agents/representative.md` |
+| representative-wording.md | the shipped body's voice, its guide and house rules, wording time | `agents/representative.md`, `core/agents/tests/representative.rs`, `runner/representative/`, `docs/specs/wording-results.md` |
 | dependencies.md | bot bumps: rebase, proof, merge, red | `core/{settings/dependencies,state/bumps}.rs`, `runner/{dependencies,dev_server/bump,flight/proving.rs}`, `adapters/{e2e_runner.rs,pages.rs,bridge/client/}` |
