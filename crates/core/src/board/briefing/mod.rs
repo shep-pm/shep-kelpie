@@ -19,6 +19,10 @@ use crate::ports::{CallActivity, Cost, Timestamp, Wait};
 use crate::state::BoardEvent;
 use crate::ticket::TicketId;
 
+mod plans;
+
+pub use plans::PlanLine;
+
 /// How long a call in flight may show nothing before the board calls it idle
 pub const IDLE_AFTER: u64 = 10 * 60;
 
@@ -30,6 +34,9 @@ const SUMMARY: usize = 300;
 
 /// A named path matching more files than this on `main` names none of them
 const AMBIGUOUS: usize = 3;
+
+/// How many issues a ready line names as unblocked, before the rest read `N more`
+const UNBLOCKS_LISTED: usize = 5;
 
 /// What `status` shows of a runner that does not pick
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +81,9 @@ pub struct Briefing<'a> {
     /// The implementers the agent board may pick, by name, then the
     /// project's reviewers in their order
     pub agents: Vec<AgentLine>,
+    /// The plan accounts the listed agents spend, in account order, each with
+    /// what the pacer last read of its week
+    pub plans: Vec<PlanLine>,
     /// The board events the project manager has not read
     pub events: Vec<BoardEvent>,
     /// Whether the project manager has read the board before
@@ -226,6 +236,8 @@ pub struct ReadyLine {
     pub priority: Option<&'static str>,
     /// Why the board passes over it, if it does
     pub waits: Option<String>,
+    /// The ready issues whose open blockers name it, lowest first
+    pub unblocks: Vec<TicketId>,
     /// The paths its body names
     pub named: Vec<String>,
     /// The start of its body, for an issue the board may take
@@ -295,7 +307,7 @@ pub fn render(board: &Briefing<'_>) -> String {
     rulings(&mut out, &board.rulings);
     red_on_main(&mut out, board);
     ready_queue(&mut out, board.ready.as_ref(), now);
-    agents(&mut out, &board.agents, now);
+    agents(&mut out, &board.agents, &board.plans, now);
     events(&mut out, board);
     overlap(&mut out, board);
     files(&mut out, &board.items);
@@ -471,13 +483,14 @@ fn ready_queue(out: &mut String, ready: Option<&Ready>, now: Timestamp) {
             .waits
             .as_ref()
             .map_or(String::new(), |w| format!("; waits: {w}"));
+        let unblocks = unblocks_part(&issue.unblocks);
         let named = match issue.named.as_slice() {
             [] => "names no file".to_owned(),
             named => format!("names {}", named.join(", ")),
         };
         let _ = writeln!(
             out,
-            "{}. {} [{}] \"{}\"{waits}; {named}",
+            "{}. {} [{}] \"{}\"{waits}{unblocks}; {named}",
             n + 1,
             ticket_ref(issue.ticket),
             issue.priority.unwrap_or("no priority"),
@@ -487,7 +500,25 @@ fn ready_queue(out: &mut String, ready: Option<&Ready>, now: Timestamp) {
     out.push('\n');
 }
 
-fn agents(out: &mut String, agents: &[AgentLine], now: Timestamp) {
+// The `; unblocks #a, #b` part of a ready line, or nothing when it unblocks none
+fn unblocks_part(unblocks: &[TicketId]) -> String {
+    if unblocks.is_empty() {
+        return String::new();
+    }
+    let mut named: Vec<String> = (unblocks.iter().take(UNBLOCKS_LISTED))
+        .map(|t| ticket_ref(*t))
+        .collect();
+    if let Some(more) = unblocks
+        .len()
+        .checked_sub(UNBLOCKS_LISTED)
+        .filter(|n| *n > 0)
+    {
+        named.push(format!("{more} more"));
+    }
+    format!("; unblocks {}", named.join(", "))
+}
+
+fn agents(out: &mut String, agents: &[AgentLine], plans: &[PlanLine], now: Timestamp) {
     out.push_str("## Agents\n\n");
     if agents.is_empty() {
         out.push_str("(none)\n\n");
@@ -498,7 +529,19 @@ fn agents(out: &mut String, agents: &[AgentLine], now: Timestamp) {
          agent from this list. Kelpie takes the cheapest available agent that fits when you \
          name none, and an `agent:<name>!` label pins. An implementer's line shows when it can \
          start and what it typically takes and costs, and an agent marked out cannot start a \
-         work item before the time shown. To have a work item wait for an agent, hold it.\n\n",
+         work item before the time shown. To have a work item wait for an agent, hold it. \
+         A ready issue whose line says `unblocks` holds up other work, so it is worth the \
+         fastest agent that can start. A plan agent costs no dollars, but each work item \
+         spends a share of its week's limit, and a share left at the reset is lost, so a \
+         plan's week is a budget to spend by its reset, not to save. Read the pace and where \
+         it lands, not the share left. On course to land under 100%, run more work items at \
+         once and give work that holds up other work to the faster plan agent. On course for \
+         over 100%, lean on local models. A small share left with little time left is no \
+         reason to slow down. The pace never reorders the agents: spend a local model that \
+         can start first, then API credit while the API is not held, then a plan, and the \
+         pace says only how far down that order to reach when the cheaper ones are busy. The \
+         ready queue is not the week's work, since the maintainer files issues all week, so \
+         a short queue is no reason to spend faster.\n\n",
     );
     for agent in agents {
         let kinds = match &agent.kinds {
@@ -517,6 +560,10 @@ fn agents(out: &mut String, agents: &[AgentLine], now: Timestamp) {
             agent.description.as_deref().unwrap_or("no description"),
             reading(agent, now),
         );
+    }
+    if !plans.is_empty() {
+        out.push('\n');
+        plans::lines(out, plans, now);
     }
     out.push('\n');
 }

@@ -27,8 +27,14 @@ pub use open::{OpenPullRequest, ReviewMarks};
 /// The label that puts an issue on the board
 pub const READY: &str = "ready-for-agent";
 
-/// The label of an issue nobody has read yet, which stays off the board
-pub const TRIAGE: &str = "needs-triage";
+/// The label of an issue that waits on the maintainer's approval, which stays
+/// off the board
+pub const TRIAGE: &str = "needs-approval";
+
+/// The label a person puts on an issue to ask for its triage
+///
+/// Not a triage decision, so it is no part of the pass's labels.
+pub const TRIAGE_GO: &str = "needs-triage";
 
 /// The label on an issue while a work item holds it
 ///

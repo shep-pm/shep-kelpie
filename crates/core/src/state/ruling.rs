@@ -94,7 +94,8 @@ pub enum AgentMeasure {
         /// The other agent's
         better: u32,
     },
-    /// Each agent's median hours, in whole minutes
+    /// Each agent's median hours, in whole minutes. Read for a ruling saved
+    /// before fit stopped reading hours, and raised no more.
     Hours {
         /// The worse agent's
         worse: u32,

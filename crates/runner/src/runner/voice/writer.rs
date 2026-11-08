@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use crate::board::make_missing_with;
+use crate::board::{TRIAGE, make_missing_with};
 use crate::ports::{Forge, ForgeError, NewLabel, Tickets, Voice};
 use crate::runner::open_forge::stop_has_come;
 use crate::settings::{ForgeSlug, TicketSource};
@@ -21,6 +21,8 @@ pub(in crate::runner) struct Writer {
     pub(super) source: TicketSource,
     /// Whether kelpie's App covers the repo
     pub(super) app: bool,
+    /// Whether the label swap is owed, so no one makes `needs-approval`
+    pub(super) swap_owed: bool,
     // The stop of the loop these hands write in, copied from the runner they came from
     pub(super) loop_stop: Option<Arc<AtomicBool>>,
 }
@@ -37,11 +39,20 @@ impl Writer {
     }
 
     /// Makes each of `wanted` the repo lacks, as the App where one covers it
+    ///
+    /// # Errors
+    ///
+    /// A note when a label cannot be made, or when `needs-approval` is wanted
+    /// while the swap is owed: made early, it would read as a finished swap.
     pub(in crate::runner) fn make_missing_labels<'a>(
         &self,
         wanted: impl IntoIterator<Item = NewLabel<'a>>,
     ) -> Result<(), String> {
         let repo = &self.remote;
+        let wanted: Vec<_> = wanted.into_iter().collect();
+        if self.swap_owed && wanted.iter().any(|l| l.name == TRIAGE) {
+            return Err(format!("the swap to `{TRIAGE}` is owed, so it is not made"));
+        }
         make_missing_with(
             self.forge.as_ref(),
             repo,
@@ -55,7 +66,6 @@ impl Writer {
     }
 
     /// Renames label `from` to `to`, as the App where one covers the repo
-    #[expect(dead_code, reason = "the label swap that calls it is a later slice")]
     pub(in crate::runner) fn rename_label(&self, from: &str, to: &str) -> Result<(), ForgeError> {
         match self.app {
             true => self.voice.rename_label(&self.remote, from, to),

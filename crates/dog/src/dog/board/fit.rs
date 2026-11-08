@@ -178,7 +178,7 @@ mod tests {
 
     use super::*;
     use crate::agents::Agents;
-    use crate::dog::board::{refresh, tests::finished};
+    use crate::dog::board::{refresh, tests::finished, tests::unmerged};
     use crate::test::write_in;
 
     fn name(agent: &str) -> AgentName {
@@ -217,12 +217,14 @@ mod tests {
     }
 
     // The board of `agents`: each pair of them has ten items of a kind, the
-    // worse one of each pair taking twelve times as long at it.
+    // worse one of each pair merging half of them.
     fn board_of(agents: &Agents, home: &Path) -> Mutex<Board> {
-        finished(home, "koji", ("slow", "fix"), 10, (7200, 0.5));
+        finished(home, "koji", ("slow", "fix"), 5, (7200, 0.5));
+        unmerged(home, "koji", ("slow", "fix"), 5, (7200, 0.5));
         finished(home, "koji", ("quick", "fix"), 10, (600, 0.5));
         finished(home, "koji", ("slow", "docs"), 10, (600, 0.5));
-        finished(home, "koji", ("bulk", "docs"), 10, (7200, 0.5));
+        finished(home, "koji", ("bulk", "docs"), 5, (7200, 0.5));
+        unmerged(home, "koji", ("bulk", "docs"), 5, (7200, 0.5));
         let board = Mutex::new(Board::new(agents));
         refresh(&board, home);
         board

@@ -234,17 +234,17 @@ fn maintainers(found: &Found, ask: bool, stood: bool, rewrite: bool, fallback: b
             "Kelpie posts the questions under your words, each with the answer the research \
              recommends, and a collapsed prompt for an agent session of their own, and labels \
              nothing yet: their answers decide where it goes, and with no reply it ends at \
-             `needs-triage`, waiting on them."
+             `needs-approval`, waiting on them."
         }
         (false, true) => {
             "A triage label they put on by hand stands, so kelpie labels it no further."
         }
         (false, false) if rewrite => {
             "Kelpie's issue check still refuses the rewrite, so kelpie writes it under their \
-             own text in the body, the issue ends at `needs-triage`, waiting on them, and \
+             own text in the body, the issue ends at `needs-approval`, waiting on them, and \
              kelpie says what the check refused."
         }
-        (false, false) => "It ends at `needs-triage`, waiting on them.",
+        (false, false) => "It ends at `needs-approval`, waiting on them.",
     };
     let mut said = format!(
         "\nThe author is the maintainer: speak to them as \"you\". Kelpie did not make it ready \

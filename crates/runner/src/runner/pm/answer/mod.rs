@@ -331,7 +331,7 @@ pub(super) fn read(text: &str) -> Option<Answer> {
                     Some(d) => answer.follow_up = Some(d),
                     None => answer.unread.push(unread(
                         "`item`, a `decision` of yes or no, a `label` of ready-for-agent or \
-                         needs-triage with a yes, `why`, and with a yes any `drop` of \
+                         needs-approval with a yes, `why`, and with a yes any `drop` of \
                          findings by number, each once, with a `why`",
                     )),
                 },

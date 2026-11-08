@@ -248,7 +248,9 @@ fn a_follow_up_answer_is_a_yes_or_a_no_and_a_yes_may_name_its_label() {
         Some((ticket(7), Call::File { unread: false }, "r".into()))
     );
     assert_eq!(
-        call("{\"follow_up\": {\"item\": 7, \"decision\": \"yes\", \"label\": \"needs-triage\"}}"),
+        call(
+            "{\"follow_up\": {\"item\": 7, \"decision\": \"yes\", \"label\": \"needs-approval\"}}"
+        ),
         Some((ticket(7), Call::File { unread: true }, String::new()))
     );
     assert_eq!(
@@ -266,7 +268,7 @@ fn a_follow_up_answer_is_a_yes_or_a_no_and_a_yes_may_name_its_label() {
         "{\"follow_up\": {\"item\": 7}}",
         "{\"follow_up\": {\"decision\": \"yes\"}}",
         "{\"follow_up\": {\"item\": 7, \"decision\": \"yes\", \"label\": \"bug\"}}",
-        "{\"follow_up\": {\"item\": 7, \"decision\": \"no\", \"label\": \"needs-triage\"}}",
+        "{\"follow_up\": {\"item\": 7, \"decision\": \"no\", \"label\": \"needs-approval\"}}",
     ] {
         let read = read(bad).unwrap();
         assert_eq!((read.follow_up, read.unread.len()), (None, 1), "{bad}");

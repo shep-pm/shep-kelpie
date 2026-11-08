@@ -739,7 +739,7 @@ fn an_issue_triaged_again_and_now_sure_loses_the_needs_triage_of_the_first_pass(
             "label P2".to_owned(),
             format!("label {TRIAGE}")
         ],
-        "the first pass is not sure of it, so it ends `needs-triage`"
+        "the first pass is not sure of it, so it ends `needs-approval`"
     );
     assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "done");
 
@@ -764,7 +764,7 @@ fn an_issue_triaged_again_and_now_sure_loses_the_needs_triage_of_the_first_pass(
     assert_eq!(
         rig.github.label_takes(),
         [(30, TRIAGE.to_owned())],
-        "`needs-triage` came off before `ready-for-agent` went on"
+        "`needs-approval` came off before `ready-for-agent` went on"
     );
     // The first pass's end is checked again before the second pass, and the
     // check still refuses it, which one comment says.
