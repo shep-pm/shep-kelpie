@@ -16,9 +16,16 @@ impl Runner {
     ///
     /// # Errors
     ///
-    /// Why the ask was dropped: the run is not on the list, or its case holds the log.
+    /// Why the ask was dropped: the item is not parked, the run is not on the list, or its
+    /// case holds the log.
     pub(super) fn ask_run_log(&mut self, ticket: TicketId, run: u64) -> Result<String, String> {
         let named = ticket_ref(ticket);
+        let parked = self.parked_items();
+        if !parked.iter().any(|p| p.ticket == ticket && !p.contribution) {
+            return Err(format!(
+                "run_log {named} run {run}: it is no longer parked, so no case carries the log"
+            ));
+        }
         let listed = self.pm.ci_runs.get(&ticket).into_iter().flatten();
         let mut listed = listed.filter(|r| r.run == run).peekable();
         if listed.peek().is_none() {

@@ -232,6 +232,31 @@ fn a_wake_with_no_new_log_to_ask_for_lets_the_ruling_go_to_the_maintainer() {
 }
 
 #[test]
+fn an_ask_for_an_item_the_same_answer_settles_is_dropped_and_makes_no_read() {
+    let (rig, runner) = question::asking_on_a_pull_request("case-question-settled-with-ask");
+    let head = rig.push_by_hand("kelpie/7", "work.txt");
+    rig.forge
+        .set_head_runs(&head, vec![head_run("test", 102, Some("success"))]);
+    rig.forge.set_run_log(102, LogPart::Whole, "GREEN-LOG-LINE");
+    rig.claude.script_for(
+        Role::Pm,
+        [Scripted::Say(
+            "{\"answer\": {\"item\": 7, \"text\": \"Use --check.\", \"why\": \"the docs\"}, \
+             \"run_log\": {\"item\": 7, \"run\": 102}}",
+        )],
+    );
+
+    let (_, _, dropped) = reported(Some(step_until(&runner, |r| {
+        matches!(r, StepReport::PmAnswered { .. })
+    })));
+
+    assert_eq!(dropped.len(), 1, "{dropped:?}");
+    assert!(dropped[0].contains("run 102"), "{dropped:?}");
+    assert!(dropped[0].contains("no longer parked"), "{dropped:?}");
+    assert_eq!(rig.forge.run_log_reads(102), 0);
+}
+
+#[test]
 fn the_log_is_read_with_the_lock_let_go() {
     let (rig, runner) = with_green_run("case-green-off-lock");
     wake_saying(&rig, &runner, ASK);
