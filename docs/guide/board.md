@@ -48,6 +48,8 @@ Kelpie's own `pm` is Opus 5.5 at medium. Code wakes it, never a timer, when:
 - a work item is stuck: its turn failed, it stopped twice with no pull request, CI stayed red with no fix pushed (each of which already asks you a ruling), or its worker has been idle for 10 minutes
 - you tell it something: `shep kelpie tell "hold #12 until the release"`
 
+A note about what the projects share, such as the API credit or a release date every project should hold to, goes with `shep kelpie tell --all "<note>"`, which tells every project's project manager in name order and prints one line for each. A project whose runner is stopped or refuses the note is named as not told, and the command then exits non-zero, since a note sent to a stopped runner would be lost.
+
 It does not wake again for an item it answered `none` for while that item is in the same state: while it is parked on the ruling waiting on you, and for an idle worker for 30 minutes after it says so, then an hour, then two hours at most. When that time ends the item is put to it again even if the worker has shown nothing since, so a hung worker is not left unattended. A new turn, a new ruling or a new phase wakes it at once, and so does a `retry`, a `re-scope` or an `ask` on the item.
 
 

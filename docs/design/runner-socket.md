@@ -48,7 +48,7 @@ A runner answers the typed protocol on `run/<project>.sock` under kelpie's home,
 
 `src/flock/control/socket.rs`. A `Reach` holds kelpie's home and a once-flag, and `Reach::trigger` has `control::trigger`'s signature and returns its `Answered`, with the reply written as the JSON text the verbs parse. Output is unchanged, plain and `--json`.
 
-- `status`, `rule`, `tell`, `send` and `change` take `&Reach`. That covers `board`, `timings`, `gate`, `drop`, `rework`, `adopt`, `triage`, `add <ticket>`, `drain`, `undrain`, `attach` and `pm`.
+- `status`, `rule`, `tell`, `tell_all`, `send` and `change` take `&Reach`. That covers `board`, `timings`, `gate`, `drop`, `rework`, `adopt`, `triage`, `add <ticket>`, `drain`, `undrain`, `attach` and `pm`. `tell_all` holds the one `Reach` across the projects, so its fallback line is said once per command.
 - `start`, `finish`, `finish_all`, `pause` and `src/upgrade/` keep `control::trigger`, since they must reach a stopped or older runner through the shepherd.
 - `Unreachable` and `Unknown` take the one-release path (`Reach::fallback`, the one function to delete): one line to stderr per command naming the socket path, then `shep trigger`.
 - `TimedOut` is `Answered::TimedOut` and never falls back, since the runner may have done the request. A connection that breaks after the request is sent is an error, for the same reason.

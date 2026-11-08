@@ -135,12 +135,20 @@ async fn run(
     } else {
         args
     };
-    // Only `finish` takes `--all`, and to every other verb it is a word.
-    let all = command == "finish" && args.contains(&"--all");
-    let args: Vec<&str> = if all {
-        args.into_iter().filter(|arg| *arg != "--all").collect()
-    } else {
-        args
+    // `finish` takes `--all` anywhere in its line. For `tell` it is the flag
+    // only as the first word after it, so a note that holds the word later
+    // keeps it. To every other verb `--all` is a word.
+    let all = match command {
+        "finish" => args.contains(&"--all"),
+        "tell" => args.first() == Some(&"--all"),
+        _ => false,
+    };
+    let args: Vec<&str> = match (all, command) {
+        (true, "tell") => args
+            .split_first()
+            .map_or(Vec::new(), |(_, rest)| rest.to_vec()),
+        (true, _) => args.into_iter().filter(|arg| *arg != "--all").collect(),
+        (false, _) => args,
     };
     if command == "rule" {
         return answer(dial, shep_home, &home, &kelpie_home, named.as_ref(), &args).await;
@@ -340,6 +348,16 @@ async fn run(
             let ticket = ticket.map_err(|_| format!("{text:?} is not a ticket id"))?;
             attach::attach(&reach, &client, &project().await?, ticket).await
         }
+        ("tell", []) if all => Err(USAGE.to_owned()),
+        ("tell", [_, ..]) if all && named.is_none() => {
+            let told = control::tell_all(&reach, &client, &args.join(" "), format).await?;
+            if told.refused.is_empty() {
+                return Ok(told.lines);
+            }
+            told.lines.iter().for_each(|line| println!("{line}"));
+            Err(told.refused.join("\n"))
+        }
+        ("tell", _) if all => Err(format!("name the project once\n\n{USAGE}")),
         ("tell", [_, ..]) => {
             let project = project().await?;
             control::tell(&reach, &client, &project, &args.join(" "), format).await

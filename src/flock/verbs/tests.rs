@@ -1,3 +1,5 @@
+use shep_client::shep_core::protocol::{Request, SelectorSpec};
+
 use super::*;
 use crate::ports::{ForgeError, Notification};
 use crate::settings::ForgeSlug;
@@ -143,6 +145,27 @@ fn koji_shepherd(says: Option<&str>) -> crate::test::FakeShepherd {
     );
     if let Some(says) = says {
         shepherd.says("koji", &[says]);
+    }
+    shepherd
+}
+
+// A flock with a running runner for `koji` and for `rotom`, each answering its
+// triggers with the body named for it
+fn two_runners(says: &[(&str, &str)]) -> crate::test::FakeShepherd {
+    let shepherd = crate::test::FakeShepherd::new();
+    let launch = Launch {
+        kelpie: "/opt/kelpie".into(),
+        shep_home: shepherd.home().to_owned(),
+        kelpie_home: None,
+    };
+    let table = crate::test::project_table(include_str!("../../../settings.example.toml"));
+    for name in ["koji", "rotom"] {
+        let name = ProjectName::try_from(name).unwrap();
+        shepherd.holds(launch.runner(&name, table.clone()), true);
+    }
+    shepherd.holds_dog("kelpie", true);
+    for (name, body) in says {
+        shepherd.says(name, &[body]);
     }
     shepherd
 }
@@ -358,6 +381,66 @@ async fn finish_all_as_a_word_names_the_flag_when_no_project_is_called_all() {
     let err = verb_line("finish", "all", None).await.unwrap_err();
     assert!(err.contains("no kelpie runner named all"), "{err}");
     assert!(err.contains("finish --all finishes every project"), "{err}");
+}
+
+#[tokio::test]
+async fn tell_all_is_refused_with_a_project() {
+    for line in [
+        "--all -p koji hold #4",
+        "--all --project=koji hold #4",
+        "-p koji --all hold #4",
+    ] {
+        let err = verb_line("tell", line, None).await.unwrap_err();
+        assert!(err.starts_with("name the project once"), "{line}: {err}");
+    }
+}
+
+#[tokio::test]
+async fn tell_all_with_no_note_is_the_usage() {
+    let err = verb_line("tell", "--all", None).await.unwrap_err();
+    assert_eq!(err, USAGE.to_owned());
+}
+
+#[tokio::test]
+async fn tell_all_tells_every_project_and_fails_when_a_runner_refuses() {
+    let mut shepherd = two_runners(&[("koji", r#"{"error":"koji has no project manager"}"#)]);
+    let err = verb_line_on(&shepherd, "tell", "--all hold #4")
+        .await
+        .unwrap_err();
+    assert_eq!(err, "koji: koji has no project manager");
+    let told: Vec<String> = shepherd
+        .writes()
+        .iter()
+        .filter_map(|w| match w {
+            Request::Trigger {
+                selector: SelectorSpec::Name(name),
+                action,
+                ..
+            } if action == "tell" => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(told, ["koji", "rotom"]);
+}
+
+#[tokio::test]
+async fn a_note_that_holds_all_after_its_first_word_keeps_it() {
+    let mut shepherd = koji_shepherd(None);
+    let lines = verb_line_on(&shepherd, "tell", "-p koji hold --all")
+        .await
+        .unwrap();
+    assert_eq!(
+        lines,
+        ["told koji's project manager, which reads it on its next wake"]
+    );
+    assert_eq!(
+        shepherd.writes(),
+        [Request::Trigger {
+            selector: SelectorSpec::Name("koji".into()),
+            action: "tell".into(),
+            params: Some("hold --all".into()),
+        }]
+    );
 }
 
 #[tokio::test]
