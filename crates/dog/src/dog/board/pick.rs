@@ -200,7 +200,7 @@ fn wait(agent: &Agent, shown: &Availability, turn_secs: u64, now: Timestamp) -> 
     let hold = match agent.runs.session() {
         Some(_) if bills_api(agent) => Some(api_hold(shown, now)),
         Some((_, Limit::Account(account))) => Some(match shown.usage(*account) {
-            Some(usage) => pacer::window(*account, &usage),
+            Some(usage) => pacer::spent(*account, &usage),
             None => Assessment::unreadable(now, "its plan is not read yet".into()).window,
         }),
         _ => None,
