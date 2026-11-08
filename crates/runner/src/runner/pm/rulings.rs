@@ -85,17 +85,25 @@ impl Runner {
     ///
     /// Only a timed-out or failed turn's ruling can be. It walks this item's
     /// rulings of either kind, newest first, each raised at the head this one
-    /// stands at, and stops at the first raised at another: a head that moved
-    /// starts the count again. Two rulings with no head count with each other,
-    /// since a head git could not read is no proof the worker got further.
+    /// stands at and while its item was open, and stops at the first at another
+    /// head or before this item opened: the count is one work item's, not one
+    /// issue's. Two rulings with no head count with each other.
     pub(in crate::runner) fn turn_stalled(&self, ruling: &Ruling) -> bool {
         if !is_turn(&ruling.kind) {
             return false;
         }
+        // The work item this ruling belongs to, and when it opened. An item a
+        // kelpie that kept no timings loaded opened when that kelpie started.
+        let opened = (ruling.issue)
+            .and_then(|issue| self.state.item(issue))
+            .and_then(|item| item.timings.as_ref().map(|timings| timings.created));
         let answered = (ruling::records(&self.paths.rulings).iter())
             .rev()
             .filter(|r| r.issue == ruling.issue && r.kind.is_some_and(on_a_turn))
-            .take_while(|r| r.head == ruling.stuck_head)
+            .take_while(|r| {
+                let raised = r.raised.unwrap_or(r.at);
+                r.head == ruling.stuck_head && opened.is_none_or(|opened| raised >= opened)
+            })
             .count();
         answered >= usize::try_from(STALLED_RESUMES).unwrap_or(usize::MAX)
     }

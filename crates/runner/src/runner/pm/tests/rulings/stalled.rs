@@ -10,6 +10,7 @@ use super::super::turn_answers::{BOTH, card, failed, phase, project, votes};
 use super::super::{answered, past_the_window, pm_seen, step_until};
 use crate::ports::{Role, Timestamp};
 use crate::runner::pm::Wake;
+use crate::runner::pm::rulings::STALLED_RESUMES;
 use crate::runner::ruling::{Answerer, Record};
 use crate::runner::{Answer, Runner, StepReport, step};
 use crate::settings::RulingName;
@@ -57,9 +58,10 @@ fn raised_at(asked: &str, reason: Stuck, head: Option<&str>) -> Ruling {
     }
 }
 
-/// Appends the history line of `ruling`, answered yes by the project manager
+/// Appends the history line of `ruling`, answered yes by the project manager at
+/// the hour #7's work item opened
 fn resumed(rig: &Rig, ruling: &Ruling) {
-    Record::of(ruling, &Answer::Yes, Timestamp(1), Answerer::Pm)
+    Record::of(ruling, &Answer::Yes, Timestamp(Rig::EPOCH), Answerer::Pm)
         .append(&rig.paths().rulings)
         .unwrap();
 }
@@ -382,5 +384,62 @@ fn the_count_is_this_items_own_turn_rulings() {
     assert!(
         runner.pm_answers_ruling(&failed_at(Some("c0ffee1"))),
         "one turn ruling of this item at this head is no limit"
+    );
+}
+
+// The count is this work item's, not this issue's: #7 opened again after the
+// item that ended on it starts its two resumes afresh at the same commit
+#[test]
+fn a_new_work_item_for_the_same_issue_starts_the_count_again() {
+    let (rig, runner) = project("stalled-new-item", BOTH);
+    let runner = runner.lock().unwrap();
+    for _ in 0..STALLED_RESUMES {
+        let ended = Ruling {
+            raised: Some(Timestamp(Rig::EPOCH - 60)),
+            ..failed_at(Some("c0ffee1"))
+        };
+        Record::of(
+            &ended,
+            &Answer::Yes,
+            Timestamp(Rig::EPOCH - 30),
+            Answerer::Pm,
+        )
+        .append(&rig.paths().rulings)
+        .unwrap();
+    }
+
+    assert!(
+        !runner.turn_stalled(&failed_at(Some("c0ffee1"))),
+        "the two resumes belong to the work item that ended"
+    );
+    assert!(
+        runner.pm_answers_ruling(&failed_at(Some("c0ffee1"))),
+        "so this item's first ruling at that commit is the project manager's"
+    );
+}
+
+// A line answered after this item opened, on a ruling raised before it, is the
+// earlier item's too: the count is by when the ruling was raised
+#[test]
+fn a_line_answered_since_this_item_opened_on_an_older_ruling_is_no_part_of_the_count() {
+    let (rig, runner) = project("stalled-late-answer", BOTH);
+    let runner = runner.lock().unwrap();
+    let ended = Ruling {
+        raised: Some(Timestamp(Rig::EPOCH - 60)),
+        ..failed_at(Some("c0ffee1"))
+    };
+    Record::of(
+        &ended,
+        &Answer::Yes,
+        Timestamp(Rig::EPOCH + 600),
+        Answerer::Pm,
+    )
+    .append(&rig.paths().rulings)
+    .unwrap();
+    resumed(&rig, &timed_out_at(Some("c0ffee1")));
+
+    assert!(
+        runner.pm_answers_ruling(&failed_at(Some("c0ffee1"))),
+        "one resume since this item opened is not past the limit"
     );
 }
