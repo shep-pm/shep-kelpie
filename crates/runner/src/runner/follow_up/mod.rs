@@ -18,7 +18,8 @@ use crate::board::{READY, TRIAGE};
 use crate::ports::{Finding, ForgeError, NewLabel, OpenTicket, Severity};
 use crate::settings::TicketSource;
 use crate::state::{RulingKind, StateError};
-use crate::work_item::{FollowUps, WorkItem};
+use crate::ticket::TicketId;
+use crate::work_item::{FollowUps, Phase, WorkItem};
 
 // A GitHub title stops at 256 characters, and one this long is unreadable
 // in a list anyway. `cut` adds ` …` to its limit.
@@ -54,7 +55,8 @@ impl Runner {
     // nothing is left to file, and the work item goes on to be removed.
     pub(super) fn follow_ups(&mut self) -> Result<Option<Begin>, StateError> {
         let item = self.current().expect("a follow-up is of a work item");
-        let Some(number) = item.pull_request else {
+        let (issue, number) = (item.issue, item.pull_request);
+        let Some(number) = number else {
             return Ok(None);
         };
         let pending = match item.follow_ups.clone() {
@@ -83,16 +85,35 @@ impl Runner {
             };
             return self.raise(number, kind).map(Some);
         }
-        self.file_follow_ups(number).map(Some)
+        match self.file_follow_ups(issue)? {
+            Ok(begin) => Ok(Some(begin)),
+            // The forge would not take them: the merged work item retries them,
+            // and past the window the maintainer is asked.
+            Err(reason) => self.forge_refused(number, reason).map(Some),
+        }
     }
 
-    // One finding at a time, each taken off the work item once it is filed. A
-    // failure part way retries only what is left. Only a yes on the `follow-up`
-    // ruling puts them on the board as `ready-for-agent`. A project manager's
-    // yes that asked for `needs-triage` files them unread.
-    fn file_follow_ups(&mut self, number: u64) -> Result<Begin, StateError> {
-        let item = self.current().expect("a follow-up is of a work item");
-        let issue = item.issue;
+    /// Files each pending finding of `issue`, one at a time, each taken off the work item
+    ///
+    /// A failure part way retries only what is left. Only a ruled finding goes on the
+    /// board as `ready-for-agent`; an unruled one is filed unread. Returns why the
+    /// forge refused, if it did, which each caller retries its own way.
+    ///
+    /// # Errors
+    ///
+    /// [`StateError`] when what it filed cannot be saved.
+    pub(in crate::runner) fn file_follow_ups(
+        &mut self,
+        issue: TicketId,
+    ) -> Result<Result<Begin, String>, StateError> {
+        let Some(item) = self.state.item(issue).cloned() else {
+            return Ok(Err("its work item is gone".to_owned()));
+        };
+        let number = item.pull_request.unwrap_or_default();
+        // Filed once the item finished, and its deferred findings are done with.
+        // Filed before the merge, it leaves nothing pending, or the merge would
+        // skip the deferred findings still in the build folder.
+        let merged = matches!(item.phase, Phase::Done { .. });
         let triaged = (item.follow_ups.as_ref()).is_some_and(|p| p.ruled && !p.unread);
         let label = if triaged { READY } else { TRIAGE };
         // READY is on every repo `add` set up, so only TRIAGE may need making.
@@ -100,12 +121,10 @@ impl Runner {
         let repo = self.remote.clone();
         let mut open = match self.ports.tickets.open_tickets(&repo) {
             Ok(open) => open,
-            Err(e) => {
-                return self.forge_refused(number, format!("cannot list the open issues: {e}"));
-            }
+            Err(e) => return Ok(Err(format!("cannot list the open issues: {e}"))),
         };
         let (mut opened, mut commented, mut skipped) = (Vec::new(), Vec::new(), 0);
-        while let Some(finding) = self.next_follow_up() {
+        while let Some(finding) = self.next_follow_up(issue) {
             let title = title_of(&finding);
             let filed = match already_filed(&open, &title, &finding) {
                 Some(known) => {
@@ -117,9 +136,8 @@ impl Runner {
                 None => {
                     // A local store takes any label, and has no repo to make one on.
                     if !labelled && self.settings.tickets.source == TicketSource::Github {
-                        let made = self.make_missing_labels([TRIAGE_LABEL]);
-                        if let Err(reason) = made {
-                            return self.forge_refused(number, reason);
+                        if let Err(reason) = self.make_missing_labels([TRIAGE_LABEL]) {
+                            return Ok(Err(reason));
                         }
                         labelled = true;
                     }
@@ -136,7 +154,7 @@ impl Runner {
                 }
             };
             match filed {
-                Ok(()) => self.update(|item| {
+                Ok(()) => self.update_of(issue, |item| {
                     if let Some(pending) = item.follow_ups.as_mut() {
                         pending.first_refused = None;
                     }
@@ -144,24 +162,25 @@ impl Runner {
                 // Never sent, and never will be: retrying would only stall the work item.
                 Err(ForgeError::LocalPath { .. }) => skipped += 1,
                 Err(e) => {
-                    let reason = format!("cannot file a follow-up for #{number}: {e}");
-                    return self.forge_refused(number, reason);
+                    return Ok(Err(format!("cannot file a follow-up for #{number}: {e}")));
                 }
             }
-            self.update(|item| {
+            self.update_of(issue, |item| {
                 if let Some(pending) = item.follow_ups.as_mut() {
                     pending.findings.remove(0);
                 }
             })?;
         }
-        self.update(|item| item.follow_ups = Some(FollowUps::default()))?;
-        Ok(Begin::Report(StepReport::FollowUpsFiled {
+        self.update_of(issue, |item| {
+            item.follow_ups = merged.then_some(FollowUps::default());
+        })?;
+        Ok(Ok(Begin::Report(StepReport::FollowUpsFiled {
             issue,
             pull_request: number,
             opened,
             commented,
             skipped,
-        }))
+        })))
     }
 
     // The forge would not take them. Retried on every pass for `REFUSAL_WINDOW`
@@ -187,9 +206,14 @@ impl Runner {
         self.raise(number, kind)
     }
 
-    fn next_follow_up(&self) -> Option<Finding> {
-        let item = self.current()?;
-        item.follow_ups.as_ref()?.findings.first().cloned()
+    fn next_follow_up(&self, issue: TicketId) -> Option<Finding> {
+        self.state
+            .item(issue)?
+            .follow_ups
+            .as_ref()?
+            .findings
+            .first()
+            .cloned()
     }
 }
 

@@ -62,6 +62,7 @@ pub(super) use said::{Released, SaidHow};
 
 use answer::Action;
 use ci_logs::Woke;
+pub(in crate::runner) use threads::{Decision, Ruled};
 use wakes::{AgentOut, LeftAlone, held, stuck_on};
 pub(super) use wakes::{StuckState, Wake};
 
@@ -284,11 +285,7 @@ impl Runner {
             return false;
         };
         let ticket = *ticket;
-        // A step in a pass has not read the account's usage, so the pace is
-        // the wake's to judge, which gives the ask up if it cannot run.
-        let now = self.ports.clock.now();
-        let down = self.pm.down_until.is_some_and(|until| now < until);
-        if self.draining() || down || self.pm_held_by_terminal() {
+        if self.pm_held_down() {
             return false;
         }
         self.pm.reading.insert(ticket);
@@ -429,6 +426,18 @@ impl Runner {
     // its account's pace.
     pub(super) fn pm_available(&mut self) -> bool {
         matches!(self.pm_pace(), Some(Pace::Clear))
+    }
+
+    /// Whether no wake can be queued now: the runner drains, a failed wake holds
+    /// the project manager down, or the maintainer's terminal has it attached
+    ///
+    /// A step in a pass has not read the account's usage, so the pace is the
+    /// wake's own to judge, which gives the ask up if it cannot run.
+    pub(in crate::runner) fn pm_held_down(&mut self) -> bool {
+        let now = self.ports.clock.now();
+        self.draining()
+            || self.pm.down_until.is_some_and(|until| now < until)
+            || self.pm_held_by_terminal()
     }
 
     /// How its account's pace stands for a call, or none when no call can run:

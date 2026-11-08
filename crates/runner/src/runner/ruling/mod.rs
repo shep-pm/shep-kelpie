@@ -32,6 +32,7 @@ pub(super) use post::PostJob;
 mod prompts;
 mod question;
 mod queued;
+mod saving;
 mod stuck;
 mod test_fails;
 use prompts::{
@@ -611,15 +612,6 @@ impl Runner {
             question,
             comment_failed,
         }))
-    }
-
-    pub(super) fn update(&mut self, change: impl FnOnce(&mut WorkItem)) -> Result<(), StateError> {
-        let mut next = self.state.clone();
-        change(
-            self.current_in(&mut next)
-                .expect("a change to the work item in flight"),
-        );
-        self.save(next)
     }
 }
 

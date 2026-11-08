@@ -12,6 +12,7 @@ use crate::runner::step;
 use crate::test::{CALL_PATIENCE, Rig, Scripted, git};
 
 mod borrowing;
+mod threads;
 
 pub(super) fn ruling_report(report: Option<StepReport>) -> (TicketId, String) {
     match report {

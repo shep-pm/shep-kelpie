@@ -120,10 +120,6 @@ pub(in crate::runner) enum Wake {
     },
     /// An item at the gate waits on the project manager for what becomes of
     /// each open review thread
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the step that asks is a later slice")
-    )]
     Threads {
         /// The work item's ticket
         ticket: TicketId,
