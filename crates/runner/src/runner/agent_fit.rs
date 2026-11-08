@@ -161,11 +161,10 @@ fn hours(minutes: u32) -> String {
     elapsed(u64::from(minutes) * 60)
 }
 
-// The finding's figures, as the ruling keeps them: rates in whole percents and
-// hours in whole minutes, so the state file holds no fraction
+// The finding's figures, as the ruling keeps them: rates in whole percents, so
+// the state file holds no fraction
 fn kept(measure: &Measure) -> AgentMeasure {
     let rate = |share: f64| (share * 100.0).round() as u32;
-    let minutes = |hours: f64| (hours * 60.0).round() as u32;
     match measure {
         Measure::MergeRate { worse, better } => AgentMeasure::MergeRate {
             worse: rate(*worse),
@@ -174,10 +173,6 @@ fn kept(measure: &Measure) -> AgentMeasure {
         Measure::HeavyFix { worse, better } => AgentMeasure::HeavyFix {
             worse: rate(*worse),
             better: rate(*better),
-        },
-        Measure::Hours { worse, better } => AgentMeasure::Hours {
-            worse: minutes(*worse),
-            better: minutes(*better),
         },
     }
 }

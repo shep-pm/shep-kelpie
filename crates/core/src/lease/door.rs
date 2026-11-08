@@ -630,8 +630,8 @@ mod tests {
             kind: "fix".into(),
             worse: "slow".into(),
             better: "quick".into(),
-            measure: Measure::Hours {
-                worse: 3.0,
+            measure: Measure::MergeRate {
+                worse: 0.5,
                 better: 1.0,
             },
             suggested_kinds: vec!["docs".into()],
@@ -643,7 +643,7 @@ mod tests {
                 { "fits": "yes" },
                 { "fits": { "no": {
                     "kind": "fix", "worse": "slow", "better": "quick",
-                    "measure": { "hours": { "worse": 3.0, "better": 1.0 } },
+                    "measure": { "merge_rate": { "worse": 0.5, "better": 1.0 } },
                     "suggested_kinds": ["docs"],
                 } } }
             ])
