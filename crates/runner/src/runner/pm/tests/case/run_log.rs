@@ -257,6 +257,22 @@ fn an_ask_for_an_item_the_same_answer_settles_is_dropped_and_makes_no_read() {
 }
 
 #[test]
+fn a_log_that_did_not_reach_the_case_can_be_asked_for_again() {
+    let (rig, runner) = with_green_run("case-green-no-list");
+    wake_saying(&rig, &runner, ASK);
+    rig.forge.set_head_runs_error(Some("GitHub is down"));
+    next_wake(&rig, &runner);
+    assert!(!case(&rig, 7).unwrap().contains("GREEN-LOG-LINE"));
+    rig.forge.set_head_runs_error(None);
+
+    let dropped = wake_saying(&rig, &runner, ASK);
+    next_wake(&rig, &runner);
+
+    assert_eq!(dropped, Vec::<String>::new());
+    assert!(case(&rig, 7).unwrap().contains("> GREEN-LOG-LINE"));
+}
+
+#[test]
 fn the_log_is_read_with_the_lock_let_go() {
     let (rig, runner) = with_green_run("case-green-off-lock");
     wake_saying(&rig, &runner, ASK);

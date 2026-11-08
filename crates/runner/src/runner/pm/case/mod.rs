@@ -129,12 +129,8 @@ impl Runner {
             }
             said.insert(ticket, line);
         }
-        // Each log asked for is in a case just written, or is asked for again.
-        let asked = std::mem::take(&mut self.pm.run_log_asks);
-        let cased = |t: &TicketId| said.get(t).is_some_and(|line| line.starts_with("case `"));
-        self.pm
-            .run_log_tried
-            .extend(asked.into_iter().filter(|(t, ..)| cased(t)));
+        // A log asked for is read for this wake alone: one a case did not take is asked again.
+        self.pm.run_log_asks.clear();
         said
     }
 

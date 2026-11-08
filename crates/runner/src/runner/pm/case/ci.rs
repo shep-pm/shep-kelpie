@@ -66,12 +66,15 @@ impl Runner {
     }
 
     // Keeps each log `ci` read, so a later wake does not read it again. A log
-    // that could not be read is asked for again.
+    // asked for is tried once its read is in a case, kept or not.
     pub(super) fn keep_run_logs(&mut self, ticket: TicketId, ci: CiReads) {
         if let Ok(runs) = &ci.runs {
             self.pm.ci_runs.insert(ticket, runs.clone());
         }
         for ((run, attempt), read) in ci.fresh {
+            if self.asked_log(ticket, (run, attempt)) {
+                self.pm.run_log_tried.insert((ticket, run, attempt));
+            }
             if let Ok(text) = read {
                 self.pm.run_logs.insert((ticket, run, attempt), text);
             }
