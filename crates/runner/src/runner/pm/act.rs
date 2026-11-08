@@ -9,7 +9,7 @@
 //! own, so one wake that carried several can settle each, and an item named
 //! twice, in one key or across both, acts once.
 
-use super::answer::{Action, Answer, Unstick};
+use super::answer::{Action, Answer, FixHow, Unstick};
 use super::red::Settled;
 use super::{Pick, Picked, StuckState, Wake, stuck_on};
 use crate::board::briefing::ticket_ref;
@@ -159,7 +159,13 @@ impl Runner {
                 continue;
             }
             handled.push(call.item);
-            match self.settle_fix(call)? {
+            // A drafted fix is read against the code before it files, so it
+            // waits on the queue and acts again when the read ends.
+            let done = match &call.how {
+                FixHow::On(on) => self.settle_fix(call.item, *on, &call.why)?,
+                FixHow::Draft { .. } => self.draft_fix(call)?,
+            };
+            match done {
                 Ok(done) => acted.push(done),
                 Err(why) => dropped.push(why),
             }

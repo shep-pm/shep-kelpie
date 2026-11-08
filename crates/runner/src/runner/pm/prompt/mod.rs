@@ -104,7 +104,10 @@ macro_rules! follow_ups {
 macro_rules! fix_key {
     () => {
         "\"fix\": null or {\"item\": <a stuck work item's issue>, \"on\": <the open fix work \
-         item it waits on>, \"why\": \"<one sentence, at most 300 characters>\"} or a list of them"
+         item it waits on>, \"why\": \"<one sentence, at most 300 characters>\"} or {\"item\": <a \
+         stuck work item's issue>, \"title\": \"<the fix issue's title>\", \"body\": \"<the issue, \
+         in the format an issue is written in>\", \"why\": \"<one sentence, at most 300 \
+         characters>\"} or a list of them"
     };
 }
 
@@ -120,7 +123,16 @@ macro_rules! fixes {
          `fix` naming a closed issue, the item itself, or an item that is not stuck. A `retry` \
          is refused on a turn kelpie could not set up, since another try meets the same fault, \
          so park it. One wake may park as many items as it carried, and any number of them on \
-         one fix."
+         one fix.\n\
+         Where no fix for the cause is open, `title` and `body` draft one instead. Kelpie \
+         checks the draft as an issue, then has a call that saw none of your text read it \
+         against the code: does each file and name it gives exist, and does each claim hold. \
+         A pass files it `ready-for-agent`, `priority: P1` and `kind:fix` at the front of the \
+         board, and parks the item on it. A refusal files nothing and puts the read's why and \
+         the draft on the item's ruling, so the item stays parked and the maintainer hears. \
+         A draft that fails kelpie's own checks never reaches that call. There is no limit on \
+         `fix`: an open fix you could park on is on the board, so drafting the same fix twice \
+         is yours to avoid."
     };
 }
 
