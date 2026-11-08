@@ -69,7 +69,7 @@ macro_rules! questions {
 /// ruling shows again to a session that has seen the answer without it
 macro_rules! follow_up_key {
     () => {
-        "\"follow_up\": null or {\"item\": <the work item whose follow-up ruling you decide>, \"decision\": \"yes\" | \"no\", \"label\"?: \"ready-for-agent\" | \"needs-triage\" (only with yes, may be left out), \"drop\"?: [{\"finding\": <its number in the wake>, \"why\": \"<why it is not worth filing>\"}] (only with yes, each number once, may be left out), \"why\": \"<one sentence, at most 300 characters>\"}"
+        "\"follow_up\": null or {\"item\": <the work item whose follow-up ruling you decide>, \"decision\": \"yes\" | \"no\", \"label\"?: \"ready-for-agent\" | \"needs-approval\" (only with yes, may be left out), \"drop\"?: [{\"finding\": <its number in the wake>, \"why\": \"<why it is not worth filing>\"}] (only with yes, each number once, may be left out), \"why\": \"<one sentence, at most 300 characters>\"}"
     };
 }
 
@@ -81,7 +81,7 @@ macro_rules! follow_ups {
          merged diff beside them, and check each finding against them and the docs. \
          Decide the ruling with `follow_up`, and the item's issue in `item`, and decide \
          each finding on its own: the wake numbers them from 1. `yes` files the findings \
-         as issues labelled `ready-for-agent` (or `needs-triage` if you give that \
+         as issues labelled `ready-for-agent` (or `needs-approval` if you give that \
          `label`, when the maintainer reads them first; leave `label` out otherwise, \
          and never give one with `no`), so file only a finding that is worth an issue \
          and reads well enough for a worker to take with no human read. With a `yes`, \
@@ -104,7 +104,10 @@ macro_rules! follow_ups {
 macro_rules! fix_key {
     () => {
         "\"fix\": null or {\"item\": <a stuck work item's issue>, \"on\": <the open fix work \
-         item it waits on>, \"why\": \"<one sentence, at most 300 characters>\"} or a list of them"
+         item it waits on>, \"why\": \"<one sentence, at most 300 characters>\"} or {\"item\": <a \
+         stuck work item's issue>, \"title\": \"<the fix issue's title>\", \"body\": \"<the issue, \
+         in the format an issue is written in>\", \"why\": \"<one sentence, at most 300 \
+         characters>\"} or a list of them"
     };
 }
 
@@ -120,7 +123,16 @@ macro_rules! fixes {
          `fix` naming a closed issue, the item itself, or an item that is not stuck. A `retry` \
          is refused on a turn kelpie could not set up, since another try meets the same fault, \
          so park it. One wake may park as many items as it carried, and any number of them on \
-         one fix."
+         one fix.\n\
+         Where no fix for the cause is open, `title` and `body` draft one instead. Kelpie \
+         checks the draft as an issue, then has a call that saw none of your text read it \
+         against the code: does each file and name it gives exist, and does each claim hold. \
+         A pass files it `ready-for-agent`, `priority: P1` and `kind:fix` at the front of the \
+         board, and parks the item on it. A refusal files nothing and puts the read's why and \
+         the draft on the item's ruling, so the item stays parked and the maintainer hears. \
+         A draft that fails kelpie's own checks never reaches that call. There is no limit on \
+         `fix`: an open fix you could park on is on the board, so drafting the same fix twice \
+         is yours to avoid."
     };
 }
 

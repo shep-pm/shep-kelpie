@@ -138,7 +138,7 @@ fn the_merge_ruling_is_raised_when_the_pass_has_ended_and_ci_is_green_on_the_hea
 }
 
 #[test]
-fn it_is_raised_under_git_merging_auto_too_and_sends_no_notice() {
+fn it_is_raised_under_merge_true_too_and_sends_no_notice() {
     let (rig, runner) = listing(&["mine"]);
     drop(runner);
     rig.merge_auto();
@@ -971,10 +971,8 @@ fn the_merge_ruling_names_rulings_pm_decides() {
 
     let asked = question(&rig, &runner);
     assert!(asked.contains("`rulings.pm_decides`"), "{asked}");
-    assert!(!asked.contains("git.merging"), "{asked}");
 
     let (rig, runner, _head) = ruled_on_an_organizations_fork();
     let asked = question(&rig, &runner);
     assert!(asked.contains("`rulings.pm_decides`"), "{asked}");
-    assert!(!asked.contains("git.merging"), "{asked}");
 }

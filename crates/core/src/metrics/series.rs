@@ -64,7 +64,12 @@ const ITEM_SECONDS: Family = Family {
 const ITEM_COST: Family = Family {
     name: "kelpie_work_item_cost_usd_total",
     kind: Counter,
-    help: "What the finished work items cost, in US dollars, by agent and kind. A work item with a call whose harness reported no cost is left out.",
+    help: "What the finished work items cost, in US dollars, by agent, kind and role, worker or reviewer. A work item with a call whose harness reported no cost is left out.",
+};
+const ITEMS_PRICED: Family = Family {
+    name: "kelpie_work_items_priced_total",
+    kind: Counter,
+    help: "Finished work items whose cost kelpie_work_item_cost_usd_total counts, by agent and kind; the denominator of a mean cost.",
 };
 const REVIEW_ROUNDS: Family = Family {
     name: "kelpie_review_rounds_total",
@@ -316,10 +321,18 @@ impl Recorder {
         self.add(&ITEM_SECONDS, labels(), finished.wall as f64);
         self.add(&REVIEW_ROUNDS, who(), f64::from(finished.review_rounds));
         self.add(&FIX_TURNS, who(), f64::from(finished.fix_turns));
-        // A line with a call whose harness reported no cost holds a cost_usd that is a lower
-        // bound, so it counts nowhere in the dollars series.
+        // A line with a call whose harness reported no cost holds dollars that are a lower
+        // bound, so it counts in neither role's series nor in the priced count.
         if finished.worker.unpriced_calls == 0 && finished.reviewer.unpriced_calls == 0 {
-            self.add(&ITEM_COST, who(), finished.cost_usd);
+            for (role, spent) in [
+                ("worker", &finished.worker),
+                ("reviewer", &finished.reviewer),
+            ] {
+                let mut labels = who();
+                labels.push(("role", role.to_owned()));
+                self.add(&ITEM_COST, labels, spent.cost_usd);
+            }
+            self.add(&ITEMS_PRICED, who(), 1.0);
         }
         self.add(&RULINGS, vec![agent, kind], f64::from(finished.rulings));
         for (severity, n) in [

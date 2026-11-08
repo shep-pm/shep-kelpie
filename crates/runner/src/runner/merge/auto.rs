@@ -176,7 +176,6 @@ fn a_vouched_head_with_a_project_manager_and_merge_true_merges_with_no_ruling() 
         let named = s.replace(listed, "[app.dogs.kelpie.agents]\npm = \"pm\"\n");
         named + "\n[app.dogs.kelpie.rulings.pm_decides]\nmerge = true\n"
     });
-    rig.edit_settings(|s| s.replace("merging = \"ask\"\n", ""));
     let runner = rig.open().unwrap();
     assert!(matches!(
         gates_passed(&rig, &runner, &head),
@@ -186,21 +185,6 @@ fn a_vouched_head_with_a_project_manager_and_merge_true_merges_with_no_ruling() 
     assert!(merged(step(&runner).unwrap()));
     assert_eq!(rig.forge.merges(), [(71, head)]);
     assert_eq!(rig.forge.comments(), [], "no ruling was posted");
-}
-
-#[test]
-fn git_merging_auto_with_merge_false_raises_the_ruling() {
-    let (rig, runner, head) = Rig::with_pull_request("golbat");
-    drop(runner);
-    rig.edit_settings(|s| {
-        let auto = s.replace("merging = \"ask\"", "merging = \"auto\"");
-        auto + "\n[app.dogs.kelpie.rulings.pm_decides]\nmerge = false\n"
-    });
-    let runner = rig.open().unwrap();
-    let report = gates_passed(&rig, &runner, &head);
-    assert!(matches!(report, StepReport::Ruling { .. }), "{report:?}");
-    assert_eq!(rig.ask(&runner, "status", None)["merging"], "ask");
-    assert_eq!(rig.forge.merges(), []);
 }
 
 #[test]
@@ -769,17 +753,10 @@ fn a_merge_that_landed_before_a_switch_to_ask_still_gets_its_notice() {
     assert!(alert.text.contains(&head[..7]), "{}", alert.text);
 }
 
-// The project's table without `git.merging`, and `rulings.pm_decides.merge`
-// as `merge` says, read when a runner next opens
+// The project's table with `rulings.pm_decides.merge` as `merge` says, read
+// when a runner next opens
 fn merging_left_to_the_map(rig: &Rig, merge: bool) {
-    rig.edit_settings(|s| {
-        let s = s.replace("merging = \"ask\"\n", "");
-        assert!(
-            !s.contains("merging ="),
-            "the example's `git.merging` moved"
-        );
-        format!("{s}\n[app.dogs.kelpie.rulings.pm_decides]\nmerge = {merge}\n")
-    });
+    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.rulings.pm_decides]\nmerge = {merge}\n"));
 }
 
 #[test]

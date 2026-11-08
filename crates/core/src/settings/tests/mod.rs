@@ -46,7 +46,6 @@ fn the_example_holds_the_first_build_defaults() {
     let s = parse(EXAMPLE).unwrap();
     assert_eq!(s.git.checkout, Path::new("/home/me/GitHub/shep"));
     assert_eq!(s.git.remote.unwrap().as_str(), "shep-pm/shep");
-    assert_eq!(s.git.merging, Some(Merging::Ask));
     assert!(s.ci.block);
     assert_eq!(s.ci.fix_attempts.cap(), None);
     assert_eq!(s.concurrency.active_items.get(), 1);
@@ -105,10 +104,21 @@ fn a_missing_setting_is_named() {
 }
 
 #[test]
-fn git_merging_may_be_left_out() {
-    assert_eq!(parse(EXAMPLE).unwrap().git.merging, Some(Merging::Ask));
-    let text = EXAMPLE.replace("merging = \"ask\"\n", "");
-    assert_eq!(parse(&text).unwrap().git.merging, None);
+fn git_merging_is_refused_by_name_and_says_migrate_deletes_it() {
+    assert!(
+        !EXAMPLE.contains("\nmerging = "),
+        "the example sets `git.merging`"
+    );
+    for value in ["auto", "ask"] {
+        let text = EXAMPLE.replace(GIT, &format!("{GIT}merging = \"{value}\"\n"));
+        assert_eq!(
+            parse_err(&text),
+            "the [app.dogs.kelpie] table on shep: `git.merging` is no longer a setting, because `rulings.pm_decides.merge` holds \
+             what it held, whether a head that passed every gate merges unasked, with or \
+             without a project manager: delete it, or run `shep kelpie settings migrate`, \
+             which does"
+        );
+    }
 }
 
 #[test]
@@ -124,18 +134,12 @@ fn the_remote_may_be_left_to_the_checkout_s_origin() {
 fn the_maintainer_is_a_github_login_and_may_be_left_out() {
     assert_eq!(parse(EXAMPLE).unwrap().git.maintainer, None);
     for (written, login) in [("octocat", "octocat"), ("@Octo-Cat", "Octo-Cat")] {
-        let text = EXAMPLE.replace(
-            "merging = \"ask\"\n",
-            &format!("merging = \"ask\"\nmaintainer = \"{written}\"\n"),
-        );
+        let text = EXAMPLE.replace(GIT, &format!("{GIT}maintainer = \"{written}\"\n"));
         let maintainer = parse(&text).unwrap().git.maintainer;
         assert_eq!(maintainer.unwrap().as_str(), login);
     }
     for bad in ["", "-octo", "octo cat", "octo/cat"] {
-        let text = EXAMPLE.replace(
-            "merging = \"ask\"\n",
-            &format!("merging = \"ask\"\nmaintainer = \"{bad}\"\n"),
-        );
+        let text = EXAMPLE.replace(GIT, &format!("{GIT}maintainer = \"{bad}\"\n"));
         let err = parse_err(&text);
         assert!(err.contains("must be a GitHub login"), "{bad:?}: {err}");
     }
@@ -143,10 +147,8 @@ fn the_maintainer_is_a_github_login_and_may_be_left_out() {
 
 #[test]
 fn the_keys_the_project_manager_took_are_refused_by_name_and_say_migrate_deletes_them() {
-    let text = EXAMPLE.replace(
-        "merging = \"ask\"\n",
-        "merging = \"ask\"\nissues = \"ask\"\n",
-    ) + "\n[app.dogs.kelpie.triage]\nhand_ready = true\n";
+    let text = EXAMPLE.replace(GIT, &format!("{GIT}issues = \"ask\"\n"))
+        + "\n[app.dogs.kelpie.triage]\nhand_ready = true\n";
     assert_eq!(
         parse_err(&text),
         "the [app.dogs.kelpie] table on shep: these are no longer settings:\n\
@@ -266,7 +268,8 @@ fn every_old_top_level_key_is_refused_at_once_naming_what_replaces_it() {
              - `forge`, {grouped}: move its value to `git.remote`, or delete it to read \
              the repo from the checkout's `origin`\n\
              - `merge_authority`, because it set both who merges and whether deferred \
-             findings are asked about: move its value to `git.merging`; deferred findings \
+             findings are asked about: move its value to `rulings.pm_decides.merge`, `true` for \
+             `auto`; deferred findings \
              always raise a follow-up ruling\n\
              - `ci`, {grouped}: move its value to `block` in a `[ci]` table\n\
              - `max_items`, {grouped}: move its value to `concurrency.active_items`\n\
@@ -466,20 +469,6 @@ fn a_misspelt_setting_is_named() {
         err.contains("`worker.turn_timout = 60`: unknown field `turn_timout`"),
         "{err}"
     );
-}
-
-#[test]
-fn merging_auto_is_accepted() {
-    let text = EXAMPLE.replace("merging = \"ask\"", "merging = \"auto\"");
-    assert_eq!(parse(&text).unwrap().git.merging, Some(Merging::Auto));
-}
-
-#[test]
-fn merging_ask_surface_is_refused() {
-    let text = EXAMPLE.replace("merging = \"ask\"", "merging = \"ask-surface\"");
-    let err = parse_err(&text);
-    assert!(err.contains("`git.merging = \"ask-surface\"`"), "{err}");
-    assert!(err.contains("unknown variant `ask-surface`"), "{err}");
 }
 
 #[test]

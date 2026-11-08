@@ -85,6 +85,14 @@ A direction recorded ahead of the code. It amends three lines here, and the rest
 
 What stands: the agent file's `description`, `kinds` and `tier`, the dog's reading of availability, the track record and its one route through the typical time, and `agent-fit` as the ruling that proposes a `kinds` change, which kelpie never applies itself.
 
+### Amendment, 2026-11-07: fit reads merge rate and fix turns, not hours
+
+- The Track record bullet's "(merge rate, hours, or share of items with 3 or more fix turns)" loses "hours". `fit` reads a pair on merge rate, then on the share of items with 3 or more fix turns; `HOURS_RATIO` and the finding's `hours` measure go (#1908).
+- Speed is already weighed twice, and a third reading of it decided nothing: the estimate ranks each agent by when it can start and how long its items take, and the project manager's pick reads that against what it bills (ADR 0020). An agent that finishes late is behind on the ranking already, and needs no ruling to say so.
+- What the hours measure raised instead was noise. A slow local model, queued behind its own GPU, raised an `agent-fit` ruling on item after item on its median hours alone, and the maintainer answered no to each. Every one is a comment on a finished pull request and a card to answer, for a `kinds` change no one wanted.
+- The record keeps its median hours: the estimate and `status`'s `records` read them, and only `fit` stops.
+- The `fit` answer carries the measure on the dog's door, which carries no version. A runner talking to a dog not yet restarted cannot read its `hours` answer and raises nothing, as it does for a dog out of reach. The dog's marks file holds no measure and is unchanged, and the state file keeps the `hours` variant so a ruling saved before this still loads.
+
 ## Considered options
 
 - **Keep the panel with fewer voters.** The project manager and the worker already agreed on 92 of 99 answers, and the maintainer's answers favoured no voter, so a smaller panel keeps a wait and a cost for the same answer.

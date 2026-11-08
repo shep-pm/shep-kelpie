@@ -7,6 +7,7 @@ use super::marker::MARKER;
 use super::pick_tests::MAINTAINER;
 use super::ready_tests::filed;
 use super::research_tests::{WORDS, calls, moves, reply, triage, under};
+use crate::board::TRIAGE;
 use crate::ports::{AgentError, Role, Session};
 use crate::runner::step;
 use crate::test::Scripted;
@@ -91,11 +92,11 @@ fn a_rewrite_that_fails_the_check_twice_goes_under_the_text_and_waits_at_needs_t
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "label bug",
-            "label P2",
-            "label kind:fix",
-            "label needs-triage"
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            "label kind:fix".to_owned(),
+            format!("label {TRIAGE}"),
         ]
     );
     assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "done");

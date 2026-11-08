@@ -267,7 +267,7 @@ fn a_queue_of_adoptions_saved_before_the_local_store_is_let_go_at_the_next_start
     assert_eq!(status["work_item"], json!(null));
 }
 
-// A local project under `merging = "auto"`, whose ticket `k1`
+// A local project whose `rulings.pm_decides.merge` is `true`, whose ticket `k1`
 // has a pull request that merges with `racy()` deferred
 fn merged_with_a_deferred_finding() -> (Rig, Mutex<Runner>) {
     let rig = Rig::new("koji");

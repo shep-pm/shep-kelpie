@@ -37,7 +37,7 @@ fn the_last_object_after_the_reasoning_is_the_answer() {
             }],
             fix: vec![FixCall {
                 item: ticket(8),
-                on: ticket(12),
+                how: FixHow::On(ticket(12)),
                 why: "a machine fault".into(),
             }],
             answer: Vec::new(),
@@ -53,6 +53,40 @@ fn the_last_object_after_the_reasoning_is_the_answer() {
             unread: Vec::new(),
         }
     );
+}
+
+#[test]
+fn a_fix_entry_names_the_open_fix_it_waits_on_or_the_issue_it_drafts() {
+    let entry = |text: &str| read(text).unwrap().fix.first().cloned().expect("an entry");
+    let parked = entry("{\"fix\": {\"item\": 7, \"on\": 12}}");
+    assert_eq!(
+        (parked.item, parked.how),
+        (ticket(7), FixHow::On(ticket(12)))
+    );
+
+    let drafted = entry(
+        "{\"fix\": {\"item\": 7, \"title\": \" Fix the  fence \", \"body\": \"Touches: \
+         `src/fence.rs`\", \"why\": \" a fault \"}}",
+    );
+    assert_eq!(drafted.item, ticket(7));
+    assert_eq!(drafted.why, "a fault");
+    assert_eq!(
+        drafted.how,
+        FixHow::Draft {
+            title: "Fix the fence".into(),
+            body: "Touches: `src/fence.rs`".into(),
+        }
+    );
+
+    for bad in [
+        "{\"fix\": {\"item\": 7}}",
+        "{\"fix\": {\"item\": 7, \"title\": \"Fix the fence\"}}",
+        "{\"fix\": {\"item\": 7, \"body\": \"Touches: `src/fence.rs`\"}}",
+        "{\"fix\": {\"item\": 7, \"title\": \" \", \"body\": \"Touches: `src/fence.rs`\"}}",
+    ] {
+        let answer = read(bad).unwrap();
+        assert_eq!((answer.fix, answer.unread.len()), (Vec::new(), 1), "{bad}");
+    }
 }
 
 #[test]
@@ -214,7 +248,9 @@ fn a_follow_up_answer_is_a_yes_or_a_no_and_a_yes_may_name_its_label() {
         Some((ticket(7), Call::File { unread: false }, "r".into()))
     );
     assert_eq!(
-        call("{\"follow_up\": {\"item\": 7, \"decision\": \"yes\", \"label\": \"needs-triage\"}}"),
+        call(
+            "{\"follow_up\": {\"item\": 7, \"decision\": \"yes\", \"label\": \"needs-approval\"}}"
+        ),
         Some((ticket(7), Call::File { unread: true }, String::new()))
     );
     assert_eq!(
@@ -232,7 +268,7 @@ fn a_follow_up_answer_is_a_yes_or_a_no_and_a_yes_may_name_its_label() {
         "{\"follow_up\": {\"item\": 7}}",
         "{\"follow_up\": {\"decision\": \"yes\"}}",
         "{\"follow_up\": {\"item\": 7, \"decision\": \"yes\", \"label\": \"bug\"}}",
-        "{\"follow_up\": {\"item\": 7, \"decision\": \"no\", \"label\": \"needs-triage\"}}",
+        "{\"follow_up\": {\"item\": 7, \"decision\": \"no\", \"label\": \"needs-approval\"}}",
     ] {
         let read = read(bad).unwrap();
         assert_eq!((read.follow_up, read.unread.len()), (None, 1), "{bad}");

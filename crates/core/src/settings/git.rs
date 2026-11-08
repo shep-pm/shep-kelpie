@@ -1,14 +1,13 @@
-//! The project's repo and who merges into it, `[app.dogs.kelpie.git]`
+//! The project's repo, `[app.dogs.kelpie.git]`
 
 use std::path::PathBuf;
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use super::ForgeSlug;
 
-/// The project's repo: where it is checked out, where it lives on GitHub,
-/// and who merges into it
+/// The project's repo: where it is checked out and where it lives on GitHub
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(title = "Git")]
@@ -24,11 +23,6 @@ pub struct Git {
     /// items opened after it: each one in flight keeps the base it was cut for.
     #[serde(default)]
     pub base: Option<BaseBranch>,
-    /// Read by `settings migrate` alone, which writes `rulings.pm_decides.merge`
-    /// from it. `rulings.pm_decides.merge` decides who merges a green,
-    /// reviewed pull request.
-    #[serde(default)]
-    pub merging: Option<Merging>,
     /// The GitHub login kelpie mentions on a ruling it posts through its
     /// App, so GitHub notifies them. The login `gh` acts as (`gh api user`)
     /// when absent.
@@ -113,19 +107,4 @@ impl TryFrom<String> for GithubLogin {
         }
         Ok(Self(login.to_owned()))
     }
-}
-
-/// Who merges a green, reviewed pull request
-///
-/// `auto` replaces only the merge ruling. A pull request no reviewer read,
-/// one with a review bot's thread above a nit open, a head no round read, a
-/// fix after a `no` and a late bot round's fix still get the merge ruling,
-/// which names why.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum Merging {
-    /// Kelpie asks for a ruling before every merge
-    Ask,
-    /// Kelpie merges once every gate passes, then posts a notice of the merge
-    Auto,
 }

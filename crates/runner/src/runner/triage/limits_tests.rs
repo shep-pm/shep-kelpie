@@ -18,6 +18,7 @@ use super::limits::DAY;
 use super::marker::MARKER;
 use super::pick_tests::{MAINTAINER, due, issue, list, rig_with, status, triaging};
 use super::research_tests::{WORDS, calls, handed, moves, reply, restart, triage};
+use crate::board::TRIAGE;
 use crate::ports::{AuthorAssociation, Clock, OpenIssue, Role, Timestamp};
 use crate::runner::{Runner, step};
 use crate::state::{StateStore, TRIAGED_KEPT};
@@ -235,7 +236,7 @@ fn an_authors_third_issue_in_a_day_gets_needs_triage_with_no_call_and_no_comment
         "no comment on the held issue"
     );
     assert_eq!(
-        labelled(&rig, "needs-triage"),
+        labelled(&rig, TRIAGE),
         [30, 31],
         "the held issue is labelled, and nothing else is written on it"
     );
@@ -265,7 +266,10 @@ fn a_new_account_with_no_history_gets_needs_triage_with_no_call() {
 
     assert_eq!(calls(&rig, Role::Triager).len(), 0);
     assert_eq!(rig.github.comments(), []);
-    assert_eq!(moves(&rig), ["make needs-triage", "label needs-triage"]);
+    assert_eq!(
+        moves(&rig),
+        [format!("make {TRIAGE}"), format!("label {TRIAGE}")]
+    );
     let held = record(&rig, &runner, 30);
     assert_eq!(held["held"], "new-account");
     assert_eq!(held["comment"], 0);
@@ -742,9 +746,9 @@ fn a_burst_of_held_issues_does_not_free_the_authors_cap_partway_through() {
     );
     assert_eq!(rig.github.comments(), [], "nothing is posted");
     assert_eq!(
-        labelled(&rig, "needs-triage"),
+        labelled(&rig, TRIAGE),
         (300..306).collect::<Vec<_>>(),
-        "each got needs-triage with no call"
+        "each got needs-approval with no call"
     );
     assert_eq!(
         triage(&rig, &runner)["daily"]["used"],

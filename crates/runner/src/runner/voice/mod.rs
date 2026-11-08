@@ -187,6 +187,7 @@ impl Runner {
             remote: self.remote.clone(),
             source: self.settings.tickets.source,
             app: self.app_covers(),
+            swap_owed: self.triage_run.label_swap_owed,
             loop_stop: self.loop_stop.clone(),
         }
     }
@@ -531,11 +532,13 @@ pub(in crate::runner) fn inert(text: &str) -> String {
 
 mod card;
 mod writer;
+#[cfg(test)]
+pub(super) use self::card::DRAFT;
 pub(super) use self::writer::Writer;
 
 pub(super) use self::card::{
     ASK_THE_MAINTAINER, BOARD, PROBLEM, RECOMMENDS, SAYS, answer_for, asks_the_maintainer, brief,
-    chosen, effect_of, named, phrases, settled_comment, thumbs, ticked,
+    chosen, draft_block, effect_of, named, phrases, settled_comment, thumbs, ticked,
 };
 
 #[cfg(test)]

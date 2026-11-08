@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use super::marker::MARKER;
 use super::pick_tests::{issue, list, rig_with, triaging};
 use super::research_tests::handed;
+use crate::board::TRIAGE;
 use crate::github::ApiError;
 use crate::ports::{Role, Timestamp};
 use crate::runner::{advance, step};
@@ -119,7 +120,7 @@ fn triage_on_a_recorded_issue_posts_a_new_comment_and_replaces_the_record() {
     assert_eq!(first["step"], "done");
     // The forge now shows the label its own record put on.
     let mut labelled = issue(&rig, 30, "newcomer", 5);
-    labelled.labels = vec!["needs-triage".to_owned()];
+    labelled.labels = vec![TRIAGE.to_owned()];
     list(&rig, labelled);
 
     let reply = rig.ask(&runner, "triage", Some("30"));
@@ -156,7 +157,7 @@ fn a_triage_asked_again_finds_its_own_comment_after_a_post_that_seemed_to_fail()
     assert_eq!(step(&runner).unwrap(), None);
     let first = rig.ask(&runner, "status", None)["triage"]["issues"][0].clone();
     let mut labelled = issue(&rig, 30, "newcomer", 5);
-    labelled.labels = vec!["needs-triage".to_owned()];
+    labelled.labels = vec![TRIAGE.to_owned()];
     list(&rig, labelled);
 
     rig.github.refuse_comments(ApiError::Refused(502));

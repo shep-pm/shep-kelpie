@@ -325,6 +325,20 @@ fn the_project_manager_runs_on_an_allow_list_of_tools_and_no_mcp_server() {
     }
 }
 
+/// The read of a fix the project manager drafted, which writes nothing and runs
+/// no command (`runner/pm/fix_read.rs`)
+#[test]
+fn the_project_manager_reading_a_fix_it_drafts_runs_on_the_read_only_tools() {
+    let mut read = call(Role::Pm, fresh());
+    read.tools = Tools::Review;
+    read.instructions = None;
+    let argv = strings(&read);
+    let at = argv.iter().position(|a| a == "--tools").unwrap();
+    assert_eq!(argv[at + 1], "Read,Glob,Grep");
+    assert!(argv.iter().any(|a| a == "--strict-mcp-config"));
+    assert!(!argv.iter().any(|a| a == "bypassPermissions"));
+}
+
 #[test]
 fn the_representative_starts_with_no_tool_allow_list_as_it_did() {
     let mut answer = call(Role::Representative, fresh());

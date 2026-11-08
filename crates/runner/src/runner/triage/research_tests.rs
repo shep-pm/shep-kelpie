@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use super::marker::MARKER;
 use super::pick_tests::{MAINTAINER, issue, list, rig_with, status};
 use super::research::read_reply;
-use crate::board::check;
+use crate::board::{TRIAGE, TRIAGE_GO, check};
 use crate::github::ApiError;
 use crate::ports::{AgentError, CLEAN, OpenIssue, Role, Timestamp, Tools};
 use crate::runner::claim::Notes;
@@ -101,7 +101,7 @@ pub(super) fn facts(rig: &Rig) -> String {
 
 // The prefixes of the labels the runner makes at its start, which no triage
 // test is about
-pub(super) const MADE_AT_START: [&str; 3] = ["agent:", "priority:", "kind:"];
+pub(super) const MADE_AT_START: [&str; 4] = ["agent:", "priority:", "kind:", TRIAGE_GO];
 
 // What the App wrote on the repo, in order: a comment, a label made or put on an issue
 pub(super) fn moves(rig: &Rig) -> Vec<String> {
@@ -170,7 +170,7 @@ pub(super) fn took_back(rig: &Rig, issue: u64, author: &str, title: &str, body: 
     saved["checks"] = serde_json::to_value([result]).unwrap();
     saved["triage"]["issues"] = json!([{
         "issue": issue, "comment": 0, "step": "taken",
-        "author": author, "seen": ["needs-triage"],
+        "author": author, "seen": [TRIAGE],
     }]);
     store.save(&serde_json::from_value(saved).unwrap()).unwrap();
 }
@@ -195,10 +195,10 @@ fn an_untouched_issue_gets_one_comment_with_the_marker_and_needs_triage_last() {
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "label priority: P3",
-            "make needs-triage",
-            "label needs-triage"
+            "comment".to_owned(),
+            "label priority: P3".to_owned(),
+            format!("make {TRIAGE}"),
+            format!("label {TRIAGE}"),
         ]
     );
     let triaged = triage(&rig, &runner);
@@ -295,11 +295,11 @@ fn a_type_and_priority_the_repo_has_go_on_before_needs_triage() {
     assert_eq!(
         moves(&rig),
         [
-            "comment",
-            "label bug",
-            "label P2",
-            "make needs-triage",
-            "label needs-triage",
+            "comment".to_owned(),
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("make {TRIAGE}"),
+            format!("label {TRIAGE}"),
         ]
     );
     assert!(facts(&rig).contains("bug, P2"));
@@ -308,7 +308,7 @@ fn a_type_and_priority_the_repo_has_go_on_before_needs_triage() {
 #[test]
 fn a_type_the_repo_lacks_is_left_off_and_a_priority_it_lacks_is_made() {
     let (rig, runner) = untouched();
-    rig.forge.set_repo_labels(&["needs-triage"]);
+    rig.forge.set_repo_labels(&[TRIAGE]);
     rig.claude.script_for(
         Role::Triager,
         [reply(json!({ "type": "bug", "priority": "P2" }))],
@@ -318,7 +318,11 @@ fn a_type_the_repo_lacks_is_left_off_and_a_priority_it_lacks_is_made() {
 
     assert_eq!(
         moves(&rig),
-        ["comment", "label priority: P2", "label needs-triage"]
+        [
+            "comment".to_owned(),
+            "label priority: P2".to_owned(),
+            format!("label {TRIAGE}")
+        ]
     );
     let said = facts(&rig);
     assert!(said.contains("priority: P2"), "{said}");
@@ -418,7 +422,10 @@ fn a_marker_by_the_app_records_the_issue_with_no_call() {
     assert_eq!(triaged["issues"][0]["comment"], comment);
     assert_eq!(rig.github.comments(), []);
     // What the earlier pass did not reach is done now.
-    assert_eq!(moves(&rig), ["make needs-triage", "label needs-triage"]);
+    assert_eq!(
+        moves(&rig),
+        [format!("make {TRIAGE}"), format!("label {TRIAGE}")]
+    );
     assert_eq!(triaged["issues"][0]["step"], "done");
 }
 
@@ -526,15 +533,24 @@ fn a_restart_after_the_comment_labels_it_without_posting_again() {
 
     assert_eq!(rig.claude.all_seen().len(), 0, "no call and no new wording");
     assert_eq!(rig.github.comments(), []);
-    assert_eq!(moves(&rig), ["make needs-triage", "label needs-triage"]);
+    assert_eq!(
+        moves(&rig),
+        [format!("make {TRIAGE}"), format!("label {TRIAGE}")]
+    );
     assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "done");
 }
 
 #[test]
 fn a_restart_at_each_step_goes_on_from_that_step() {
     for (step_at, expected) in [
-        ("commented", vec!["make needs-triage", "label needs-triage"]),
-        ("labelled", vec!["make needs-triage", "label needs-triage"]),
+        (
+            "commented",
+            vec![format!("make {TRIAGE}"), format!("label {TRIAGE}")],
+        ),
+        (
+            "labelled",
+            vec![format!("make {TRIAGE}"), format!("label {TRIAGE}")],
+        ),
         ("done", vec![]),
     ] {
         let (rig, runner) = untouched();
@@ -715,7 +731,7 @@ fn a_comment_the_forge_refused_is_posted_at_the_next_poll_without_another_call()
     assert_eq!(tried[0], tried[1]);
     assert_eq!(
         moves(&rig).last().map(String::as_str),
-        Some("label needs-triage")
+        Some(format!("label {TRIAGE}").as_str())
     );
     assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "done");
 }
@@ -793,10 +809,10 @@ fn a_restart_at_commented_still_puts_on_the_type_and_priority_the_comment_named(
     assert_eq!(
         moves(&rig),
         [
-            "label bug",
-            "label P2",
-            "make needs-triage",
-            "label needs-triage"
+            "label bug".to_owned(),
+            "label P2".to_owned(),
+            format!("make {TRIAGE}"),
+            format!("label {TRIAGE}"),
         ]
     );
     assert_eq!(rig.github.comments(), []);
@@ -840,11 +856,14 @@ fn a_needs_triage_kelpie_put_on_itself_is_not_read_as_by_hand_at_the_labelled_st
     drop(runner);
     crashed_at(&rig, 30, "labelled");
     let runner = rig.open().unwrap();
-    rig.forge.label(30, "needs-triage");
+    rig.forge.label(30, TRIAGE);
 
     assert_eq!(step(&runner).unwrap(), None);
 
-    assert_eq!(moves(&rig), ["make needs-triage", "label needs-triage"]);
+    assert_eq!(
+        moves(&rig),
+        [format!("make {TRIAGE}"), format!("label {TRIAGE}")]
+    );
     assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "done");
     let told: Vec<String> = runner.lock().unwrap().take_notes();
     assert!(!told.iter().any(|n| n.contains("by hand")), "{told:?}");

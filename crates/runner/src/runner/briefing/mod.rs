@@ -7,7 +7,7 @@
 //! session's activity current. Git runs with the runner's lock let go, and
 //! nothing here calls a model: the activity is a file's modified time.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -16,14 +16,15 @@ use super::trigger::lock;
 use super::turn::held_up::HeldUp;
 use crate::agents::{Fit, Role, Tier};
 use crate::board::briefing::{
-    self, AgentLine, Briefing, Files, IDLE_AFTER, Item, Merge, Out, Ready, ReadyLine, RedLine,
-    RulingLine, Session, age, elapsed, quiet_for,
+    self, AgentLine, Briefing, Files, IDLE_AFTER, Item, Merge, Out, PlanLine, Ready, ReadyLine,
+    RedLine, RulingLine, Session, age, elapsed, quiet_for,
 };
 use crate::board::{ReadyIssue, Skip, priority, rule_order};
 use crate::lease::door::Pick;
 use crate::local_paths::Surface;
+use crate::pacer::named;
 use crate::ports::{AgentCall, PaddockHolder, Timestamp, Wait};
-use crate::settings::{AgentName, GatewayName, ModelHost};
+use crate::settings::{AgentName, GatewayName, Limit, ModelHost};
 use crate::state::{ProjectState, StateError, write_atomically};
 use crate::ticket::TicketId;
 use crate::work_item::{Phase, ReviewStage, Seat, Turn, WorkItem};
@@ -465,6 +466,7 @@ impl Runner {
                 .collect(),
             ready: self.ready_lines(),
             agents: self.agent_lines(),
+            plans: self.plan_lines(),
             events,
             woken_before: self.state.pm_seen.is_some(),
             dropped,
@@ -616,6 +618,26 @@ impl Runner {
         implementers.into_iter().chain(reviewers).collect()
     }
 
+    // The plan accounts the listed implementers and reviewers spend, in account
+    // order, each with the reading the pacer last took of it. An account nothing
+    // has paced has none. A local model, gateway or API agent spends no account.
+    fn plan_lines(&self) -> Vec<PlanLine> {
+        let reviewers = self.lineup.iter().map(|r| r.name.clone());
+        let accounts: BTreeSet<_> = (self.board_agents().into_iter())
+            .chain(reviewers)
+            .filter_map(|name| match self.agent_limit(&name) {
+                Some(Limit::Account(account)) => Some(account),
+                _ => None,
+            })
+            .collect();
+        (accounts.into_iter())
+            .map(|account| PlanLine {
+                name: named(account, "Claude", "Codex").to_owned(),
+                reading: (self.pacing.get(&account)).and_then(|(_, last)| last.reading),
+            })
+            .collect()
+    }
+
     // Until when `agent` starts nothing at `now`, and why: a review bot's
     // window while it is closed, else the new-item hold last found on its plan account.
     fn agent_out(&self, agent: &AgentName, now: Timestamp) -> Option<Out> {
@@ -633,8 +655,9 @@ impl Runner {
 
     fn ready_lines(&self) -> Option<Ready> {
         let (read, _) = self.brief.ready.as_ref()?;
-        let issues = self
-            .ready_in_order()
+        let ready = self.ready_in_order();
+        let unblocked = unblocked_by(&ready);
+        let issues = ready
             .into_iter()
             .map(|issue| {
                 let skip = self
@@ -654,6 +677,7 @@ impl Runner {
                     ticket: issue.ticket,
                     priority: priority(&issue.labels),
                     waits,
+                    unblocks: unblocked.get(&issue.ticket).cloned().unwrap_or_default(),
                     named: named.cloned().unwrap_or_default(),
                     excerpt: quoted.then(|| briefing::excerpt(&issue.body)),
                     title: events::quote(&issue.title),
@@ -665,6 +689,25 @@ impl Runner {
             issues,
         })
     }
+}
+
+// The ready issues each ticket holds up: those of `ready` whose blockers, as
+// the board read them, name it and are open. Each list runs lowest first.
+fn unblocked_by(ready: &[ReadyIssue]) -> BTreeMap<TicketId, Vec<TicketId>> {
+    let mut unblocked: BTreeMap<TicketId, Vec<TicketId>> = BTreeMap::new();
+    for issue in ready {
+        for blocker in issue.blocked_by.iter().filter(|b| b.open) {
+            unblocked
+                .entry(blocker.ticket)
+                .or_default()
+                .push(issue.ticket);
+        }
+    }
+    for tickets in unblocked.values_mut() {
+        tickets.sort_unstable();
+        tickets.dedup();
+    }
+    unblocked
 }
 
 // `text` on one line, its runs of whitespace closed up
