@@ -74,6 +74,12 @@ The maintainer ruled that no open thread reaches the merge unruled, nits include
 - A project with no `agents.pm` keeps its merge ruling, and its nits hold nothing.
 - The project manager down, or a drain, makes the item wait in CI with no ruling and no time limit.
 
+### Amendment, 2026-11-08: an unread head goes back through a review pass
+
+On a project with `agents.pm`, the gate sends an unreviewed pass, an unread head, a note fix (a merge ruling's `no` or a person's comment) and a late fix (a bot's late review) back through a review pass, with no merge ruling (32cdda48f, `crates/runner/src/runner/gate/unread.rs`). Only a borrowed head still warns. This applies to the project's own work items: contributions, including adopted items with a `contributor`, keep the warned merge ruling.
+
+A pass whose reviewers are down waits at the gate, and a new pass starts every 30 minutes until a reviewer reads the head. A project with no `agents.pm` keeps the warned merge ruling. ADR 0008's earlier warning remains the record of that decision.
+
 ## Considered options
 
 - **Keep the settings as the rulebook.** Every call would need a rule written before the work, so the maintainer reads a file to change how one item runs, and the change lands on every item at once.
