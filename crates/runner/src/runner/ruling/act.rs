@@ -41,6 +41,7 @@ pub(super) enum Act {
     Rerun { head: String },
     Restore { files: Vec<String> },
     RerunAll { run: u64 },
+    Approve { head: String },
 }
 
 /// The action `answer` names for a ruling of `kind`, if it names one
@@ -48,11 +49,24 @@ pub(super) enum Act {
 /// # Errors
 ///
 /// [`RuleError::NotOffered`] when the ruling lists no option for it.
+/// [`RuleError::Act`] when the project manager tries to approve held CI.
 pub(super) fn plan(
     id: TicketId,
     answer: &Answer,
     kind: &RulingKind,
+    by: Answerer,
 ) -> Result<Option<Act>, RuleError> {
+    if let (Answer::Yes, RulingKind::Stuck(Stuck::CheckQueued { head, held, .. })) = (answer, kind)
+        && !held.is_empty()
+    {
+        if by != Answerer::Maintainer {
+            return Err(RuleError::Act(
+                id,
+                "only the maintainer can approve held CI runs".to_owned(),
+            ));
+        }
+        return Ok(Some(Act::Approve { head: head.clone() }));
+    }
     // A check no workflow posted has no run to rerun, so a yes only waits.
     if let (Answer::Yes, RulingKind::Stuck(Stuck::CheckQueued { run: Some(run), .. })) =
         (answer, kind)
@@ -114,6 +128,13 @@ impl Runner {
                 let rerun = self.ports.forge.rerun_run(&self.remote, *run, Rerun::All);
                 rerun.map_err(|e| RuleError::Act(id, format!("cannot rerun the run: {e}")))?;
                 Ok(format!("reran run {run}"))
+            }
+            Act::Approve { head } => {
+                self.ports
+                    .forge
+                    .approve_workflow_runs(&self.remote, head)
+                    .map_err(|e| RuleError::Act(id, format!("cannot approve the runs: {e}")))?;
+                Ok(format!("approved the held runs of {}", short(head)))
             }
             Act::Restore { files } => {
                 let worktree = worktree.ok_or_else(|| {

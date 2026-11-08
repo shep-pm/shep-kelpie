@@ -65,6 +65,32 @@ fn pm_decide_applies_its_answer_as_if_the_project_left_the_ruling_to_it() {
 }
 
 #[test]
+fn a_project_manager_cannot_approve_held_ci_for_the_maintainer() {
+    let (rig, runner, head) = Rig::with_pull_request_set("asked-held-ci", |rig| {
+        rig.with_app();
+        rig.maintainer("octocat");
+        name_pm(rig);
+    });
+    rig.forge.set_held_checks(&head, &[("test.yml", 42)]);
+    assert!(matches!(
+        rig.verdict(&runner),
+        Some(StepReport::Ruling { .. })
+    ));
+    rig.forge.threads.grant_write("octocat");
+    rig.claude
+        .script_for(Role::Pm, [Scripted::Say(decided('A', false))]);
+
+    let said = replied(&rig, &runner, "71 pm decide", |c| {
+        c.starts_with("**Answered by the project manager")
+            || c.contains("only the maintainer can approve")
+    });
+
+    assert!(rig.forge.approvals().is_empty(), "{said}");
+    assert!(pending(&rig));
+    assert!(said.contains("only the maintainer can approve"), "{said}");
+}
+
+#[test]
 fn a_design_flag_on_pm_decide_leaves_the_ruling_the_maintainers_with_its_pick() {
     let (rig, runner) = foreign_put("asked-decide-design");
     rig.claude

@@ -54,9 +54,14 @@ impl Runner {
             ruling.kind,
             RulingKind::Stuck(Stuck::TurnFailed { setup: true, .. })
         );
+        let approval = matches!(
+            &ruling.kind,
+            RulingKind::Stuck(Stuck::CheckQueued { held, .. }) if !held.is_empty()
+        );
         let answers = self.agents.pm.is_some()
             && !own_wake
             && !setup
+            && !approval
             && !ruling.kind.is_contribution()
             && !self.draining()
             && self
@@ -406,6 +411,7 @@ fn no_sends_worker(kind: &RulingKind) -> Result<(), String> {
             Stuck::TurnTimeout { .. } | Stuck::TurnFailed { .. } | Stuck::PushRefused { .. },
         )
         | RulingKind::AgentFiles { .. } => "a no stops the work item, since no note helps it",
+        RulingKind::Stuck(Stuck::CheckQueued { held, .. }) if !held.is_empty() => return Ok(()),
         RulingKind::Stuck(Stuck::CheckQueued { .. } | Stuck::NoChecks { .. }) => {
             "a no only waits for the checks again"
         }

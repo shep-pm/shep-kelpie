@@ -402,11 +402,7 @@ fn pull_request(
             "state,isDraft,headRefOid,statusCheckRollup,labels",
         ],
     )?)?;
-    // `gh pr view` lists no check suites, so they are asked for apart, and
-    // only when the rollup would let the pull request merge.
-    if matches!(pr.checks, Checks::Pending(_) | Checks::Failed(_)) {
-        return Ok(pr);
-    }
+    // Held workflows have no check run in the rollup.
     let suites = suites::of_commit(config, repo, &pr.head)?;
     Ok(PullRequest {
         checks: suites.fold(pr.checks),
@@ -669,6 +665,7 @@ impl Check {
                     name: name.clone(),
                     run: details_url.as_deref().and_then(run_of),
                     running: status == "IN_PROGRESS",
+                    held: false,
                 })
             }
             _ => None,

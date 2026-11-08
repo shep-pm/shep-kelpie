@@ -1,4 +1,4 @@
-//! A check stuck at queued or in progress on a finished run
+//! Checks held for approval or stuck on a finished run
 //!
 //! GitHub sometimes leaves one job of a finished run queued: the run reads
 //! completed, the job never starts, and its check never concludes. The
@@ -7,6 +7,7 @@
 //! A refused rerun means the run is still going, and it waits another cap.
 //! Still stuck, the item is parked on a `check-queued` ruling, unless every
 //! check left is running. A check with no run is ruled on past `JOB_TIMEOUT`.
+//! Held runs are never rerun; an entirely held head is ruled on at once.
 
 use std::collections::HashMap;
 
@@ -60,6 +61,33 @@ impl Runner {
         review: Option<&Review>,
     ) -> Result<Option<Begin>, StateError> {
         let now = self.ports.clock.now();
+        if !queued.is_empty() && queued.iter().all(|check| check.held) {
+            if !super::settled(since, now) {
+                return Ok(None);
+            }
+            let remote = self.remote.as_str();
+            let held = queued
+                .iter()
+                .filter_map(|check| check.run)
+                .map(|run| format!("https://github.com/{remote}/actions/runs/{run}"))
+                .collect();
+            return self
+                .raise(
+                    number,
+                    Stuck::CheckQueued {
+                        head: head.to_owned(),
+                        checks: queued.iter().map(|check| check.name.clone()).collect(),
+                        held,
+                        run: None,
+                        url: format!("https://github.com/{remote}/pull/{number}/checks"),
+                        review: review.cloned(),
+                    }
+                    .into(),
+                )
+                .map(Some);
+        }
+        let active: Vec<Queued> = queued.iter().filter(|check| !check.held).cloned().collect();
+        let queued = active.as_slice();
         let cap = u64::from(self.settings.ci.queued_minutes.get()) * 60;
         if now.0.saturating_sub(since.0) < cap {
             return Ok(None);
@@ -98,6 +126,7 @@ impl Runner {
             let stuck = Stuck::CheckQueued {
                 head: head.to_owned(),
                 checks,
+                held: Vec::new(),
                 run: first,
                 url,
                 review: review.cloned(),

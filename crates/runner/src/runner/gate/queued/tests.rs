@@ -12,6 +12,7 @@ fn stuck(name: &str, run: u64) -> Queued {
         name: name.to_owned(),
         run: Some(run),
         running: false,
+        held: false,
     }
 }
 
@@ -217,6 +218,7 @@ const OTHER: u64 = 39_697_679_104;
 fn docs_in_progress() -> Queued {
     Queued {
         running: true,
+        held: false,
         ..stuck("docs", OTHER)
     }
 }
@@ -274,6 +276,7 @@ fn a_check_of_a_rerun_run_still_going_is_ruled_on_only_past_a_jobs_timeout() {
     // The rerun started, and its job is running
     let running = Queued {
         running: true,
+        held: false,
         ..stuck("windows-gnu", RUN)
     };
     rig.forge.set_checks(&head, Checks::Pending(vec![running]));
@@ -298,6 +301,7 @@ fn pages_deploy() -> Queued {
         name: "Cloudflare Pages".to_owned(),
         run: None,
         running: true,
+        held: false,
     }
 }
 
@@ -354,4 +358,178 @@ fn a_yes_on_a_runless_check_queued_reruns_nothing_and_waits_again() {
     assert_eq!(step(&runner).unwrap(), None, "it waits again");
     rig.clock.advance(JOB_TIMEOUT - 1);
     assert_eq!(step(&runner).unwrap(), None, "the wait starts from the yes");
+}
+
+#[test]
+fn a_head_whose_checks_are_all_held_is_ruled_on_at_once() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge
+        .set_held_checks(&head, &[("test.yml", RUN), ("docs.yml", OTHER)]);
+
+    let (_, question) = ruling_report(rig.verdict(&runner));
+
+    assert!(
+        question.contains("wait for the maintainer's approval"),
+        "{question}"
+    );
+    for run in [RUN, OTHER] {
+        assert!(
+            question.contains(&format!(
+                "https://github.com/shep-pm/shep/actions/runs/{run}"
+            )),
+            "{question}"
+        );
+    }
+    assert!(
+        question.contains("pull request's code on GitHub's runners"),
+        "{question}"
+    );
+    assert!(question.contains("not on this machine"), "{question}");
+    assert!(rig.forge.whole_run_reruns().is_empty());
+    assert!(rig.forge.approvals().is_empty());
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["rulings"][0]["kind"]["reason"], "check-queued",
+        "{status}"
+    );
+}
+
+#[test]
+fn a_yes_to_a_held_ruling_approves_the_runs_and_waits_for_ci() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge.set_held_checks(&head, &[("test.yml", RUN)]);
+    ruling_report(rig.verdict(&runner));
+
+    rig.ask(&runner, "rule", Some("71 yes"));
+
+    assert_eq!(rig.forge.approvals(), std::slice::from_ref(&head));
+    assert!(rig.forge.whole_run_reruns().is_empty());
+    assert_eq!(step(&runner).unwrap(), None, "CI settles after approval");
+    rig.forge
+        .set_checks(&head, Checks::Pending(vec![docs_in_progress()]));
+    rig.forge.set_run_in_progress(OTHER);
+    rig.clock.advance(CHECKS_SETTLE);
+    assert_eq!(step(&runner).unwrap(), None, "CI is still running");
+    assert!(rig.forge.merges().is_empty());
+    rig.forge.set_checks(&head, Checks::Passed);
+    let (_, question) = ruling_report(step(&runner).unwrap());
+    assert!(question.starts_with("Merge pull request #71"), "{question}");
+}
+
+#[test]
+fn a_no_to_a_held_ruling_sends_the_worker_its_note() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge.set_held_checks(&head, &[("test.yml", RUN)]);
+    ruling_report(rig.verdict(&runner));
+
+    rig.ask(&runner, "rule", Some("71 no remove the unsafe workflow"));
+
+    assert!(rig.forge.approvals().is_empty());
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["work_item"]["phase"]["state"], "implement",
+        "{status}"
+    );
+    rig.claude.script([Scripted::Text("workflow removed")]);
+    step(&runner).unwrap();
+    let seen = rig.claude.all_seen();
+    assert!(
+        seen.last()
+            .unwrap()
+            .call
+            .prompt
+            .contains("remove the unsafe workflow")
+    );
+}
+
+#[test]
+fn held_runs_ask_the_maintainer_even_with_a_project_manager() {
+    let (rig, runner, head) = Rig::with_pull_request_set("shep", |rig| {
+        rig.pm("pm");
+        rig.with_app();
+    });
+    rig.forge.set_held_checks(&head, &[("test.yml", RUN)]);
+
+    ruling_report(rig.verdict(&runner));
+
+    let comments = rig.github.comments();
+    let card = comments
+        .iter()
+        .find(|(_, text)| text.contains("Approve the held CI runs?"))
+        .expect("approval is posted to the maintainer at once");
+    assert!(
+        card.1.contains("pull request's code on GitHub's runners"),
+        "{}",
+        card.1
+    );
+    assert!(card.1.contains("not on this machine"), "{}", card.1);
+    assert!(
+        card.1.contains(&format!("/actions/runs/{RUN}")),
+        "{}",
+        card.1
+    );
+    assert!(rig.forge.approvals().is_empty());
+}
+
+#[test]
+fn a_held_check_beside_a_running_one_waits_on_the_running_one() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    let held = Queued {
+        held: true,
+        ..stuck("test.yml", RUN)
+    };
+    rig.forge.set_checks(
+        &head,
+        Checks::Pending(vec![held.clone(), docs_in_progress()]),
+    );
+    rig.forge.set_run_in_progress(OTHER);
+    assert_eq!(rig.verdict(&runner), None);
+    rig.clock.advance(CAP);
+
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::GateFailed { .. })
+    ));
+    assert!(rig.forge.whole_run_reruns().is_empty());
+    assert!(rig.forge.approvals().is_empty());
+
+    rig.forge.set_checks(&head, Checks::Pending(vec![held]));
+    ruling_report(rig.verdict(&runner));
+    assert!(rig.forge.whole_run_reruns().is_empty());
+}
+
+#[test]
+fn a_held_head_is_never_merged() {
+    let (rig, runner, head) = Rig::with_pull_request_set("shep", |rig| rig.merge_auto());
+    rig.forge.set_held_checks(&head, &[("test.yml", RUN)]);
+
+    ruling_report(rig.verdict(&runner));
+    rig.clock.advance(JOB_TIMEOUT);
+    step(&runner).unwrap();
+
+    assert!(rig.forge.merges().is_empty());
+    assert!(rig.forge.approvals().is_empty());
+    assert!(rig.forge.whole_run_reruns().is_empty());
+}
+
+#[test]
+fn approving_held_runs_returns_to_the_reviews_ci_wait() {
+    let rig = Rig::new("shep");
+    rig.ci_on();
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+    step(&runner).unwrap();
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_held_checks(&head, &[("test.yml", RUN)]);
+    ruling_report(rig.verdict(&runner));
+
+    rig.ask(&runner, "rule", Some("71 yes"));
+
+    assert_eq!(rig.forge.approvals(), [head]);
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["phase"]["state"], "review", "{status}");
+    assert_eq!(step(&runner).unwrap(), None, "CI settles after approval");
+    assert!(rig.forge.whole_run_reruns().is_empty());
 }

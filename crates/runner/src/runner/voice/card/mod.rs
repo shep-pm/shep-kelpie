@@ -538,6 +538,11 @@ fn stuck(reason: &Stuck) -> (&'static str, &'static str, Option<&'static str>) {
             "Kelpie looks at CI again",
             Some(SENDS_BACK),
         ),
+        Stuck::CheckQueued { held, .. } if !held.is_empty() => (
+            "Approve the held CI runs?",
+            "Approves the held runs and kelpie waits for CI",
+            Some(SENDS_BACK),
+        ),
         Stuck::CheckQueued { run: None, .. } => (
             "A check from an app never finished. Wait again?",
             "Waits another while, since kelpie cannot rerun a check an app posted",

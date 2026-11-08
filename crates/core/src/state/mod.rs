@@ -67,7 +67,7 @@ use crate::work_item::{Attached, Known, Phase, Priced, Review, Seconds, Tally, T
 pub const STATE_FILE: &str = "state.json";
 
 /// The state file's format version, bumped when the file gains a field or value an older kelpie refuses
-pub const VERSION: u32 = 104;
+pub const VERSION: u32 = 105;
 
 /// The format before a project could have more than one work item open,
 /// which this kelpie still reads
@@ -580,14 +580,17 @@ pub enum Stuck {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         rerun: bool,
     },
-    /// A check stayed queued after its run was rerun, or an app's check
-    /// never finished. A yes reruns the run, if any, and waits again; a no
-    /// waits.
+    /// Checks await approval, stayed queued after a rerun, or never finished
+    /// A yes approves held runs or reruns a stuck run, then waits for CI.
+    /// A no sends the worker a note for held runs, otherwise waits.
     CheckQueued {
         /// The head
         head: String,
         /// The checks still queued
         checks: Vec<String>,
+        /// The URLs of workflow runs waiting for the maintainer's approval
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        held: Vec<String>,
         /// The workflow run they belong to; none for an app's check
         #[serde(default, skip_serializing_if = "Option::is_none")]
         run: Option<u64>,

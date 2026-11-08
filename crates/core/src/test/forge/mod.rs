@@ -11,8 +11,8 @@ use crate::board::{OpenPullRequest, ReadyIssue, ReviewMarks};
 use crate::ports::{
     BranchRun, Checks, CommentMarks, FailedLogs, FolderEntry, Forge, ForgeError, HeadRun,
     InstallationToken, IssueCloseReason, LogPart, MaintainerReview, NewLabel, OpenIssue, OpenPull,
-    PullRequest, PullRequestState, QueueStanding, RateLimits, Rerun, Reviewed, Talk, ThreadComment,
-    Timestamp, Visibility, Workflow,
+    PullRequest, PullRequestState, QueueStanding, Queued, RateLimits, Rerun, Reviewed, Talk,
+    ThreadComment, Timestamp, Visibility, Workflow,
 };
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
@@ -292,6 +292,20 @@ impl FakeForge {
     /// Reports `checks` for commit `head`. A head with none reported is pending.
     pub fn set_checks(&self, head: &str, checks: Checks) {
         self.checks.lock().unwrap().insert(head.to_owned(), checks);
+    }
+
+    /// Holds these workflow runs for the maintainer's approval on `head`
+    pub fn set_held_checks(&self, head: &str, runs: &[(&str, u64)]) {
+        let queued = runs
+            .iter()
+            .map(|(name, run)| Queued {
+                name: (*name).to_owned(),
+                run: Some(*run),
+                running: false,
+                held: true,
+            })
+            .collect();
+        self.set_checks(head, Checks::Pending(queued));
     }
 
     /// Merges or closes pull request `number` as someone other than kelpie would

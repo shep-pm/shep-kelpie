@@ -46,6 +46,15 @@ pub(in crate::runner) fn stuck_comment(reason: &Stuck) -> String {
             fix_turns_had(*turns)
         ),
         Stuck::CheckQueued {
+            head, checks, held, ..
+        } if !held.is_empty() => format!(
+            "{} at {} wait for the maintainer's approval: {}. Approving runs the pull \
+             request's code on GitHub's runners, not on this machine.",
+            checks.join(", "),
+            short(head),
+            held.join(", ")
+        ),
+        Stuck::CheckQueued {
             head,
             checks,
             run: None,
