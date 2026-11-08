@@ -7,7 +7,7 @@
 //! session's activity current. Git runs with the runner's lock let go, and
 //! nothing here calls a model: the activity is a file's modified time.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -16,14 +16,15 @@ use super::trigger::lock;
 use super::turn::held_up::HeldUp;
 use crate::agents::{Fit, Role, Tier};
 use crate::board::briefing::{
-    self, AgentLine, Briefing, Files, IDLE_AFTER, Item, Merge, Out, Ready, ReadyLine, RedLine,
-    RulingLine, Session, age, elapsed, quiet_for,
+    self, AgentLine, Briefing, Files, IDLE_AFTER, Item, Merge, Out, PlanLine, Ready, ReadyLine,
+    RedLine, RulingLine, Session, age, elapsed, quiet_for,
 };
 use crate::board::{ReadyIssue, Skip, priority, rule_order};
 use crate::lease::door::Pick;
 use crate::local_paths::Surface;
+use crate::pacer::named;
 use crate::ports::{AgentCall, PaddockHolder, Timestamp, Wait};
-use crate::settings::{AgentName, GatewayName, ModelHost};
+use crate::settings::{AgentName, GatewayName, Limit, ModelHost};
 use crate::state::{ProjectState, StateError, write_atomically};
 use crate::ticket::TicketId;
 use crate::work_item::{Phase, ReviewStage, Seat, Turn, WorkItem};
@@ -465,6 +466,7 @@ impl Runner {
                 .collect(),
             ready: self.ready_lines(),
             agents: self.agent_lines(),
+            plans: self.plan_lines(),
             events,
             woken_before: self.state.pm_seen.is_some(),
             dropped,
@@ -614,6 +616,26 @@ impl Runner {
             .collect::<Vec<_>>();
         let reviewers = (self.lineup.iter()).map(|r| line(&r.name, Role::Reviewer));
         implementers.into_iter().chain(reviewers).collect()
+    }
+
+    // The plan accounts the listed implementers and reviewers spend, in account
+    // order, each with the reading the pacer last took of it. An account nothing
+    // has paced has none. A local model, gateway or API agent spends no account.
+    fn plan_lines(&self) -> Vec<PlanLine> {
+        let reviewers = self.lineup.iter().map(|r| r.name.clone());
+        let accounts: BTreeSet<_> = (self.board_agents().into_iter())
+            .chain(reviewers)
+            .filter_map(|name| match self.agent_limit(&name) {
+                Some(Limit::Account(account)) => Some(account),
+                _ => None,
+            })
+            .collect();
+        (accounts.into_iter())
+            .map(|account| PlanLine {
+                name: named(account, "Claude", "Codex").to_owned(),
+                reading: (self.pacing.get(&account)).and_then(|(_, last)| last.reading),
+            })
+            .collect()
     }
 
     // Until when `agent` starts nothing at `now`, and why: a review bot's

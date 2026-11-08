@@ -1,6 +1,8 @@
 use super::*;
 use crate::agents::{Role, Tier};
 use crate::lease::door::Pick;
+use crate::pacer::Reading;
+use crate::ports::Window;
 use crate::settings::AgentName;
 use crate::test::{EPOCH, ticket};
 
@@ -85,6 +87,7 @@ fn a_board_with_an_idle_worker_a_review_call_and_a_ruling_reads_whole() {
             issues: Vec::new(),
         }),
         agents: Vec::new(),
+        plans: Vec::new(),
         events: events.to_vec(),
         woken_before: true,
         dropped: true,
@@ -201,6 +204,7 @@ fn briefing(items: Vec<Item>) -> Briefing<'static> {
         red: Vec::new(),
         ready: None,
         agents: Vec::new(),
+        plans: Vec::new(),
         events: Vec::new(),
         woken_before: false,
         dropped: false,
@@ -345,6 +349,7 @@ fn quoting(body: &str) -> String {
             }],
         }),
         agents: Vec::new(),
+        plans: Vec::new(),
         events: Vec::new(),
         woken_before: false,
         dropped: false,
@@ -460,7 +465,17 @@ fn the_agents_section_lists_the_implementers_then_the_reviewers_with_tier_kinds_
          start and what it typically takes and costs, and an agent marked out cannot start a \
          work item before the time shown. To have a work item wait for an agent, hold it. \
          A ready issue whose line says `unblocks` holds up other work, so it is worth the \
-         fastest agent that can start.\n\
+         fastest agent that can start. A plan agent costs no dollars, but each work item \
+         spends a share of its week's limit, and a share left at the reset is lost, so a \
+         plan's week is a budget to spend by its reset, not to save. Read the pace and where \
+         it lands, not the share left. On course to land under 100%, run more work items at \
+         once and give work that holds up other work to the faster plan agent. On course for \
+         over 100%, lean on local models. A small share left with little time left is no \
+         reason to slow down. The pace never reorders the agents: spend a local model that \
+         can start first, then API credit while the API is not held, then a plan, and the \
+         pace says only how far down that order to reach when the cheaper ones are busy. The \
+         ready queue is not the week's work, since the maintainer files issues all week, so \
+         a short queue is no reason to spend faster.\n\
          \n\
          - opus-high (implementer): heavy tier, kinds design, migration; \
          Work that needs the strongest agent.; starts now, typically 1h30m, about $4.25\n\
@@ -640,5 +655,96 @@ fn a_long_unblocks_list_is_cut_and_counted() {
     assert!(
         text.contains("; unblocks #1, #2, #3, #4, #5; names src/a.rs\n"),
         "{text}"
+    );
+}
+
+// A board with one implementer, so its agents section shows `plans`
+fn plans_section(plans: Vec<PlanLine>) -> String {
+    let board = Briefing {
+        agents: vec![agent(
+            "sonnet-high",
+            Role::Implementer,
+            (Tier::Standard, None, Some("Work.")),
+        )],
+        plans,
+        ..briefing(Vec::new())
+    };
+    let text = render(&board);
+    let section = text.split("## Agents\n").nth(1).unwrap();
+    section.split("\n## ").next().unwrap().to_owned()
+}
+
+// A weekly window `used` percent spent that resets `resets_in` seconds after [`EPOCH`], read `read_ago` seconds before it
+fn week_read(used: u32, resets_in: u64, read_ago: u64) -> Option<Reading> {
+    let window = Window {
+        used_pct: used,
+        resets_at: Timestamp(EPOCH + resets_in),
+    };
+    Some(Reading {
+        at: Timestamp(EPOCH - read_ago),
+        session: Window {
+            used_pct: 0,
+            ..window
+        },
+        week: window,
+    })
+}
+
+#[test]
+fn a_plan_account_shows_its_week_used_against_elapsed() {
+    let section = plans_section(vec![PlanLine {
+        name: "Claude".into(),
+        reading: week_read(16, 6 * 86_400 + 3600, 240),
+    }]);
+    assert!(
+        section.ends_with(
+            "\n\nClaude week: 16% used, 14% of the week gone, 6d 1h to the reset, \
+             on course for 114%, read 4m ago\n"
+        ),
+        "{section}"
+    );
+}
+
+#[test]
+fn a_plan_account_with_no_reading_says_so() {
+    let section = plans_section(vec![
+        PlanLine {
+            name: "Claude".into(),
+            reading: None,
+        },
+        PlanLine {
+            name: "Codex".into(),
+            reading: week_read(60, 86_400, 60),
+        },
+    ]);
+    assert!(
+        section.ends_with(
+            "\n\nClaude week: no reading\n\
+             Codex week: 60% used, 86% of the week gone, 1d to the reset, \
+             on course for 70%, read 1m ago\n"
+        ),
+        "{section}"
+    );
+}
+
+#[test]
+fn a_reading_from_before_the_weeks_reset_says_so() {
+    let section = plans_section(vec![PlanLine {
+        name: "Claude".into(),
+        reading: Some(Reading {
+            at: Timestamp(EPOCH - 8 * 86_400),
+            session: Window {
+                used_pct: 0,
+                resets_at: Timestamp(EPOCH - 8 * 86_400),
+            },
+            week: Window {
+                used_pct: 90,
+                resets_at: Timestamp(EPOCH),
+            },
+        }),
+    }]);
+    assert!(
+        section.ends_with("\n\nClaude week: the reading predates the week's reset, read 8d ago\n"),
+        "{section}"
     );
 }
