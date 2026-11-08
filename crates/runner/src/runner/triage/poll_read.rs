@@ -247,6 +247,9 @@ impl Runner {
         asked: u64,
         read: Result<PollRead, ForgeError>,
     ) -> Result<(), StateError> {
+        if self.triage_run.label_swap_owed {
+            self.swap_labels();
+        }
         let Ok(PollRead {
             mut open,
             pulls,

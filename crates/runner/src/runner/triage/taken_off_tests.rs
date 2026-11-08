@@ -139,7 +139,7 @@ fn kelpies_own_swap_is_not_the_maintainers() {
 
     // The edit passes: it is ready, as the first pass of any issue is
     let mut labels = PASSING_LABELS.to_vec();
-    labels.push("needs-triage");
+    labels.push("needs-approval");
     relisted(&rig, PASSING, &labels);
     assert_eq!(step(&runner).unwrap(), None);
     assert_eq!(moves(&rig).last().unwrap(), "label ready-for-agent");
@@ -169,7 +169,7 @@ fn a_triage_pass_leaves_it_off() {
         !moved[1..].contains(&"label ready-for-agent".to_owned()),
         "{moved:?}"
     );
-    assert_eq!(moved.last().unwrap(), "label needs-triage");
+    assert_eq!(moved.last().unwrap(), "label needs-approval");
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn a_label_taken_off_while_the_triager_ran_is_not_put_back() {
     pump(&runner, || {
         let moved = moves(&rig);
         moved.contains(&"label ready-for-agent".to_owned())
-            || moved.contains(&"label needs-triage".to_owned())
+            || moved.contains(&"label needs-approval".to_owned())
     });
 
     let moved = moves(&rig);
@@ -201,13 +201,13 @@ fn a_label_taken_off_while_the_triager_ran_is_not_put_back() {
         !moved.contains(&"label ready-for-agent".to_owned()),
         "{moved:?}"
     );
-    assert_eq!(moved.last().unwrap(), "label needs-triage");
+    assert_eq!(moved.last().unwrap(), "label needs-approval");
 }
 
 #[test]
 fn a_passing_issue_whose_needs_triage_will_not_come_off_gets_no_ready_label_yet() {
     let mut labels = PASSING_LABELS.to_vec();
-    labels.push("needs-triage");
+    labels.push("needs-approval");
     let (rig, runner) = checking("pick = \"maintainer\"", MAINTAINER, PASSING, &labels);
     rig.github.refuse_label_removals(ApiError::Refused(422));
 

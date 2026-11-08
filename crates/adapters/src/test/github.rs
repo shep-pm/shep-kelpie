@@ -59,6 +59,8 @@ struct Hub {
     issue_creates_refused: Option<ApiError>,
     // Why every label taken off an issue is refused, while it is
     label_removals_refused: Option<ApiError>,
+    // Why every label rename is refused, while it is
+    label_renames_refused: Option<ApiError>,
     // Whether a review that carries line comments is refused with 422, as
     // GitHub does one naming a line the diff does not show
     line_comments_refused: bool,
@@ -242,6 +244,16 @@ impl FakeGithub {
     /// Takes labels off issues again after [`Self::refuse_label_removals`]
     pub fn accept_label_removals(&self) {
         self.hub.lock().unwrap().label_removals_refused = None;
+    }
+
+    /// Makes every label rename answer `error` until [`Self::accept_label_renames`]
+    pub fn refuse_label_renames(&self, error: ApiError) {
+        self.hub.lock().unwrap().label_renames_refused = Some(error);
+    }
+
+    /// Takes label renames again after [`Self::refuse_label_renames`]
+    pub fn accept_label_renames(&self) {
+        self.hub.lock().unwrap().label_renames_refused = None;
     }
 
     /// Takes new issues again after [`Self::refuse_issue_creates`]
@@ -717,6 +729,11 @@ impl GithubApi for FakeGithub {
         }
         if let Some(error) =
             (hub.label_removals_refused.clone()).filter(|_| call.verb == Verb::Delete)
+        {
+            return Err(error);
+        }
+        if let Some(error) = (hub.label_renames_refused.clone())
+            .filter(|_| call.verb == Verb::Patch && call.path.contains("/labels/"))
         {
             return Err(error);
         }

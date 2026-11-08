@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use super::marker::MARKER;
 use super::pick_tests::{MAINTAINER, issue, list, rig_with, status};
 use super::research::read_reply;
-use crate::board::{TRIAGE, check};
+use crate::board::{TRIAGE, TRIAGE_GO, check};
 use crate::github::ApiError;
 use crate::ports::{AgentError, CLEAN, OpenIssue, Role, Timestamp, Tools};
 use crate::runner::claim::Notes;
@@ -101,7 +101,7 @@ pub(super) fn facts(rig: &Rig) -> String {
 
 // The prefixes of the labels the runner makes at its start, which no triage
 // test is about
-pub(super) const MADE_AT_START: [&str; 3] = ["agent:", "priority:", "kind:"];
+pub(super) const MADE_AT_START: [&str; 4] = ["agent:", "priority:", "kind:", TRIAGE_GO];
 
 // What the App wrote on the repo, in order: a comment, a label made or put on an issue
 pub(super) fn moves(rig: &Rig) -> Vec<String> {

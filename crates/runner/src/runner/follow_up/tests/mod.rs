@@ -227,10 +227,10 @@ fn a_repo_without_the_triage_label_gets_it_once_and_the_findings_are_filed() {
 fn a_triage_label_the_repo_has_in_another_case_is_left_as_it_is() {
     let found = [racy()];
     let (rig, runner) = auto_ready_to_merge(&found, &lines(&found));
-    rig.forge.set_repo_labels(&["Needs-Triage"]);
+    rig.forge.set_repo_labels(&["Needs-Approval"]);
 
     assert_eq!(after_yes(&runner), filed(&[900], &[], 0));
-    assert_eq!(rig.forge.repo_labels_now(), ["Needs-Triage"]);
+    assert_eq!(rig.forge.repo_labels_now(), ["Needs-Approval"]);
 }
 
 #[test]

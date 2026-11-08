@@ -16,7 +16,7 @@ use crate::test::Rig;
 fn filed_with(label: &str) -> (Rig, Mutex<Runner>) {
     let (rig, runner) = untouched();
     rig.forge
-        .set_repo_labels(&["priority: P1", "priority: P2", "needs-triage"]);
+        .set_repo_labels(&["priority: P1", "priority: P2", "needs-approval"]);
     let mut filed = crash(&rig, "It crashes when I run it.");
     filed.labels = vec![label.to_owned()];
     list(&rig, filed);
@@ -33,7 +33,7 @@ fn the_priority_the_issue_was_filed_with_stands_over_the_one_the_pass_ranks() {
 
         assert_eq!(step(&runner).unwrap(), None, "{filed}");
 
-        assert_eq!(moves(&rig), ["comment", "label needs-triage"], "{filed}");
+        assert_eq!(moves(&rig), ["comment", "label needs-approval"], "{filed}");
         assert_eq!(rig.github.label_takes(), [], "{filed}");
     }
 }
@@ -46,7 +46,7 @@ fn a_pass_that_names_the_priority_the_issue_carries_changes_no_label() {
 
     assert_eq!(step(&runner).unwrap(), None);
 
-    assert_eq!(moves(&rig), ["comment", "label needs-triage"]);
+    assert_eq!(moves(&rig), ["comment", "label needs-approval"]);
     assert_eq!(rig.github.label_takes(), []);
 }
 
@@ -54,13 +54,13 @@ fn a_pass_that_names_the_priority_the_issue_carries_changes_no_label() {
 fn a_pass_that_names_the_priority_the_issue_carries_under_the_bare_name_changes_no_label() {
     let (rig, runner) = filed_with("P1");
     rig.forge
-        .set_repo_labels(&["P1", "priority: P1", "needs-triage"]);
+        .set_repo_labels(&["P1", "priority: P1", "needs-approval"]);
     let found = json!({ "priority": "P1" });
     rig.claude.script_for(Role::Triager, [reply(found)]);
 
     assert_eq!(step(&runner).unwrap(), None);
 
-    assert_eq!(moves(&rig), ["comment", "label needs-triage"]);
+    assert_eq!(moves(&rig), ["comment", "label needs-approval"]);
     assert_eq!(rig.github.label_takes(), []);
 }
 
@@ -69,7 +69,7 @@ fn a_priority_put_on_by_hand_while_the_pass_ran_stands_and_the_pass_priority_is_
     let (rig, runner) = untouched();
     drop(runner);
     rig.forge
-        .set_repo_labels(&["priority: P1", "priority: P3", "needs-triage"]);
+        .set_repo_labels(&["priority: P1", "priority: P3", "needs-approval"]);
     let record = json!({
         "issue": 30, "comment": 101, "step": "commented", "labels": ["priority: P1"],
     });
@@ -79,7 +79,7 @@ fn a_priority_put_on_by_hand_while_the_pass_ran_stands_and_the_pass_priority_is_
 
     assert_eq!(step(&runner).unwrap(), None);
 
-    assert_eq!(moves(&rig), ["label needs-triage"]);
+    assert_eq!(moves(&rig), ["label needs-approval"]);
     assert_eq!(rig.github.label_takes(), []);
     assert_eq!(rig.forge.issue_labels(30), ["priority: P3"]);
 }

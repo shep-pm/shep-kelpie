@@ -187,6 +187,7 @@ impl Runner {
             remote: self.remote.clone(),
             source: self.settings.tickets.source,
             app: self.app_covers(),
+            swap_owed: self.triage_run.label_swap_owed,
             loop_stop: self.loop_stop.clone(),
         }
     }
