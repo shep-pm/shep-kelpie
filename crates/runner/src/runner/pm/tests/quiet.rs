@@ -12,7 +12,7 @@ use crate::runner::flight::advance;
 use crate::runner::pm::{DOWN_FOR, HOLD_FOR};
 use crate::runner::{Pass, Runner, StepReport, step};
 use crate::settings::Harness;
-use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
+use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, ticket};
 
 /// The project manager leaving #7 to resolve itself
 const NONE_7: &str = "{\"pick\": null, \"unstick\": {\"item\": 7, \"action\": \"none\", \
@@ -491,4 +491,28 @@ fn a_wake_that_failed_leaves_its_item_to_be_woken_for_again() {
 
     work.release();
     assert!(work.answered(CALL_PATIENCE), "the turn never answered");
+}
+
+#[test]
+fn a_read_wait_left_behind_does_not_hide_an_idle_call() {
+    let (rig, runner, work) = idle_turn("unstick-read");
+    // The gate once held #7 for a reviewer's read, then sent it back through a
+    // pass. Its wait record stays to keep the wake count, but the item is not
+    // waiting at the gate now.
+    runner.lock().unwrap().pm_read_wait(ticket(7), 0);
+    rig.claude.script([Scripted::Say(RETRY_7)]);
+
+    // 11m from its start: idle, and the wake names the idle call, not the read.
+    rig.clock.advance(11 * 60);
+    // The pass that notices it queues it, and its wake waits the window.
+    assert_eq!(step(&runner).unwrap(), None, "the wake waits its window");
+    past_the_window(&rig);
+    let (woke_for, acted, _) = answered(step(&runner).unwrap());
+
+    assert_eq!(
+        woke_for,
+        ["#7 is stuck: its worker has shown no tool call or output for 11m"]
+    );
+    assert_eq!(acted, ["ended #7's idle call, to retry"]);
+    assert!(work.answered(CALL_PATIENCE), "the held call never ended");
 }

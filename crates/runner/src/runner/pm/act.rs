@@ -424,7 +424,9 @@ impl Runner {
         if let Some(out) = self.waiting_out(ticket) {
             return Some(StuckState::AgentOut(out.agent.clone()));
         }
-        if let Some(kept) = self.pm.read_again.get(&ticket) {
+        if let Some(kept) = self.pm.read_again.get(&ticket).copied()
+            && self.read_wait_holds(ticket)
+        {
             return Some(StuckState::ReviewerDown(kept.since));
         }
         let watched = self.flights.watched(ticket)?;

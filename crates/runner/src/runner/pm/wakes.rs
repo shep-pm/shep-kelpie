@@ -284,6 +284,17 @@ impl Runner {
         }
     }
 
+    // Whether `ticket`'s item is at the gate waiting for a reviewer to read its
+    // head, rather than merely having a read wait kept for its wake count.
+    pub(super) fn read_wait_holds(&self, ticket: TicketId) -> bool {
+        let Some(item) = self.state.item(ticket) else {
+            return false;
+        };
+        self.pm.read_again.contains_key(&ticket)
+            && matches!(item.phase, Phase::Ci { .. })
+            && item.unreviewed.is_some()
+    }
+
     // The stuck wake `ticket`'s work item deserves as the board stands: the
     // ruling it is parked on, its idle call, or nothing.
     fn stuck_now(&self, ticket: TicketId) -> Option<Wake> {
@@ -315,7 +326,9 @@ impl Runner {
                 state: StuckState::AgentOut(out.agent.clone()),
             });
         }
-        if let Some(kept) = self.pm.read_again.get(&ticket).copied() {
+        if let Some(kept) = self.pm.read_again.get(&ticket).copied()
+            && self.read_wait_holds(ticket)
+        {
             return Some(read_again_wake(item, kept));
         }
         let watched = self.flights.watched(ticket).filter(|w| w.idle)?;
