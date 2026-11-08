@@ -72,7 +72,8 @@ fn a_new_project_gets_its_board_at_start_with_nothing_on_it() {
              name none, and an `agent:<name>!` label pins. An implementer's line shows when it \
              can start and what it typically takes and costs, and an agent marked out cannot \
              start a work item before the time shown. To have a work item wait for an agent, \
-             hold it.\n\
+             hold it. A ready issue whose line says `unblocks` holds up other work, so it is worth \
+             the fastest agent that can start.\n\
              \n\
              - opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, \
              such as a data migration, a release step or a change to a public interface.; \
@@ -140,7 +141,7 @@ const TWO_BRANCHES: &str = r#"# Board: acme, 2026-09-21 14:18 UTC
 
 ## Agents
 
-Implementers by name, then reviewers in their order. You name each work item's agent from this list. Kelpie takes the cheapest available agent that fits when you name none, and an `agent:<name>!` label pins. An implementer's line shows when it can start and what it typically takes and costs, and an agent marked out cannot start a work item before the time shown. To have a work item wait for an agent, hold it.
+Implementers by name, then reviewers in their order. You name each work item's agent from this list. Kelpie takes the cheapest available agent that fits when you name none, and an `agent:<name>!` label pins. An implementer's line shows when it can start and what it typically takes and costs, and an agent marked out cannot start a work item before the time shown. To have a work item wait for an agent, hold it. A ready issue whose line says `unblocks` holds up other work, so it is worth the fastest agent that can start.
 
 - opus-high (implementer): heavy tier, every kind; Builds work that is hard to undo, such as a data migration, a release step or a change to a public interface.; starts now, typically 1h00m, cost unknown
 - sonnet-high (implementer): standard tier, every kind; Builds everyday features and anything with state, such as a store, a queue or a migration.; starts now, typically 1h00m, cost unknown
@@ -609,4 +610,55 @@ fn a_hold_whose_time_has_passed_marks_no_agent_out() {
         bullets.iter().all(|b| !b.contains("out until")),
         "{bullets:#?}"
     );
+}
+
+// The board's ready line for issue `number`, from its number to the end of the line
+fn ready_line(rig: &Rig, number: u64) -> String {
+    let text = board(rig);
+    let start = format!(". #{number} [");
+    let line = text.lines().find(|l| l.contains(&start));
+    line.unwrap_or_else(|| panic!("no line for #{number}: {text}"))
+        .to_owned()
+}
+
+#[test]
+fn a_ready_issue_names_the_ready_issues_blocked_by_it() {
+    let rig = Rig::new("acme");
+    let runner = rig.open().unwrap();
+    // #4 is assigned, so the board passes it over, and #5 and #6 wait on it.
+    rig.forge.list_ready(4, true);
+    rig.forge.list_ready(5, false);
+    rig.forge.list_ready(6, false);
+    rig.forge.block(5, 4);
+    rig.forge.block(6, 4);
+    step(&runner).unwrap();
+    rig.clock.advance(5 * 60);
+    super::brief(&runner);
+    let four = ready_line(&rig, 4);
+    assert!(four.contains("; unblocks #5, #6; names "), "{four}");
+    for number in [5, 6] {
+        let line = ready_line(&rig, number);
+        assert!(line.contains("waits: blocked by #4"), "{line}");
+        assert!(!line.contains("unblocks"), "{line}");
+    }
+}
+
+#[test]
+fn a_ready_issue_with_a_work_item_open_is_not_named_as_unblocked() {
+    let (rig, runner) = seven_and_eight("acme");
+    // #8 has a work item and is also listed ready, blocked by #4 as #9 is.
+    rig.forge.list_ready(4, true);
+    rig.forge.list_ready(8, false);
+    rig.forge.block(8, 4);
+    rig.claude.script([
+        Scripted::Push("README.md", "seven\n"),
+        Scripted::Push("README.md", "eight\n"),
+    ]);
+    for _ in 0..4 {
+        step(&runner).unwrap();
+    }
+    rig.clock.advance(5 * 60);
+    super::brief(&runner);
+    let four = ready_line(&rig, 4);
+    assert!(four.contains("; unblocks #9; names "), "{four}");
 }
