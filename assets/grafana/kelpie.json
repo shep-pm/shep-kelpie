@@ -24,6 +24,12 @@
     },
     {
       "type": "panel",
+      "id": "barchart",
+      "name": "Bar chart",
+      "version": ""
+    },
+    {
+      "type": "panel",
       "id": "stat",
       "name": "Stat",
       "version": ""
@@ -1019,7 +1025,7 @@
       "id": 25,
       "type": "table",
       "title": "Work items by agent and kind",
-      "description": "Each agent and kind of work the project finished in the dashboard's time range: the share that merged and the mean hours an item took, which is what the agent board's pick reads and what an agent-fit ruling is raised from. Read it over a week or more, since an agent's record means little over a few items. The two queries reach the panel as two frames, and the merge transformation joins them into one row per agent and kind, so a pair with finished items and none merged has an empty share, which is what a share with nothing to divide is.",
+      "description": "Each agent and kind of work the project finished in the dashboard's time range: the share that merged, the mean hours an item took, the mean worker and reviewer dollars, and the fix turns and review rounds per finished item. The share and hours are what the agent board's pick reads and what an agent-fit ruling is raised from. Read it over a week or more, since an agent's record means little over a few items. The queries reach the panel as separate frames, and the merge transformation joins them into one row per agent and kind, so a pair with finished items and none merged has an empty share, which is what a share with nothing to divide is. Dollars are over the work items priced, which leave out any with a call whose harness reported no cost, so a pair with none priced has empty dollars. The table shows every kind: the kind variable filters the panels below it. The medians the agent board uses stay in kelpie status.",
       "gridPos": {
         "h": 8,
         "w": 24,
@@ -1049,6 +1055,50 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "expr": "sum by (agent, kind) (increase(kelpie_work_item_seconds_total{sheep=~\"$sheep\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_finished_total{sheep=~\"$sheep\"}[$__range])) / 3600",
+          "legendFormat": "",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (agent, kind) (increase(kelpie_work_item_cost_usd_total{role=\"worker\",sheep=~\"$sheep\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_priced_total{sheep=~\"$sheep\"}[$__range]))",
+          "legendFormat": "",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (agent, kind) (increase(kelpie_work_item_cost_usd_total{role=\"reviewer\",sheep=~\"$sheep\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_priced_total{sheep=~\"$sheep\"}[$__range]))",
+          "legendFormat": "",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (agent, kind) (increase(kelpie_fix_turns_total{sheep=~\"$sheep\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_finished_total{sheep=~\"$sheep\"}[$__range]))",
+          "legendFormat": "",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (agent, kind) (increase(kelpie_review_rounds_total{sheep=~\"$sheep\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_finished_total{sheep=~\"$sheep\"}[$__range]))",
           "legendFormat": "",
           "format": "table",
           "instant": true
@@ -1096,6 +1146,70 @@
                 "value": "h"
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #C"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "mean worker $"
+              },
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #D"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "mean reviewer $"
+              },
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #E"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "fix turns per item"
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #F"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "review rounds per item"
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
           }
         ]
       },
@@ -1107,6 +1221,200 @@
           }
         ]
       }
+    },
+    {
+      "id": 26,
+      "type": "barchart",
+      "title": "Mean cost per work item by agent and kind",
+      "description": "US dollars a finished work item cost on average over the dashboard's time range, for each agent and kind of work, with the worker's and the reviewers' dollars stacked. A work item with a call whose harness reported no cost is left out of both the dollars and the count, so a mean never divides by an item it did not add. A local model's own calls cost a fraction of a cent while the reviewer reading its pull request costs as much as any other's, and the stack shows which one a bar is. Filtered by the kind variable.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 104
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "label_join(sum by (agent, kind) (increase(kelpie_work_item_cost_usd_total{role=\"worker\",sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_priced_total{sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])), \"agent_kind\", \" / \", \"agent\", \"kind\")",
+          "legendFormat": "",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "label_join(sum by (agent, kind) (increase(kelpie_work_item_cost_usd_total{role=\"reviewer\",sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_priced_total{sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])), \"agent_kind\", \" / \", \"agent\", \"kind\")",
+          "legendFormat": "",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "agent": true,
+              "kind": true
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "worker"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "reviewer"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "agent_kind",
+        "stacking": "normal",
+        "orientation": "auto",
+        "xTickLabelRotation": -45,
+        "showValue": "never"
+      }
+    },
+    {
+      "id": 27,
+      "type": "barchart",
+      "title": "Mean hours per work item by agent and kind",
+      "description": "Wall hours a finished work item took on average over the dashboard's time range, from creation to finish, for each agent and kind of work. Read it beside the cost beside it. Filtered by the kind variable.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 104
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "label_join(sum by (agent, kind) (increase(kelpie_work_item_seconds_total{sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])) / sum by (agent, kind) (increase(kelpie_work_items_finished_total{sheep=~\"$sheep\",kind=~\"$kind\"}[$__range])) / 3600, \"agent_kind\", \" / \", \"agent\", \"kind\")",
+          "legendFormat": "",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "agent": true,
+              "kind": true
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "mean hours"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "agent_kind",
+        "orientation": "auto",
+        "xTickLabelRotation": -45,
+        "showValue": "never"
+      }
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "Mean cost per work item by agent",
+      "description": "US dollars the work items finished in a day cost on average, worker and reviewers together, over the work items priced in that day, for each agent. Filtered by the kind variable. A day holds few items, so read a week of it.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 112
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (agent) (increase(kelpie_work_item_cost_usd_total{sheep=~\"$sheep\",kind=~\"$kind\"}[1d])) / (sum by (agent) (increase(kelpie_work_items_priced_total{sheep=~\"$sheep\",kind=~\"$kind\"}[1d])) > 0)",
+          "legendFormat": "{{agent}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {}
     }
   ],
   "refresh": "30s",
@@ -1130,6 +1438,33 @@
           "refId": "sheep"
         },
         "definition": "label_values(kelpie_work_items, sheep)",
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "refresh": 2
+      },
+      {
+        "name": "kind",
+        "label": "Kind",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "query": {
+          "query": "label_values(kelpie_work_items_finished_total, kind)",
+          "refId": "kind"
+        },
+        "definition": "label_values(kelpie_work_items_finished_total, kind)",
         "includeAll": true,
         "multi": true,
         "allValue": ".*",
