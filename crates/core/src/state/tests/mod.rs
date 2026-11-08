@@ -17,7 +17,7 @@ fn store_in(dir: &Path) -> StateStore {
 // deliberate edit here and shows in review. Every other test reads `VERSION`.
 #[test]
 fn the_state_file_version_is_pinned() {
-    assert_eq!(VERSION, 103);
+    assert_eq!(VERSION, 104);
 }
 
 // Large, so a kill is likely to land inside a write, and uniform, so a
@@ -355,6 +355,39 @@ fn a_version_100_file_loads_with_no_ruling_borrowed() {
     let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(saved["version"], VERSION);
     assert_eq!(saved["rulings"][0]["borrowed"], true);
+    assert_eq!(store.load().unwrap(), Some(loaded));
+}
+
+// A ruling from version 101, when a `Ruling` gained `borrowed`, has no
+// `stuck_head`, so it loads as none, and a timed-out turn's ruling that gains
+// one saves and loads back with it.
+#[test]
+fn a_version_101_file_loads_with_no_stuck_head() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path());
+    let mut state = ProjectState::new();
+    state.rulings.push(Ruling {
+        issue: Some(ticket(7)),
+        pull_request: Some(71),
+        ..Ruling::new(
+            ticket(71),
+            "q",
+            RulingKind::from(Stuck::TurnTimeout { phase: None }),
+        )
+    });
+    let mut old = serde_json::to_value(&state).unwrap();
+    old["version"] = 101.into();
+    assert!(old["rulings"][0].get("stuck_head").is_none());
+    fs::write(dir.path().join(STATE_FILE), old.to_string()).unwrap();
+
+    let mut loaded = store.load().unwrap().expect("a saved state");
+    assert_eq!(loaded.rulings[0].stuck_head, None);
+    loaded.rulings[0].stuck_head = Some("c0ffee1".into());
+    store.save(&loaded).unwrap();
+    let text = fs::read_to_string(dir.path().join(STATE_FILE)).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(saved["version"], VERSION);
+    assert_eq!(saved["rulings"][0]["stuck_head"], "c0ffee1");
     assert_eq!(store.load().unwrap(), Some(loaded));
 }
 

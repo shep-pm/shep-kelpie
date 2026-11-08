@@ -5,12 +5,15 @@ use std::sync::Mutex;
 
 use serde_json::{Value, json};
 
-use super::super::{answered, pm_seen, red as red_ci, step_until};
+use super::super::{answered, pm_seen, red as red_ci, step_until, with_pm};
 use crate::ports::HeadRun;
 use crate::runner::{Runner, StepReport};
-use crate::test::{Rig, Scripted, Seen};
+use crate::test::{Rig, Scripted, Seen, git};
 
 pub(super) const NOTHING: &str = "{\"pick\": null}";
+
+// Where a turn's last change sits, past the ten minutes a turn may be quiet for
+const STALE: u64 = Rig::EPOCH - 11 * 60;
 
 /// Raw issue text, so the hostile lines of one test are the ones its asserts look for
 pub(super) const BODY: &str = "Make `--dry-run` the name.\n\n## Acceptance\n\n- it matches shep\n";
@@ -29,6 +32,33 @@ pub(super) fn red_with_coderabbit(project: &str) -> (Rig, Mutex<Runner>) {
     rig.coderabbit_on();
     let runner = rig.open().unwrap();
     (rig, runner)
+}
+
+/// A project with a project manager whose worker's turn on #7 ran past its
+/// ceiling with nothing written for ten minutes, parked on a turn-timeout
+/// ruling at the returned head, with no wake yet
+pub(super) fn timed_out(project: &str) -> (Rig, Mutex<Runner>, String) {
+    parked_past(
+        project,
+        Scripted::TimeOutPlanting("stale.rs", "fn stale() {}\n", STALE),
+    )
+}
+
+/// [`timed_out`], the turn committing `done.rs` before it ran past its ceiling
+pub(super) fn timed_out_committing(project: &str) -> (Rig, Mutex<Runner>, String) {
+    parked_past(
+        project,
+        Scripted::TimeOutCommitting("done.rs", "fn done() {}\n", STALE),
+    )
+}
+
+fn parked_past(project: &str, end: Scripted) -> (Rig, Mutex<Runner>, String) {
+    let (rig, runner) = with_pm(project);
+    rig.ask(&runner, "add", Some("7"));
+    rig.claude.script([end]);
+    step_until(&runner, |r| matches!(r, StepReport::TimedOut { .. }));
+    let head = git(&rig.worktree_7(), &["rev-parse", "HEAD"]);
+    (rig, runner, head)
 }
 
 /// Tells the project manager something and waits for its answer, which is its wake
@@ -80,6 +110,14 @@ pub(super) fn past(issue: u64, at: u64, kind: &str, asked: &str, answer: &str) -
         "id": 71, "pull_request": 71, "by_pm": false,
         "at": at, "issue": issue, "kind": kind, "asked": asked, "answer": answer,
     })
+}
+
+/// A line of `rulings.jsonl`: a timed-out or failed turn on `issue`, answered
+/// at `at`, raised while its worktree stood at `head`
+pub(super) fn past_at(issue: u64, at: u64, kind: &str, head: &str) -> Value {
+    let mut line = past(issue, at, kind, "asked", "yes");
+    line["head"] = head.into();
+    line
 }
 
 /// Writes `lines` as a JSON line each to `file`, after what it holds

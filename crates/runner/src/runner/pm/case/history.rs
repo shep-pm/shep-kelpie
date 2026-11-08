@@ -11,15 +11,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use super::Parked;
+use super::{Parked, plain};
 use crate::board::briefing::date_time;
 use crate::home::STEPS_FILE;
 use crate::ports::SessionId;
 use crate::runner::Runner;
-use crate::runner::ruling::{Answerer, try_records};
+use crate::runner::ruling::{Answerer, Record, try_records};
 use crate::settings::RulingName;
+use crate::state::{RulingKind, Stuck};
 use crate::ticket::TicketId;
 use crate::watch::{self, Format};
+use crate::worktree;
 
 /// What one item's case reads of the runner's log and its worker's transcript
 #[derive(Debug, Clone)]
@@ -181,6 +183,7 @@ impl Runner {
                 kind.as_str()
             );
         }
+        out.push_str(&self.stuck_head_part(parked, &past));
         if past.is_empty() {
             out.push_str("No ruling on this item was answered before.\n\n");
         }
@@ -204,6 +207,79 @@ impl Runner {
         None
     }
 
+    // What the case says of the head a timed-out or failed turn's ruling was
+    // raised at, against the head the last of either kind on the item was.
+    // Empty for every other kind, and for a case with no ruling.
+    fn stuck_head_part(&self, parked: &Parked, past: &[Record]) -> String {
+        let Some(ruling) = &parked.ruling else {
+            return String::new();
+        };
+        let stuck = matches!(
+            &ruling.kind,
+            RulingKind::Stuck(Stuck::TurnTimeout { .. } | Stuck::TurnFailed { .. })
+        );
+        if !stuck {
+            return String::new();
+        }
+        let Some(head) = &ruling.stuck_head else {
+            return "Kelpie could not read its worktree's head when it raised this ruling, so \
+                    whether it moved since the last is not here.\n\n"
+                .to_owned();
+        };
+        let head = plain(head);
+        let stood = format!("Its worktree stood at `{head}` when it raised this ruling");
+        let Some(last) = (past.iter()).find(|r| r.kind.is_some_and(is_stuck)) else {
+            return format!(
+                "{stood}. This is the first {BOTH} on this item, so there is no earlier head to \
+                 compare it with.\n\n"
+            );
+        };
+        let Some(before) = &last.head else {
+            return format!(
+                "{stood}. The last {BOTH} on this item kept no head, so there is nothing to \
+                 compare it with.\n\n"
+            );
+        };
+        let before = plain(before);
+        if before == head {
+            return format!(
+                "{stood}, and when the last {BOTH} was raised. The head has not moved since.\n\n"
+            );
+        }
+        let moved = format!("{stood}, and at `{before}` when the last {BOTH} was raised");
+        match worktree::moved_since(
+            &self.settings.git.checkout,
+            &parked.worktree,
+            &before,
+            &head,
+        ) {
+            Ok(changed) if changed.commits == 0 => format!(
+                "{moved}. The newer head holds no commit the earlier one lacks, so kelpie names \
+                 nothing between them.\n\n"
+            ),
+            Ok(changed) => {
+                let since = format!(
+                    "{moved}. The newer head has {} and {} the earlier one does not",
+                    count(changed.commits as usize, "commit", "commits"),
+                    count(changed.files.len(), "file", "files"),
+                );
+                match changed.files.is_empty() {
+                    true => format!("{since}.\n\n"),
+                    false => {
+                        let files: Vec<String> = (changed.files.iter())
+                            .map(|f| format!("- `{}`\n", plain(f)))
+                            .collect();
+                        format!("{since}:\n\n{}\n", files.join(""))
+                    }
+                }
+            }
+            Err(e) => {
+                let why = self.shown(e.to_string());
+                format!("{moved}. Kelpie could not read what changed between them ({why}).\n\n")
+            }
+        }
+    }
+
     // What the item's priced calls cost against its cap, as the board shows it
     fn spend_part(&self, out: &mut String, ticket: TicketId) {
         out.push_str("## Spend\n\n");
@@ -218,6 +294,23 @@ impl Runner {
             item.priced().total().usd(),
             cap.usd()
         );
+    }
+}
+
+// The two kinds whose ruling keeps the head its worktree stood at
+const BOTH: &str = "turn-timeout or turn-failed";
+
+// Whether `kind` is one of them
+fn is_stuck(kind: RulingName) -> bool {
+    matches!(kind, RulingName::TurnTimeout | RulingName::TurnFailed)
+}
+
+// `n` of what `n` is, as the case counts it
+fn count(n: usize, one: &str, many: &str) -> String {
+    match n {
+        0 => format!("no {many}"),
+        1 => format!("1 {one}"),
+        n => format!("{n} {many}"),
     }
 }
 
