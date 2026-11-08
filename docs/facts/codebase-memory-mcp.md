@@ -26,7 +26,7 @@ The refactor matrix in the experiments repo, night2: one task, splitting shep-ke
 - The same holds in production: pi workers had the graph from #949 and made 0 of 2,408 calls to it (#966).
 - Not measured: Claude Code's own LSP tool on this task, or a prompt that tells the worker to use either tool.
 
-So the graph stays off for a worker's turns by default (`code_graph.worker`, `docs/design/fence.md`). A tool the worker does not call only costs its definitions in every request.
+So a worker never gets the graph (`docs/design/fence.md`). A tool the worker does not call only costs its definitions in every request.
 
 ## The daemon (measured on macOS, v0.11.0, 2026-10-15)
 

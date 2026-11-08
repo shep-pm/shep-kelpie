@@ -18,20 +18,6 @@ const INDEXER: &str = "#!/bin/sh\n\
     echo \"$CBM_RUNTIME_DIR\" > \"$CBM_CACHE_DIR/runtime\"\n\
     echo \"$CBM_ALLOWED_ROOT\" > \"$CBM_CACHE_DIR/root\"\n";
 
-// The example's code graph table, as `settings.example.toml` writes it
-const GRAPH_OFF: &str = "[app.dogs.kelpie.code_graph]\nenabled = false\nworker = false";
-
-// Both keys on, which load and are read by nothing
-fn name_both_keys(rig: &Rig) {
-    rig.edit_settings(|s| {
-        assert!(s.contains(GRAPH_OFF), "the example's code graph moved");
-        s.replace(
-            GRAPH_OFF,
-            "[app.dogs.kelpie.code_graph]\nenabled = true\nworker = true",
-        )
-    });
-}
-
 fn install(rig: &Rig, script: &str) {
     let binary = rig.paths().tools.code_graph();
     std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
@@ -176,10 +162,9 @@ fn an_installed_server_gives_the_reviewer_the_server_and_an_index_under_kelpies_
 
 #[test]
 fn a_worker_never_gets_the_graph() {
-    // Installed, with both keys on: the worker's turn carries no server, writes no MCP file of
+    // Installed: the worker's turn carries no server, writes no MCP file of
     // its own, allows no `mcp__` tool, and indexes nothing.
     let rig = Rig::new("shep");
-    name_both_keys(&rig);
     install(&rig, INDEXER);
     worker_turn(&rig);
 
@@ -292,7 +277,6 @@ fn a_pi_reviewer_alone_gets_the_server_and_an_index() {
 #[test]
 fn a_pi_worker_never_gets_the_graph() {
     let rig = Rig::new("shep");
-    name_both_keys(&rig);
     install(&rig, INDEXER);
     pi_agents(&rig);
     worker_turn(&rig);
@@ -308,7 +292,6 @@ fn a_pi_worker_never_gets_the_graph() {
 #[test]
 fn a_goose_worker_never_gets_the_graph() {
     let rig = Rig::new("shep");
-    name_both_keys(&rig);
     install(&rig, INDEXER);
     goose_agent(&rig);
     worker_turn(&rig);
@@ -324,7 +307,6 @@ fn a_goose_worker_never_gets_the_graph() {
 #[test]
 fn a_codex_worker_never_gets_the_graph() {
     let rig = Rig::new("shep");
-    name_both_keys(&rig);
     install(&rig, INDEXER);
     codex_agents(&rig);
     worker_turn(&rig);
@@ -407,9 +389,8 @@ fn a_codex_reviewer_alone_gets_the_server_and_an_index() {
 
 #[test]
 fn no_installed_server_means_no_graph_and_no_note() {
-    // Both keys on, which nothing reads: only the server being there turns the graph on.
+    // Only the server being there turns the graph on.
     let rig = Rig::new("shep");
-    name_both_keys(&rig);
     let runner = work_and_review(&rig);
 
     let seen = rig.claude.all_seen();
