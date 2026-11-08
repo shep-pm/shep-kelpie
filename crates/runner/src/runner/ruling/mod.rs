@@ -291,7 +291,7 @@ impl Runner {
             (Answer::Yes, RulingKind::FollowUp { refused: None, .. })
         );
         // ... unless the project manager asks for them to be filed unread, as
-        // `needs-triage`.
+        // `needs-approval`.
         let unread = triaged && unread;
         let accepts = match (&answer, &ruling.kind) {
             (Answer::Yes, RulingKind::AgentFiles { head, .. }) => Some(head.clone()),

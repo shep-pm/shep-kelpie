@@ -5,7 +5,7 @@
 //! reply must have a `body` and no open question. Where the check passes the
 //! issue as left, the body goes over the issue's and the labels go on,
 //! `ready-for-agent` last. Otherwise the body goes under the issue's text, and
-//! the issue ends `needs-triage`. The comment is worded first. A reply that
+//! the issue ends `needs-approval`. The comment is worded first. A reply that
 //! splits the issue is made ready as a split or refused as one
 //! ([`super::split`]). On anyone else's issue it only saves the plan, held.
 
@@ -93,7 +93,7 @@ pub(in crate::runner) fn readiness(
         return Ready::Not;
     };
     // The maintainer took the label off, now or while the pass ran, so it stays
-    // off: the pass ends at `needs-triage`.
+    // off: the pass ends at `needs-approval`.
     let now = (runner.labels_now(issue)).unwrap_or_else(|_| runner.triage_seen(issue));
     if runner.check_ready_was_seen(issue) && !now.iter().any(|l| l == READY) {
         return Ready::Not;
@@ -109,7 +109,7 @@ pub(in crate::runner) fn readiness(
 pub(super) enum ReadyWrite {
     /// The body went on and its step is saved
     Written,
-    /// A publish refusal dropped the body, so the issue ends `needs-triage`
+    /// A publish refusal dropped the body, so the issue ends `needs-approval`
     /// like any other, and the issue is told the rewrite did not happen
     Refused,
     /// Nothing more this pass: the maintainer's own label stood, or the write
@@ -279,7 +279,7 @@ impl Runner {
     }
 
     // Saves the record with the owed ready body dropped: a publish refusal
-    // took it, so the issue ends `needs-triage` like any other
+    // took it, so the issue ends `needs-approval` like any other
     pub(super) fn triage_ready_dropped(&mut self, issue: u64) -> Result<(), StateError> {
         let mut next = self.state.clone();
         if let Some(held) = next
@@ -293,7 +293,7 @@ impl Runner {
         self.unplan(issue)
     }
 
-    // The `labelled` step: puts `needs-triage` on, unless a label put on by hand
+    // The `labelled` step: puts `needs-approval` on, unless a label put on by hand
     // since the pass began stands (one already there is this step's own), and
     // ends the pass. A split of someone else's issue is then asked of the
     // maintainer in a comment of its own.
@@ -340,7 +340,7 @@ impl Runner {
     }
 
     // Puts on the labels the reply gave and then `ready-for-agent`, last, taking
-    // off the `needs-triage` an earlier pass left. A triage label put on by hand
+    // off the `needs-approval` an earlier pass left. A triage label put on by hand
     // since the pass began is read for here too: kelpie labels nothing over it,
     // whether it came after the body went on or while the call ran.
     pub(super) fn label_ready(&mut self, issue: u64) -> Result<ReadyLabels, StateError> {
@@ -392,7 +392,7 @@ impl Runner {
             return Ok(ReadyLabels::Stood);
         }
         // An issue is not both ready for the board and waiting for the
-        // maintainer, so the `needs-triage` of an earlier pass comes off before
+        // maintainer, so the `needs-approval` of an earlier pass comes off before
         // `ready-for-agent` goes on. The reading above already ruled out a label
         // put on by hand, so this one is kelpie's own.
         if carried.iter().any(|l| l == TRIAGE)

@@ -28,7 +28,7 @@ pub struct TriageState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unrecorded: Vec<UnrecordedCall>,
     /// The highest issue number a prune dropped the record of, so an issue at or
-    /// below it that carries `needs-triage` and has no record is told from one
+    /// below it that carries `needs-approval` and has no record is told from one
     /// someone labelled by hand: kelpie triaged it and the record went.
     ///
     /// Left out while zero.
@@ -51,7 +51,7 @@ fn is_zero(n: &u64) -> bool {
 /// How many finished triage records are kept, the oldest going first
 ///
 /// An issue whose record went is told apart from an untouched one by its
-/// `needs-triage` label and, if that is taken off, by the marker in its
+/// `needs-approval` label and, if that is taken off, by the marker in its
 /// comments. The label alone does not say who put it on, so
 /// [`TriageState::pruned_through`] says which issue numbers kelpie may have
 /// triaged. A duplicate-closing record is kept past the count: its issue has
@@ -259,7 +259,7 @@ pub struct Triaged {
     /// Left out while empty.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub author: String,
-    /// The limit that held this issue, which kelpie labelled `needs-triage`
+    /// The limit that held this issue, which kelpie labelled `needs-approval`
     /// with no call and no comment
     ///
     /// Left out unless a limit held the issue.
@@ -415,7 +415,7 @@ pub struct TriageLocal {
 pub enum TriageStep {
     /// The issue is the maintainer's, was labelled `ready-for-agent` by hand,
     /// and kelpie took it back for triage: its `ready-for-agent` is swapped for
-    /// `needs-triage` or about to be, and its first pass is owed. The comment
+    /// `needs-approval` or about to be, and its first pass is owed. The comment
     /// that pass posts replaces this record.
     Taken,
     /// The comment is posted and the labels are not all on. On the ready path
@@ -430,15 +430,15 @@ pub enum TriageStep {
     /// The answers round's comment is posted, and its settled answers are
     /// owed under the issue's author's text, in `ready_body`
     Answers,
-    /// The labels the reply gave are on and `needs-triage` is not
+    /// The labels the reply gave are on and `needs-approval` is not
     Labelled,
-    /// `needs-triage` is on, or the maintainer's own triage label stood
+    /// `needs-approval` is on, or the maintainer's own triage label stood
     Done,
     /// `ready-for-agent` is on
     Ready,
 }
 
-/// Which triage limit held an issue, so it got `needs-triage` with no call and
+/// Which triage limit held an issue, so it got `needs-approval` with no call and
 /// no comment. The hold is final for that issue: the pass does not come back to
 /// it, and `shep kelpie triage` can still be asked of it.
 // wire format: changing this is a breaking change to the state file

@@ -63,7 +63,7 @@ pub(in crate::runner) enum Settler {
     Thread,
     /// The project manager, with its answer in words and its one-line why;
     /// a yes to a follow-up ruling says whether `unread` files the findings
-    /// `needs-triage`, not `ready-for-agent`
+    /// `needs-approval`, not `ready-for-agent`
     Pm {
         answer: String,
         why: String,
