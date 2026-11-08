@@ -13,30 +13,61 @@ use crate::ports::{
 use crate::runner::flight::advance;
 use crate::runner::ruling::{Answerer, Record};
 use crate::runner::{Answer, CHECKS_SETTLE, Runner, StepReport, step};
-use crate::settings::{Merging, RulingName};
+use crate::settings::RulingName;
 use crate::state::{Ruling, RulingKind, Stuck};
 use crate::test::ticket;
 use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
 use crate::work_item::{Awaited, Phase, Review, ReviewStage, Turn, WorkItem};
 
 /// A project whose project manager answers merge rulings, with CI green and
-/// the worker parked on merge ruling 71, which is judged under `merging`
-pub(super) fn left_to_pm(project: &str, merging: Merging) -> (Rig, Mutex<Runner>) {
+/// the worker parked on merge ruling 71
+pub(super) fn left_to_pm(project: &str) -> (Rig, Mutex<Runner>) {
     let (rig, runner, head) = Rig::with_pull_request_set(project, |rig| {
         rig.with_app();
         rig.maintainer("octocat");
         name_pm(rig);
     });
-    // The map starts `merge` `false`, so a test sets it here.
+    // The map starts `merge` `false`, so a test sets it here. A head every
+    // gate passes would then merge unasked, so no gate vouches for this one
+    // while the ruling is raised.
     leave_merges(&runner);
+    let vouched = unvouch(&runner);
     rig.forge.set_checks(&head, Checks::Passed);
     assert!(matches!(
         rig.verdict(&runner),
         Some(StepReport::Ruling { id, .. }) if id == ticket(71)
     ));
-    // The ruling was raised under `ask`, and is judged under `merging`.
-    runner.lock().unwrap().settings.git.merging = Some(merging);
+    revouch(&runner, vouched);
     (rig, runner)
+}
+
+/// What vouched for the head of the work item: its reviewed, unread and arrived heads
+type Vouched = (Vec<String>, Vec<String>, Option<String>);
+
+/// Takes away what vouches for the current work item's head
+fn unvouch(runner: &Mutex<Runner>) -> Vouched {
+    let mut runner = runner.lock().unwrap();
+    let focus = runner.focus.expect("a work item is current");
+    let item = runner.state.item_mut(focus).expect("it is in the state");
+    (
+        std::mem::take(&mut item.reviewed_heads),
+        std::mem::take(&mut item.sent_unread),
+        item.arrived.take(),
+    )
+}
+
+/// Gives back what [`unvouch`] took, and clears the ruling's unread head warning
+fn revouch(runner: &Mutex<Runner>, (reviewed, unread, arrived): Vouched) {
+    let mut runner = runner.lock().unwrap();
+    let focus = runner.focus.expect("a work item is current");
+    let item = runner.state.item_mut(focus).expect("it is in the state");
+    (item.reviewed_heads, item.sent_unread, item.arrived) = (reviewed, unread, arrived);
+    let ruling = &mut runner.state.rulings[0];
+    on_merge(ruling, |kind| {
+        if let RulingKind::Merge { unread_head, .. } = kind {
+            *unread_head = false;
+        }
+    });
 }
 
 /// Leaves merge rulings to the project manager
@@ -102,7 +133,7 @@ fn asked(rig: &Rig) -> usize {
 
 #[test]
 fn a_kind_left_to_it_is_answered_by_the_project_manager_and_not_asked() {
-    let (rig, runner) = left_to_pm("pm-answers", Merging::Auto);
+    let (rig, runner) = left_to_pm("pm-answers");
     assert_eq!(asking(&rig), None, "the comment waits on the answer");
     rig.claude
         .script_for(Role::Pm, [Scripted::Say(answers('A', false))]);
@@ -131,7 +162,7 @@ fn a_kind_left_to_it_is_answered_by_the_project_manager_and_not_asked() {
 
 #[test]
 fn a_design_flag_goes_to_the_maintainer_with_the_project_managers_pick() {
-    let (rig, runner) = left_to_pm("pm-design", Merging::Auto);
+    let (rig, runner) = left_to_pm("pm-design");
     rig.claude
         .script_for(Role::Pm, [Scripted::Say(answers('B', true))]);
 
@@ -148,7 +179,7 @@ fn a_design_flag_goes_to_the_maintainer_with_the_project_managers_pick() {
 
 #[test]
 fn a_wake_that_gives_no_answer_sends_the_ruling_to_the_maintainer_as_it_stands() {
-    let (rig, runner) = left_to_pm("pm-none", Merging::Auto);
+    let (rig, runner) = left_to_pm("pm-none");
     rig.claude.script_for(Role::Pm, [Scripted::Say(NOTHING)]);
 
     settled(&rig, &runner);
@@ -158,25 +189,12 @@ fn a_wake_that_gives_no_answer_sends_the_ruling_to_the_maintainer_as_it_stands()
     assert!(!card.contains("**Project manager"), "{card}");
 }
 
-#[test]
-fn a_merge_under_ask_left_to_it_is_answered_by_the_project_manager() {
-    let (rig, runner) = left_to_pm("pm-ask", Merging::Ask);
-    rig.claude
-        .script_for(Role::Pm, [Scripted::Say(answers('A', false))]);
-
-    settled(&rig, &runner);
-
-    assert!(!pending(&rig), "the answer was applied");
-    assert!(answered(&rig).is_some(), "{:?}", comments(&rig));
-    assert_eq!(asking(&rig), None, "the maintainer was never asked");
-}
-
 // A merge ruling the gate raised with a warning on it, which only the
 // maintainer's yes passes: the project manager's yes goes to the maintainer.
 
 /// [`left_to_pm`] under `auto`, with ruling 71 warning as `warn` sets it
 fn warned(project: &str, warn: impl FnOnce(&mut Ruling)) -> (Rig, Mutex<Runner>) {
-    let (rig, runner) = left_to_pm(project, Merging::Auto);
+    let (rig, runner) = left_to_pm(project);
     {
         let mut runner = runner.lock().unwrap();
         let ruling = &mut runner.state.rulings[0];
@@ -359,6 +377,7 @@ fn a_ruling_raised_in_a_drain_goes_to_the_maintainer_at_once() {
         name_pm(rig);
     });
     leave_merges(&runner);
+    unvouch(&runner);
     rig.forge.set_checks(&head, Checks::Passed);
     rig.ask(&runner, "drain", None);
 
@@ -436,7 +455,7 @@ fn a_failure_the_project_manager_answered_on_the_item_is_not_left_to_it_again() 
 
 /// [`left_to_pm`], answered with option A, the maintainer able to write
 fn answered_a(project: &str) -> (Rig, Mutex<Runner>) {
-    let (rig, runner) = left_to_pm(project, Merging::Auto);
+    let (rig, runner) = left_to_pm(project);
     rig.forge.threads.grant_write("octocat");
     rig.claude
         .script_for(Role::Pm, [Scripted::Say(answers('A', false))]);
@@ -543,7 +562,7 @@ fn advanced_until(runner: &Mutex<Runner>, done: impl Fn() -> bool) {
 
 #[test]
 fn a_runner_restarted_while_a_ruling_is_held_posts_its_comment() {
-    let (rig, runner) = left_to_pm("pm-restart", Merging::Auto);
+    let (rig, runner) = left_to_pm("pm-restart");
     assert_eq!(asking(&rig), None, "the comment waits on the answer");
     assert!(unposted(&rig));
     drop(runner);
@@ -558,7 +577,7 @@ fn a_runner_restarted_while_a_ruling_is_held_posts_its_comment() {
 
 #[test]
 fn a_ruling_whose_work_item_is_dropped_while_held_is_never_posted() {
-    let (rig, runner) = left_to_pm("pm-dropped", Merging::Auto);
+    let (rig, runner) = left_to_pm("pm-dropped");
     rig.claude
         .script_for(Role::Pm, [Scripted::Say(answers('A', false))]);
     rig.ask(&runner, "drop", Some("7"));
@@ -573,7 +592,7 @@ fn a_ruling_whose_work_item_is_dropped_while_held_is_never_posted() {
 
 #[test]
 fn a_ruling_held_through_a_drain_goes_to_the_maintainer_and_says_why() {
-    let (rig, runner) = left_to_pm("pm-drained", Merging::Auto);
+    let (rig, runner) = left_to_pm("pm-drained");
     let hold = wake_held(&rig, &runner);
 
     rig.ask(&runner, "drain", None);
@@ -594,7 +613,7 @@ fn a_ruling_held_through_a_drain_goes_to_the_maintainer_and_says_why() {
 
 #[test]
 fn an_answer_after_the_maintainer_was_alerted_is_dropped_and_the_ruling_still_waits() {
-    let (rig, runner) = left_to_pm("pm-late", Merging::Auto);
+    let (rig, runner) = left_to_pm("pm-late");
     let hold = wake_held(&rig, &runner);
     rig.ask(&runner, "drain", None);
     advanced_until(&runner, || !rig.alerts.posts().is_empty());

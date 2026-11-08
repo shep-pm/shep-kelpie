@@ -271,7 +271,7 @@ mod tests {
     use super::*;
     use crate::home::ProjectName;
     use crate::runner::{StepReport, step};
-    use crate::settings::{AgentName, Merging};
+    use crate::settings::{AgentName, RulingName};
     use crate::shepherd::SHEP_VERSION;
     use crate::test::{FakeShepherd, Memory, Rig, Scripted, project_table};
 
@@ -413,13 +413,15 @@ mod tests {
         look.read().unwrap();
 
         let mut table = table.lock().unwrap();
-        let git = table.get_mut("git").and_then(Value::as_object_mut).unwrap();
-        git.insert("merging".into(), Value::String("auto".into()));
+        table.insert(
+            "rulings".into(),
+            serde_json::json!({ "pm_decides": { "merge": true } }),
+        );
         drop(table);
         look.again(&runner);
 
         let runner = runner.lock().unwrap();
-        assert_eq!(runner.settings().git.merging, Some(Merging::Auto));
+        assert!(runner.settings().rulings.pm_decides(RulingName::Merge));
     }
 
     #[test]
