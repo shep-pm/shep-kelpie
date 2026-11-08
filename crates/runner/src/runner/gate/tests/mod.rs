@@ -13,6 +13,7 @@ use crate::test::{CALL_PATIENCE, Rig, Scripted, git};
 
 mod borrowing;
 mod threads;
+mod unread;
 
 pub(super) fn ruling_report(report: Option<StepReport>) -> (TicketId, String) {
     match report {

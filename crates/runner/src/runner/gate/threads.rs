@@ -73,7 +73,7 @@ impl Runner {
     ///
     /// A project with no `agents.pm` keeps the maintainer's merge ruling, and a
     /// contribution's threads are the maintainer's to read.
-    fn rules_threads(&self) -> bool {
+    pub(super) fn rules_threads(&self) -> bool {
         self.agents.pm.is_some()
             && self
                 .current()
@@ -407,7 +407,7 @@ impl Runner {
     }
 
     // Idle, naming what the item waits on, which `status` and the board show
-    fn held_for(&mut self, reason: Reason) -> Begin {
+    pub(super) fn held_for(&mut self, reason: Reason) -> Begin {
         self.held_up.because(reason);
         Begin::Idle
     }

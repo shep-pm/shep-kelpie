@@ -64,6 +64,14 @@ pub(in crate::runner) fn question(
                     " This head is the worker's fix for a review bot's late review, and no reviewer read it.",
                 );
             }
+            if unreviewed.is_some() || *unread_head || *note_fix || *late_fix {
+                unread.push_str(
+                    " Kelpie sends an unread head back through a pass of the review where the \
+                     project's project manager rules on its open threads, so this reaches you \
+                     only because the project names none, or the pull request is a \
+                     contribution's.",
+                );
+            }
             let mut open = open_threads.as_ref().map_or_else(String::new, |open| {
                 format!(" Review bot threads are still open on it: {open}.")
             });

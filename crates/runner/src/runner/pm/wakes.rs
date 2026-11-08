@@ -13,13 +13,14 @@ use crate::board::briefing::{age, date_time, elapsed, ticket_ref};
 
 use super::requests;
 use crate::ports::{Finding, PaddockHolder, Timestamp, Wait};
+use crate::runner::gate::READ_AGAIN;
 use crate::runner::Runner;
 use crate::runner::review_bot::RuledThread;
 use crate::runner::voice::brief;
 use crate::settings::AgentName;
 use crate::state::{ProjectState, Ruling, RulingKind, Stuck};
 use crate::ticket::TicketId;
-use crate::work_item::{Phase, ReviewWeight};
+use crate::work_item::{Phase, ReviewWeight, WorkItem};
 use crate::worktree;
 
 /// What a work item is stuck on, which a new turn, phase or ruling is a
@@ -38,6 +39,9 @@ pub(in crate::runner) enum StuckState {
     Idle(Timestamp),
     /// Its due turn waits for the next pick, since this agent is out
     AgentOut(AgentName),
+    /// Its pull request has gone unread at the gate, and kelpie waits for a
+    /// reviewer to read it, from this time
+    ReviewerDown(Timestamp),
 }
 
 /// Why the project manager is woken
@@ -212,6 +216,24 @@ pub(super) struct AgentOut {
     back: Timestamp,
 }
 
+/// An item at the gate waiting for a reviewer to read its head: when its current
+/// wait began, and whether a wait of its own has already woken the project manager
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ReadAgain {
+    pub(super) since: Timestamp,
+    woken: bool,
+}
+
+/// Whether an item's wait at the gate for a reviewer has run its length
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::runner) enum ReadWait {
+    /// The wait is running, or has only now begun
+    Running,
+    /// The wait ended. `wake` says whether it is the item's first, which is the
+    /// one that wakes the project manager
+    Ended { wake: bool },
+}
+
 /// What the project manager left a work item alone in, when it said so, how
 /// many `none`s in a row on that state, when its hold ends, and whether the
 /// wake its hold ended for has gone out
@@ -293,12 +315,58 @@ impl Runner {
                 state: StuckState::AgentOut(out.agent.clone()),
             });
         }
+        if let Some(kept) = self.pm.read_again.get(&ticket).copied() {
+            return Some(read_again_wake(item, kept));
+        }
         let watched = self.flights.watched(ticket).filter(|w| w.idle)?;
         Some(Wake::Stuck {
             ticket,
             what: IDLE_WHAT.to_owned(),
             state: StuckState::Idle(watched.started),
         })
+    }
+
+    /// Records that `ticket` waits at the gate for a reviewer to read its head, and
+    /// says whether that wait has run `wait` seconds
+    ///
+    /// The first look begins the wait. An ended one starts the next from now, and
+    /// is the item's first, which wakes the project manager, only until one has
+    /// gone out for it.
+    pub(in crate::runner) fn pm_read_wait(&mut self, ticket: TicketId, wait: u64) -> ReadWait {
+        let now = self.ports.clock.now();
+        let kept = self
+            .pm
+            .read_again
+            .entry(ticket)
+            .or_insert(ReadAgain {
+                since: now,
+                woken: false,
+            });
+        if now.0.saturating_sub(kept.since.0) < wait {
+            return ReadWait::Running;
+        }
+        let wake = !kept.woken;
+        kept.since = now;
+        kept.woken |= wake;
+        ReadWait::Ended { wake }
+    }
+
+    /// Stops holding `ticket`'s wait for a reviewer, which its item no longer needs
+    pub(in crate::runner) fn pm_read_clear(&mut self, ticket: TicketId) {
+        self.pm.read_again.remove(&ticket);
+    }
+
+    /// Forgets the read waits of the work items no longer open
+    pub(in crate::runner) fn pm_reads_kept(&mut self, open: &[TicketId]) {
+        self.pm.read_again.retain(|ticket, _| open.contains(ticket));
+    }
+
+    /// Wakes the project manager for `ticket` waiting at the gate for a reviewer
+    /// to read its head
+    pub(in crate::runner) fn pm_ask_unread(&mut self, ticket: TicketId) {
+        if let Some(wake) = self.stuck_now(ticket) {
+            self.pm_due(wake);
+        }
     }
 
     /// The record that `ticket`'s due turn waits for a pick, while its work
@@ -394,7 +462,7 @@ impl Runner {
                 ));
                 true
             }
-            StuckState::Idle(..) | StuckState::AgentOut(..) => {
+            StuckState::Idle(..) | StuckState::AgentOut(..) | StuckState::ReviewerDown(..) => {
                 let Some(until) = entry.until else {
                     return false;
                 };
@@ -402,6 +470,7 @@ impl Runner {
                 if held {
                     let on = match state {
                         StuckState::AgentOut(agent) => format!("waits, its agent {agent} out,"),
+                        StuckState::ReviewerDown(_) => "waits unread at the gate,".to_owned(),
                         _ => "is idle".to_owned(),
                     };
                     self.notes.push(format!(
@@ -425,7 +494,9 @@ impl Runner {
         };
         let until = match state {
             StuckState::Ruling { .. } => None,
-            StuckState::Idle(..) | StuckState::AgentOut(..) => {
+            StuckState::Idle(..)
+            | StuckState::AgentOut(..)
+            | StuckState::ReviewerDown(..) => {
                 Some(Timestamp(at.0.saturating_add(quiet_backoff(nones))))
             }
         };
@@ -635,6 +706,24 @@ impl Runner {
 // Whether `wake` is a stuck wake for `state`.
 fn same_state(wake: &Wake, state: &StuckState) -> bool {
     matches!(wake, Wake::Stuck { state: now, .. } if now == state)
+}
+
+// The wake for `item`, at the gate with its head unread since `kept.since`
+fn read_again_wake(item: &WorkItem, kept: ReadAgain) -> Wake {
+    let why = match item.unreviewed.as_deref() {
+        Some(why) => format!(": {why}"),
+        None => String::new(),
+    };
+    Wake::Stuck {
+        ticket: item.issue,
+        what: format!(
+            "no reviewer has read its pull request since {} UTC{why}. Kelpie starts one new \
+             review pass every {} minutes until one reads it.",
+            date_time(kept.since),
+            READ_AGAIN / 60
+        ),
+        state: StuckState::ReviewerDown(kept.since),
+    }
 }
 
 // The wake for `ticket`'s work item, parked on `ruling`, if that is a stuck
