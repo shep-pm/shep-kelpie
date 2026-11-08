@@ -1,6 +1,6 @@
 # Who a triage comment is for
 
-What a triage comment says of the maintainer depends on whose issue it is (#1144). The label does not change: every pass that is not ready ends at `needs-approval`. The pass and its post are in `triage-pass.md`, the author's round in `triage-author.md`.
+What a triage comment says of the maintainer depends on whose issue it is (#1144). The label does not change: every pass that is not ready ends at `needs-approval`. The pass and its post are in `triage-pass.md`, the author's round in `triage-author.md` and `triage-answers.md`.
 
 - `Reader` (`runner/triage/facts.rs`) is told to the representative with the facts: `Maintainer` on an issue whose author is `Runner::maintainer()`, ignoring case, `Mentioned` on someone else's hand-over comment, `Other` otherwise.
 - The maintainer's issue whose rewrite the check passes (`Wording.ready`): the facts say the issue as kelpie rewrites it passes its issue check, that the body goes over the issue's and `ready-for-agent` goes on, and name the priority the pass put on.

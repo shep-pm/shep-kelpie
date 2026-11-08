@@ -1,6 +1,6 @@
 # Triage's limits
 
-The four limits an issue passes before the spam check and the research call (#887): the daily cap, the author's cap, the account's age and the body's size. The settings, the pick rule and the verb are in `triage.md`, the pass itself in `triage-pass.md`, the author's round in `triage-author.md`, the classifier in `triage-spam.md`.
+The four limits an issue passes before the spam check and the research call (#887): the daily cap, the author's cap, the account's age and the body's size. The settings, the pick rule and the verb are in `triage.md`, the pass itself in `triage-pass.md`, the author's round in `triage-author.md` and `triage-answers.md`, the classifier in `triage-spam.md`.
 
 - The four limits are checked in order before the spam check and the research call, none a model call. `runner/triage/limits.rs`
   - `per_day`: at most this many calls in any 24 hours, counted from the calls the records save and those saved for an issue with no record yet, which a restart does not lose. Past it an issue waits in `triage.due` for the next free place and is never dropped. A cap above `MOST_PER_DAY` (200, the same as `TRIAGED_KEPT`) is refused at the settings check: that many finished records, a call-holding one ahead of one holding none, is all a 24 hour count can see.

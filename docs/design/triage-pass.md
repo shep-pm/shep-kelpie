@@ -1,6 +1,6 @@
 # The triage pass
 
-One issue's pass. Settings: `triage.md`; the check that owes it: `triage-check.md`; answers: `triage-author.md`; the maintainer's issue rewritten and made ready: `triage-ready.md`; images: `triage-images.md`; a duplicate: `triage-duplicate.md`.
+One issue's pass. Settings: `triage.md`; the check that owes it: `triage-check.md`; answers: `triage-answers.md`; the maintainer's issue rewritten and made ready: `triage-ready.md`; images: `triage-images.md`; a duplicate: `triage-duplicate.md`.
 
 - `Runner::triage_due` runs after `contribution_due` and before the board pick, with the board open, a free slot, an App and no drain. It takes a queued issue before the oldest in `triage.due`, one per poll. Forge reads precede the lock (`runner-lock.md`). `runner/triage/`
 - Before the first call, `Tickets::issue_comments` reads for the App's last-line `<!-- kelpie:triage -->` marker: it records the issue without a call. `<!-- kelpie:triage duplicate #n -->` also closes it. Other authors' markers count for nothing. The verb reads past its old comment. `flight/triage.rs` uses its own ledger `KEY`.
