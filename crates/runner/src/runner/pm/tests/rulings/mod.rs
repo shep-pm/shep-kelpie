@@ -1,6 +1,7 @@
 //! The rulings `rulings.pm_decides` leaves to the project manager: its answer
 //! is applied and posted, anything else goes to the maintainer with its pick,
-//! and a `no <note>` on its answer reopens the ruling
+//! a `no <note>` on its answer reopens it, and a timed-out or failed turn's
+//! ruling keeps the head its worktree stood at
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -18,6 +19,8 @@ use crate::state::{Ruling, RulingKind, Stuck};
 use crate::test::ticket;
 use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted};
 use crate::work_item::{Awaited, Phase, Review, ReviewStage, Turn, WorkItem};
+
+mod head;
 
 /// A project whose project manager answers merge rulings, with CI green and
 /// the worker parked on merge ruling 71, which is judged under `merging`

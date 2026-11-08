@@ -14,7 +14,7 @@ mod threads;
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use self::ci::CiReads;
 pub(super) use self::ci::ended_red;
@@ -53,6 +53,8 @@ pub(super) struct Parked {
     pub(super) contribution: bool,
     // Its worker's session, whose transcript says what the worker said
     pub(super) session: SessionId,
+    // Its worktree, whose clone holds the commits its worker never pushed
+    worktree: PathBuf,
 }
 
 // What one case reads of the forge and the ticket source
@@ -146,6 +148,7 @@ impl Runner {
                 pull,
                 contribution,
                 session: item.session.clone(),
+                worktree: item.worktree.clone(),
             });
         }
         parked

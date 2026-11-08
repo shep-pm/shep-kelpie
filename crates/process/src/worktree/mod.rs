@@ -43,7 +43,7 @@ pub use adopt::adopt;
 pub use borrowed::borrowed;
 pub use cache::{Pruned, TurnMark, prune};
 pub use catch_up::{Rebase, rebase};
-pub use changed::changed_files;
+pub use changed::{Moved, changed_files, moved_since};
 pub use contribution::{
     Change, Opaque, Touched, change as contribution_change, changed_paths,
     checkout as contribution_checkout,
