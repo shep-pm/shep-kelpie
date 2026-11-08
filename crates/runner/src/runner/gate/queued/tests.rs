@@ -402,7 +402,7 @@ fn a_yes_to_a_held_ruling_approves_the_runs_and_waits_for_ci() {
 
     rig.ask(&runner, "rule", Some("71 yes"));
 
-    assert_eq!(rig.forge.approvals(), [head.clone()]);
+    assert_eq!(rig.forge.approvals(), std::slice::from_ref(&head));
     assert!(rig.forge.whole_run_reruns().is_empty());
     assert_eq!(step(&runner).unwrap(), None, "CI settles after approval");
     rig.forge
