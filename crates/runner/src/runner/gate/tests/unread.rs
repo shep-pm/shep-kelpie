@@ -6,7 +6,8 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
-use crate::ports::{AgentError, CLEAN, Checks, Role};
+use crate::board::briefing::date_time;
+use crate::ports::{AgentError, CLEAN, Checks, Clock, Role, Timestamp};
 use crate::runner::coderabbit::tests::now;
 use crate::runner::gate::READ_AGAIN;
 use crate::runner::pm::HOLD_FOR;
@@ -20,6 +21,9 @@ use crate::work_item::{LOCAL_FAILURES_DOWN, ReviewPlan};
 use super::ruling_report;
 
 const NOTHING: &str = "{\"pick\": null}";
+// The project manager leaving #7 to resolve itself, with nothing to pick
+const LEAVE_7: &str = "{\"pick\": null, \"unstick\": {\"item\": 7, \"action\": \"none\", \
+                      \"why\": \"it will come back on its own\"}}";
 const FINDING: &str = "P2: `bleats` loses a stamped prefix. Strip only files shep stamped.";
 const WAITED: &str = "no reviewer read its last review";
 const KEPT_FAILING: &str = "claude was passed over after its calls kept failing";
@@ -616,6 +620,70 @@ fn the_wake_says_kelpie_starts_a_new_pass_each_wait() {
 
     let [wake] = read_wakes(&rig).try_into().expect("one wake");
     assert!(wake.call.prompt.contains(EACH_WAIT), "{}", wake.call.prompt);
+}
+
+#[test]
+fn the_wake_names_when_the_head_went_unread() {
+    let (rig, runner, _) = at_the_gate("unread-when", true, 2, |rig| {
+        rig.claude.script_for(Role::Reviewer, down(6));
+    });
+    pm_says(&rig, [NOTHING]);
+    waiting(&rig, &runner);
+    // The wait began now, which is when the head went unread: no step moves the
+    // rig's clock on its own
+    let since = rig.clock.now();
+    let ended = Timestamp(since.0 + READ_AGAIN);
+
+    rig.clock.advance(READ_AGAIN);
+    until(&runner, |r| matches!(r, StepReport::Unreviewed { .. }));
+    rig.clock.advance(HOLD_FOR);
+    until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+
+    let [wake] = read_wakes(&rig).try_into().expect("one wake");
+    let asked = &wake.call.prompt;
+    assert!(
+        asked.contains(&format!("{WAKE_WORDS} {} UTC", date_time(since))),
+        "{asked} names no time as early as when the head went unread"
+    );
+    assert!(
+        !asked.contains(&date_time(ended)),
+        "{asked} names the time the wait ended, which is {} later than the head went unread",
+        READ_AGAIN / 60
+    );
+}
+
+#[test]
+fn a_read_wait_the_project_manager_left_alone_is_not_woken_for_again() {
+    let (rig, runner, _) = at_the_gate("unread-alone", true, 2, |rig| {
+        rig.claude.script_for(Role::Reviewer, down(9));
+    });
+    waiting(&rig, &runner);
+
+    // The maintainer tells it something while #7 waits unread, and its answer
+    // leaves #7 alone. The state it left it in is the wait's own start.
+    rig.clock.advance(300);
+    rig.ask(&runner, "tell", Some("look at the queue"));
+    pm_says(&rig, [LEAVE_7, NOTHING]);
+    until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+
+    // The wait ends with one new pass, cut short again. Its wake is held back:
+    // the item is in the same state the project manager left it in.
+    rig.clock.advance(READ_AGAIN - 300);
+    until(&runner, |r| matches!(r, StepReport::Unreviewed { .. }));
+    rig.clock.advance(HOLD_FOR);
+    steps(&runner, 6);
+
+    assert!(
+        read_wakes(&rig).is_empty(),
+        "the wait woke the project manager again after it said `none`"
+    );
+    let notes = runner.lock().unwrap().take_notes();
+    assert!(
+        notes.iter().any(|n| {
+            n.contains("waits unread at the gate") && n.contains("not woken for it again")
+        }),
+        "{notes:?}: no note says the wait was held by the `none`"
+    );
 }
 
 #[test]

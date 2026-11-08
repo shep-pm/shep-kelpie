@@ -216,11 +216,15 @@ pub(super) struct AgentOut {
     back: Timestamp,
 }
 
-/// An item at the gate waiting for a reviewer to read its head: when its current
-/// wait began, and whether a wait of its own has already woken the project manager
+/// An item at the gate waiting for a reviewer to read its head
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ReadAgain {
+    /// When its head went unread, which its wake names and its stuck state keys
+    /// on, so a later wait is the same state and not a new one
     pub(super) since: Timestamp,
+    /// When the next new pass is due
+    next: Timestamp,
+    /// Whether a wait of its own has already woken the project manager
     woken: bool,
 }
 
@@ -342,20 +346,21 @@ impl Runner {
     /// Records that `ticket` waits at the gate for a reviewer to read its head, and
     /// says whether that wait has run `wait` seconds
     ///
-    /// The first look begins the wait. An ended one starts the next from now, and
-    /// is the item's first, which wakes the project manager, only until one has
-    /// gone out for it.
+    /// The first look begins the wait and the time it names, which later waits
+    /// keep. An ended one starts the next from now, and is the item's first,
+    /// which wakes the project manager, only until one has gone out for it.
     pub(in crate::runner) fn pm_read_wait(&mut self, ticket: TicketId, wait: u64) -> ReadWait {
         let now = self.ports.clock.now();
         let kept = self.pm.read_again.entry(ticket).or_insert(ReadAgain {
             since: now,
+            next: Timestamp(now.0.saturating_add(wait)),
             woken: false,
         });
-        if now.0.saturating_sub(kept.since.0) < wait {
+        if now < kept.next {
             return ReadWait::Running;
         }
         let wake = !kept.woken;
-        kept.since = now;
+        kept.next = Timestamp(now.0.saturating_add(wait));
         kept.woken |= wake;
         ReadWait::Ended { wake }
     }
