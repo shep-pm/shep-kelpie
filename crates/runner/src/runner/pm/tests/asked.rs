@@ -549,6 +549,7 @@ fn no_worker_turn() -> Vec<(&'static str, RulingKind)> {
             stuck(Stuck::CheckQueued {
                 head: "abc".into(),
                 checks: Vec::new(),
+                held: Vec::new(),
                 run: None,
                 url: String::new(),
                 review: None,

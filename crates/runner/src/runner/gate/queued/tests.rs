@@ -12,6 +12,7 @@ fn stuck(name: &str, run: u64) -> Queued {
         name: name.to_owned(),
         run: Some(run),
         running: false,
+        held: false,
     }
 }
 
@@ -217,6 +218,7 @@ const OTHER: u64 = 39_697_679_104;
 fn docs_in_progress() -> Queued {
     Queued {
         running: true,
+        held: false,
         ..stuck("docs", OTHER)
     }
 }
@@ -274,6 +276,7 @@ fn a_check_of_a_rerun_run_still_going_is_ruled_on_only_past_a_jobs_timeout() {
     // The rerun started, and its job is running
     let running = Queued {
         running: true,
+        held: false,
         ..stuck("windows-gnu", RUN)
     };
     rig.forge.set_checks(&head, Checks::Pending(vec![running]));
@@ -298,6 +301,7 @@ fn pages_deploy() -> Queued {
         name: "Cloudflare Pages".to_owned(),
         run: None,
         running: true,
+        held: false,
     }
 }
 
@@ -354,4 +358,38 @@ fn a_yes_on_a_runless_check_queued_reruns_nothing_and_waits_again() {
     assert_eq!(step(&runner).unwrap(), None, "it waits again");
     rig.clock.advance(JOB_TIMEOUT - 1);
     assert_eq!(step(&runner).unwrap(), None, "the wait starts from the yes");
+}
+
+#[test]
+fn a_head_whose_checks_are_all_held_is_ruled_on_at_once() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    rig.forge
+        .set_held_checks(&head, &[("test.yml", RUN), ("docs.yml", OTHER)]);
+
+    let (_, question) = ruling_report(rig.verdict(&runner));
+
+    assert!(
+        question.contains("wait for the maintainer's approval"),
+        "{question}"
+    );
+    for run in [RUN, OTHER] {
+        assert!(
+            question.contains(&format!(
+                "https://github.com/shep-pm/shep/actions/runs/{run}"
+            )),
+            "{question}"
+        );
+    }
+    assert!(
+        question.contains("pull request's code on GitHub's runners"),
+        "{question}"
+    );
+    assert!(question.contains("not on this machine"), "{question}");
+    assert!(rig.forge.whole_run_reruns().is_empty());
+    assert!(rig.forge.approvals().is_empty());
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(
+        status["rulings"][0]["kind"]["reason"], "check-queued",
+        "{status}"
+    );
 }

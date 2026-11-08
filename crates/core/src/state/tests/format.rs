@@ -95,6 +95,7 @@ fn the_file_format_is_pinned() {
         RulingKind::from(Stuck::CheckQueued {
             head: "c0ffee".into(),
             checks: vec!["windows-gnu".into()],
+            held: Vec::new(),
             run: Some(39_697_676_985),
             url: "https://github.com/shep-pm/shep/actions/runs/39697676985".into(),
             review: None,

@@ -59,6 +59,30 @@ impl Runner {
         queued: &[Queued],
         review: Option<&Review>,
     ) -> Result<Option<Begin>, StateError> {
+        if !queued.is_empty() && queued.iter().all(|check| check.held) {
+            let remote = self.remote.as_str();
+            let held = queued
+                .iter()
+                .filter_map(|check| check.run)
+                .map(|run| format!("https://github.com/{remote}/actions/runs/{run}"))
+                .collect();
+            return self
+                .raise(
+                    number,
+                    Stuck::CheckQueued {
+                        head: head.to_owned(),
+                        checks: queued.iter().map(|check| check.name.clone()).collect(),
+                        held,
+                        run: None,
+                        url: format!("https://github.com/{remote}/pull/{number}/checks"),
+                        review: review.cloned(),
+                    }
+                    .into(),
+                )
+                .map(Some);
+        }
+        let active: Vec<Queued> = queued.iter().filter(|check| !check.held).cloned().collect();
+        let queued = active.as_slice();
         let now = self.ports.clock.now();
         let cap = u64::from(self.settings.ci.queued_minutes.get()) * 60;
         if now.0.saturating_sub(since.0) < cap {
@@ -98,6 +122,7 @@ impl Runner {
             let stuck = Stuck::CheckQueued {
                 head: head.to_owned(),
                 checks,
+                held: Vec::new(),
                 run: first,
                 url,
                 review: review.cloned(),
