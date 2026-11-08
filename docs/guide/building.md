@@ -64,7 +64,7 @@ A plugin that cannot load is skipped, the runner logs why and the run goes on: n
 
 A project adds a plugin the repo does not name in its `[app.dogs.kelpie.repo_setup]` table, with `extra`. It narrows nothing: the repo's `.claude` files already say what an agent working there gets. Every key is optional, an unknown key stops the runner naming it, and a change is read as the runner rereads its settings.
 
-The keys `plugins`, `own`, `roles`, `parts` and `skip` still load and nothing reads them. A project that narrowed with them gets everything the repo sets up on its next reread.
+The keys `plugins`, `own`, `roles`, `parts` and `skip` are gone: the runner refuses each by name until `shep kelpie settings migrate` deletes it, which `shep kelpie upgrade` runs. A project that narrowed with them gets everything the repo sets up once they are out of its table.
 
 - `extra`: plugins the repo does not turn on, each as `name@marketplace` with its marketplace's source as one string: `github:owner/name`, `git:<url>` or `directory:<folder inside the checkout>`, and `#<branch or tag>` after a `github` or `git` address. The kinds are those of the `source` in an `extraKnownMarketplaces` entry. A marketplace given here takes the place of the repo's of the same name, and two plugins of one marketplace must give the same source. An extra plugin that cannot load is skipped with its reason, as the repo's are. It reaches the worker, the reviewers and the project manager, as the repo's plugins do.
 

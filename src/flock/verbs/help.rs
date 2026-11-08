@@ -97,7 +97,7 @@ pub const TABLE: &[Row] = &[
     row(
         "set",
         "<key> <value>",
-        "change one setting, such as git.merging auto",
+        "change one setting, such as ci.block false",
     ),
     row(
         "get",

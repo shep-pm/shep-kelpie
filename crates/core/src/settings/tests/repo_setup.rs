@@ -1,5 +1,5 @@
-//! `[app.dogs.kelpie.repo_setup]`, whose `extra` adds a plugin the repo does not name and whose
-//! other keys still load, read by nothing
+//! `[app.dogs.kelpie.repo_setup]`, whose one key `extra` adds a plugin the repo
+//! does not name
 
 use super::{EXAMPLE, parse, parse_err};
 
@@ -8,11 +8,8 @@ fn with(keys: &str) -> String {
 }
 
 #[test]
-fn left_out_the_table_narrows_nothing_and_adds_nothing() {
-    let setup = parse(EXAMPLE).unwrap().repo_setup;
-    assert!(setup.plugins && setup.own);
-    assert!(setup.skip.is_empty());
-    assert!(setup.extra.is_empty());
+fn left_out_the_table_adds_nothing() {
+    assert!(parse(EXAMPLE).unwrap().repo_setup.extra.is_empty());
 }
 
 #[test]
@@ -25,52 +22,56 @@ fn an_unknown_key_is_refused_by_name() {
 }
 
 #[test]
-fn the_keys_that_used_to_narrow_still_load() {
-    let keys = "plugins = false\nown = false\nroles = [\"worker\", \"pm\"]\n\
-                parts = [\"skills\", \"agents\"]\nskip = [\"style@house\"]";
-    let setup = parse(&with(keys)).unwrap().repo_setup;
-    assert!(!setup.plugins && !setup.own);
-    assert_eq!(
-        (setup.roles.len(), setup.parts.len(), setup.skip.len()),
-        (2, 2, 1)
-    );
-}
-
-#[test]
-fn a_role_kelpie_has_no_call_for_is_refused() {
-    let err = parse_err(&with("roles = [\"implementer\"]"));
-    assert!(err.contains("repo_setup.roles"), "{err}");
-    assert!(err.contains("worker, reviewer"), "{err}");
-}
-
-#[test]
-fn a_role_that_went_with_the_panel_is_refused_naming_it() {
-    for gone in ["advisor", "researcher"] {
-        let err = parse_err(&with(&format!("roles = [\"worker\", \"{gone}\"]")));
-        assert!(err.contains("repo_setup.roles"), "{gone}: {err}");
-        assert!(err.contains("`advisor` and `researcher`"), "{gone}: {err}");
-        assert!(err.contains("ruling panel"), "{gone}: {err}");
+fn the_narrowing_keys_are_refused_by_name_and_say_migrate_deletes_them() {
+    let gone = [
+        "plugins = false",
+        "own = false",
+        "roles = [\"worker\", \"issue-writer\"]",
+        "parts = [\"skills\", \"themes\"]",
+        "skip = [\"style@house\"]",
+    ];
+    for key in gone {
+        let err = parse_err(&with(key));
+        let name = key.split([' ', '=']).next().unwrap();
+        assert!(
+            err.contains(&format!("`repo_setup.{name}`")),
+            "{key}: {err}"
+        );
+        assert!(
+            err.contains("the repo's `.claude` files decide what loads"),
+            "{key}: {err}"
+        );
+        assert!(err.contains("shep kelpie settings migrate"), "{key}: {err}");
     }
-}
-
-#[test]
-fn the_issue_writers_role_is_refused_naming_it_and_the_migration() {
-    let err = parse_err(&with("roles = [\"worker\", \"issue-writer\"]"));
-    assert!(err.contains("repo_setup.roles"), "{err}");
-    assert!(
-        err.contains("`issue-writer` went with the issue writer"),
-        "{err}"
+    let whole = parse_err(&with(&gone.join("\n")));
+    let named: Vec<&str> = whole
+        .lines()
+        .skip(1)
+        .map(|line| line.split('`').nth(1).unwrap())
+        .collect();
+    assert_eq!(
+        named,
+        [
+            "repo_setup.plugins",
+            "repo_setup.own",
+            "repo_setup.roles",
+            "repo_setup.parts",
+            "repo_setup.skip",
+        ],
+        "a table that narrowed names every key it must drop at once"
     );
-    assert!(err.contains("shep kelpie settings migrate"), "{err}");
+    assert!(parse(EXAMPLE).is_ok(), "the example sets none of them");
 }
 
 #[test]
 fn a_plugin_is_written_name_at_marketplace() {
     for bad in ["style", "style@", "@house", "a@b@c", "../x@house"] {
-        let err = parse_err(&with(&format!("skip = [{bad:?}]")));
+        let err = parse_err(&with(&format!(
+            "extra = {{ {bad:?} = \"github:acme/lab\" }}"
+        )));
         assert!(err.contains("name@marketplace"), "{bad}: {err}");
     }
-    assert!(parse(&with("skip = [\"style@house\"]")).is_ok());
+    assert!(parse(&with("extra = { \"style@house\" = \"github:acme/lab\" }")).is_ok());
 }
 
 #[test]
@@ -108,15 +109,5 @@ fn a_marketplace_is_written_kind_colon_address() {
             serde_json::json!({ "source": { "source": "git", "url": "https://h/r.git" } }),
             serde_json::json!({ "source": { "source": "directory", "path": "plugins/y" } }),
         ]
-    );
-}
-
-#[test]
-fn a_part_a_plugin_lacks_is_refused() {
-    let err = parse_err(&with("parts = [\"themes\"]"));
-    assert!(err.contains("repo_setup.parts"), "{err}");
-    assert!(
-        err.contains("skills, agents, commands, hooks or mcp"),
-        "{err}"
     );
 }

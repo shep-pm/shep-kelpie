@@ -381,7 +381,7 @@ pub(in crate::runner) fn question(
         }) => {
             return format!(
                 "The reviewers' pass over {about} has ended and CI is green on {}, and nobody \
-                 merges someone else's work but you, whatever `git.merging` says. {yes} merges \
+                 merges someone else's work but you, whatever `rulings.pm_decides` says. {yes} merges \
                  this head and the representative thanks the contributor. {no} merges nothing: \
                  the representative words your note for the contributor and posts it, and a no \
                  with no note posts nothing. There is no `rework`, because kelpie cannot push \
@@ -397,7 +397,7 @@ pub(in crate::runner) fn question(
             let rework = trigger("rework <note>");
             return format!(
                 "The reviewers' pass over {about} has ended and CI is green on {}, and nobody \
-                 merges someone else's work but you, whatever `git.merging` says. {yes} merges \
+                 merges someone else's work but you, whatever `rulings.pm_decides` says. {yes} merges \
                  this head and the representative thanks the contributor. {no} merges nothing: \
                  the representative words your note for the contributor and posts it, and a no \
                  with no note posts nothing. {rework} takes the pull request over: kelpie opens \
