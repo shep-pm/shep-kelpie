@@ -111,7 +111,8 @@ async fn follow(mut visit: Visit, out: &mut impl Write) -> Ended {
                 | Answer::Wait(_)
                 | Answer::Held(_)
                 | Answer::Picks(_)
-                | Answer::Fits(_)),
+                | Answer::Fits(_)
+                | Answer::Credit(_)),
             )) => {
                 return Ended::Refused(told(&format!("the dog answered {other:?} to the e2e ask")));
             }

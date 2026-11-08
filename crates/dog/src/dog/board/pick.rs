@@ -38,7 +38,7 @@ impl View {
 
     /// Each agent and kind the ledgers give a record to
     pub(super) fn tallies(&self) -> BTreeMap<(String, Option<String>), Record> {
-        agent_board::records(self.ledgers.iter().flat_map(|l| l.iter()))
+        agent_board::records(self.ledgers.iter().flat_map(|l| l.finished.iter()))
     }
 
     /// Each agent's track record per kind of work, from every project's ledger
@@ -73,7 +73,7 @@ impl View {
             .map(|(name, agent)| (name.as_str(), agent.fit.tier()))
             .collect();
         let tier_of = |name: &str| tiers.get(name).copied();
-        History::new(self.ledgers.iter().flat_map(|l| l.iter()), tier_of)
+        History::new(self.ledgers.iter().flat_map(|l| l.finished.iter()), tier_of)
     }
 }
 
@@ -176,7 +176,7 @@ fn estimate(
 }
 
 // Whether `agent` is billed to the API key
-fn bills_api(agent: &Agent) -> bool {
+pub(super) fn bills_api(agent: &Agent) -> bool {
     (agent.runs.session()).is_some_and(|(model, _)| model.harness.bills_api())
 }
 

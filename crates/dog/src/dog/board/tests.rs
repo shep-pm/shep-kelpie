@@ -55,6 +55,11 @@ fn wrote(
         "worker": role(4), "reviewer": role(1), "qwen": { "rounds": 0, "seconds": 0 },
         "review_rounds": 0, "fix_turns": 0, "rulings": 0, "agent": agent, "kind": kind,
     });
+    lines(home, project, &line, n);
+}
+
+// Appends `line` to `project`'s ledger under `home`, `n` times, making the folder when it is not there
+fn lines(home: &Path, project: &str, line: &Value, n: usize) {
     let folder = home.join(project);
     fs::create_dir_all(&folder).unwrap();
     let mut ledger = (OpenOptions::new().create(true).append(true))
@@ -65,8 +70,37 @@ fn wrote(
     }
 }
 
+// Adds a `call` line to `project`'s ledger under `home`: `agent`'s call at `at`,
+// costing `cost_usd`. None for `agent` names none, and for `cost_usd` reports no cost.
+pub(in crate::dog) fn call(
+    home: &Path,
+    project: &str,
+    agent: Option<&str>,
+    at: u64,
+    cost_usd: Option<f64>,
+) {
+    let mut line = json!({
+        "line": "call", "at": at, "issue": 7, "role": "worker", "kind": "turn",
+        "usage": { "input": 0, "cache_write": 0, "cache_read": 0, "output": 0 },
+        "units": 0, "ended": "answered",
+    });
+    if let Some(agent) = agent {
+        line["agent"] = json!(agent);
+    }
+    match cost_usd {
+        Some(usd) => line["cost_usd"] = json!(usd),
+        None => line["unpriced"] = json!(true),
+    }
+    lines(home, project, &line, 1);
+}
+
 fn items(board: &Mutex<Board>) -> usize {
-    lock(board).view().ledgers.iter().map(|l| l.len()).sum()
+    lock(board)
+        .view()
+        .ledgers
+        .iter()
+        .map(|l| l.finished.len())
+        .sum()
 }
 
 #[test]
@@ -704,4 +738,143 @@ async fn the_answer_reports_each_agents_cost_and_tier_and_ranks_none() {
         [plan, local, billed],
         "the dearer plan agent finishes first, ahead of the free local one and the held one"
     );
+}
+
+// EPOCH is 2026-09-21T14:13:20Z: the first second of its UTC month, of the
+// month before it, and of the month after it.
+const MONTH: u64 = 1_788_220_800;
+const LAST_MONTH: u64 = 1_785_542_400;
+const NEXT_MONTH: u64 = 1_790_812_800;
+
+// Two implementers billed to the API key, and one on the Claude plan
+fn billed_billed_and_plan(dir: &Path) -> Agents {
+    write_in(dir, "billed.md", &format!("{ON_CLAUDE}login: api\n---\n"));
+    write_in(dir, "other.md", &format!("{ON_CLAUDE}login: api\n---\n"));
+    write_in(dir, "plan.md", &format!("{ON_CLAUDE}---\n"));
+    Agents::load(dir).unwrap()
+}
+
+#[test]
+fn the_months_api_spend_sums_every_projects_priced_calls_of_api_agents() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = billed_billed_and_plan(&dir.path().join("agents"));
+    let home = dir.path().join("kelpie");
+    call(&home, "koji", Some("billed"), EPOCH, Some(1.5));
+    call(&home, "koji", Some("billed"), MONTH, Some(0.5));
+    call(&home, "golbat", Some("other"), EPOCH + 60, Some(2.0));
+    let board = Mutex::new(Board::new(&agents));
+    refresh(&board, &home);
+
+    let credit = lock(&board).view().credit(Timestamp(EPOCH));
+
+    assert_eq!(
+        credit.spent_usd, 4.0,
+        "both projects, both agents, one month"
+    );
+    assert_eq!((credit.since, credit.resets_at), (MONTH, NEXT_MONTH));
+}
+
+#[test]
+fn a_call_from_an_earlier_month_is_left_out_of_the_sum() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = billed_billed_and_plan(&dir.path().join("agents"));
+    let home = dir.path().join("kelpie");
+    call(&home, "koji", Some("billed"), LAST_MONTH + 60, Some(9.0));
+    call(&home, "koji", Some("billed"), EPOCH, Some(1.5));
+    let board = Mutex::new(Board::new(&agents));
+    refresh(&board, &home);
+    let view = lock(&board).view();
+
+    let this = view.credit(Timestamp(EPOCH));
+    let next = view.credit(Timestamp(NEXT_MONTH));
+
+    assert_eq!(this.spent_usd, 1.5, "the August call is not this month's");
+    assert_eq!(
+        (next.spent_usd, next.since, next.resets_at),
+        (0.0, NEXT_MONTH, 1_793_491_200),
+        "the sum drops the call once the clock crosses the first of the month"
+    );
+}
+
+#[test]
+fn a_plan_agent_an_unpriced_call_and_a_line_with_no_agent_add_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = billed_billed_and_plan(&dir.path().join("agents"));
+    let home = dir.path().join("kelpie");
+    call(&home, "koji", Some("plan"), EPOCH, Some(3.0));
+    call(&home, "koji", Some("billed"), EPOCH, None);
+    call(&home, "koji", None, EPOCH, Some(7.0));
+    let board = Mutex::new(Board::new(&agents));
+    refresh(&board, &home);
+
+    let credit = lock(&board).view().credit(Timestamp(EPOCH));
+
+    assert_eq!(
+        credit.spent_usd, 0.0,
+        "only a priced call of an API agent counts"
+    );
+}
+
+#[test]
+fn a_project_manager_on_login_api_counts_toward_the_spend() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("agents");
+    let pm = "---\nrole: pm\nharness: claude-code\nmodel: claude-sonnet-5-5\n\
+              effort: high\nlogin: api\n---\nKeep the board.\n";
+    write_in(&folder, "pm.md", pm);
+    let agents = Agents::load(&folder).unwrap();
+    let home = dir.path().join("kelpie");
+    call(&home, "koji", Some("pm"), EPOCH, Some(2.0));
+    let board = Mutex::new(Board::new(&agents));
+    refresh(&board, &home);
+
+    let credit = lock(&board).view().credit(Timestamp(EPOCH));
+
+    assert_eq!(
+        credit.spent_usd, 2.0,
+        "the board holds every agent that bills the key, whatever its role"
+    );
+}
+
+#[test]
+fn an_agent_file_that_gains_login_api_counts_from_the_next_ask() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("agents");
+    write_in(&folder, "billed.md", &format!("{ON_CLAUDE}---\n"));
+    let home = dir.path().join("kelpie");
+    call(&home, "koji", Some("billed"), EPOCH, Some(1.5));
+    call(&home, "koji", Some("stray"), EPOCH, Some(4.0));
+    let board = Mutex::new(Board::new(&Agents::load(&folder).unwrap()));
+    refresh(&board, &home);
+
+    let before = lock(&board).view().credit(Timestamp(EPOCH));
+    write_in(
+        &folder,
+        "billed.md",
+        &format!("{ON_CLAUDE}login: api\n---\n"),
+    );
+    lock(&board).set_agents(&Agents::load(&folder).unwrap());
+    let after = lock(&board).view().credit(Timestamp(EPOCH));
+
+    assert_eq!(
+        (before.spent_usd, after.spent_usd),
+        (0.0, 1.5),
+        "the ask reads the book as it is now: `stray` has no file, so it never counts"
+    );
+}
+
+#[test]
+fn the_sum_moves_when_a_ledger_gains_a_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = billed_billed_and_plan(&dir.path().join("agents"));
+    let home = dir.path().join("kelpie");
+    call(&home, "koji", Some("billed"), EPOCH, Some(1.5));
+    let board = Mutex::new(Board::new(&agents));
+    refresh(&board, &home);
+    let spent = || lock(&board).view().credit(Timestamp(EPOCH)).spent_usd;
+
+    assert_eq!(spent(), 1.5);
+    call(&home, "koji", Some("billed"), EPOCH + 60, Some(2.5));
+    assert_eq!(spent(), 1.5, "the board has not read the ledger again yet");
+    assert_eq!((refresh(&board, &home), spent()), (1, 4.0));
 }
