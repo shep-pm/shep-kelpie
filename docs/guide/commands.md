@@ -30,10 +30,10 @@ shep kelpie tools install
 shep kelpie github setup   # once per repo owner, with --org <org> for an organization
 shep kelpie totp       # once, to answer rulings from ntfy
 shep kelpie lease status
-shep kelpie get git.merging        # one setting of the project's table, or all of it with no key
-shep kelpie set git.merging auto   # changes one setting
-shep kelpie get -p '*' git.merging   # one line per project whose name matches the quoted glob
-shep kelpie set -p 'shep*' git.merging auto   # the same in every one of them, or in none if one refuses
+shep kelpie get ci.block          # one setting of the project's table, or all of it with no key
+shep kelpie set ci.block false    # changes one setting
+shep kelpie get -p '*' ci.block   # one line per project whose name matches the quoted glob
+shep kelpie set -p 'shep*' ci.block false   # the same in every one of them, or in none if one refuses
 shep kelpie version    # this build, the commit it was made from and the shep it is made with, or --json for one line
 ```
 

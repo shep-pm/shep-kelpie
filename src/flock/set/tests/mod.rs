@@ -284,7 +284,7 @@ impl Scene {
 #[tokio::test]
 async fn set_writes_a_word_and_a_list_and_get_shows_both() {
     let mut scene = Scene::new().await;
-    scene.set("git.merging", "auto").await.unwrap();
+    scene.set("ci.block", "false").await.unwrap();
     scene
         .set("worker.allowed_domains", r#"["crates.io"]"#)
         .await
@@ -293,8 +293,8 @@ async fn set_writes_a_word_and_a_list_and_get_shows_both() {
     let writes = scene.shepherd.writes();
     assert_eq!(writes.len(), 2, "{writes:?}");
     assert_eq!(
-        scene.get("koji", Some("git.merging")).await.unwrap(),
-        [r#""auto""#]
+        scene.get("koji", Some("ci.block")).await.unwrap(),
+        ["false"]
     );
     assert_eq!(
         scene
@@ -304,7 +304,7 @@ async fn set_writes_a_word_and_a_list_and_get_shows_both() {
         [r#"["crates.io"]"#]
     );
     let whole = scene.get("koji", None).await.unwrap().join("\n");
-    assert!(whole.contains("merging = \"auto\""), "{whole}");
+    assert!(whole.contains("block = false"), "{whole}");
     assert!(
         whole.contains("allowed_domains = [\"crates.io\"]"),
         "{whole}"
@@ -345,9 +345,9 @@ async fn an_old_reviewers_key_loads_and_is_read_by_nothing() {
 async fn set_leaves_every_other_key_as_it_was() {
     let scene = Scene::new().await;
     let before = scene.table();
-    scene.set("git.merging", "auto").await.unwrap();
+    scene.set("ci.block", "false").await.unwrap();
     let mut expected = before;
-    expected["git"]["merging"] = "auto".into();
+    expected["ci"]["block"] = false.into();
     assert_eq!(scene.table(), expected);
 }
 
@@ -369,10 +369,10 @@ async fn a_value_that_does_not_fit_is_refused_with_the_settings_reason_and_nothi
     let mut scene = Scene::new().await;
     let before = scene.table();
     for (key, value, reason) in [
-        ("git.merging", "sometimes", "merging"),
+        ("ci.block", "sometimes", "block"),
         ("git.nonsense", "1", "nonsense"),
         ("nonsense", "1", "nonsense"),
-        ("git.merging.deeper", "1", "git.merging"),
+        ("ci.block.deeper", "1", "ci.block"),
     ] {
         let refused = scene.set(key, value).await.unwrap_err();
         assert!(refused.contains(reason), "{key}: {refused}");
@@ -387,17 +387,17 @@ async fn a_value_that_does_not_fit_is_refused_with_the_settings_reason_and_nothi
 async fn the_refusal_is_the_one_from_settings_from_table() {
     let scene = Scene::new().await;
     let mut table = scene.table();
-    table["git"]["merging"] = "sometimes".into();
+    table["ci"]["block"] = "sometimes".into();
     let home = scene.shepherd.scratch("home");
     let why = Settings::from_table(&table, "koji", &home, &home).unwrap_err();
-    let refused = scene.set("git.merging", "sometimes").await.unwrap_err();
+    let refused = scene.set("ci.block", "sometimes").await.unwrap_err();
     assert_eq!(refused, why.to_string());
 }
 
 #[tokio::test]
 async fn get_of_a_key_the_table_does_not_set_is_refused_naming_it() {
     let scene = Scene::new().await;
-    for key in ["git.review", "nothing", "git.merging.deeper"] {
+    for key in ["git.review", "nothing", "ci.block.deeper"] {
         let refused = scene.get("koji", Some(key)).await.unwrap_err();
         assert!(refused.contains(&format!("`{key}`")), "{refused}");
     }
@@ -407,7 +407,7 @@ async fn get_of_a_key_the_table_does_not_set_is_refused_naming_it() {
 async fn a_project_with_no_table_is_refused_pointing_at_add() {
     let mut scene = Scene::new().await;
     let refused = scene
-        .set_on("rotom", "git.merging", "auto")
+        .set_on("rotom", "ci.block", "false")
         .await
         .unwrap_err();
     assert!(refused.contains("shep kelpie add rotom"), "{refused}");
@@ -475,7 +475,7 @@ async fn a_checkout_moved_to_one_no_other_project_runs_is_written_and_waits_for_
         Path::new(scene.table()["git"]["checkout"].as_str().unwrap()),
         spare
     );
-    let said = scene.set("git.merging", "auto").await.unwrap();
+    let said = scene.set("ci.block", "false").await.unwrap();
     assert!(said[0].ends_with("at its next wake"), "{said:?}");
 }
 
@@ -551,19 +551,16 @@ async fn a_glob_writes_every_project_whose_name_matches_and_no_other() {
     );
     let _ = scene.shepherd.writes();
 
-    let said = scene
-        .set_all("shep*", "git.merging", r#""auto""#)
-        .await
-        .unwrap();
+    let said = scene.set_all("shep*", "ci.block", "false").await.unwrap();
 
     assert_eq!(
         said,
         ["shep", "shep-kelpie", "shepherd"]
-            .map(|name| format!(r#"project {name}: git.merging = "auto"; {WAKE}"#))
+            .map(|name| format!("project {name}: ci.block = false; {WAKE}"))
     );
     assert_eq!(scene.shepherd.writes().len(), 3);
     for name in ["shep", "shep-kelpie", "shepherd"] {
-        assert_eq!(scene.table_of(name)["git"]["merging"], "auto", "{name}");
+        assert_eq!(scene.table_of(name)["ci"]["block"], false, "{name}");
     }
     assert_eq!(scene.table(), koji);
     assert_eq!(scene.table_of("eevee"), eevee);
@@ -608,7 +605,7 @@ async fn one_project_refusing_the_value_means_no_project_is_written_and_the_erro
 async fn every_project_that_refuses_the_value_is_named() {
     let mut scene = Scene::new().await;
     let refused = scene
-        .set_all("*", "git.merging", "sometimes")
+        .set_all("*", "ci.block", "sometimes")
         .await
         .unwrap_err();
     assert!(refused.contains("project eevee"), "{refused}");
@@ -620,11 +617,11 @@ async fn every_project_that_refuses_the_value_is_named() {
 async fn a_glob_that_matches_no_project_is_an_error_and_nothing_is_written() {
     let mut scene = Scene::new().await;
     let refused = scene
-        .set_all("nothing*", "git.merging", "auto")
+        .set_all("nothing*", "ci.block", "false")
         .await
         .unwrap_err();
     assert!(refused.contains("nothing*"), "{refused}");
-    let refused = scene.get_all("nothing*", "git.merging").await.unwrap_err();
+    let refused = scene.get_all("nothing*", "ci.block").await.unwrap_err();
     assert!(refused.contains("nothing*"), "{refused}");
     assert_eq!(scene.shepherd.writes(), []);
 }

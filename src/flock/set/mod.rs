@@ -350,7 +350,7 @@ fn insert(table: &mut Map<String, Value>, key: &str, value: Value) -> Result<(),
     let mut parts: Vec<&str> = key.split('.').collect();
     let last = parts.pop().filter(|last| !last.is_empty());
     let (Some(last), true) = (last, parts.iter().all(|part| !part.is_empty())) else {
-        return Err(format!("`{key}` is not a dotted key like `git.merging`"));
+        return Err(format!("`{key}` is not a dotted key like `ci.block`"));
     };
     let mut at = table;
     let mut walked = Vec::new();
