@@ -62,7 +62,6 @@ pub(super) fn names((old, was): Reach<'_>, (new, now): Reach<'_>) -> Vec<&'stati
         remote: _,   // waits for the next start
         base: old_base,
         merging: _, // read by `settings migrate` alone, which writes `rulings.pm_decides.merge`
-        issues: _,  // read by nothing
         maintainer: old_maintainer,
     } = old_git;
     let Git {
@@ -70,7 +69,6 @@ pub(super) fn names((old, was): Reach<'_>, (new, now): Reach<'_>) -> Vec<&'stati
         remote: _,
         base: new_base,
         merging: _,
-        issues: _,
         maintainer: new_maintainer,
     } = new_git;
     [

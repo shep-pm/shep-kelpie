@@ -21,10 +21,10 @@ use crate::settings::{PM_ALONE, PM_DECIDES, RulingName};
 use crate::shepherd::{self, Connection, DOG, Socket};
 use crate::webhook::KelpieSettings;
 
-/// The keys migrate deletes: the loader refuses the first eight by name and
+/// The keys migrate deletes: the loader refuses the first ten by name and
 /// ignores the rest, the four the agent board and the project manager replaced
 /// and `[pacing]`, which doctor names
-const GONE_KEYS: [&str; 13] = [
+const GONE_KEYS: [&str; 15] = [
     "rulings.decide",
     "rulings.full_panel_paths",
     "agents.advisor",
@@ -33,6 +33,8 @@ const GONE_KEYS: [&str; 13] = [
     "agents.issue_writer",
     "dependencies.on_red",
     "local_rounds.keep",
+    "git.issues",
+    "triage.hand_ready",
     "agents.implementers",
     "agents.implementer_choice",
     "agents.fallback_after",

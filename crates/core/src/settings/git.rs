@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{ForgeSlug, Gone};
+use super::ForgeSlug;
 
 /// The project's repo: where it is checked out, where it lives on GitHub,
 /// and who merges into it
@@ -24,14 +24,11 @@ pub struct Git {
     /// items opened after it: each one in flight keeps the base it was cut for.
     #[serde(default)]
     pub base: Option<BaseBranch>,
-    /// Who merges a green, reviewed pull request. While the table holds it,
-    /// it outranks `rulings.pm_decides.merge`.
+    /// Read by `settings migrate` alone, which writes `rulings.pm_decides.merge`
+    /// from it. `rulings.pm_decides.merge` decides who merges a green,
+    /// reviewed pull request.
     #[serde(default)]
     pub merging: Option<Merging>,
-    /// Read by nothing: deferred findings always raise a follow-up ruling
-    #[serde(default)]
-    #[schemars(extend("deprecated" = true))]
-    pub issues: Option<Gone>,
     /// The GitHub login kelpie mentions on a ruling it posts through its
     /// App, so GitHub notifies them. The login `gh` acts as (`gh api user`)
     /// when absent.

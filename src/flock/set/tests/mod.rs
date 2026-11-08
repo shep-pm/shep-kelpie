@@ -15,7 +15,6 @@ const TABLE: &str = r#"
 checkout = CHECKOUT
 remote = "REMOTE"
 merging = "ask"
-issues = "ask"
 
 [ci]
 block = true

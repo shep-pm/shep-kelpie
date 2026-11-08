@@ -4,7 +4,7 @@ Kelpie's triage of issues other people open (#887): the settings, the agent, the
 
 - `[app.dogs.kelpie.triage]`, an absent table meaning `pick = "off"`, with `deny_unknown_fields`. `crates/core/src/settings/triage.rs`
   - `pick`: `off` (default), `maintainer` (only the maintainer's issues) or `all`
-  - `hand_ready`: read by nothing, `Option<Gone>` deprecated in the schema, so a table that still holds one loads whatever its value
+  - `hand_ready`: gone, refused by name, and `settings migrate` deletes it
   - `wait_days`: whole days above 0, default 7
   - `max_questions`: 1 to 10, default 10, refused above 10 by `Triage::check`.
   - `per_day` (default 10), `per_author_per_day` (default 2), `min_account_days` (default 30) and `max_body_kb` (default 20): each `0` for off, a negative or non-number value refused by name. `crates/core/src/settings/tests/triage.rs`

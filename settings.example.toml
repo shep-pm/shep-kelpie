@@ -42,10 +42,6 @@ remote = "shep-pm/shep"
 # `no`, and a late bot round's fix. Kelpie reads `rulings.pm_decides.merge`
 # instead: `true` is `auto` and `false` is `ask`, and `settings migrate` writes it from this.
 merging = "ask"
-# Findings a worker deferred, once its pull request merges. `ask` raises a
-# ruling before filing them as issues, `file` files them at once, and
-# `skip` files nothing and leaves them in the review. `ask` when absent.
-issues = "ask"
 # The GitHub login kelpie mentions on a ruling it posts through its App, so
 # GitHub notifies you. The login `gh` acts as when absent, so set this when
 # that is not you, such as a bot account.
