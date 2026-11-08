@@ -41,12 +41,11 @@ impl Rig {
         self.reviewers(RIG_REVIEWERS_AND_CODERABBIT);
     }
 
-    /// Makes the project's `git.merging` `auto`, read when a runner next opens
+    /// Makes the project's `rulings.pm_decides.merge` `true`, so a head that
+    /// passes every gate merges unasked, read when a runner next opens
     pub fn merge_auto(&self) {
-        let (ask, auto) = ("merging = \"ask\"", "merging = \"auto\"");
         self.edit_settings(|s| {
-            assert!(s.contains(ask), "the example's `git.merging` moved");
-            s.replace(ask, auto)
+            format!("{s}\n[app.dogs.kelpie.rulings.pm_decides]\nmerge = true\n")
         });
     }
 

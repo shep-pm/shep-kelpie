@@ -10,7 +10,7 @@ mod triage;
 use std::path::Path;
 
 use crate::ports::Visibility;
-use crate::settings::{GatewayName, Merging};
+use crate::settings::{GatewayName, Merging, RulingName};
 use crate::test::Rig;
 use crate::webhook::{KelpieSettings, WebhookKind};
 
@@ -29,20 +29,37 @@ fn a_changed_setting_takes_effect_at_once() {
     let rig = Rig::new("shep");
     let runner = rig.open().unwrap();
     let next = settings_with(&rig, |s| {
-        s.replace("merging = \"ask\"", "merging = \"auto\"")
+        let s = s
             .replace("fix_attempts = -1", "fix_attempts = 2")
-            .replace("active_items = 1", "active_items = 2")
+            .replace("active_items = 1", "active_items = 2");
+        format!("{s}\n[app.dogs.kelpie.rulings.pm_decides]\nmerge = true\n")
     });
     let mut runner = runner.lock().unwrap();
     let line = runner.reread(next, rig.kelpie_settings()).unwrap();
     assert_eq!(
         line.as_deref(),
-        Some("settings changed: git.merging, ci, concurrency now in effect")
+        Some("settings changed: ci, concurrency, rulings now in effect")
     );
     assert_eq!(runner.settings().concurrency.active_items.get(), 2);
-    assert_eq!(runner.settings().git.merging, Some(Merging::Auto));
+    assert!(runner.settings().rulings.pm_decides(RulingName::Merge));
     assert_eq!(runner.settings().ci.fix_attempts.cap(), Some(2));
     assert_eq!(runner.status().merging, Merging::Auto);
+}
+
+#[test]
+fn a_change_to_git_merging_alone_changes_nothing() {
+    let rig = Rig::new("shep");
+    let runner = rig.open().unwrap();
+    let next = settings_with(&rig, |s| {
+        let flipped = match s.contains("\nmerging = \"ask\"\n") {
+            true => s.replace("\nmerging = \"ask\"\n", "\nmerging = \"auto\"\n"),
+            false => s.replace("\nmerging = \"auto\"\n", "\nmerging = \"ask\"\n"),
+        };
+        assert_ne!(flipped, s, "the example's `git.merging` moved");
+        flipped
+    });
+    let mut runner = runner.lock().unwrap();
+    assert_eq!(runner.reread(next, rig.kelpie_settings()), Ok(None));
 }
 
 #[test]
