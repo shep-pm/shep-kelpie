@@ -20,11 +20,7 @@ impl Runner {
     // on an open issue with no work item and no triage wait, written since this
     // runner first asked for the comments. None for anyone else's comment, a
     // bot's, kelpie's own, and one on a pull request or a closed issue.
-    pub(super) fn issue_words(
-        &mut self,
-        comment: &ThreadComment,
-        asked: &[u64],
-    ) -> Option<String> {
+    pub(super) fn issue_words(&mut self, comment: &ThreadComment, asked: &[u64]) -> Option<String> {
         // A project with no project manager named reads the comments for its
         // rulings' answers alone: nothing here could answer what it held
         self.agents.pm.as_ref()?;
