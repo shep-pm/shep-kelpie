@@ -102,8 +102,7 @@ pub(super) struct Ranked {
     rest: Vec<AgentName>,
     // A pinned label's agent was the only one asked for
     pinned: bool,
-    // For which ticket, and whether `first` is the project manager's pick,
-    // which never pins
+    // For which ticket, and whether `first` is the project manager's pick
     ticket: TicketId,
     picked: bool,
     // The note for a project manager's pick that did not hold, told once the item opens
@@ -141,10 +140,9 @@ impl Ranked {
                 )
             })
         });
-        let pinned = self.pinned && !(self.picked && agent == self.first);
         Opening {
             agent,
-            pinned,
+            pinned: self.pinned,
             note,
         }
     }
@@ -416,10 +414,10 @@ impl Runner {
         Ok(agent)
     }
 
-    // The implementers the agent board ranks for a work item for `ticket`,
-    // whose issue has `labels`, on what `picked` says. The project manager's
-    // agent is asked for alone first and takes the item, unpinned, when it
-    // can start within the slack. Else the ask is as if none were named.
+    // The implementers the agent board ranks for `ticket`'s work item. The
+    // project manager's agent is asked for alone first and takes the item
+    // when it can start within the slack. Else, or when `labels` pin another
+    // agent, the ask is as if none were named.
     pub(super) fn ranked(
         &self,
         ticket: TicketId,
@@ -427,10 +425,20 @@ impl Runner {
         picked: Option<&Picked>,
     ) -> Result<Ranked, AddError> {
         let files = self.implementer_files();
-        let (named, mut note) = first_choice(ticket, picked, &files);
+        let (mut named, mut note) = first_choice(ticket, picked, &files);
         // A label naming no implementer is refused, pinned or not.
         let pin =
             (agent_label(labels, &files).map_err(AddError::Label)?).filter(|_| pinned(labels));
+        if let (Some(agent), Some(pin)) = (&named, &pin)
+            && agent != pin
+        {
+            note = Some(format!(
+                "{}: the project manager picked {agent}, but the issue's `agent:{pin}!` \
+                 label pins {pin}",
+                ticket.shown()
+            ));
+            named = None;
+        }
         let ask = PickAsk {
             kind: label_kind(labels).map(str::to_owned),
             tier: picked.and_then(|p| p.tier),
