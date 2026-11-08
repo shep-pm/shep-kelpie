@@ -592,7 +592,7 @@ fn refuse_delete(rig: &Rig) {
     crate::test::write_script(&hook, "#!/bin/sh\nexit 1\n");
 }
 
-// Steps until #7, merged under `git.merging = "auto"`, fails its cleanup
+// Steps until #7, merged under `rulings.pm_decides.merge = true`, fails its cleanup
 fn cleanup_fails(rig: &Rig, runner: &Mutex<Runner>) {
     for _ in 0..6 {
         match step(runner).unwrap() {

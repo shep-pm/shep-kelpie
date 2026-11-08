@@ -76,7 +76,6 @@ pub struct Place<'a> {
 /// beside it.
 const DEFAULTS: &str = r#"
 [git]
-merging = "ask"
 
 [ci]
 fix_attempts = -1

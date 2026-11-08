@@ -34,14 +34,6 @@ remote = "shep-pm/shep"
 # happens on a long-lived branch that is not its default. `shep kelpie add
 # --base <branch>` writes it. A change reaches the work items opened after it.
 # base = "next"
-# Who merges a green, reviewed pull request. `ask` raises a merge ruling.
-# `auto` merges and sends a notice after, to the webhook, or the log when
-# kelpie has none. Under `auto` some pull requests still get the merge
-# ruling, which names why: one no reviewer read, one with a review bot's
-# thread above a nit open, a head no review round read, a fix after a
-# `no`, and a late bot round's fix. Kelpie reads `rulings.pm_decides.merge`
-# instead: `true` is `auto` and `false` is `ask`, and `settings migrate` writes it from this.
-merging = "ask"
 # The GitHub login kelpie mentions on a ruling it posts through its App, so
 # GitHub notifies you. The login `gh` acts as when absent, so set this when
 # that is not you, such as a bot account.
@@ -264,9 +256,14 @@ compact_window = 200000
 # ruling's thread, where `<id> no <note>` reopens it; an abstention, a `design`
 # flag or an option only you can carry out comes to you with its pick. A
 # question and a follow-up have wakes of their own, whatever their value.
-# `merge` is yours, and set `true` its yes merges a head that passed every
-# gate, still yours where the ruling warns of an unread head, an unread fix, an
-# unreviewed pass, open review bot threads or a borrowed head. `security`,
+# `merge` is yours, which raises a merge ruling for each green, reviewed pull
+# request. Set `true`, kelpie merges a head that passed every gate unasked and
+# sends a notice after, to the webhook, or the log when kelpie has none. Some
+# pull requests still get the ruling, which names why: one no reviewer read, one
+# with a review bot's thread above a nit open, a head no review round read, a
+# fix after a `no`, and a late bot round's fix. `settings migrate` writes it
+# from a `git.merging` an older table holds, `auto` as `true` and `ask` as
+# `false`. `security`,
 # `contribution-merge` and `local-model-spilled` are refused as `true`, and are
 # never written.
 # `shep kelpie add`, `upgrade` and `shep kelpie settings migrate` write each

@@ -1,6 +1,6 @@
 # Settings
 
-A project's settings are its `[app.dogs.kelpie]` table. `shep kelpie get [<key>]` prints it, or one dotted key, as TOML, and `shep kelpie set <key> <value>` changes one key, such as `shep kelpie set git.merging auto` or `shep kelpie set agents.allow '["sonnet-high", "defect-hunter"]'`. The value is a TOML value, and text that is not one is a string. `set` writes only a table the runner would accept, and refuses to move `git.checkout` or `git.remote` onto a checkout or repo another project runs, as `add` does. It says when a running runner takes the change: at its next wake, or for `git.checkout`, `git.remote` and kelpie's gateways, when it next starts. Lookout edits the table too, in the runner's pane. Every setting sits in a table of its own.
+A project's settings are its `[app.dogs.kelpie]` table. `shep kelpie get [<key>]` prints it, or one dotted key, as TOML, and `shep kelpie set <key> <value>` changes one key, such as `shep kelpie set rulings.pm_decides.merge true` or `shep kelpie set agents.allow '["sonnet-high", "defect-hunter"]'`. The value is a TOML value, and text that is not one is a string. `set` writes only a table the runner would accept, and refuses to move `git.checkout` or `git.remote` onto a checkout or repo another project runs, as `add` does. It says when a running runner takes the change: at its next wake, or for `git.checkout`, `git.remote` and kelpie's gateways, when it next starts. Lookout edits the table too, in the runner's pane. Every setting sits in a table of its own.
 
 Two example files hold what every setting means, in their comments, and nothing else says it:
 
@@ -17,7 +17,6 @@ A key kelpie no longer reads, such as `review.reviewers`, `coderabbit` or `plann
 
 - `git.checkout` and `git.remote`: the checkout and the GitHub repo its `origin` names
 - `git.base`: the branch `--base` named, or the repo's default branch. A work item records it when it opens. Work items branch from `origin/<base>`, and their pull requests open against and merge into it. Adoption and contributions accept a pull request into the base and refuse one into another branch
-- `git.merging = "ask"`
 - `ci.block` is on when the checkout has `.github/workflows`, and `ci.fix_attempts = -1`. `ci.queued_minutes` is not written and reads 60: how long a check may stay `queued` or `in progress` in the wait for CI before kelpie reruns its workflow run once, and past that asks you with a `check-queued` ruling. The same number is how long a head with no check at all waits: with a workflow on `origin/main` that runs on a pull request it then asks you with a `no-checks` ruling, and with none it goes on as skipped at once
 - `concurrency.active_items = 1` and `concurrency.pending_rulings = 2`
 - `budget.per_item_usd = 10`

@@ -11,6 +11,9 @@ use crate::ports::LocalLeases;
 use crate::runner::Runner;
 use crate::settings::{Settings, SettingsError};
 
+// The example's git table, whose header a key written into it follows
+const GIT: &str = "[app.dogs.kelpie.git]\n";
+
 impl Rig {
     /// Registers kelpie's App for the project's repo owner and installs it on
     /// the repo, so a runner opened next posts through it
@@ -60,29 +63,17 @@ impl Rig {
         on(&["commit", "--quiet", "-m", "start the line"]);
         on(&["push", "--quiet", "origin", branch]);
         on(&["checkout", "--quiet", "main"]);
-        let ask = "\nmerging = \"ask\"\n";
         self.edit_settings(|s| {
-            let anchor = if s.contains(ask) {
-                ask
-            } else {
-                "\nmerging = \"auto\"\n"
-            };
-            assert!(s.contains(anchor), "the example's `git.merging` moved");
-            s.replace(anchor, &format!("{anchor}base = \"{branch}\"\n"))
+            assert!(s.contains(GIT), "the example's git table moved");
+            s.replace(GIT, &format!("{GIT}base = \"{branch}\"\n"))
         });
     }
 
     /// Sets the project's `git.maintainer` to `login`, read when a runner next opens
     pub fn maintainer(&self, login: &str) {
-        let ask = "\nmerging = \"ask\"\n";
         self.edit_settings(|s| {
-            let anchor = if s.contains(ask) {
-                ask
-            } else {
-                "\nmerging = \"auto\"\n"
-            };
-            assert!(s.contains(anchor), "the example's `git.merging` moved");
-            s.replace(anchor, &format!("{anchor}maintainer = \"{login}\"\n"))
+            assert!(s.contains(GIT), "the example's git table moved");
+            s.replace(GIT, &format!("{GIT}maintainer = \"{login}\"\n"))
         });
     }
 
