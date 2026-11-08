@@ -50,11 +50,20 @@ const GOOSE: &str = "role: implementer\nharness: goose\nmodel: qwen3.8:27b\neffo
 const BOT: &str = "role: reviewer\nharness: bot\nbot: coderabbit\nreviews: 3\nhours: 1\n";
 
 #[test]
-fn login_api_on_a_claude_code_implementer_or_reviewer_reads_as_billed_to_the_api() {
-    let reviewer = CLAUDE.replace("implementer", "reviewer");
+fn login_api_on_a_claude_code_session_reads_as_billed_to_the_api() {
+    let role = |name: &str| CLAUDE.replace("implementer", name);
+    let (reviewer, pm, representative, triager) = (
+        role("reviewer"),
+        role("pm"),
+        role("representative"),
+        role("triager"),
+    );
     for (what, keys) in [
         ("an implementer", CLAUDE),
         ("a reviewer", reviewer.as_str()),
+        ("a project manager", pm.as_str()),
+        ("a representative", representative.as_str()),
+        ("a triager", triager.as_str()),
     ] {
         let read = |login: &str| {
             let agent = parse(&format!("---\n{keys}{login}---\nLook.\n")).unwrap();
@@ -100,16 +109,8 @@ fn an_api_agents_limit_is_api_and_a_usage_key_beside_it_is_refused_with_its_line
 }
 
 #[test]
-fn login_is_refused_with_its_line_on_a_pm_a_command_reviewer_and_a_harness_with_no_api_login() {
-    let role = |name: &str| CLAUDE.replace("implementer", name);
-    // A role that takes no `login` refuses it as it refuses any key.
-    for name in ["pm", "representative", "triager"] {
-        let refused = parse(&format!("---\n{}login: api\n---\nLook.\n", role(name))).unwrap_err();
-        assert!(
-            refused.contains("unknown field `login`"),
-            "{name}: {refused}"
-        );
-    }
+fn login_is_refused_with_its_line_on_a_reviewer_that_runs_on_its_own_and_a_harness_with_no_api_login()
+ {
     // A reviewer that runs on its own spends no login.
     for (what, keys, line) in [
         ("command", COMMAND, 5),
