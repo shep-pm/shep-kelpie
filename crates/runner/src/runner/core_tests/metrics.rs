@@ -206,14 +206,24 @@ fn a_work_item_s_calls_spend_and_finish_reach_the_metrics_endpoint() {
             .is_some(),
         "the wall seconds carry no agent or kind"
     );
-    assert!(
-        rig.samples
-            .value(
-                "kelpie_work_item_cost_usd_total",
-                &[("agent", "sonnet-high"), ("kind", "none")]
-            )
-            .is_some(),
-        "the item's cost is not counted by its agent and kind"
+    for role in ["worker", "reviewer"] {
+        assert!(
+            rig.samples
+                .value(
+                    "kelpie_work_item_cost_usd_total",
+                    &[("agent", "sonnet-high"), ("kind", "none"), ("role", role)]
+                )
+                .is_some(),
+            "the item's {role} cost is not counted by its agent and kind"
+        );
+    }
+    assert_eq!(
+        rig.samples.value(
+            "kelpie_work_items_priced_total",
+            &[("agent", "sonnet-high"), ("kind", "none")]
+        ),
+        Some(1.0),
+        "the item is priced, and counted once"
     );
     assert_eq!(
         rig.samples
@@ -249,10 +259,17 @@ fn a_finished_items_series_carry_its_agent_and_kind() {
     assert_eq!(sink.value("kelpie_review_rounds_total", &who), Some(2.0));
     assert_eq!(sink.value("kelpie_fix_turns_total", &who), Some(1.0));
     assert_eq!(sink.value("kelpie_rulings_total", &who), Some(1.0));
+    for role in ["worker", "reviewer"] {
+        let by_role = [("agent", "sonnet-high"), ("kind", "fix"), ("role", role)];
+        assert_eq!(
+            sink.value("kelpie_work_item_cost_usd_total", &by_role),
+            Some(0.5),
+            "the {role}'s half dollar"
+        );
+    }
     assert_eq!(
-        sink.value("kelpie_work_item_cost_usd_total", &who),
-        Some(1.0),
-        "the line's dollar, priced in both roles"
+        sink.value("kelpie_work_items_priced_total", &who),
+        Some(1.0)
     );
     // The findings stay by severity alone
     assert_eq!(
@@ -287,8 +304,13 @@ fn a_finished_line_with_no_agent_or_kind_reads_unknown_and_none() {
     assert_eq!(sink.value("kelpie_review_rounds_total", &who), Some(2.0));
     assert_eq!(sink.value("kelpie_fix_turns_total", &who), Some(1.0));
     assert_eq!(sink.value("kelpie_rulings_total", &who), Some(1.0));
+    let worker = [("agent", "unknown"), ("kind", "none"), ("role", "worker")];
     assert_eq!(
-        sink.value("kelpie_work_item_cost_usd_total", &who),
+        sink.value("kelpie_work_item_cost_usd_total", &worker),
+        Some(0.5)
+    );
+    assert_eq!(
+        sink.value("kelpie_work_items_priced_total", &who),
         Some(1.0)
     );
     // A kind kelpie no longer has reads `none` too, so the label set stays bounded (ADR 0012)
@@ -310,8 +332,15 @@ fn a_finished_line_with_no_agent_or_kind_reads_unknown_and_none() {
     // A line with a call whose harness reported no cost holds a lower bound, so it counts nowhere
     recorder.line(&finished_line(Some("iq3-xxs"), Some("fix"), "merged", 2));
     let unpriced = [("agent", "iq3-xxs"), ("kind", "fix")];
+    for role in ["worker", "reviewer"] {
+        let by_role = [("agent", "iq3-xxs"), ("kind", "fix"), ("role", role)];
+        assert_eq!(
+            sink.value("kelpie_work_item_cost_usd_total", &by_role),
+            None
+        );
+    }
     assert_eq!(
-        sink.value("kelpie_work_item_cost_usd_total", &unpriced),
+        sink.value("kelpie_work_items_priced_total", &unpriced),
         None
     );
     assert_eq!(
