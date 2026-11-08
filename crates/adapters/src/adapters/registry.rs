@@ -12,6 +12,8 @@ use crate::ports::{AlertError, Registry, RegistryError};
 /// Seconds curl gets to connect, and to finish the read
 const CONNECT_TIMEOUT: u32 = 5;
 const MAX_TIME: u32 = 15;
+/// Redirects curl follows
+const MAX_REDIRS: u32 = 3;
 
 /// Reads the public registries with the system's `curl`
 #[derive(Debug, Clone, Copy, Default)]
@@ -26,17 +28,26 @@ impl Registry for CurlRegistry {
 // What a read gives back: the body, then the HTTP status.
 type Got = Result<(String, u16), RegistryError>;
 
-// One GET of `url` through curl.
-fn get(url: &str) -> Got {
-    let config = render(&[
+// The curl config of one GET of `url`. A registry may answer a name that is not its
+// canonical one with a redirect, so a few https ones are followed.
+fn config(url: &str) -> String {
+    let options = render(&[
         ("url", url.to_owned()),
         ("proto", "=https".to_owned()),
+        ("proto-redir", "=https".to_owned()),
+        ("max-redirs", MAX_REDIRS.to_string()),
         ("connect-timeout", CONNECT_TIMEOUT.to_string()),
         ("max-time", MAX_TIME.to_string()),
         // The status goes on a line of its own after the body.
         ("write-out", "\n%{http_code}".to_owned()),
     ]);
-    run(&config).map_err(|error| match error {
+    // `location` is a flag, which `render` cannot write.
+    format!("location\n{options}")
+}
+
+// One GET of `url` through curl.
+fn get(url: &str) -> Got {
+    run(&config(url)).map_err(|error| match error {
         AlertError::Spawn(why) => RegistryError::Spawn(why),
         AlertError::Unreachable(code) => RegistryError::Unreachable(code),
         AlertError::Refused(status) => RegistryError::Refused(status),
@@ -172,6 +183,17 @@ mod tests {
         let read = read(&get, needed);
         let [url] = asked.into_inner().try_into().expect("one GET");
         (read, url)
+    }
+
+    #[test]
+    fn a_read_follows_a_few_redirects_and_only_to_https() {
+        let config = config("https://pypi.org/pypi/Django/4.2/json");
+
+        let lines: Vec<&str> = config.lines().collect();
+        assert!(lines.contains(&"location"));
+        assert!(lines.contains(&"proto = \"=https\""));
+        assert!(lines.contains(&"proto-redir = \"=https\""));
+        assert!(lines.contains(&"max-redirs = \"3\""));
     }
 
     #[test]

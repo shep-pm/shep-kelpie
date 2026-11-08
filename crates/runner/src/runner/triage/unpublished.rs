@@ -5,7 +5,9 @@
 //! issue's `Needs:` line names. This keeps what it read, for the board's
 //! [`check_holds`](super::Runner::check_holds). A publish stands, so a package found
 //! published is never asked of again in this run. One not found is asked again at
-//! the next poll, and the issue goes on at the first poll that finds it.
+//! the next poll, and the issue goes on at the first poll that finds it. A package
+//! no poll has read yet holds its issue too, so a board read between polls starts
+//! no worker on it.
 
 use std::collections::BTreeSet;
 
@@ -21,8 +23,6 @@ pub(super) type Read = Vec<(Needed, Result<bool, RegistryError>)>;
 pub(in crate::runner) struct Looked {
     /// The packages found published, as the `Needs:` line writes each
     published: BTreeSet<String>,
-    /// The packages the last poll read and found not published
-    waiting: BTreeSet<String>,
     /// The packages the last poll could not read, so each is noted once
     unread: BTreeSet<String>,
 }
@@ -37,7 +37,6 @@ impl Looked {
     /// not be read and could not be at the poll before either
     pub(super) fn keep(&mut self, read: Read) -> Vec<String> {
         let before = std::mem::take(&mut self.unread);
-        self.waiting.clear();
         let mut notes = Vec::new();
         for (needed, answer) in read {
             let package = needed.to_string();
@@ -45,9 +44,8 @@ impl Looked {
                 Ok(true) => {
                     self.published.insert(package);
                 }
-                Ok(false) => {
-                    self.waiting.insert(package);
-                }
+                // Neither found nor unread: the issue waits on it.
+                Ok(false) => {}
                 Err(why) => {
                     if !before.contains(&package) {
                         notes.push(format!(
@@ -62,12 +60,13 @@ impl Looked {
         notes
     }
 
-    /// The first package `body`'s `Needs:` line names that the last poll found
-    /// not published
+    /// The first package `body`'s `Needs:` line names that is not found published
+    /// and that the last poll did not fail to read: one it found missing, or one no
+    /// poll has asked of yet
     pub(super) fn first_waiting(&self, body: &str) -> Option<String> {
         (check::needs(body).iter())
             .map(ToString::to_string)
-            .find(|package| self.waiting.contains(package))
+            .find(|package| !self.published.contains(package) && !self.unread.contains(package))
     }
 }
 

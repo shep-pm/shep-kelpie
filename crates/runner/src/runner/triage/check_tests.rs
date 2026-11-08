@@ -818,6 +818,26 @@ fn a_ready_issue_needing_an_unpublished_package_is_held() {
 }
 
 #[test]
+fn a_package_no_poll_has_read_yet_holds_the_issue_on_an_early_board_read() {
+    let (rig, runner) = waiting_on(&[FOO]);
+    assert_eq!(
+        step(&runner).unwrap(),
+        None,
+        "held on the first poll's read"
+    );
+    // The maintainer edits the line to name a package, and the board is read before
+    // the triage poll is due again, as a work item's end makes it.
+    rig.forge.set_ready_body(30, &needing(&[BAR]));
+    runner.lock().unwrap().looks.board_moved();
+
+    assert_eq!(step(&runner).unwrap(), None, "nothing starts");
+
+    assert_eq!(rig.registry.asked(), [FOO], "no poll has asked about BAR");
+    let skipped = rig.ask(&runner, "status", None)["skipped"].clone();
+    assert_eq!(skipped[0]["package"], BAR, "{skipped}");
+}
+
+#[test]
 fn it_goes_on_by_itself_once_the_package_is_published() {
     let (rig, runner) = waiting_on(&[FOO]);
     assert_eq!(step(&runner).unwrap(), None, "held");
