@@ -19,7 +19,7 @@ use super::ruling::PostJob;
 use super::trigger::lock;
 use crate::board::ReadyIssue;
 use crate::board::briefing::ticket_ref;
-use crate::ports::{AgentError, AgentReply, COMPACT, Session, SessionId, Timestamp};
+use crate::ports::{AgentError, AgentReply, COMPACT, HeadRun, Session, SessionId, Timestamp};
 use crate::settings::PmAgent;
 use crate::state::StateError;
 use crate::ticket::TicketId;
@@ -45,6 +45,7 @@ mod question;
 mod red;
 mod requests;
 mod rulings;
+mod run_log;
 mod said;
 #[cfg(test)]
 mod tests;
@@ -209,6 +210,12 @@ pub(super) struct Desk {
     // run's log does not change, so it is read once. An item's go when it
     // closes, and a restart forgets them all.
     run_logs: BTreeMap<(TicketId, u64, u32), String>,
+    // Each item's runs the last case listed, which a log may be asked for from
+    ci_runs: BTreeMap<TicketId, Vec<HeadRun>>,
+    // Each run attempt whose log it asked for, which the next case reads
+    run_log_asks: Vec<(TicketId, u64, u32)>,
+    // Each run attempt a case read the log of for it, so a log is read once however it came out
+    run_log_tried: BTreeSet<(TicketId, u64, u32)>,
 }
 
 impl Desk {
@@ -584,6 +591,12 @@ impl Runner {
                 Wake::Threads { ticket, .. } => {
                     self.pm.threads_out.remove(&ticket);
                 }
+                // The log is not read, and the item's case lists the run as before.
+                Wake::RunLog { ticket, run } => {
+                    self.pm
+                        .run_log_asks
+                        .retain(|(t, r, _)| (*t, *r) != (ticket, run));
+                }
                 // The ruling goes to the maintainer, who need not wait on it again.
                 Wake::Question { id, .. } | Wake::FollowUp { id, .. } => {
                     self.pm.asking.remove(&id);
@@ -878,6 +891,7 @@ impl Runner {
                 self.pm.asking.remove(id);
             }
         }
+        self.pm_asks_again(&flying.wakes, &answer);
         // An item it gave no `read` on goes on to CI as it stands.
         for wake in &flying.wakes {
             if let Wake::Findings { ticket, .. } = wake {

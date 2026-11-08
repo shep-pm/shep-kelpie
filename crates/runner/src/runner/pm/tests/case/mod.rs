@@ -7,6 +7,7 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::sync::Mutex;
 
 mod rig;
+mod run_log;
 mod threads;
 
 use self::rig::{
