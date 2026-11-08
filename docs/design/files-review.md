@@ -22,7 +22,7 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | contribution-security.md | its security review | `runner/{contributions/,flight/security.rs}`, `process/worktree/` |
 | contribution-pass.md | reviewers' pass, green head | `runner/contributions/pass.rs`, `process/worktree/` |
 | contribution-talk.md | contributors' words, quiet clock | `runner/contributions/{heard,clock}.rs`, `runner/thread_replies/` |
-| contribution-push.md | a fork worker's push; red-CI comment | `runner/contributions/{push,after}.rs` |
+| contribution-push.md | a fork worker's push; red-CI comment; `worktree::Remote` | `runner/contributions/{push,after}.rs` |
 | contribution-release.md | asking for a release: its answers | `runner/contributions/{release,ruling}.rs` |
 | contribution-merge.md | merge ruling: yes, thanks, no | `runner/contributions/{merge,ruling}.rs`, `core/settings/rulings.rs` |
 | representative.md | agent file, `agents.representative`, post wording | `runner/representative/`, `core/{agents/front,settings/agents}/`, `agents/representative.md` |

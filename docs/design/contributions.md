@@ -34,7 +34,7 @@ Kelpie follows other people's pull requests: security review (`contribution-secu
 
 ## Remote
 
-- `worktree::Remote`, where a work item's branch lives (`Origin` or a contributor's fork), and the adoption of a released contribution: `contribution-release.md`. #631, #632, #634
+- `worktree::Remote`, where a work item's branch lives (`Origin` or a contributor's fork): `contribution-push.md`; the adoption of a released contribution: `contribution-release.md`. #631, #632, #634
 
 ## CI on a trusted head
 

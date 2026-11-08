@@ -81,7 +81,9 @@ pub(super) fn ruling_comment(mention: Option<&str>, ruling: &Ruling) -> String {
     let mut blocks = card.opening();
     blocks.push(match Wants::of(kind) {
         Wants::Answer => table(&card.choices, kind),
-        Wants::Merge | Wants::YesOrNo => answer_table(&card.choices, number, mention.is_some()),
+        Wants::Merge | Wants::Trust | Wants::YesOrNo => {
+            answer_table(&card.choices, number, mention.is_some())
+        }
     });
     blocks.extend(card.on_the_board());
     blocks.extend(pm_words(ruling, &card.choices));
@@ -213,7 +215,7 @@ fn boxes(kind: &RulingKind) -> bool {
     match Wants::of(kind) {
         Wants::Merge => true,
         Wants::Answer => !Card::of(kind).choices.is_empty(),
-        Wants::YesOrNo => false,
+        Wants::Trust | Wants::YesOrNo => false,
     }
 }
 
@@ -951,7 +953,7 @@ fn answering(login: &str, number: TicketId, kind: &RulingKind, choices: &[Choice
             }
         }
         // The table names each answer already, so the mention is all this adds.
-        Wants::Merge | Wants::YesOrNo => {}
+        Wants::Merge | Wants::Trust | Wants::YesOrNo => {}
     }
     lines.join("\n")
 }
@@ -962,7 +964,7 @@ fn unmentioned(number: TicketId, kind: &RulingKind) -> String {
     let rule = format!("shep kelpie rule {number}");
     let forms = match Wants::of(kind) {
         Wants::Answer => Some(format!("`{rule} <your answer>`")),
-        Wants::Merge | Wants::YesOrNo => None,
+        Wants::Merge | Wants::Trust | Wants::YesOrNo => None,
     };
     let lead = "This ruling mentions no one, so a reaction, a tick or a reply here answers \
                 nothing.";

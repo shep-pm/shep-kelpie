@@ -4,10 +4,10 @@
 //! goes quiet after being asked (ADR 0010); the quiet clock drives each step.
 //! At the nudge the representative asks, in one comment, whether kelpie may take
 //! the pull request; at the quiet with no ask it posts the same and restarts the
-//! clock. A reply is read as `yes`, `no` or `other` (the last goes to
-//! [`answer`](super::answer)), and a thumbs up or down on the ask counts alike.
-//! A yes, or no answer by the quiet, is a release. A no restarts the clock;
-//! a second no then quiet raises a ruling.
+//! clock. An ask's notice runs from the ask itself, late or not. A reply is read
+//! as `yes`, `no` or `other` (the last goes to [`answer`](super::answer)), and a
+//! thumbs up or down on the ask counts alike. A yes, or no answer by the quiet,
+//! is a release. A no restarts the clock; a second no then quiet raises a ruling.
 
 use super::super::Runner;
 use super::super::representative::Post;
@@ -270,7 +270,8 @@ impl Runner {
     }
 
     // Posts the ask, and records it. `quiet` is whether the contributor has
-    // been quiet the whole window: the clock starts over so they have one.
+    // been quiet the whole window: the clock starts over so they have one. The
+    // days it states run from the ask itself.
     fn ask(&mut self, held: &Contribution, clock: &Clock, quiet: bool) -> Result<(), StateError> {
         let number = held.pull_request;
         let (asks, nos) = held.asked.as_ref().map_or((1, 0), |a| (a.asks + 1, a.nos));
@@ -281,7 +282,7 @@ impl Runner {
             None => {
                 let days = match quiet {
                     true => clock.quiet_days(),
-                    false => clock.days_to_quiet(now),
+                    false => clock.notice_days(),
                 };
                 let facts = self.ask_facts(held, asks, days);
                 match self.word_and_post(held, ASK, &facts, &key, "ask")? {
