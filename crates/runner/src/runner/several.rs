@@ -576,6 +576,24 @@ fn add_takes_back_an_open_finished_issue_with_every_slot_busy() {
 }
 
 #[test]
+fn add_with_a_free_slot_opens_an_open_finished_issue_at_once() {
+    let (rig, runner) = seven_finished("altaria");
+    rig.forge.list_ready(7, false);
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(
+        rig.ask(&runner, "status", None)["skipped"],
+        json!([{ "reason": "finished", "issue": "7" }])
+    );
+
+    let status = rig.ask(&runner, "add", Some("7"));
+    assert!(status["work_item"].is_object(), "{status}");
+    assert_eq!(open_items(&rig, &runner), [7]);
+    let state = StateStore::new(rig.paths().state).load().unwrap().unwrap();
+    assert!(state.finished.is_empty());
+    assert_eq!(status["skipped"], json!([]));
+}
+
+#[test]
 fn a_queued_add_clears_the_dropped_skip_once_in_the_log_and_in_status() {
     let (rig, runner) = seven_dropped_two_slots_held("numel");
     rig.ask(&runner, "add", Some("7"));
