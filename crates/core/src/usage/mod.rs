@@ -88,6 +88,8 @@ pub enum CallKind {
     /// `/compact` on the project manager's session, or on a worker's before
     /// a turn
     Compact,
+    /// The project manager's read of a fix it drafted, against the code
+    FixRead,
     /// The project manager's batch retro, over the work items finished since
     /// the last one
     Retro,

@@ -439,8 +439,7 @@ fn the_ledger_comes_out_as_the_counters_the_runner_sends_each_at_its_lines_time(
     assert!(out.contains(&format!("{calls} 2 150")), "{out:#?}");
     let merged = r#"kelpie_work_items_finished_total{sheep="koji",agent="unknown",kind="none",outcome="merged"} 1 200"#;
     assert!(out.contains(&merged.to_owned()), "{out:#?}");
-    let dollars =
-        r#"kelpie_work_item_cost_usd_total{sheep="koji",agent="unknown",kind="none"} 0.5 200"#;
+    let dollars = r#"kelpie_work_item_cost_usd_total{sheep="koji",agent="unknown",kind="none",role="worker"} 0.5 200"#;
     assert!(out.contains(&dollars.to_owned()), "{out:#?}");
     let high = r#"kelpie_findings_total{sheep="koji",severity="high"} 1 200"#;
     assert!(out.contains(&high.to_owned()), "{out:#?}");
@@ -449,6 +448,58 @@ fn the_ledger_comes_out_as_the_counters_the_runner_sends_each_at_its_lines_time(
     assert!(out.contains(&moves.to_owned()), "{out:#?}");
     assert!(out.contains(&"# TYPE kelpie_calls counter".to_owned()));
     assert_eq!(out.last().unwrap(), "# EOF");
+}
+
+// A finished line whose worker cost 0.4 and whose reviewers cost 0.1, with `worker_unpriced` and
+// `reviewer_unpriced` calls whose harness reported no cost
+fn costed_item(worker_unpriced: u32, reviewer_unpriced: u32) -> Line {
+    let role = |cost_usd: f64, unpriced: u32| {
+        json!({
+            "calls": 1, "tokens": { "input": 1, "cache_write": 0, "cache_read": 0, "output": 0 },
+            "units": 1, "cost_usd": cost_usd, "unpriced_calls": unpriced,
+        })
+    };
+    ledger_line(
+        &json!({
+            "line": "finished", "at": 200, "issue": 7, "title": "t", "pull_request": 71,
+            "merged": true, "wall": 90, "units": 2, "cost_usd": 0.5,
+            "worker": role(0.4, worker_unpriced), "reviewer": role(0.1, reviewer_unpriced),
+            "qwen": { "rounds": 0, "seconds": 0 }, "review_rounds": 1, "fix_turns": 0,
+            "rulings": 0, "agent": "qwen", "kind": "fix", "held": { "high": 0, "medium": 0 },
+        })
+        .to_string(),
+    )
+}
+
+#[test]
+fn a_finished_lines_cost_splits_into_worker_and_reviewer() {
+    let out = openmetrics(&[("koji".to_owned(), vec![costed_item(0, 0)])]);
+
+    let who = r#"sheep="koji",agent="qwen",kind="fix""#;
+    for expected in [
+        format!(r#"kelpie_work_item_cost_usd_total{{{who},role="worker"}} 0.4 200"#),
+        format!(r#"kelpie_work_item_cost_usd_total{{{who},role="reviewer"}} 0.1 200"#),
+        format!(r"kelpie_work_items_priced_total{{{who}}} 1 200"),
+    ] {
+        assert!(out.contains(&expected), "{expected} not in {out:#?}");
+    }
+}
+
+#[test]
+fn an_unpriced_call_leaves_a_line_out_of_both_cost_roles_and_the_priced_count() {
+    for (worker, reviewer) in [(1, 0), (0, 1), (2, 3)] {
+        let out = openmetrics(&[("koji".to_owned(), vec![costed_item(worker, reviewer)])]);
+
+        let priced: Vec<_> = (out.iter())
+            .filter(|l| {
+                l.starts_with("kelpie_work_item_cost_usd_total{")
+                    || l.starts_with("kelpie_work_items_priced_total{")
+            })
+            .collect();
+        assert!(priced.is_empty(), "{worker}/{reviewer}: {priced:#?}");
+        let merged = r#"kelpie_work_items_finished_total{sheep="koji",agent="qwen",kind="fix",outcome="merged"} 1 200"#;
+        assert!(out.contains(&merged.to_owned()), "still finished: {out:#?}");
+    }
 }
 
 #[test]
