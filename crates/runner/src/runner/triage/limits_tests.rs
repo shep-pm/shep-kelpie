@@ -748,7 +748,7 @@ fn a_burst_of_held_issues_does_not_free_the_authors_cap_partway_through() {
     assert_eq!(
         labelled(&rig, TRIAGE),
         (300..306).collect::<Vec<_>>(),
-        "each got needs-triage with no call"
+        "each got needs-approval with no call"
     );
     assert_eq!(
         triage(&rig, &runner)["daily"]["used"],

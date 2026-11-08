@@ -48,7 +48,7 @@ fn planned(drafts: &[Value], filed: &[&str]) -> (Rig, Mutex<Runner>) {
 fn planned_asking(drafts: &[Value], filed: &[&str], asked: Value) -> (Rig, Mutex<Runner>) {
     let rig = rig_with("pick = \"maintainer\"");
     rig.forge.set_repo_labels(&[
-        "needs-triage",
+        "needs-approval",
         "ready-for-agent",
         "kind:fix",
         "priority: P2",
@@ -499,7 +499,7 @@ fn splitting_with(
 ) -> (Rig, Mutex<Runner>) {
     let rig = rig_with(lines);
     rig.forge.set_repo_labels(&[
-        "needs-triage",
+        "needs-approval",
         "ready-for-agent",
         "kind:fix",
         "priority: P2",
@@ -604,7 +604,7 @@ fn an_unknown_implementer_is_refused_and_files_nothing() {
     assert!(!said.contains("draft 1"), "{said}");
     assert_eq!(saved_split(&rig), Value::Null);
     assert_eq!(rig.github.issue_edits(), []);
-    assert!(app_writes(&rig, 0).contains(&"label #30 needs-triage".to_owned()));
+    assert!(app_writes(&rig, 0).contains(&"label #30 needs-approval".to_owned()));
 }
 
 #[test]
@@ -766,7 +766,7 @@ fn a_split_on_someone_elses_issue_asks_in_a_new_comment_and_files_nothing() {
         Some(2)
     );
     assert_eq!(rig.github.issue_edits(), [], "the author's body stands");
-    assert!(app_writes(&rig, 0).contains(&"label #30 needs-triage".to_owned()));
+    assert!(app_writes(&rig, 0).contains(&"label #30 needs-approval".to_owned()));
 }
 
 #[test]

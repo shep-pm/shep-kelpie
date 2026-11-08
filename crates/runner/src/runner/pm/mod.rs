@@ -9,7 +9,7 @@
 //! session is the project's one, resumed and compacted past [`COMPACT_PAST`].
 //! While it is down, the board rule picks and stuck items keep their rulings.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Mutex;
 
 use super::Runner;
@@ -34,6 +34,7 @@ mod case;
 mod ci_logs;
 mod diffs;
 mod fix;
+mod fix_read;
 mod maintainer;
 mod more;
 mod notes;
@@ -120,6 +121,8 @@ pub(super) enum Choice {
 enum Kind {
     Wake,
     Compact,
+    /// One drafted fix, read against the code before kelpie files it
+    FixRead,
 }
 
 /// The call in flight, as the runner needs it once it ends
@@ -135,6 +138,8 @@ struct Flying {
     lost: Vec<String>,
     session: SessionId,
     fresh: bool,
+    // The draft a fix read is reading, which its end files or puts to the maintainer
+    draft: Option<fix::FixDraft>,
 }
 
 /// What the runner keeps about its project manager, in memory only
@@ -194,6 +199,9 @@ pub(super) struct Desk {
     // The question being raised is one it parked the work item on, the maintainer's alone
     parking: bool,
     flying: Option<Flying>,
+    // Each drafted fix waiting for its read against the code, oldest first. In
+    // memory only: a restart loses one, and the log says what it held.
+    fix_reads: VecDeque<fix::FixDraft>,
     // What the wake read with the lock let go, kept while it launches
     logs: Option<ci_logs::Logs>,
     // Each failed run's whole log a case holds, by item and run: a completed
@@ -457,8 +465,25 @@ impl Runner {
         let Some(agent) = self.agents.pm.clone() else {
             return Woke::Did(false);
         };
-        if self.pm.flying.is_some() || self.draining() {
+        if self.draining() {
+            // A drain starts no call, and the draft queue is in memory: what it
+            // held is lost, and the log says what it held.
+            self.pm_reads_given_up();
             return Woke::Did(false);
+        }
+        if self.pm.flying.is_some() {
+            return Woke::Did(false);
+        }
+        // A drafted fix is read before any wake goes: it is what the last answer
+        // asked kelpie to do, and its read is one call of its own. One that
+        // cannot run yet leaves the draft queued, and the wake goes.
+        if reads && !self.pm.fix_reads.is_empty() && self.pm_available() {
+            let Some(draft) = self.pm.fix_reads.pop_front() else {
+                return Woke::Did(false);
+            };
+            let launched = self.begin_fix_read(&agent, draft);
+            self.post();
+            return Woke::Did(launched);
         }
         // What the maintainer told it outlasts a restart, and wakes it again.
         if !self.state.pm_told.is_empty() {
@@ -698,6 +723,7 @@ impl Runner {
             lost,
             session: id,
             fresh,
+            draft: None,
         });
         self.launch_pm(call, CEILING, agent.name.as_str(), CallKind::Wake);
         Ok(())
@@ -717,6 +743,7 @@ impl Runner {
             lost: Vec::new(),
             session: id,
             fresh: false,
+            draft: None,
         });
         self.launch_pm(call, CEILING, agent.name.as_str(), CallKind::Compact);
         Ok(())
@@ -735,6 +762,11 @@ impl Runner {
         let Some(flying) = self.pm.flying.take() else {
             return Ok(None);
         };
+        if flying.kind == Kind::FixRead {
+            // Its own session, saved nowhere: the project manager's own session
+            // is what a wake resumes, and a read of a draft is no part of it.
+            return self.fix_read_ended(flying, result);
+        }
         if flying.kind == Kind::Compact {
             // Even a compaction whose result went unread may have dropped the answer's shape.
             self.pm.full_prompt = true;

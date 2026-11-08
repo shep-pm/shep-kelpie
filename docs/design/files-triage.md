@@ -16,4 +16,5 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | triage-spam.md | the spam check | `runner/triage/spam.rs` |
 | triage-reader.md | who a comment is for | `runner/triage/facts.rs` |
 | triage-hand.md | the swap a `taken` record owes | `runner/triage/hand.rs` |
+| triage-swap.md | the waiting label's one-time swap to `needs-approval` | `runner/triage/swap.rs`, `runner/voice/writer.rs`, `core/board/mod.rs` |
 | triage-check.md | the check on every issue | `runner/triage/checks.rs` |

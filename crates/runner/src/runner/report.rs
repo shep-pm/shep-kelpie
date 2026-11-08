@@ -718,6 +718,20 @@ pub enum StepReport {
         /// Its session
         session: SessionId,
     },
+    /// The project manager's read of a fix it drafted ended: kelpie filed the
+    /// fix, or put the draft to the maintainer and filed nothing
+    PmFixRead {
+        /// The work item the fix is for
+        item: TicketId,
+        /// The fix kelpie filed, and none when the read refused the draft
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fix: Option<TicketId>,
+        /// What the read said, in its words
+        verdict: String,
+        /// What kelpie could not do, each with why
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        dropped: Vec<String>,
+    },
     /// A call started in a session, before it ends: what `shep kelpie watch`
     /// reads to tell whose a transcript is and where to find it
     SessionStarted {

@@ -247,6 +247,17 @@ impl Runner {
         asked: u64,
         read: Result<PollRead, ForgeError>,
     ) -> Result<(), StateError> {
+        // A listing read while the swap was owed holds the old label, which the
+        // check and the pass would read as no label of ours. Nothing acts on it,
+        // and the next poll reads the repo as the swap leaves it.
+        if self.triage_run.label_swap_owed {
+            self.swap_labels();
+            self.triage_run.listing = None;
+            if self.state.triage.is_none() {
+                self.looks.triage_listed(now);
+            }
+            return Ok(());
+        }
         let Ok(PollRead {
             mut open,
             pulls,

@@ -424,6 +424,9 @@ fn profile(call: &AgentCall) -> Vec<OsString> {
     let own = call.agent_tools.as_deref();
     let tools = match (call.role, call.tools) {
         (_, Kind::Retro) => Some(settings::RETRO_TOOLS),
+        // The project manager's read of a fix it drafted reads and searches
+        // alone: it writes nothing and runs no command.
+        (Role::Pm, Kind::Review) => Some(crate::settings::CLAUDE_REVIEW_TOOLS),
         (Role::Pm, _) => Some(settings::PM_TOOLS),
         (_, Kind::Work) => Some(own.unwrap_or(settings::WORK_TOOLS)),
         (_, Kind::Review) => Some(own.unwrap_or(crate::settings::CLAUDE_REVIEW_TOOLS)),

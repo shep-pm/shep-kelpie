@@ -42,7 +42,8 @@ const RED: &str = "`workflow`, a `call` of fix with a `title` and a `body`, or a
 const UNSTICK: &str = "`item`, an `action` of retry, re-scope, ask or none, and `why`";
 
 /// What a `fix` entry holds, as a dropped one names it
-const FIX: &str = "`item`, an `on` naming the open fix it waits on, and `why`";
+const FIX: &str = "`item`, then `on` naming the open fix it waits on or a `title` and a `body` \
+                   for the fix it drafts, and `why`";
 
 /// What an `answer` entry holds, as a dropped one names it
 const SETTLE: &str = "`item`, then `text` or `escalate`, and `why`";
@@ -134,16 +135,24 @@ pub(super) struct Unstick {
     pub(super) why: String,
 }
 
-/// The project manager's call to keep one stuck work item parked on a fix
-/// that is already open
+/// The project manager's call about one stuck work item and its fix
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct FixCall {
     /// The work item's ticket, which is parked on a ruling
     pub(super) item: TicketId,
-    /// The open fix work item it waits on
-    pub(super) on: TicketId,
+    /// The open fix it waits on, or the fix it drafts
+    pub(super) how: FixHow,
     /// Why, which the ruling it stays parked on carries
     pub(super) why: String,
+}
+
+/// What the project manager does about one stuck work item's fix
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum FixHow {
+    /// Keep the item parked on the open fix it names
+    On(TicketId),
+    /// File this fix, which kelpie reads against the code before it files it
+    Draft { title: String, body: String },
 }
 
 /// The project manager's call on one worker's question
@@ -322,7 +331,7 @@ pub(super) fn read(text: &str) -> Option<Answer> {
                     Some(d) => answer.follow_up = Some(d),
                     None => answer.unread.push(unread(
                         "`item`, a `decision` of yes or no, a `label` of ready-for-agent or \
-                         needs-triage with a yes, `why`, and with a yes any `drop` of \
+                         needs-approval with a yes, `why`, and with a yes any `drop` of \
                          findings by number, each once, with a `why`",
                     )),
                 },
@@ -431,10 +440,15 @@ pub(super) fn read(text: &str) -> Option<Answer> {
     Some(answer)
 }
 
-// The last top-level object in `text` that has an answer's key. Read from
-// the start, each whole JSON value is skipped past, so nothing inside one,
-// a string's braces included, is ever taken for an answer of its own.
+// The last top-level object in `text` that has an answer's key.
 fn last_object(text: &str) -> Option<Map<String, Value>> {
+    last_named(text, &KEYS)
+}
+
+/// The last top-level object in `text` that has any of `keys`. Read from the
+/// start, each whole JSON value is skipped past, so nothing inside one, a
+/// string's braces included, is ever taken for an object of its own.
+pub(super) fn last_named(text: &str, keys: &[&str]) -> Option<Map<String, Value>> {
     let mut found = None;
     let mut at = 0;
     while let Some(offset) = text[at..].find('{') {
@@ -444,7 +458,7 @@ fn last_object(text: &str) -> Option<Map<String, Value>> {
             Some(Ok(value)) => {
                 at = start + values.byte_offset();
                 if let Value::Object(fields) = value
-                    && KEYS.iter().any(|k| fields.contains_key(*k))
+                    && keys.iter().any(|k| fields.contains_key(*k))
                 {
                     found = Some(fields);
                 }
@@ -514,11 +528,21 @@ fn unstick(value: &Value) -> Option<Unstick> {
 
 fn fix(value: &Value) -> Option<FixCall> {
     let item = ticket(value.get("item")?)?;
-    let on = ticket(value.get("on")?)?;
+    let words = |key: &str| {
+        let words = value.get(key)?.as_str()?.trim();
+        (!words.is_empty()).then(|| words.to_owned())
+    };
+    let how = match value.get("on") {
+        None | Some(Value::Null) => FixHow::Draft {
+            title: plain_line(&words("title")?),
+            body: printable(&words("body")?),
+        },
+        Some(on) => FixHow::On(ticket(on)?),
+    };
     let why = value.get("why").and_then(Value::as_str).unwrap_or("");
     Some(FixCall {
         item,
-        on,
+        how,
         why: why.trim().to_owned(),
     })
 }
