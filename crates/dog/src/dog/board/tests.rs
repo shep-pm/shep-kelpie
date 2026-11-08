@@ -8,7 +8,7 @@ use super::*;
 use crate::agents::Tier;
 use crate::api_refusal::{CREDIT_RECHECK_SECS, Refusal};
 use crate::dog::availability::{Availability, Readers, Sources, read};
-use crate::lease::door::{Pick, PickAsk};
+use crate::lease::door::{Budget, Pick, PickAsk};
 use crate::ports::{Meter, Timestamp, Utilization};
 use crate::settings::{Account, Gateway, GatewayName, Gateways};
 use crate::test::{EPOCH, FakeClock, FakeMeter, LeaseReads, utilization, write_in};
@@ -704,7 +704,7 @@ async fn a_plan_agent_is_not_held_by_an_api_refusal() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn the_answer_reports_each_agents_cost_and_tier_and_ranks_none() {
+async fn the_answer_reports_each_agents_cost_tier_budget_and_ranks_none() {
     let dir = tempfile::tempdir().unwrap();
     let agents = plan_api_and_local(&dir.path().join("agents"));
     let home = dir.path().join("kelpie");
@@ -721,22 +721,62 @@ async fn the_answer_reports_each_agents_cost_and_tier_and_ranks_none() {
     let plan = Pick {
         cost_usd: Some(3.0),
         tier: Some(Tier::Heavy),
+        budget: Some(Budget::Plan),
         ..Pick::new(AgentName::kelpies("plan"), 600, 0)
     };
     let local = Pick {
         tier: Some(Tier::Light),
         local: true,
+        budget: Some(Budget::Local),
         ..Pick::new(AgentName::kelpies("local"), 3600, 0)
     };
     let billed = Pick {
         tier: Some(Tier::Light),
         held: true,
+        budget: Some(Budget::Billed),
         ..Pick::new(AgentName::kelpies("billed"), HELD_FOR + 3600, HELD_FOR)
     };
     assert_eq!(
         picks,
         [plan, local, billed],
         "the dearer plan agent finishes first, ahead of the free local one and the held one"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn each_pick_names_the_budget_it_draws_from() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = plan_api_and_local(&dir.path().join("agents"));
+    let home = dir.path().join("kelpie");
+    let board = Mutex::new(Board::new(&agents));
+    let shown = seen(&agents, &Gateways::default(), 10).await;
+    let now = Timestamp(EPOCH);
+    let budget = |name: &str| {
+        pick::answer(&lock(&board).view(), &shown, &ask_all(), now)
+            .into_iter()
+            .find(|p| p.agent.as_str() == name)
+            .and_then(|p| p.budget)
+    };
+
+    assert_eq!(budget("local"), Some(Budget::Local));
+    assert_eq!(budget("plan"), Some(Budget::Plan));
+    assert_eq!(
+        budget("billed"),
+        Some(Budget::Billed),
+        "no credit is set, so its calls bill the API key"
+    );
+
+    lock(&board).set_credit(Some(10.0));
+    call(&home, "koji", Some("billed"), EPOCH, Some(4.0));
+    refresh(&board, &home);
+    assert_eq!(budget("billed"), Some(Budget::Credit), "4 of 10 spent");
+
+    call(&home, "koji", Some("billed"), EPOCH, Some(6.0));
+    refresh(&board, &home);
+    assert_eq!(
+        budget("billed"),
+        Some(Budget::Billed),
+        "the month's credit is spent"
     );
 }
 

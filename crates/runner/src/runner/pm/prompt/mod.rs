@@ -364,7 +364,8 @@ each key but `issue` optional: `tier` is the least the work needs, `slack` the m
 may take, and `agent` is the implementer tried first. Name an `agent` on \
 every `pick` entry, an implementer from the Agents section that can start now; when you name \
 none, or the agent cannot start within the slack, kelpie takes the cheapest available agent \
-that fits. An agent the Agents section marks out will not start the item, and the \
+that fits, and never one the Agents section marks billed to the API. An agent the Agents \
+section marks out will not start the item, and the \
 maintainer's `agent:<name>!` label wins over your `agent`: the item runs on the label's agent \
 alone. An issue that should wait for an agent goes on \
 `hold`, as any issue that should wait does, rather than on a pick, with the open work item \

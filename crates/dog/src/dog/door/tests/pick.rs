@@ -10,7 +10,7 @@ use crate::dog::availability::{Readers, Sources, read};
 use crate::dog::board::refresh;
 use crate::dog::board::tests::finished;
 use crate::forwarder::Upstream;
-use crate::lease::door::{Answer, Ask, PICK, Pick, PickAsk, Visit};
+use crate::lease::door::{Answer, Ask, Budget, PICK, Pick, PickAsk, Visit};
 use crate::lease::door_pick::{pick, refused};
 use crate::ports::{LocalLeases, Meter, ModelLoad, PaddockHolder, Timestamp, Utilization};
 use crate::settings::{Account, AgentName, Gateway, GatewayName, Gateways};
@@ -326,6 +326,7 @@ async fn a_reviewer_on_a_held_plan_finishes_after_its_hold() {
         picks,
         [Pick {
             tier: Some(Tier::Standard),
+            budget: Some(Budget::Plan),
             ..Pick::new(name("held"), 6 * 3600, 5 * 3600)
         }],
         "the hold ends when the plan's window resets"
@@ -373,8 +374,24 @@ async fn a_refusal_a_runner_reports_holds_every_api_agent_for_the_next_pick() {
     let until = Timestamp(EPOCH + CREDIT_RECHECK_SECS);
     assert_eq!(held, Some(until));
     let picks = picked(&dog.socket, item(None, &["billed", "fast"])).await;
-    let waits: Vec<_> = picks.iter().map(|p| (p.agent.as_str(), p.wait)).collect();
-    assert_eq!(waits, [("fast", 0), ("billed", CREDIT_RECHECK_SECS)]);
+    assert_eq!(
+        agents_of(&picks),
+        ["fast"],
+        "an ask that names no agent is answered no agent billed to the key"
+    );
+    let named = PickAsk {
+        pin: Some(name("billed")),
+        ..item(None, &["billed", "fast"])
+    };
+    let named_picks = picked(&dog.socket, named).await;
+    let held: Vec<_> = (named_picks.iter())
+        .map(|p| (p.agent.as_str(), p.wait, p.budget))
+        .collect();
+    assert_eq!(
+        held,
+        [("billed", CREDIT_RECHECK_SECS, Some(Budget::Billed))],
+        "the hold reaches the API agent a named ask may still start"
+    );
 }
 
 // The picks the dog at `socket` answers `ask` with.

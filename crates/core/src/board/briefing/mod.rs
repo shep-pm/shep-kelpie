@@ -14,7 +14,7 @@ use std::fmt::Write as _;
 use serde::{Deserialize, Serialize};
 
 use crate::agents::{Role, Tier};
-use crate::lease::door::Pick;
+use crate::lease::door::{Budget, Pick};
 use crate::ports::{CallActivity, Cost, Timestamp, Wait};
 use crate::state::BoardEvent;
 use crate::ticket::TicketId;
@@ -544,21 +544,26 @@ fn agents(
     out.push_str(
         "Implementers by name, then reviewers in their order. You name each work item's \
          agent from this list. Kelpie takes the cheapest available agent that fits when you \
-         name none, and an `agent:<name>!` label pins. An implementer's line shows when it can \
-         start and what it typically takes and costs, and an agent marked out cannot start a \
-         work item before the time shown. To have a work item wait for an agent, hold it. \
-         A ready issue whose line says `unblocks` holds up other work, so it is worth the \
-         fastest agent that can start. A plan agent costs no dollars, but each work item \
-         spends a share of its week's limit, and a share left at the reset is lost, so a \
-         plan's week is a budget to spend by its reset, not to save. Read the pace and where \
-         it lands, not the share left. On course to land under 100%, run more work items at \
-         once and give work that holds up other work to the faster plan agent. On course for \
-         over 100%, lean on local models. A small share left with little time left is no \
-         reason to slow down. The pace never reorders the agents: spend a local model that \
-         can start first, then API credit while the API is not held, then a plan, and the \
-         pace says only how far down that order to reach when the cheaper ones are busy. The \
-         ready queue is not the week's work, since the maintainer files issues all week, so \
-         a short queue is no reason to spend faster.\n\n",
+         name none, and an `agent:<name>!` label pins. An implementer's line shows when it \
+         can start, what it typically takes and costs, and which budget its calls draw from, \
+         and an agent marked out cannot start a work item before the time shown. To have a \
+         work item wait for an agent, hold it. A ready issue whose line says `unblocks` holds \
+         up other work, so it is worth the fastest agent that can start. Each budget has its \
+         own rule. A local model's power is already paid for: spend one first when it can \
+         take the item. A plan agent costs no dollars, but each work item spends a share of \
+         its week's limit, and a share left at the reset is lost, so a plan's week is a \
+         budget to spend by its reset, not to save. Read the pace and where it lands, not the \
+         share left. On course to land under 100%, run more work items at once and give work \
+         that holds up other work to the faster plan agent. On course for over 100%, lean on \
+         local models. A small share left with little time left is no reason to slow down. \
+         Spend the API credit and the plan week to their pace, the one further behind its \
+         reset first, since both are lost at their reset. Billed API is overflow you must \
+         ask for: kelpie starts an agent billed to the API only when you name it or an \
+         `agent:<name>!` label pins it, and never on its own, so an item whose only fitting \
+         agents are billed is skipped as unpicked until you name one. The ready queue is not \
+         the week's \
+         work, since the maintainer files issues all week, so a short queue is no reason to \
+         spend faster.\n\n",
     );
     if credit.is_some() {
         out.push_str(
@@ -566,12 +571,12 @@ fn agents(
              spend it, and it is paced across the month so its course aims at 100% by the \
              month's end. The share left at the month's end is lost, so spend it like any \
              budget at its reset. On course under 100%, put more work on API agents; over \
-             100%, put less by naming a plan agent for the items. The pace never reorders \
-             the agents. A standing note from you to spend the credit freely until a date \
-             (`shep kelpie tell --all`, a line with an `(until ...)` end in \
-             `pm-standing.md`) sets this pacing aside until then, and the order alone \
-             decides: a local model that can start, then API credit while the API is not \
-             held, then a plan.\n\n",
+             100%, put less by naming a plan agent for the items. A standing note from you \
+             to spend the credit freely until a date (`shep kelpie tell --all`, a line with \
+             an `(until ...)` end in `pm-standing.md`) sets this pacing aside until then: \
+             spend a local model that can take the item first, spend the credit and the plan \
+             week while either lasts, and billed API only for an agent you name or a label \
+             pins.\n\n",
         );
     }
     for agent in agents {
@@ -608,13 +613,33 @@ fn reading(agent: &AgentLine, now: Timestamp) -> String {
         0 => "now".to_owned(),
         wait => format!("{} UTC", date_time(Timestamp(now.0.saturating_add(wait)))),
     };
-    let cost = match (read.cost_usd, read.local) {
-        (Some(usd), _) => format!("about ${usd:.2}"),
-        (None, true) => "costs nothing (local model)".to_owned(),
-        (None, false) => "cost unknown".to_owned(),
-    };
+    let cost = spends(read);
     let typical = elapsed(read.finish.saturating_sub(read.wait));
     format!("; starts {starts}, typically {typical}, {cost}")
+}
+
+// What an agent's calls cost, naming the budget they draw from. A pick from a
+// dog that names no budget keeps the wording of the dog that wrote it.
+fn spends(read: &Pick) -> String {
+    let (after, unpriced) = match read.budget {
+        Some(Budget::Local) => ("in power", "power not metered"),
+        Some(Budget::Plan) => ("at list price, from the plan week", "from the plan week"),
+        Some(Budget::Credit) => ("from the API credit", "from the API credit"),
+        Some(Budget::Billed) => ("billed to the API", "billed to the API"),
+        None => (
+            "",
+            if read.local {
+                "costs nothing (local model)"
+            } else {
+                "cost unknown"
+            },
+        ),
+    };
+    match read.cost_usd {
+        Some(usd) if after.is_empty() => format!("about ${usd:.2}"),
+        Some(usd) => format!("about ${usd:.2} {after}"),
+        None => unpriced.to_owned(),
+    }
 }
 
 fn events(out: &mut String, board: &Briefing<'_>) {

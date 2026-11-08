@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use super::door::{Answer, Ask, CREDIT, Credit, FIT, FitAsk, Fits, PICK, Pick, PickAsk, REFUSED};
 use super::door_pace::answered;
-use crate::agent_board::rank;
+use crate::agent_board::{rank, startable};
 use crate::api_refusal::Refusal;
 use crate::ports::{AgentBoard, Timestamp};
 use crate::settings::AgentName;
@@ -53,14 +53,15 @@ impl AgentBoard for DoorBoard {
 /// The agents the dog at `door` would start `item` on, in order, or None when it cannot say
 ///
 /// The dog reads each agent and the runner ranks them with the ask's slack.
-/// An empty list is the dog's answer that no allowed agent fits.
+/// An ask that names no agent gets none billed to the API key. An empty list
+/// is the dog's answer that no allowed agent fits.
 pub fn pick(door: &Path, item: &PickAsk) -> Option<Vec<Pick>> {
     let ask = Ask {
         pick: Some(item.clone()),
         ..Ask::new(PICK, std::process::id(), "pick")
     };
     match answered(door, &ask)? {
-        Answer::Picks(picks) => Some(rank(picks, item.slack)),
+        Answer::Picks(picks) => Some(startable(rank(picks, item.slack), item.pin.is_some())),
         _ => None,
     }
 }

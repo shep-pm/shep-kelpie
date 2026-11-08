@@ -239,6 +239,21 @@ pub struct PickAsk {
     pub leave_out: Vec<AgentName>,
 }
 
+/// Which budget an agent's calls draw from, as the dog reads it
+// wire format: changing this is a breaking change to the door
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Budget {
+    /// Its model is power kelpie has already paid for
+    Local,
+    /// An account's plan week, which bills no API key
+    Plan,
+    /// Billed to the API key, while the month's spend is under its credit
+    Credit,
+    /// Billed to the API key, with no credit set or the month's credit spent
+    Billed,
+}
+
 /// An agent the dog read as able to start an item, in a [`Answer::Picks`]
 ///
 /// The dog orders none: `rank` puts them in the order to try them, from the
@@ -264,11 +279,14 @@ pub struct Pick {
     /// Whether its wait is a hold on its API key
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub held: bool,
+    /// Which budget its calls draw from, or None from a dog that does not say
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<Budget>,
 }
 
 impl Pick {
     /// `agent`, finishing in `finish` seconds and starting in `wait`, with no
-    /// cost, tier, place in the list, and neither local nor held
+    /// cost, tier, place in the list, budget, and neither local nor held
     pub fn new(agent: AgentName, finish: u64, wait: u64) -> Self {
         Self {
             agent,
@@ -278,6 +296,7 @@ impl Pick {
             tier: None,
             local: false,
             held: false,
+            budget: None,
         }
     }
 }
@@ -728,15 +747,43 @@ mod tests {
             tier: Some(Tier::Heavy),
             local: true,
             held: true,
+            budget: Some(Budget::Credit),
             ..Pick::new(AgentName::kelpies("opus-high"), 900, 300)
         };
         assert_eq!(
             serde_json::to_value(&read).unwrap(),
             json!({
                 "agent": "opus-high", "finish": 900, "wait": 300, "cost_usd": 1.5,
-                "tier": "heavy", "local": true, "held": true
+                "tier": "heavy", "local": true, "held": true, "budget": "credit"
             })
         );
+    }
+
+    #[test]
+    fn a_pick_that_names_no_budget_still_reads() {
+        let read: Pick =
+            serde_json::from_str(r#"{"agent":"sonnet-high","finish":600,"wait":0}"#).unwrap();
+        assert_eq!(read, Pick::new(AgentName::kelpies("sonnet-high"), 600, 0));
+        assert_eq!(read.budget, None, "a dog that names none is asked none");
+    }
+
+    #[test]
+    fn a_pick_names_its_budget_lowercase_and_reads_it_back() {
+        for (name, budget) in [
+            ("local", Budget::Local),
+            ("plan", Budget::Plan),
+            ("credit", Budget::Credit),
+            ("billed", Budget::Billed),
+        ] {
+            let line = format!(r#"{{"agent":"a","finish":600,"wait":0,"budget":"{name}"}}"#);
+            let read: Pick = serde_json::from_str(&line).unwrap();
+            assert_eq!(read.budget, Some(budget), "{line}");
+            assert_eq!(
+                serde_json::to_string(&read).unwrap(),
+                line,
+                "the same line goes back out"
+            );
+        }
     }
 
     #[test]
