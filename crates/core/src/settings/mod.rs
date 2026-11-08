@@ -25,7 +25,6 @@ mod browser;
 mod budget;
 mod builds;
 mod ci;
-mod code_graph;
 mod contributions;
 mod dependencies;
 mod domains;
@@ -53,7 +52,6 @@ pub use browser::Browser;
 pub use budget::{Budget, PerItemUsd};
 pub use builds::Builds;
 pub use ci::{Ci, Concurrency, FixAttempts, TestCommand};
-pub use code_graph::CodeGraph;
 pub use contributions::{Contributions, Pick};
 pub use dependencies::{Dependencies, DependencyPick};
 pub use e2e::{E2e, RepoPath, ResultsDir, SshAlias};
@@ -136,10 +134,6 @@ pub struct Settings {
     /// kelpie's home. GitHub when absent.
     #[serde(default)]
     pub tickets: Tickets,
-    /// Whether workers and reviewers get a code graph of the worktree. Off
-    /// when absent.
-    #[serde(default)]
-    pub code_graph: CodeGraph,
     /// Whether a worker drives a browser to see the UI it builds, which
     /// hosts it reaches, and whether it is headed. Off when absent.
     #[serde(default)]
@@ -521,6 +515,11 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "repo_setup.skip",
         because: NARROWING,
+        fix: MIGRATE,
+    },
+    Removed {
+        key: "code_graph",
+        because: "the graph follows `shep kelpie tools install`, and a worker never gets it",
         fix: MIGRATE,
     },
 ];
