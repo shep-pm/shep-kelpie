@@ -103,7 +103,7 @@ impl Runner {
         if self.asked_login(author).is_none() {
             return false;
         }
-        if self.settings.triage.pick == TriagePick::All || self.go_listed(issue) {
+        if self.settings.triage.pick == TriagePick::All || self.go_seen(issue) {
             return true;
         }
         self.own_author(author)

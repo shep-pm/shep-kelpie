@@ -280,7 +280,8 @@ impl Runner {
                 continue;
             }
             // A record is the issue's, to finish or to leave, unless the verb asked again.
-            if !asked && !self.first_pass_owed(issue) {
+            let renewed = self.go_renewed_listed(issue);
+            if !asked && !renewed && !self.first_pass_owed(issue) {
                 continue;
             }
             self.flights.triage_try(issue);

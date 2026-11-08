@@ -348,7 +348,7 @@ impl Runner {
                     self.check_owed(i.number),
                     app.as_deref(),
                     self.taken_seen(i.number).is_some(),
-                ) && self.first_pass_owed(i.number)
+                ) && (self.first_pass_owed(i.number) || self.go_renewed(&i.labels, i.number))
                     && !self.ready_at_work(i, pulls.as_ref())
             })
             .collect();

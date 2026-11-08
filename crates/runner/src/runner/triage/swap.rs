@@ -8,6 +8,7 @@
 use std::collections::BTreeSet;
 
 use super::super::Runner;
+use super::comment::NEEDS_TRIAGE;
 use crate::board::{TRIAGE, TRIAGE_GO};
 use crate::ports::NewLabel;
 use crate::settings::TriagePick;
@@ -44,7 +45,7 @@ impl Runner {
         match (has(TRIAGE), has(TRIAGE_GO)) {
             (true, true) => Ok(()),
             (false, false) if self.settings.triage.pick == TriagePick::Label => {
-                self.make_missing_labels([NEEDS_TRIAGE_GO])
+                self.make_missing_labels([NEEDS_TRIAGE, NEEDS_TRIAGE_GO])
             }
             (false, false) => Ok(()),
             (true, false) => self.make_missing_labels([NEEDS_TRIAGE_GO]),

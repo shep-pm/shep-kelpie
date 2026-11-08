@@ -128,7 +128,7 @@ fn a_go_on_a_triaged_issue_starts_nothing() {
         &rig,
         json!({
             "issue": 30, "comment": 101, "step": "done",
-            "author": "newcomer", "seen": [TRIAGE],
+            "author": "newcomer", "seen": [TRIAGE, TRIAGE_GO],
         }),
     );
     let runner = rig.open().unwrap();
@@ -146,18 +146,39 @@ fn a_go_on_a_triaged_issue_starts_nothing() {
 }
 
 #[test]
-fn a_new_repo_under_label_gets_the_go_label() {
+fn a_go_put_on_again_after_an_edit_starts_a_pass() {
+    let (rig, runner) = asked("newcomer", FAILING, &[TRIAGE]);
+    drop(runner);
+    crashed_with(
+        &rig,
+        json!({
+            "issue": 30, "comment": 101, "step": "done",
+            "author": "newcomer", "seen": [TRIAGE],
+        }),
+    );
+    let runner = rig.open().unwrap();
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(
+        calls(&rig, Role::Triager).len(),
+        1,
+        "the old pass saw no go"
+    );
+}
+
+#[test]
+fn a_new_repo_under_label_gets_both_waiting_labels() {
     let rig = rig_with("pick = \"label\"");
     rig.forge.set_repo_labels(&["bug"]);
 
     let _runner = rig.open().unwrap();
 
     let made = (rig.github.writes().into_iter())
-        .filter_map(|(_, call)| {
-            serde_json::from_str::<serde_json::Value>(call.body.as_deref()?).ok()
-        })
-        .filter(|body| body["name"] == TRIAGE_GO);
-    assert_eq!(made.count(), 1);
+        .filter_map(|(_, call)| serde_json::from_str::<Value>(call.body.as_deref()?).ok())
+        .filter_map(|body| body["name"].as_str().map(str::to_owned))
+        .filter(|name| name == TRIAGE || name == TRIAGE_GO);
+    assert_eq!(made.collect::<Vec<_>>(), [TRIAGE, TRIAGE_GO]);
 }
 
 #[test]
