@@ -4,7 +4,7 @@
 use super::*;
 use crate::agent_board::{Finding, Measure};
 use crate::agents::Agents;
-use crate::dog::board::tests::finished;
+use crate::dog::board::tests::{finished, unmerged};
 use crate::dog::board::{Board, load_marks, refresh};
 use crate::lease::door::{FitAsk, Fits};
 use crate::lease::door_pick::fits;
@@ -35,11 +35,12 @@ fn home_in(dir: &Path) -> PathBuf {
     home
 }
 
-// The board of `agents`, with ten items of `fix` each for the pair, `slow`'s
-// taking twelve times as long as `quick`'s.
+// The board of `agents`, with ten items of `fix` each for the pair, `slow`
+// merging half of its items and `quick` all of them.
 fn board_of(agents: &Agents, home: &Path) -> Arc<Mutex<Board>> {
     let board = Arc::new(Mutex::new(Board::new(agents)));
-    finished(home, "koji", ("slow", "fix"), 10, (7200, 0.5));
+    finished(home, "koji", ("slow", "fix"), 5, (7200, 0.5));
+    unmerged(home, "koji", ("slow", "fix"), 5, (7200, 0.5));
     finished(home, "koji", ("quick", "fix"), 10, (600, 0.5));
     refresh(&board, home);
     board
@@ -58,15 +59,16 @@ async fn asked(socket: &Path, agent: &str, kind: &str) -> Fits {
         .expect("the dog answered")
 }
 
-// The finding the pair gives: `slow` takes twelve times as long at `fix`.
+// The finding the pair gives: `slow` merges half its `fix` items and `quick`
+// all of them.
 fn finding() -> Finding {
     Finding {
         kind: "fix".into(),
         worse: "slow".into(),
         better: "quick".into(),
-        measure: Measure::Hours {
-            worse: 2.0,
-            better: 1.0 / 6.0,
+        measure: Measure::MergeRate {
+            worse: 0.5,
+            better: 1.0,
         },
         suggested_kinds: vec!["docs".into()],
     }
@@ -107,10 +109,11 @@ async fn a_pair_is_answered_once_and_again_only_after_ten_more_items() {
         "ten items of the kind is the reading"
     );
     assert_eq!(again, Fits::Yes, "the dog answered this pair just now");
-    finished(&home, "koji", ("slow", "fix"), 9, (7200, 0.5));
+    finished(&home, "koji", ("slow", "fix"), 5, (7200, 0.5));
+    unmerged(&home, "koji", ("slow", "fix"), 4, (7200, 0.5));
     refresh(&board, &home);
     let nine_more = asked(&socket, "slow", "fix").await;
-    finished(&home, "koji", ("slow", "fix"), 1, (7200, 0.5));
+    unmerged(&home, "koji", ("slow", "fix"), 1, (7200, 0.5));
     refresh(&board, &home);
     let ten_more = asked(&socket, "slow", "fix").await;
     assert_eq!(nine_more, Fits::Yes, "nineteen items is not ten more");
