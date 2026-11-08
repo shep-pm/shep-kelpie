@@ -44,6 +44,10 @@ impl AgentBoard for DoorBoard {
     fn refused(&self, refusal: &Refusal) -> Option<Timestamp> {
         refused(&self.socket, refusal)
     }
+
+    fn credit(&self) -> Option<Credit> {
+        credit(&self.socket)
+    }
 }
 
 /// The agents the dog at `door` would start `item` on, in order, or None when it cannot say
