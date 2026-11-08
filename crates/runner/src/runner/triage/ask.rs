@@ -6,7 +6,7 @@
 //! asked login writes next is their answers; kelpie reads no word in it. No reply
 //! `triage.wait_days` on, and the maintainer triages it as it stands.
 //! [`Runner::askable`] asks the maintainer's own issues, any under `pick = "all"`,
-//! and an App issue of the maintainer. No status label goes on while a wait is
+//! one the maintainer approved with the go, and an App issue of the maintainer. No status label goes on while a wait is
 //! open ([`Runner::finish_triage`]); [`super::heard`] hears the answers.
 
 use std::collections::BTreeMap;
@@ -55,7 +55,7 @@ pub(in crate::runner) fn under_text(body: &str, text: &str) -> String {
 pub(in crate::runner) enum Write {
     /// It went on, and its step is saved
     Written,
-    /// The forge refused it, so the issue ends `needs-triage` like any other,
+    /// The forge refused it, so the issue ends `needs-approval` like any other,
     /// and the issue is told the write did not happen
     Refused,
     /// Nothing more this pass: the maintainer's own label stood, or the write
@@ -96,13 +96,14 @@ impl Runner {
     }
 
     // Whether `asked_login` names anyone to ask: the maintainer on their own
-    // issue, and any author under `pick = "all"`. An issue the App opened is
-    // asked of the maintainer. Anyone else gets `needs-triage` with no ask.
-    pub(in crate::runner) fn askable(&self, author: &str) -> bool {
+    // issue, and any author under `pick = "all"` or on an issue the maintainer
+    // approved with the go. An issue the App opened is asked of the maintainer.
+    // Anyone else gets `needs-approval` with no ask.
+    pub(in crate::runner) fn askable(&self, issue: u64, author: &str) -> bool {
         if self.asked_login(author).is_none() {
             return false;
         }
-        if self.settings.triage.pick == TriagePick::All {
+        if self.settings.triage.pick == TriagePick::All || self.go_listed(issue) {
             return true;
         }
         self.own_author(author)
@@ -236,7 +237,7 @@ impl Runner {
 
     // Ends the wait as `none`: the questions and the prompt come off the record,
     // and what the pass owed goes on, which is its labels and then
-    // `needs-triage`. The triage comment stays as the maintainer's starting
+    // `needs-approval`. The triage comment stays as the maintainer's starting
     // point: nothing new is posted.
     pub(in crate::runner) fn triage_none(&mut self, issue: u64) -> Result<(), StateError> {
         let mut next = self.state.clone();

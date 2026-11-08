@@ -3,7 +3,7 @@
 //! The representative words the facts, kelpie's code appends [`MARKER`] and
 //! posts the comment as the App, and then puts the labels on. A maintainer's
 //! issue whose rewrite the issue check passes takes the ready path ([`ready`]);
-//! any other ends `needs-triage`. The record in `triage.issues` is saved before
+//! any other ends `needs-approval`. The record in `triage.issues` is saved before
 //! each next write to the forge, so a restart posts nothing twice; a post the
 //! forge took whose record did not save is caught by the App's marker. A failed
 //! step is logged and tried at the next poll, and five failures give the issue
@@ -415,7 +415,7 @@ impl Runner {
         let ask = purpose == Some(Purpose::First)
             && stood.is_none()
             && !found.open.is_empty()
-            && self.askable(author);
+            && self.askable(issue, author);
         // The login the questions go to and whose reply answers them. On an issue
         // kelpie's own App opened, it is the maintainer: the App is nobody to ask,
         // and its own comments can never be the answers.
@@ -446,7 +446,7 @@ impl Runner {
         };
         let ready = ready::readiness(self, issue, author, found, &labels);
         // A rewrite the check still refuses is written as settled answers are,
-        // and the issue ends `needs-triage`.
+        // and the issue ends `needs-approval`.
         let (mut plan, mut refused, mut held) = (Vec::new(), Vec::new(), Vec::new());
         let (ready_body, rewrite) = match (stood.as_ref(), ready) {
             (Some(label), _) => {
@@ -778,7 +778,7 @@ impl Runner {
             .then_some(TriageQuestions { comment, at });
         // The labels the pass began with go into the record with it: a pass
         // that resumes after a restart has no in-memory reading left, and
-        // without these it takes kelpie's own `needs-triage` for the
+        // without these it takes kelpie's own `needs-approval` for the
         // maintainer's.
         let mut seen = (self.triage_tries.get(&issue))
             .and_then(|t| t.seen.clone())
@@ -902,7 +902,7 @@ impl Runner {
     }
 
     // Does what `issue`'s record says is left: the duplicate's close, the research's
-    // labels then `needs-triage`, the answers pass's write, or the ready path's
+    // labels then `needs-approval`, the answers pass's write, or the ready path's
     // body write then labels, `ready-for-agent` last, each saved before the next
     // write. No label goes on while the author's ask or questions are open.
     pub(super) fn finish_triage(&mut self, issue: u64) -> Result<(), StateError> {

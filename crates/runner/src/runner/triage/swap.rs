@@ -10,8 +10,10 @@ use std::collections::BTreeSet;
 use super::super::Runner;
 use crate::board::{TRIAGE, TRIAGE_GO};
 use crate::ports::NewLabel;
+use crate::settings::TriagePick;
 
-// Made on a repo once its old label is renamed, or when only the new one is there
+// Made on a repo once its old label is renamed, when only the new one is there, and
+// under `pick = "label"` on a repo with neither
 const NEEDS_TRIAGE_GO: NewLabel<'static> = NewLabel {
     name: TRIAGE_GO,
     color: "fbca04",
@@ -20,7 +22,8 @@ const NEEDS_TRIAGE_GO: NewLabel<'static> = NewLabel {
 
 impl Runner {
     // Renames the repo's `needs-triage` to `needs-approval` where only the old one
-    // exists, and makes `needs-triage` new. A project on the local store has no
+    // exists, and makes `needs-triage` new, which `pick = "label"` also does on a repo
+    // with neither, for the maintainer to use. A project on the local store has no
     // labels on its repo. A swap that fails is owed again at each poll, and until it
     // is done nothing makes `needs-approval`, which would read as a swap finished.
     pub(in crate::runner) fn swap_labels(&mut self) {
@@ -40,7 +43,11 @@ impl Runner {
             .map_err(|e| format!("cannot read {slug}'s labels to swap `{TRIAGE_GO}`: {e}"))?;
         let has = |name: &str| have.iter().any(|h| h.eq_ignore_ascii_case(name));
         match (has(TRIAGE), has(TRIAGE_GO)) {
-            (true, true) | (false, false) => Ok(()),
+            (true, true) => Ok(()),
+            (false, false) if self.settings.triage.pick == TriagePick::Label => {
+                self.make_missing_labels([NEEDS_TRIAGE_GO])
+            }
+            (false, false) => Ok(()),
             (true, false) => self.make_missing_labels([NEEDS_TRIAGE_GO]),
             (false, true) => {
                 self.map_seen_labels().map_err(|e| {

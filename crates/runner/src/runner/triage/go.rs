@@ -32,9 +32,9 @@ impl Runner {
             let number = issue.number;
             match self.label_issue(number, TRIAGE_GO, false) {
                 Ok(()) => issue.labels.retain(|l| l != TRIAGE_GO),
-                Err(e) => self
-                    .notes
-                    .push(format!("triage #{number}: cannot take `{TRIAGE_GO}` off: {e}")),
+                Err(e) => self.notes.push(format!(
+                    "triage #{number}: cannot take `{TRIAGE_GO}` off: {e}"
+                )),
             }
         }
     }

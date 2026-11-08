@@ -3,11 +3,12 @@
 
 use std::sync::Mutex;
 
-use serde_json::json;
+use serde_json::{Value, json};
 
+use super::ask_tests::{asked as questions, record};
 use super::check_tests::{FAILING, PASSING, PASSING_LABELS, REPO_LABELS, checking, filed};
 use super::pick_tests::{MAINTAINER, list, rig_with};
-use super::research_tests::{WORDS, calls, moves, reply};
+use super::research_tests::{WORDS, calls, crashed_with, moves, reply};
 use crate::board::{TRIAGE, TRIAGE_GO};
 use crate::ports::{Clock, Role, Timestamp};
 use crate::runner::{Runner, step};
@@ -16,6 +17,11 @@ use crate::test::{Rig, Scripted};
 // A rig under `pick = "label"` whose issue 30, by `author`, was opened before
 // `pick` was turned on and carries `labels` and the maintainer's go
 fn asked(author: &str, body: &str, labels: &[&str]) -> (Rig, Mutex<Runner>) {
+    found(author, body, labels, json!({}))
+}
+
+// The same, with the triager finding `found`
+fn found(author: &str, body: &str, labels: &[&str], found: Value) -> (Rig, Mutex<Runner>) {
     let rig = rig_with("pick = \"label\"");
     rig.forge.set_repo_labels(&REPO_LABELS);
     let mut labels = labels.to_vec();
@@ -26,7 +32,7 @@ fn asked(author: &str, body: &str, labels: &[&str]) -> (Rig, Mutex<Runner>) {
     list(&rig, old);
     rig.claude
         .script_for(Role::Representative, [Scripted::Say(WORDS)]);
-    rig.claude.script_for(Role::Triager, [reply(json!({}))]);
+    rig.claude.script_for(Role::Triager, [reply(found)]);
     let runner = rig.open().unwrap();
     (rig, runner)
 }
@@ -91,4 +97,76 @@ fn the_pass_takes_the_go_off_and_ends_at_needs_approval() {
     assert_eq!(rig.github.label_takes(), [(30, TRIAGE_GO.to_owned())]);
     assert_eq!(calls(&rig, Role::Triager).len(), 1, "nothing starts again");
     assert_eq!(rig.github.comments().len(), 1);
+}
+
+#[test]
+fn an_issue_swapped_on_upgrade_is_not_an_approval() {
+    let rig = rig_with("pick = \"label\"");
+    rig.forge.set_repo_labels(&[TRIAGE_GO]);
+    rig.forge.label(30, TRIAGE_GO);
+    let mut old = filed(&rig, "newcomer", FAILING, &[TRIAGE]);
+    old.created = Timestamp(rig.clock.now().0.saturating_sub(1));
+    list(&rig, old);
+    rig.claude.script_for(Role::Triager, [reply(json!({}))]);
+    let runner = rig.open().unwrap();
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(calls(&rig, Role::Triager).len(), 0);
+    assert_eq!(rig.github.comments(), []);
+    assert_eq!(rig.github.label_takes(), []);
+    let renamed = rig.github.writes();
+    let renamed = renamed.iter().filter(|(_, c)| c.path.ends_with(TRIAGE_GO));
+    assert_eq!(renamed.count(), 1, "the swap renamed the old label");
+}
+
+#[test]
+fn a_go_on_a_triaged_issue_starts_nothing() {
+    let (rig, runner) = asked("newcomer", FAILING, &[TRIAGE]);
+    drop(runner);
+    crashed_with(
+        &rig,
+        json!({
+            "issue": 30, "comment": 101, "step": "done",
+            "author": "newcomer", "seen": [TRIAGE],
+        }),
+    );
+    let runner = rig.open().unwrap();
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(calls(&rig, Role::Triager).len(), 0);
+    assert_eq!(rig.github.comments(), []);
+    assert_eq!(rig.github.label_takes(), [(30, TRIAGE_GO.to_owned())]);
+
+    let reply = rig.ask(&runner, "triage", Some("30"));
+    assert_eq!(reply.get("error"), None, "the verb still asks: {reply}");
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(calls(&rig, Role::Triager).len(), 1);
+}
+
+#[test]
+fn a_new_repo_under_label_gets_the_go_label() {
+    let rig = rig_with("pick = \"label\"");
+    rig.forge.set_repo_labels(&["bug"]);
+
+    let _runner = rig.open().unwrap();
+
+    let made = (rig.github.writes().into_iter())
+        .filter_map(|(_, call)| {
+            serde_json::from_str::<serde_json::Value>(call.body.as_deref()?).ok()
+        })
+        .filter(|body| body["name"] == TRIAGE_GO);
+    assert_eq!(made.count(), 1);
+}
+
+#[test]
+fn an_approved_outside_issue_is_asked_as_under_pick_all() {
+    let (rig, runner) = found("newcomer", FAILING, &[], questions());
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    let held = record(&rig, &runner);
+    assert!(held["questions"]["at"].is_number(), "{held}");
+    assert_eq!(moves(&rig), ["comment"], "asked, so no label yet");
 }
