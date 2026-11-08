@@ -209,6 +209,13 @@ impl Runner {
         let (done, why) = self.rule_threads(wakes, &answer.threads)?;
         acted.extend(done);
         dropped.extend(why);
+        // After the settles above, so an item they unparked has no case to carry the log.
+        for call in &answer.run_log {
+            match self.ask_run_log(call.item, call.run) {
+                Ok(done) => acted.push(done),
+                Err(why) => dropped.push(why),
+            }
+        }
         if let Some(reply) = &answer.reply {
             self.pm.reply = Some(reply.clone());
         }

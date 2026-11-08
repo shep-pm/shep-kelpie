@@ -3,6 +3,7 @@
 
 use std::fmt::Write as _;
 
+use super::case::case_file;
 use super::maintainer::held_on;
 use super::red::short;
 use super::{Wake, diffs};
@@ -133,6 +134,28 @@ macro_rules! fixes {
          A draft that fails kelpie's own checks never reaches that call. There is no limit on \
          `fix`: an open fix you could park on is on the board, so drafting the same fix twice \
          is yours to avoid."
+    };
+}
+
+/// The `run_log` key as the answer shows it, which a wake for an item with a case
+/// shows again to a session that has seen the answer without it
+macro_rules! run_log_key {
+    () => {
+        "\"run_log\": null or {\"item\": <a work item with a case>, \"run\": <a run number on its case's `## CI` list>} or a list of them"
+    };
+}
+
+/// How a green run's log is asked for, shown with the `run_log` key
+macro_rules! run_logs {
+    () => {
+        "A case's `## CI` lists every run on the pull request's head and quotes the whole \
+         log of each that failed. A run that did not fail has its log left out, since it \
+         is rarely worth reading. `run_log` asks for one: the next wake carries it, and \
+         `cases/<issue>.md` holds it under its run from then on. Kelpie drops and logs a \
+         `run_log` for a run that is not on the item's `## CI` list, or whose log the case \
+         already holds. Where the ruling you were woken for stays unanswered while you ask, \
+         it stays held from the maintainer and you are woken for it again, once for each \
+         log read."
     };
 }
 
@@ -303,6 +326,8 @@ const ANSWER: &str = concat!(
  \"unstick\": null or {\"item\": <a stuck work item's issue>, \"action\": \"retry\" | \"re-scope\" | \"ask\" | \"none\", \"why\": \"<one sentence, at most 300 characters>\"} or [{\"item\": <a stuck work item's issue>, \"action\": \"retry\" | \"re-scope\" | \"ask\" | \"none\", \"why\": \"<one sentence, at most 300 characters>\"}, ...],
  ",
     fix_key!(),
+    ",\n ",
+    run_log_key!(),
     ",\n ",
     answer_key!(),
     ",\n ",
@@ -494,6 +519,25 @@ pub(super) fn wake(
                     "\nThe object takes this key as well:\n\n```\n{}\n```\n\n{}\n",
                     standing_key!(),
                     standing_how!()
+                );
+            }
+            let cased = |w: &Wake| {
+                matches!(
+                    w,
+                    Wake::Stuck { .. }
+                        | Wake::Question { .. }
+                        | Wake::FollowUp { .. }
+                        | Wake::Answer { .. }
+                        | Wake::Threads { .. }
+                        | Wake::RunLog { .. }
+                )
+            };
+            if wakes.iter().any(cased) {
+                let _ = write!(
+                    out,
+                    "\nThe object takes this key as well:\n\n```\n{}\n```\n\n{}\n",
+                    run_log_key!(),
+                    run_logs!()
                 );
             }
             if wakes.iter().any(|w| matches!(w, Wake::Question { .. })) {
@@ -792,6 +836,12 @@ pub(super) fn reason(wake: &Wake) -> String {
             head,
             threads,
         } => super::threads::wake_text(*ticket, *pull_request, head, threads),
+        Wake::RunLog { ticket, run } => format!(
+            "you asked for the log of run {run} on {}'s pull request: its case, `{}`, holds \
+             it under that run",
+            ticket_ref(*ticket),
+            case_file(*ticket)
+        ),
         Wake::Question { ticket, id, asked } => {
             let mut out = format!("{}'s worker asks, on ruling {id}:\n", ticket_ref(*ticket));
             for line in asked.lines() {
