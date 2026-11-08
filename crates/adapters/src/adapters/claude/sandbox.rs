@@ -903,6 +903,7 @@ mod tests {
                 "project",
                 "--settings",
                 settings.to_str().unwrap(),
+                "--exclude-dynamic-system-prompt-sections",
                 "--tools",
                 "Bash,Read,Edit,Write,Glob,Grep,Skill",
                 "--strict-mcp-config",
