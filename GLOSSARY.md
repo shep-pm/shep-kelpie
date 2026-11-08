@@ -557,10 +557,11 @@ option's text says what kelpie will do, and the board's events name the option
 that asked for it.
 
 **Merge authority**:
-Who merges a green, reviewed pull request, a project's `git.merging`. `ask`
-raises a ruling before every merge. `auto` has kelpie merge once every gate
-passes, and replaces only that ruling: the merge still asks where a safety
-gate holds it, such as a pull request no reviewer read. Pending deferred findings
+Whether a green, reviewed pull request merges unasked, a project's
+`rulings.pm_decides.merge`. `false` raises a ruling before every merge. `true`
+has kelpie merge once every gate passes, and replaces only that ruling: the
+merge still asks where a safety gate holds it, such as a pull request no
+reviewer read. Pending deferred findings
 always raise a `follow-up` ruling. The project manager answers when
 `rulings.pm_decides.follow-up` allows it; otherwise the maintainer does,
 including on a project with no `agents.pm`.

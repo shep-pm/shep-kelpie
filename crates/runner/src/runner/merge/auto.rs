@@ -188,23 +188,6 @@ fn a_vouched_head_with_a_project_manager_and_merge_true_merges_with_no_ruling() 
 }
 
 #[test]
-fn git_merging_auto_with_merge_false_raises_the_ruling() {
-    let (rig, runner, head) = Rig::with_pull_request("golbat");
-    drop(runner);
-    rig.edit_settings(|s| {
-        let git = "[app.dogs.kelpie.git]\n";
-        assert!(s.contains(git), "the example's git table moved");
-        let auto = s.replace(git, &format!("{git}merging = \"auto\"\n"));
-        auto + "\n[app.dogs.kelpie.rulings.pm_decides]\nmerge = false\n"
-    });
-    let runner = rig.open().unwrap();
-    let report = gates_passed(&rig, &runner, &head);
-    assert!(matches!(report, StepReport::Ruling { .. }), "{report:?}");
-    assert_eq!(rig.ask(&runner, "status", None)["merging"], "ask");
-    assert_eq!(rig.forge.merges(), []);
-}
-
-#[test]
 fn a_notice_the_webhook_refuses_is_tried_again_across_a_restart_and_posted_once() {
     let (rig, runner, head) = Rig::with_pull_request("koji");
     let runner = under_auto(&rig, runner);
@@ -770,13 +753,10 @@ fn a_merge_that_landed_before_a_switch_to_ask_still_gets_its_notice() {
     assert!(alert.text.contains(&head[..7]), "{}", alert.text);
 }
 
-// The project's table without `git.merging`, and `rulings.pm_decides.merge`
-// as `merge` says, read when a runner next opens
+// The project's table with `rulings.pm_decides.merge` as `merge` says, read
+// when a runner next opens
 fn merging_left_to_the_map(rig: &Rig, merge: bool) {
-    rig.edit_settings(|s| {
-        assert!(!s.contains("\nmerging ="), "the example sets `git.merging`");
-        format!("{s}\n[app.dogs.kelpie.rulings.pm_decides]\nmerge = {merge}\n")
-    });
+    rig.edit_settings(|s| format!("{s}\n[app.dogs.kelpie.rulings.pm_decides]\nmerge = {merge}\n"));
 }
 
 #[test]

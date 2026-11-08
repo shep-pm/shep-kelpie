@@ -4,7 +4,10 @@
 //! nothing itself: the `kinds` it suggests are for the maintainer to write
 //! into the agent file. [`fit`] reads every pair of agents whose files take a
 //! kind and that have [`FIT_ITEMS`] items of it each, and calls one clearly
-//! worse on the three measures a [`Record`] keeps.
+//! worse on the two measures of quality a [`Record`] keeps: its merge rate,
+//! then the share of its items with 3 or more fix turns. Speed is read
+//! nowhere here: the board's estimate and the pick already weigh hours against
+//! cost, so no agent is flagged for its hours.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -23,9 +26,6 @@ pub const FIT_AGAIN: u32 = 10;
 /// A merge rate this far below another agent's is clearly worse
 const MERGE_RATE_GAP: f64 = 0.15;
 
-/// Median hours this many times another agent's are clearly worse
-const HOURS_RATIO: f64 = 1.5;
-
 /// A share of items with 3 or more fix turns this far above another agent's is clearly worse
 const HEAVY_FIX_GAP: f64 = 0.15;
 
@@ -37,13 +37,6 @@ pub enum Measure {
     /// Its items merged this much less often than the other agent's
     MergeRate {
         /// The worse agent's rate
-        worse: f64,
-        /// The other agent's
-        better: f64,
-    },
-    /// Its merged items took this many times as long as the other agent's
-    Hours {
-        /// The worse agent's median hours
         worse: f64,
         /// The other agent's
         better: f64,
@@ -91,7 +84,7 @@ pub struct Taker<'a> {
 /// agents whose file takes a kind are read at it, and only when each has
 /// [`FIT_ITEMS`] or more items of it: one whose file names no `kinds` takes
 /// every kind. Findings come out by kind, then by the worse agent, then by
-/// the better one, each naming the first measure that says it.
+/// the better one, each naming the first of the two measures that says it.
 pub fn fit<'a>(
     records: &BTreeMap<(String, Option<String>), Record>,
     takers: impl IntoIterator<Item = Taker<'a>>,
@@ -168,12 +161,6 @@ fn worse_than(a: &Record, b: &Record) -> Option<Measure> {
         && better - worse >= MERGE_RATE_GAP
     {
         return Some(Measure::MergeRate { worse, better });
-    }
-    if let (Some(worse), Some(better)) = (a.median_hours, b.median_hours)
-        && better > 0.0
-        && worse >= better * HOURS_RATIO
-    {
-        return Some(Measure::Hours { worse, better });
     }
     let (worse, better) = (a.heavy_fix_share(), b.heavy_fix_share());
     (worse - better >= HEAVY_FIX_GAP).then_some(Measure::HeavyFix { worse, better })
@@ -306,40 +293,45 @@ mod tests {
         assert_eq!(
             found,
             [],
-            "a tenth off the merge rate, a third more hours and a tenth more heavy fix turns"
+            "a tenth off the merge rate and a tenth more heavy fix turns"
         );
     }
 
     #[test]
-    fn a_longer_median_and_a_heavier_fix_share_are_each_found() {
-        let hours = tallies(&[
-            ("slow", "fix", record(10, 10, 3.0, 0)),
-            ("quick", "fix", record(10, 10, 1.0, 0)),
-        ]);
-        let fixes = tallies(&[
+    fn a_heavier_fix_share_is_found() {
+        let records = tallies(&[
             ("often", "fix", record(10, 10, 1.0, 4)),
             ("seldom", "fix", record(10, 10, 1.0, 1)),
         ]);
-        let slow = [file("slow", &["fix"]), file("quick", &["fix"])];
-        let often = [file("often", &["fix"]), file("seldom", &["fix"])];
+        let files = [file("often", &["fix"]), file("seldom", &["fix"])];
 
-        let found = fit(&hours, at(&slow));
-        let fixes_found = fit(&fixes, at(&often));
+        let found = fit(&records, at(&files));
 
         assert_eq!(
             found[0].measure,
-            Measure::Hours {
-                worse: 3.0,
-                better: 1.0,
-            }
-        );
-        assert_eq!(
-            fixes_found[0].measure,
             Measure::HeavyFix {
                 worse: 0.4,
                 better: 0.1,
             },
             "the share of its items with 3 or more fix turns"
+        );
+    }
+
+    #[test]
+    fn a_slower_agent_with_the_same_quality_is_never_found() {
+        let records = tallies(&[
+            ("slow", "fix", record(10, 5, 3.0, 2)),
+            ("quick", "fix", record(10, 5, 1.0, 2)),
+        ]);
+        let files = [file("slow", &["fix"]), file("quick", &["fix"])];
+
+        let found = fit(&records, at(&files));
+
+        assert_eq!(
+            found,
+            [],
+            "the same merge rate and fix turns, and median hours three times apart: the pick \
+             already weighs the hours"
         );
     }
 

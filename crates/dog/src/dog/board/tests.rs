@@ -22,13 +22,36 @@ pub(in crate::dog) fn finished(
     n: usize,
     (wall, cost_usd): (u64, f64),
 ) {
+    wrote(home, project, (agent, kind), n, (wall, cost_usd), true);
+}
+
+// Adds `n` items of `agent` and `kind` that never merged, each otherwise as a
+// line of `finished`.
+pub(in crate::dog) fn unmerged(
+    home: &Path,
+    project: &str,
+    (agent, kind): (&str, &str),
+    n: usize,
+    (wall, cost_usd): (u64, f64),
+) {
+    wrote(home, project, (agent, kind), n, (wall, cost_usd), false);
+}
+
+fn wrote(
+    home: &Path,
+    project: &str,
+    (agent, kind): (&str, &str),
+    n: usize,
+    (wall, cost_usd): (u64, f64),
+    merged: bool,
+) {
     let role = |calls: u32| {
         let tokens = json!({ "input": 0, "cache_write": 0, "cache_read": 0, "output": 0 });
         json!({ "calls": calls, "tokens": tokens, "units": 0, "cost_usd": 0.0 })
     };
     let line = json!({
         "line": "finished", "at": 1, "issue": 7, "title": "t", "pull_request": 7,
-        "merged": true, "wall": wall, "units": 0, "cost_usd": cost_usd,
+        "merged": merged, "wall": wall, "units": 0, "cost_usd": cost_usd,
         "worker": role(4), "reviewer": role(1), "qwen": { "rounds": 0, "seconds": 0 },
         "review_rounds": 0, "fix_turns": 0, "rulings": 0, "agent": agent, "kind": kind,
     });
