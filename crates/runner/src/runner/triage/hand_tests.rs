@@ -104,6 +104,9 @@ fn a_taken_record_waits_out_a_label_swap_that_is_owed() {
     rig.github.accept_label_renames();
     rig.next_look();
     assert_eq!(step(&runner).unwrap(), None);
+    // The listing that poll held predates the swap, so it is read again.
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
 
     assert_eq!(
         rig.github.label_takes(),

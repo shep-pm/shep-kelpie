@@ -4,6 +4,7 @@ use serde_json::json;
 
 use super::ask_tests::record;
 use super::check_tests::{PASSING, PASSING_LABELS, filed};
+use super::pick_tests::MAINTAINER;
 use super::pick_tests::{list, rig_with};
 use super::research_tests::{WORDS, calls, crash, crashed_with, moves, reply};
 use crate::board::{TRIAGE, TRIAGE_GO};
@@ -131,7 +132,11 @@ fn app_writes(rig: &Rig, name: &str) -> Vec<String> {
 // A rig whose App covers the repo and refuses to rename labels, on a repo that
 // holds only the old label and a `kind:fix`, with triage on for everyone
 fn refused() -> Rig {
-    let rig = rig_with("pick = \"all\"");
+    refused_with("pick = \"all\"")
+}
+
+fn refused_with(lines: &str) -> Rig {
+    let rig = rig_with(lines);
     rig.forge
         .set_repo_labels(&[TRIAGE_GO, "kind:fix", "ready-for-agent"]);
     rig.github.refuse_label_renames(ApiError::Refused(403));
@@ -155,6 +160,9 @@ fn a_failed_swap_retries_on_the_next_poll_and_holds_triage() {
     assert!(tried >= 2, "the poll retried the rename");
 
     rig.github.accept_label_renames();
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+    // The listing that poll held predates the swap, so it is read again.
     rig.next_look();
     assert_eq!(step(&runner).unwrap(), None);
 
@@ -182,6 +190,9 @@ fn nothing_makes_needs_approval_while_the_swap_is_owed() {
     );
 
     rig.github.accept_label_renames();
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+    // The listing that poll held predates the swap, so it is read again.
     rig.next_look();
     assert_eq!(step(&runner).unwrap(), None);
 
@@ -228,10 +239,40 @@ fn a_pass_left_commented_waits_out_the_swap_instead_of_failing_on_it() {
     rig.github.accept_label_renames();
     rig.next_look();
     assert_eq!(step(&runner).unwrap(), None);
+    // The listing that poll held predates the swap, so it is read again.
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
 
     assert_eq!(
         moves(&rig),
         [format!("make {TRIAGE}"), format!("label {TRIAGE}")]
     );
     assert_eq!(record(&rig, &runner)["step"], "done");
+}
+
+#[test]
+fn a_listing_read_before_the_swap_is_not_acted_on() {
+    let rig = refused_with("pick = \"maintainer\"");
+    let mut labels = PASSING_LABELS.to_vec();
+    labels.push(TRIAGE_GO);
+    list(&rig, filed(&rig, MAINTAINER, PASSING, &labels));
+    let runner = rig.open().unwrap();
+
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(moves(&rig), Vec::<String>::new(), "owed: nothing is read");
+
+    rig.github.accept_label_renames();
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(moves(&rig), Vec::<String>::new(), "the listing is stale");
+    assert_eq!(rig.github.label_takes(), []);
+
+    let mut labels = PASSING_LABELS.to_vec();
+    labels.push(TRIAGE);
+    list(&rig, filed(&rig, MAINTAINER, PASSING, &labels));
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(moves(&rig), ["label ready-for-agent"]);
+    assert_eq!(rig.github.label_takes(), [(30, TRIAGE.to_owned())]);
 }
