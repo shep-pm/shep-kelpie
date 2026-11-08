@@ -248,7 +248,7 @@ impl Runner {
         if self.slot_free() {
             return Ok(Room::Opens);
         }
-        if self.is_dropped(ticket) {
+        if self.is_dropped(ticket) || self.state.finished.contains(&ticket) {
             return Ok(Room::Queues);
         }
         Err(AddError::InFlight(self.slot_issues()))
@@ -303,11 +303,13 @@ impl Runner {
         }
         self.board_takes(ticket, listed, open)?;
         let mut next = self.state.clone();
+        next.finished.retain(|t| *t != ticket);
         next.dropped.retain(|t| *t != ticket);
         self.save(next).map_err(AddError::State)?;
         // The skip is cleared here, so the next pass logs no second `skip-cleared`.
-        self.skipped
-            .retain(|skip| !matches!(skip, Skip::Dropped { issue } if *issue == ticket));
+        self.skipped.retain(|skip| {
+            !matches!(skip, Skip::Dropped { issue } | Skip::Finished { issue } if *issue == ticket)
+        });
         self.notes.push(format!(
             "{} skip-cleared by add: no slot is free, so the board takes it by priority \
              when one frees",
@@ -332,10 +334,14 @@ impl Runner {
             .filter(|t| **t != ticket)
             .copied()
             .collect();
+        let finished: Vec<TicketId> = (self.state.finished.iter())
+            .filter(|t| **t != ticket)
+            .copied()
+            .collect();
         let pick = board::pick(
             std::slice::from_ref(one),
             open,
-            &self.state.finished,
+            &finished,
             &dropped,
             &self.implementer_files(),
             &[],
