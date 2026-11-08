@@ -818,7 +818,7 @@ fn a_ready_issue_needing_an_unpublished_package_is_held() {
 }
 
 #[test]
-fn a_package_no_poll_has_read_yet_holds_the_issue_on_an_early_board_read() {
+fn a_package_no_poll_has_read_yet_is_asked_of_and_holds_the_issue_on_an_early_board_read() {
     let (rig, runner) = waiting_on(&[FOO]);
     assert_eq!(
         step(&runner).unwrap(),
@@ -832,9 +832,33 @@ fn a_package_no_poll_has_read_yet_holds_the_issue_on_an_early_board_read() {
 
     assert_eq!(step(&runner).unwrap(), None, "nothing starts");
 
-    assert_eq!(rig.registry.asked(), [FOO], "no poll has asked about BAR");
+    let asked = rig.registry.asked();
+    assert_eq!(asked.last().map(String::as_str), Some(BAR), "{asked:?}");
     let skipped = rig.ask(&runner, "status", None)["skipped"].clone();
     assert_eq!(skipped[0]["package"], BAR, "{skipped}");
+}
+
+#[test]
+fn an_issue_only_the_board_lists_has_its_package_asked_of_and_goes_on_once_published() {
+    // The board lists issue 30 as ready, and the triage poll's listing leaves it out, as
+    // a repository's thousand newest open issues may.
+    let rig = rig_with("pick = \"off\"");
+    rig.forge.list_ready(30, false);
+    rig.forge.set_ready_body(30, &needing(&[FOO]));
+    for label in PASSING_LABELS {
+        rig.forge.label(30, label);
+    }
+    let runner = rig.open().unwrap();
+
+    assert_eq!(step(&runner).unwrap(), None, "held");
+
+    assert_eq!(rig.registry.asked(), [FOO], "the board's read asked of it");
+    let skipped = rig.ask(&runner, "status", None)["skipped"].clone();
+    assert_eq!(skipped[0]["package"], FOO, "{skipped}");
+    rig.registry.publish(FOO);
+    rig.next_look();
+    let (started, _) = dispatched(step(&runner).unwrap());
+    assert_eq!(started.github(), Some(30));
 }
 
 #[test]

@@ -48,7 +48,7 @@ mod scrub;
 pub(super) mod spam;
 pub(super) mod split;
 mod split_ask;
-mod unpublished;
+pub(in crate::runner) mod unpublished;
 
 use super::contributions::post::forge_is_busy;
 use super::flight::triage::{Job, Research};
