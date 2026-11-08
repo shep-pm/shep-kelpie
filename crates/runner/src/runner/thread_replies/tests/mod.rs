@@ -9,6 +9,7 @@ use crate::ticket::TicketId;
 
 mod marks;
 mod settled;
+mod triage_answer;
 
 const ASKS: &str = "<kelpie-question>\nWhich flag?\n</kelpie-question>\n";
 

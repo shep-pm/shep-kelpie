@@ -151,7 +151,7 @@ impl Runner {
 
     // The issues whose triage waits on the author, in the order their records
     // hold them
-    pub(super) fn triage_waiting(&self) -> Vec<Triaged> {
+    pub(in crate::runner) fn triage_waiting(&self) -> Vec<Triaged> {
         self.state.triage.as_ref().map_or_else(Vec::new, |triage| {
             triage
                 .issues

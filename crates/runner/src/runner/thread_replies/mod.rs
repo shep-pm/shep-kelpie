@@ -305,7 +305,8 @@ impl Runner {
         self.threads.failed = None;
         let heard = self.hear_replies(&read)?;
         // An issue whose triage waits on its author is heard the same way, from
-        // the same read.
+        // the same read, which may end the wait. Those it asked are noted first.
+        let asked = self.triage_asked();
         self.hear_triage(&read.comments)?;
         for comment in &read.comments {
             if (read.stopped.as_ref()).is_some_and(|(id, _)| *id == comment.id) {
@@ -317,7 +318,7 @@ impl Runner {
             if aimed.is_empty() {
                 // On an issue nothing is watched on, the maintainer's own
                 // comment is words for the project manager to answer.
-                if let Some(line) = self.issue_words(comment) {
+                if let Some(line) = self.issue_words(comment, &asked) {
                     self.threads.judged.insert(comment.id, comment.created);
                     self.hear(comment, Some(&line))?;
                     self.react_held(comment);
