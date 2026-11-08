@@ -43,6 +43,13 @@ pub(in crate::runner) enum Reason {
     Builds(String),
     /// Its agent is out, and the project manager's next pick names the one after
     AgentOut(AgentName),
+    /// Its open review threads are with the project manager, and the merge waits on its answer
+    ThreadsAsked,
+    /// The project manager is down, so its open review threads wait for it
+    PmDown,
+    /// The project manager pushed back on a thread the maintainer wrote, and the merge waits
+    /// for their reply
+    PushBack,
 }
 
 impl Reason {
@@ -63,6 +70,17 @@ impl Reason {
             Self::AgentOut(agent) => format!(
                 "its agent {agent} is out, so the turn waits for the project manager to name the next"
             ),
+            Self::ThreadsAsked => {
+                "its open review threads are with the project manager, so the merge waits on its answer".into()
+            }
+            Self::PmDown => {
+                "the project manager is down, so its open review threads wait for it".into()
+            }
+            Self::PushBack => {
+                "the project manager pushed back on a review thread the maintainer wrote, so the \
+                 merge waits for their reply"
+                    .into()
+            }
         }
     }
 }

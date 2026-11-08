@@ -28,7 +28,7 @@ pub(super) const THREADS: &str = "an `item`, a `thread` number from the wake, a 
 
 /// What the project manager decides about one open thread
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Decision {
+pub(in crate::runner) enum Decision {
     /// The worker fixes it in this pull request
     Fix,
     /// It is filed to fix later
@@ -66,21 +66,17 @@ pub(super) struct ThreadCall {
 
 /// A call that held, with the thread it is about
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Ruled {
+pub(in crate::runner) struct Ruled {
     /// The thread
-    pub(super) thread: RuledThread,
+    pub(in crate::runner) thread: RuledThread,
     /// What to do
-    pub(super) decision: Decision,
+    pub(in crate::runner) decision: Decision,
     /// Why
-    pub(super) why: String,
+    pub(in crate::runner) why: String,
 }
 
 /// How many `none`s in a row an item's threads were asked for, and when its
 /// next ask may go
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the step that asks is a later slice")
-)]
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Quiet {
     nones: u32,
@@ -164,11 +160,7 @@ impl Runner {
     /// The ticket is noted until the call ends. False is returned, and
     /// nothing queued, when no call can run, the runner drains, or a wake
     /// that answered nothing still holds the item's next ask back.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the step that asks is a later slice")
-    )]
-    pub(super) fn pm_ask_threads(&mut self, wake: Wake) -> bool {
+    pub(in crate::runner) fn pm_ask_threads(&mut self, wake: Wake) -> bool {
         let Wake::Threads { ticket, .. } = &wake else {
             return false;
         };
@@ -178,7 +170,7 @@ impl Runner {
         }
         let now = self.ports.clock.now();
         let held = (self.pm.threads_quiet.get(&ticket)).is_some_and(|quiet| now < quiet.until);
-        if held || self.draining() || !self.pm_available() {
+        if held || self.pm_held_down() {
             return false;
         }
         self.pm.threads_out.insert(ticket);
@@ -188,7 +180,7 @@ impl Runner {
 
     /// Whether `ticket`'s open threads were put to the project manager and
     /// its call has not ended
-    pub(super) fn pm_threads_out(&self, ticket: TicketId) -> bool {
+    pub(in crate::runner) fn pm_threads_out(&self, ticket: TicketId) -> bool {
         self.pm.threads_out.contains(&ticket)
     }
 
@@ -278,26 +270,20 @@ impl Runner {
                 .filter(|(item, _)| item == ticket)
                 .map(|(_, ruled)| ruled.clone())
                 .collect();
-            if !ruled.is_empty() {
-                self.threads_ruled(*ticket, &ruled)?;
+            // What the forge refused leaves its thread open to be asked for again,
+            // held back as a thread left unanswered is, so a forge that keeps
+            // refusing does not wake the project manager for the same call.
+            let mut refused = false;
+            if let Err(reason) = self.threads_ruled(*ticket, &ruled) {
+                self.gate_refused(*ticket, &reason);
+                dropped.push(format!("{}: {reason}", ticket_ref(*ticket)));
+                refused = true;
             }
-            self.threads_asked_ended(*ticket, !ruled.is_empty(), ruled.len() < threads.len());
+            let answered = !ruled.is_empty() && !refused;
+            let left = refused || ruled.len() < threads.len();
+            self.threads_asked_ended(*ticket, answered, left);
         }
         Ok((acted, dropped))
-    }
-
-    /// Carries out the project manager's `ruled` decisions on `ticket`'s threads
-    ///
-    /// # Errors
-    ///
-    /// [`StateError`] when what it did cannot be saved.
-    pub(super) fn threads_ruled(
-        &mut self,
-        ticket: TicketId,
-        ruled: &[Ruled],
-    ) -> Result<(), StateError> {
-        let _ = (ticket, ruled);
-        Ok(())
     }
 
     // Ends `ticket`'s ask, and counts the wake as one more `none` when a

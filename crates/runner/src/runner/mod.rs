@@ -330,6 +330,9 @@ pub struct Runner {
     checks: checks::Book,
     // The project manager's wakes and decisions, in memory only
     pm: pm::Desk,
+    // Each gate thread kelpie pushed back on, with the last remark in it that was
+    // not kelpie's own, so the ask waits for the maintainer's reply. In memory only
+    pushed_back: gate::PushedBack,
     // Every project's `[app.dogs.kelpie]` table on this shepherd, this one's too,
     // as the last look read them, in memory only
     peer_tables: BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
@@ -675,6 +678,7 @@ impl Runner {
             told_points: spoken,
             checks: checks::Book::default(),
             pm: pm::Desk::default(),
+            pushed_back: gate::PushedBack::default(),
             peer_tables: BTreeMap::new(),
             retro_book: retro::Book::default(),
             postings,
@@ -889,6 +893,7 @@ impl Runner {
         let open = |issue: &TicketId| self.state.item(*issue).is_some();
         self.install_ran.retain(open);
         self.install_failed.retain(|issue, _| open(issue));
+        self.pushed_back.keep_only(&self.state.open_tickets());
         self.metrics.work_items(&self.state);
         Ok(())
     }
