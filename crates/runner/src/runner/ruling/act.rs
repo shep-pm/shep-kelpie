@@ -49,14 +49,22 @@ pub(super) enum Act {
 /// # Errors
 ///
 /// [`RuleError::NotOffered`] when the ruling lists no option for it.
+/// [`RuleError::Act`] when the project manager tries to approve held CI.
 pub(super) fn plan(
     id: TicketId,
     answer: &Answer,
     kind: &RulingKind,
+    by: Answerer,
 ) -> Result<Option<Act>, RuleError> {
     if let (Answer::Yes, RulingKind::Stuck(Stuck::CheckQueued { head, held, .. })) = (answer, kind)
         && !held.is_empty()
     {
+        if by != Answerer::Maintainer {
+            return Err(RuleError::Act(
+                id,
+                "only the maintainer can approve held CI runs".to_owned(),
+            ));
+        }
         return Ok(Some(Act::Approve { head: head.clone() }));
     }
     // A check no workflow posted has no run to rerun, so a yes only waits.

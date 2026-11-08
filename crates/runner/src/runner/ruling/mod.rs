@@ -274,7 +274,7 @@ impl Runner {
         let now = self.ports.clock.now();
         let mut next = self.state.clone();
         let ruling = next.rulings.remove(at);
-        let act = act::plan(id, &answer, &ruling.kind)?;
+        let act = act::plan(id, &answer, &ruling.kind, by)?;
         let asked = act::asked(&ruling, &answer, by);
         // Kept in the rulings history once the answer is saved.
         let record = Record::of(&ruling, &answer, now, by);
