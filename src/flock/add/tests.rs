@@ -204,6 +204,23 @@ async fn a_project_add_writes_holds_no_pacing_table_and_loads() {
 }
 
 #[tokio::test]
+async fn a_project_add_writes_loads_and_holds_none_of_the_removed_keys() {
+    let scene = Scene::new().await;
+    scene.add().await.unwrap();
+
+    let (runner, _) = scene.shepherd.sheep("koji").expect("a runner");
+    let table = runner.dogs.get(DOG).expect("a kelpie table").as_map();
+    assert!(table["git"].get("issues").is_none(), "{table:?}");
+    assert!(
+        table
+            .get("triage")
+            .is_none_or(|t| t.get("hand_ready").is_none()),
+        "{table:?}"
+    );
+    scene.settings();
+}
+
+#[tokio::test]
 async fn add_writes_no_reviewers() {
     let scene = Scene::new().await;
     scene.add().await.unwrap();

@@ -5,7 +5,7 @@ use std::num::NonZeroU32;
 
 use super::{EXAMPLE, parse, parse_err};
 use crate::ports::Probability;
-use crate::settings::{AuthorRole, Gone, TriagePick};
+use crate::settings::{AuthorRole, TriagePick};
 
 const TABLE: &str = "[app.dogs.kelpie.triage]\n";
 
@@ -359,20 +359,5 @@ fn the_forge_association_decides_a_role_when_no_login_is_listed() {
         (None, AuthorRole::Reporter),
     ] {
         assert_eq!(AuthorRole::of(association), role, "{association:?}");
-    }
-}
-
-// The key decides nothing: the issue check holds a failing `ready-for-agent`
-// issue and owes it the triager, whatever the table says for it.
-#[test]
-fn hand_ready_loads_and_is_read_by_nothing() {
-    assert_eq!(parse(EXAMPLE).unwrap().triage.hand_ready, None);
-    for pick in ["off", "maintainer", "all"] {
-        for value in ["true", "false", "\"yes\"", "3"] {
-            let lines = format!("pick = \"{pick}\"\nhand_ready = {value}\n");
-            let t = parse(&with(&lines)).unwrap().triage;
-            assert_eq!(t.hand_ready, Some(Gone), "{lines}");
-            assert_eq!(t.check(), Ok(()), "{lines}");
-        }
     }
 }

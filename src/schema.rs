@@ -204,7 +204,6 @@ mod tests {
     // so each key is counted.
     fn examples_with_every_key() -> Vec<String> {
         let text = include_str!("../settings.example.toml")
-            .replace("issues = \"ask\"\n", "")
             .replace("build_env = {}", "build_env = { BUN = \"bun\" }")
             .replace(
                 "# instructions_file = \"~/.shep/kelpie/shep/worker-instructions.md\"",
@@ -382,14 +381,6 @@ mod tests {
         assert!(defs["EndpointUrl"]["pattern"].is_string());
     }
 
-    #[test]
-    fn git_issues_is_deprecated_and_takes_any_value() {
-        let root = schema();
-        let key = &root["$defs"]["Git"]["properties"]["issues"];
-        assert_eq!(key["deprecated"], true, "{key}");
-        assert!(resolve(&root, key).get("type").is_none(), "{key}");
-    }
-
     // Lookout groups a sheep's rows by table, under each table's title.
     #[test]
     fn each_project_table_has_a_title_and_says_what_it_holds() {
@@ -474,18 +465,6 @@ mod tests {
     fn the_agent_board_table_is_deprecated_and_takes_any_value() {
         let root = schema();
         let key = &root["properties"]["agent_board"];
-        assert_eq!(key["deprecated"], true, "{key}");
-        assert!(resolve(&root, key).get("type").is_none(), "{key}");
-    }
-
-    // `triage.hand_ready` decides nothing, so the example documents no key for
-    // it, and a table that still holds one loads whatever its value.
-    #[test]
-    fn the_triage_hand_ready_key_is_deprecated_and_takes_any_value() {
-        let root = schema();
-        let project = resolve(&root, &root[SHEEP_SCHEMA_KEY]);
-        let triage = resolve(&root, &project["properties"]["triage"]);
-        let key = &triage["properties"]["hand_ready"];
         assert_eq!(key["deprecated"], true, "{key}");
         assert!(resolve(&root, key).get("type").is_none(), "{key}");
     }
