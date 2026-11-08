@@ -339,6 +339,7 @@ fn quoting(body: &str) -> String {
                 title: "Nine".into(),
                 priority: None,
                 waits: None,
+                unblocks: Vec::new(),
                 named: Vec::new(),
                 excerpt: Some(excerpt(body)),
             }],
@@ -457,7 +458,9 @@ fn the_agents_section_lists_the_implementers_then_the_reviewers_with_tier_kinds_
          agent from this list. Kelpie takes the cheapest available agent that fits when you \
          name none, and an `agent:<name>!` label pins. An implementer's line shows when it can \
          start and what it typically takes and costs, and an agent marked out cannot start a \
-         work item before the time shown. To have a work item wait for an agent, hold it.\n\
+         work item before the time shown. To have a work item wait for an agent, hold it. \
+         A ready issue whose line says `unblocks` holds up other work, so it is worth the \
+         fastest agent that can start.\n\
          \n\
          - opus-high (implementer): heavy tier, kinds design, migration; \
          Work that needs the strongest agent.; starts now, typically 1h30m, about $4.25\n\
@@ -584,6 +587,58 @@ fn an_agent_that_is_out_shows_until_when_and_why() {
             "- codex (implementer): standard tier, every kind; Codex on the plan; \
              starts 2027-01-15 08:00 UTC, typically 1h00m, about $2.00; out until 2027-01-15 08:00 UTC: its week is spent\n"
         ),
+        "{text}"
+    );
+}
+
+// A board whose ready queue is one issue, #20, waiting on nothing, that unblocks `unblocks`
+fn ready_unblocking(unblocks: &[u64]) -> String {
+    let line = ReadyLine {
+        ticket: ticket(20),
+        title: "Twenty".into(),
+        priority: Some("P1"),
+        waits: Some("blocked by #3".into()),
+        unblocks: unblocks.iter().map(|&n| ticket(n)).collect(),
+        named: files(&["src/a.rs"]),
+        excerpt: None,
+    };
+    let board = Briefing {
+        ready: Some(Ready {
+            read: Timestamp(EPOCH),
+            issues: vec![line],
+        }),
+        ..briefing(Vec::new())
+    };
+    render(&board)
+}
+
+#[test]
+fn a_ready_line_names_the_issues_it_unblocks() {
+    let text = ready_unblocking(&[12, 14]);
+    assert!(
+        text.contains(
+            "1. #20 [P1] \"Twenty\"; waits: blocked by #3; unblocks #12, #14; names src/a.rs\n"
+        ),
+        "{text}"
+    );
+    let text = ready_unblocking(&[]);
+    assert!(!text.contains("unblocks #"), "{text}");
+    assert!(
+        text.contains("1. #20 [P1] \"Twenty\"; waits: blocked by #3; names src/a.rs\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_long_unblocks_list_is_cut_and_counted() {
+    let text = ready_unblocking(&[1, 2, 3, 4, 5, 6, 7]);
+    assert!(
+        text.contains("; unblocks #1, #2, #3, #4, #5, 2 more; names src/a.rs\n"),
+        "{text}"
+    );
+    let text = ready_unblocking(&[1, 2, 3, 4, 5]);
+    assert!(
+        text.contains("; unblocks #1, #2, #3, #4, #5; names src/a.rs\n"),
         "{text}"
     );
 }

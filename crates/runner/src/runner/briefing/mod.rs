@@ -633,8 +633,9 @@ impl Runner {
 
     fn ready_lines(&self) -> Option<Ready> {
         let (read, _) = self.brief.ready.as_ref()?;
-        let issues = self
-            .ready_in_order()
+        let ready = self.ready_in_order();
+        let unblocked = unblocked_by(&ready);
+        let issues = ready
             .into_iter()
             .map(|issue| {
                 let skip = self
@@ -654,6 +655,7 @@ impl Runner {
                     ticket: issue.ticket,
                     priority: priority(&issue.labels),
                     waits,
+                    unblocks: unblocked.get(&issue.ticket).cloned().unwrap_or_default(),
                     named: named.cloned().unwrap_or_default(),
                     excerpt: quoted.then(|| briefing::excerpt(&issue.body)),
                     title: events::quote(&issue.title),
@@ -665,6 +667,25 @@ impl Runner {
             issues,
         })
     }
+}
+
+// The ready issues each ticket holds up: those of `ready` whose blockers, as
+// the board read them, name it and are open. Each list runs lowest first.
+fn unblocked_by(ready: &[ReadyIssue]) -> BTreeMap<TicketId, Vec<TicketId>> {
+    let mut unblocked: BTreeMap<TicketId, Vec<TicketId>> = BTreeMap::new();
+    for issue in ready {
+        for blocker in issue.blocked_by.iter().filter(|b| b.open) {
+            unblocked
+                .entry(blocker.ticket)
+                .or_default()
+                .push(issue.ticket);
+        }
+    }
+    for tickets in unblocked.values_mut() {
+        tickets.sort_unstable();
+        tickets.dedup();
+    }
+    unblocked
 }
 
 // `text` on one line, its runs of whitespace closed up
