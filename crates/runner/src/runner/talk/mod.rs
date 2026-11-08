@@ -28,7 +28,7 @@ use crate::work_item::{Phase, Review, TALK_ROUNDS, Turn};
 mod sort;
 
 /// What the id of a request that is a conversation comment starts with
-pub(super) const COMMENT_REQUEST: &str = "comment:";
+pub(in crate::runner) const COMMENT_REQUEST: &str = "comment:";
 #[cfg(test)]
 mod tests;
 

@@ -117,6 +117,43 @@ pub(in crate::runner) fn deferred_with_reasons(build: &Path) -> Result<Vec<Defer
         .collect())
 }
 
+/// Takes every finding `is` names, and the reason under each, out of the deferred
+/// findings file in `build`. A file that does not name one is left as it is.
+///
+/// # Errors
+///
+/// A message naming the file when it cannot be read or written.
+pub(in crate::runner) fn drop_deferred(
+    build: &Path,
+    is: impl Fn(&Finding) -> bool,
+) -> Result<(), String> {
+    let path = deferred_path(build);
+    let text = match worker_folder::read(build, Path::new(DEFERRED_FILE)) {
+        Ok(text) => text.unwrap_or_default(),
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+    };
+    let (mut kept, mut dropped) = (String::new(), false);
+    let mut reason_of_dropped = false;
+    for line in text.split_inclusive('\n') {
+        let named = parse_findings(line).pop();
+        if named.as_ref().is_some_and(&is) {
+            (dropped, reason_of_dropped) = (true, true);
+            continue;
+        }
+        // The reason is the line under the finding, if indented by two spaces.
+        if reason_of_dropped && line.starts_with("  ") {
+            reason_of_dropped = false;
+            continue;
+        }
+        reason_of_dropped = false;
+        kept.push_str(line);
+    }
+    if !dropped {
+        return Ok(());
+    }
+    turn::write(build, &path, &kept)
+}
+
 /// A finding the worker copied into the deferred findings file, with the
 /// reason on the line after it
 #[derive(Debug, Clone, PartialEq, Eq)]

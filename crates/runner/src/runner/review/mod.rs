@@ -429,7 +429,9 @@ impl Runner {
                 }
                 // A fix that moved the head answers the bot threads it was sent, by what the worker said.
                 Ok(now) => {
-                    if let Some(reason) = self.record_pushed_disputes(&review, sent)? {
+                    let held = self.record_pushed_disputes(&review, sent)?;
+                    let held = held.or_else(|| self.leave_fixed_deferred(sent.findings).err());
+                    if let Some(reason) = held {
                         return Ok(self.gate_failed(reason));
                     }
                     self.journal_outcomes(&review, sent, true)?;

@@ -424,8 +424,9 @@ reviewer reads again because of it, and a bot that read the pull request
 before has its nits on that fix's head left open. With a project manager,
 every thread still open at the merge, nits included, goes to it, and a `fix`
 ruling sends the worker one turn for all of them. Findings the worker
-leaves out of scope go in the **deferred findings** file, which the merge
-files as follow-ups, all but its nits. A finding the worker shows is
+leaves out of scope go in the **deferred findings** file, all but its nits
+ruled on before the merge by the project manager, beside the open threads, or
+after it where there is none. A finding the worker shows is
 wrong goes in the **disputed findings** file with its reason: the next
 reviewer is shown it, and it is never filed.
 
@@ -566,9 +567,10 @@ Whether a green, reviewed pull request merges unasked, a project's
 has kelpie merge once every gate passes, and replaces only that ruling: the
 merge still asks where a safety gate holds it, such as a pull request no
 reviewer read. Pending deferred findings
-always raise a `follow-up` ruling. The project manager answers when
-`rulings.pm_decides.follow-up` allows it; otherwise the maintainer does,
-including on a project with no `agents.pm`.
+are ruled on before the merge by the project manager, and after it, as a
+`follow-up` ruling, where there is none or the head merged by hand. That ruling
+is the project manager's when `rulings.pm_decides.follow-up` allows it;
+otherwise the maintainer's, including on a project with no `agents.pm`.
 Every other ruling still asks.
 
 **Notice**:
