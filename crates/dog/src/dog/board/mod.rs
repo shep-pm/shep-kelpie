@@ -41,6 +41,7 @@ pub(super) type Marks = BTreeMap<(AgentName, String), u32>;
 pub struct Board {
     ranked: Arc<BTreeMap<AgentName, Agent>>,
     api: Arc<BTreeSet<AgentName>>,
+    monthly_credit_usd: Option<f64>,
     ledgers: BTreeMap<ProjectName, Arc<Ledger>>,
     marks: Marks,
 }
@@ -61,6 +62,7 @@ type Stamp = (u64, Option<SystemTime>);
 pub struct View {
     ranked: Arc<BTreeMap<AgentName, Agent>>,
     api: Arc<BTreeSet<AgentName>>,
+    monthly_credit_usd: Option<f64>,
     ledgers: Vec<Arc<Ledger>>,
     marks: Marks,
 }
@@ -70,6 +72,11 @@ impl View {
     fn implementers(&self) -> impl Iterator<Item = (&AgentName, &Agent)> {
         (self.ranked.iter()).filter(|(_, agent)| agent.role == Role::Implementer)
     }
+
+    // The API credit's monthly size the board was given, None for no credit line
+    pub(super) fn monthly_credit(&self) -> Option<f64> {
+        self.monthly_credit_usd
+    }
 }
 
 impl Board {
@@ -78,6 +85,7 @@ impl Board {
         Self {
             ranked: Arc::new(ranked(agents)),
             api: Arc::new(billed(agents)),
+            monthly_credit_usd: None,
             ledgers: BTreeMap::new(),
             marks: Marks::new(),
         }
@@ -91,11 +99,20 @@ impl Board {
         self.api = Arc::new(billed(agents));
     }
 
+    /// Holds the API credit's monthly size, in US dollars, from the `[kelpie]`
+    /// section, for the next `credit` ask to carry
+    ///
+    /// A `View` already copied out keeps the size it was copied with.
+    pub(super) fn set_credit(&mut self, monthly_credit_usd: Option<f64>) {
+        self.monthly_credit_usd = monthly_credit_usd;
+    }
+
     /// What it holds now, for a pick, a `fit` ask, a `credit` ask or `status` to read without the lock
     pub(super) fn view(&self) -> View {
         View {
             ranked: Arc::clone(&self.ranked),
             api: Arc::clone(&self.api),
+            monthly_credit_usd: self.monthly_credit_usd,
             ledgers: (self.ledgers.values()).map(Arc::clone).collect(),
             marks: self.marks.clone(),
         }

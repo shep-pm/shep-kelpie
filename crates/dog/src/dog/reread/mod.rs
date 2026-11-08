@@ -1,9 +1,10 @@
 //! The dog reading its `[kelpie]` section again, and applying what can apply live
 //!
 //! Every [`LOAD_TICK`] the dog asks the shepherd for the section. A text that
-//! differs from the last good one is read whole, as the start reads it, with
-//! no salvage. A good read applies `leases.cargo-test`, `gateways` and
-//! `codex_home`. The webhook waits for a restart, and `status` names its keys. A read that fails applies nothing, and the webhook is told once per reason.
+//! differs from the last good one is read whole, with no salvage. A good read
+//! applies `leases.cargo-test`, `api.monthly_credit_usd`, `gateways` and
+//! `codex_home`. The webhook waits for a restart, and `status` names its keys.
+//! A read that fails applies nothing, and the webhook is told once per reason.
 //!
 //! The pass loads the agents folder again too, and a changed load applies to the
 //! board and the availability. A folder that fails to load keeps the old agents.
@@ -61,6 +62,7 @@ pub(super) struct Reread {
     // The last text that read whole, or the start's.
     text: String,
     capacity: NonZeroU32,
+    monthly_credit: Option<f64>,
     gateways: BTreeMap<GatewayName, Gateway>,
     codex_home: Option<PathBuf>,
     waiting: Vec<&'static str>,
@@ -75,11 +77,17 @@ pub(super) struct Reread {
 
 impl Reread {
     /// A reread whose baseline is what the start read
+    ///
+    /// The board is handed the start's credit size, so the first `credit` ask
+    /// has it before any pass runs.
     pub(super) fn new(started: &Started, handles: Handles) -> Self {
+        let monthly_credit = started.settings.api.monthly_credit_usd;
+        board::lock(&handles.board).set_credit(monthly_credit);
         Self {
             started: started.settings.clone(),
             text: started.text.clone(),
             capacity: started.settings.leases.cargo_test_capacity(),
+            monthly_credit,
             gateways: started.settings.gateways.clone(),
             codex_home: started.settings.codex_home.clone(),
             waiting: Vec::new(),
@@ -189,11 +197,24 @@ impl Reread {
             self.capacity = capacity;
             log.push(format!("applied leases.cargo-test: {capacity} at a time"));
         }
+        self.apply_credit(settings, log);
         self.apply_availability(settings, log);
         let waiting = waiting_for_restart(&self.started, settings);
         let fresh = waiting.iter().filter(|key| !self.waiting.contains(key));
         log.extend(fresh.map(|key| format!("waiting for restart: {key}")));
         self.waiting = waiting;
+    }
+
+    // The API credit's size, which the board carries on every `credit` answer.
+    fn apply_credit(&mut self, settings: &KelpieSettings, log: &mut Vec<String>) {
+        let credit = settings.api.monthly_credit_usd;
+        if credit == self.monthly_credit {
+            return;
+        }
+        board::lock(&self.handles.board).set_credit(credit);
+        self.monthly_credit = credit;
+        let shown = credit.map_or("none".to_owned(), |usd| format!("{usd}"));
+        log.push(format!("applied api.monthly_credit_usd: {shown}"));
     }
 
     // The gateways and the Codex home, which the availability task takes together.
@@ -306,6 +327,7 @@ fn waiting_for_restart(started: &KelpieSettings, now: &KelpieSettings) -> Vec<&'
     let KelpieSettings {
         webhook: was_webhook,
         leases: _,          // applied live
+        api: _,             // applied live
         gpu_metrics_url: _, // a runner's, read at each of its wakes
         codex_home: _,      // applied live
         gateways: _,        // applied live
@@ -314,6 +336,7 @@ fn waiting_for_restart(started: &KelpieSettings, now: &KelpieSettings) -> Vec<&'
     let KelpieSettings {
         webhook: now_webhook,
         leases: _,
+        api: _,
         gpu_metrics_url: _,
         codex_home: _,
         gateways: _,

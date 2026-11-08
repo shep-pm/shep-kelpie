@@ -14,7 +14,8 @@ use crate::webhook::KelpieSettings;
 const OLD_FILE: &str = "settings.toml";
 
 /// A runner's settings
-#[derive(Debug, Clone, PartialEq, Eq)]
+// `kelpie.api` holds a float, so this and `KelpieSettings` are `PartialEq` only.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Loaded {
     /// The project's settings
     pub settings: Settings,
