@@ -441,3 +441,73 @@ fn a_no_to_a_held_ruling_sends_the_worker_its_note() {
             .contains("remove the unsafe workflow")
     );
 }
+
+#[test]
+fn held_runs_ask_the_maintainer_even_with_a_project_manager() {
+    let (rig, runner, head) = Rig::with_pull_request_set("shep", |rig| {
+        rig.pm("pm");
+        rig.with_app();
+    });
+    rig.forge.set_held_checks(&head, &[("test.yml", RUN)]);
+
+    ruling_report(rig.verdict(&runner));
+
+    let comments = rig.github.comments();
+    let card = comments
+        .iter()
+        .find(|(_, text)| text.contains("Approve the held CI runs?"))
+        .expect("approval is posted to the maintainer at once");
+    assert!(
+        card.1.contains("pull request's code on GitHub's runners"),
+        "{}",
+        card.1
+    );
+    assert!(card.1.contains("not on this machine"), "{}", card.1);
+    assert!(
+        card.1.contains(&format!("/actions/runs/{RUN}")),
+        "{}",
+        card.1
+    );
+    assert!(rig.forge.approvals().is_empty());
+}
+
+#[test]
+fn a_held_check_beside_a_running_one_waits_on_the_running_one() {
+    let (rig, runner, head) = Rig::with_pull_request("shep");
+    let held = Queued {
+        held: true,
+        ..stuck("test.yml", RUN)
+    };
+    rig.forge.set_checks(
+        &head,
+        Checks::Pending(vec![held.clone(), docs_in_progress()]),
+    );
+    rig.forge.set_run_in_progress(OTHER);
+    assert_eq!(rig.verdict(&runner), None);
+    rig.clock.advance(CAP);
+
+    assert!(matches!(
+        step(&runner).unwrap(),
+        Some(StepReport::GateFailed { .. })
+    ));
+    assert!(rig.forge.whole_run_reruns().is_empty());
+    assert!(rig.forge.approvals().is_empty());
+
+    rig.forge.set_checks(&head, Checks::Pending(vec![held]));
+    ruling_report(step(&runner).unwrap());
+    assert!(rig.forge.whole_run_reruns().is_empty());
+}
+
+#[test]
+fn a_held_head_is_never_merged() {
+    let (rig, runner, head) = Rig::with_pull_request_set("shep", |rig| rig.merge_auto());
+    rig.forge.set_held_checks(&head, &[("test.yml", RUN)]);
+
+    ruling_report(rig.verdict(&runner));
+    rig.clock.advance(JOB_TIMEOUT);
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert!(rig.forge.merges().is_empty());
+    assert!(rig.forge.approvals().is_empty());
+    assert!(rig.forge.whole_run_reruns().is_empty());
+}
