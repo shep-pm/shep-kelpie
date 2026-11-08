@@ -10,8 +10,10 @@ use std::io::{BufRead, Write};
 
 use crate::home::ProjectName;
 use crate::runner::{Wants, read_answer};
+use crate::state::Held;
 use crate::state::Projects;
 use crate::state::Ruling;
+use crate::state::RulingKind;
 use crate::ticket::TicketId;
 
 /// What `shep kelpie rule` takes, as its help says
@@ -266,15 +268,31 @@ fn locate(
 
 // `words` as `rule`'s params for `ruling`.
 fn params(ruling: &Ruling, words: &str) -> Result<String, String> {
-    let answer = read_answer(Wants::of(&ruling.kind), words);
-    let answer = answer.map_err(|why| {
-        let id = ruling.id;
-        format!(
-            "ruling {id} was not answered: {why}. It takes {}",
-            forms(ruling)
-        )
-    })?;
+    let answer =
+        read_answer(Wants::of(&ruling.kind), words).map_err(|why| refused(ruling, words, &why))?;
     Ok(answer.params(ruling.id))
+}
+
+// Why `ruling` refuses `words`: what it takes, and where the project flag goes
+// when the answer holds one, since after the answer's first word a `-p` is one
+// of its words.
+fn refused(ruling: &Ruling, words: &str, why: &str) -> String {
+    let id = ruling.id;
+    let takes = format!(
+        "ruling {id} was not answered: {why}. It takes {}",
+        forms(ruling)
+    );
+    match holds_project_flag(words) {
+        false => takes,
+        true => format!(
+            "{takes}. `-p` goes before the answer: `shep kelpie -p <project> rule {id} ...`"
+        ),
+    }
+}
+
+// Whether `words` holds the project flag as one of its own words
+fn holds_project_flag(words: &str) -> bool {
+    (words.split_whitespace()).any(|word| word == "-p" || word == "--project")
 }
 
 // The commands that answer `ruling`.
@@ -283,12 +301,27 @@ fn forms(ruling: &Ruling) -> String {
     match Wants::of(&ruling.kind) {
         Wants::Answer => format!("your answer to the worker: `shep kelpie rule {id} <text>`"),
         Wants::Merge => format!(
-            "`shep kelpie rule {id} yes`, `shep kelpie rule {id} no <note>` or \
-             `shep kelpie rule {id} rework <note>`"
+            "{}, `shep kelpie rule {id} no <note>` or `shep kelpie rule {id} rework <note>`",
+            yes(ruling)
         ),
-        Wants::YesOrNo => {
-            format!("`shep kelpie rule {id} yes` or `shep kelpie rule {id} no <note>`")
+        Wants::Trust | Wants::YesOrNo => {
+            format!("{} or `shep kelpie rule {id} no <note>`", yes(ruling))
         }
+    }
+}
+
+// The yes that answers `ruling`. A contribution's security ruling trusts only
+// the head its yes names, so its form names that head.
+fn yes(ruling: &Ruling) -> String {
+    let id = ruling.id;
+    match &ruling.kind {
+        RulingKind::Contribution(Held::Security { head, .. }) => {
+            format!(
+                "`shep kelpie rule {id} yes {}`",
+                head.get(..7).unwrap_or(head)
+            )
+        }
+        _ => format!("`shep kelpie rule {id} yes`"),
     }
 }
 
@@ -369,6 +402,7 @@ fn pick(
     let prompt = match Wants::of(&ruling.kind) {
         Wants::Answer => "Your answer: ",
         Wants::Merge => "yes, no <note> or rework <note>: ",
+        Wants::Trust => "yes <head>, or no <note>: ",
         Wants::YesOrNo => "yes, or no <note>: ",
     };
     loop {

@@ -2,9 +2,11 @@
 //!
 //! `shep kelpie rule` and replies on ntfy read an answer this way: `yes`, or
 //! `no <note>`, for a ruling that asks yes or no, those or `rework <note>`
-//! for a merge ruling, and any text at all for the worker's question or a
-//! contributor's request for a decision, a lone `yes` included. What they read goes to the runner as `rule`'s own `<id>
-//! yes`, `<id> no <note>`, `<id> rework <note>` or `<id> answer <text>`.
+//! for a merge ruling, `yes <head>` for a contribution's security ruling, and
+//! any text at all for the worker's question or a contributor's request for a
+//! decision, a lone `yes` included. What they read goes to the runner as
+//! `rule`'s own `<id> yes`, `<id> no <note>`, `<id> rework <note>` or `<id>
+//! answer <text>`.
 
 use super::{Action, Answer};
 use crate::state::{Held, RulingKind};
@@ -23,9 +25,16 @@ pub enum Wants {
     Answer,
     /// The merge ruling: `<id> yes`, `<id> no <note>` or `<id> rework <note>`
     Merge,
+    /// A contribution's security ruling: `<id> yes <head>` naming the head it
+    /// trusts, or `<id> no <note>`
+    Trust,
     /// Every other ruling: `<id> yes`, or `<id> no <note>`
     YesOrNo,
 }
+
+/// What a refused answer to a ruling that trusts a head is told it takes
+const TRUST_TAKES: &str = "it takes `yes <head>`, with 7 or more characters of \
+                           the head it trusts, or `no <note>`";
 
 impl Wants {
     /// What a ruling of `kind` takes
@@ -43,6 +52,8 @@ impl Wants {
             // Kelpie's own merge ruling and a contribution's take the same
             // three answers.
             RulingKind::Merge { .. } | RulingKind::Contribution(Held::Merge { .. }) => Self::Merge,
+            // A security ruling trusts only the head its yes names.
+            RulingKind::Contribution(Held::Security { .. }) => Self::Trust,
             RulingKind::Stuck(..)
             | RulingKind::AgentFiles { .. }
             | RulingKind::AgentFit(..)
@@ -74,7 +85,7 @@ pub fn read_answer(wants: Wants, words: &str) -> Result<Answer, String> {
             }
             Ok(Answer::Text(text.to_owned()))
         }
-        Wants::Merge | Wants::YesOrNo => {
+        Wants::Merge | Wants::YesOrNo | Wants::Trust => {
             let (first, rest) = words.split_once(char::is_whitespace).unwrap_or((words, ""));
             let rest = rest.trim();
             let merge = wants == Wants::Merge;
@@ -94,6 +105,7 @@ pub fn read_answer(wants: Wants, words: &str) -> Result<Answer, String> {
                 ("rerun", "") => Ok(Answer::Do(Action::Rerun)),
                 ("restore", "") => Ok(Answer::Do(Action::Restore)),
                 _ if merge => Err("it takes `yes`, `no <note>` or `rework <note>`".into()),
+                _ if wants == Wants::Trust => Err(TRUST_TAKES.into()),
                 _ => Err("it takes `yes`, or `no <note>`".into()),
             }
         }
@@ -162,7 +174,7 @@ mod tests {
             head: "abc".into(),
             lines: Vec::new(),
         });
-        assert_eq!(Wants::of(&flagged), Wants::YesOrNo);
+        assert_eq!(Wants::of(&flagged), Wants::Trust);
         let waiting = RulingKind::Contribution(crate::state::Held::Waiting);
         assert_eq!(Wants::of(&waiting), Wants::Answer);
     }
@@ -220,6 +232,29 @@ mod tests {
         assert_eq!(
             Answer::Trust("6b0606e".into()).params(ticket(30)),
             "30 yes 6b0606e"
+        );
+    }
+
+    #[test]
+    fn a_refused_yes_on_a_security_ruling_names_the_head() {
+        let security = RulingKind::Contribution(crate::state::Held::Security {
+            head: "5e46b09d0a1f2b3c4d5e6f708192a3b4c5d6e7f8".into(),
+            lines: Vec::new(),
+        });
+        let read = |words| read_answer(Wants::of(&security), words);
+        let takes = "it takes `yes <head>`, with 7 or more characters of the head it trusts, \
+                     or `no <note>`";
+        assert_eq!(read("yes 5e46b09 -p zendriver-rs"), Err(takes.into()));
+        assert_eq!(read("yes 5e46b09"), Ok(Answer::Trust("5e46b09".into())));
+        assert_eq!(read("yes"), Ok(Answer::Yes));
+        assert_eq!(
+            read("no nothing runs on it"),
+            Ok(Answer::No("nothing runs on it".into()))
+        );
+        // A ruling that trusts no head says nothing of one.
+        assert_eq!(
+            read_answer(Wants::YesOrNo, "yes 5e46b09 -p zendriver-rs"),
+            Err("it takes `yes`, or `no <note>`".into())
         );
     }
 
