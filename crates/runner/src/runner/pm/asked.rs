@@ -295,7 +295,7 @@ impl Runner {
             .collect();
         let taken = match Wants::of(&ruling.kind) {
             Wants::Answer => "as your answer".to_owned(),
-            Wants::Merge | Wants::YesOrNo => format!("as your `{number} no <note>`"),
+            Wants::Merge | Wants::Trust | Wants::YesOrNo => format!("as your `{number} no <note>`"),
         };
         let said = format!(
             "**Project manager: other approaches to ruling #{number}**\n\n{}\n\nReply \
@@ -333,7 +333,7 @@ impl Runner {
         };
         Ok(match Wants::of(&ruling.kind) {
             Wants::Answer => Answer::Text(text.clone()),
-            Wants::Merge | Wants::YesOrNo => Answer::No(text.clone()),
+            Wants::Merge | Wants::Trust | Wants::YesOrNo => Answer::No(text.clone()),
         })
     }
 

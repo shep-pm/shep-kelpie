@@ -962,6 +962,7 @@ fn forms(wants: Wants, id: TicketId) -> String {
     match wants {
         Wants::Answer => format!("`{id} <your answer>`"),
         Wants::Merge => format!("`{id} yes`, `{id} no <note>` or `{id} rework <note>`"),
+        Wants::Trust => format!("`{id} yes <head>` or `{id} no <note>`"),
         Wants::YesOrNo => format!("`{id} yes` or `{id} no <note>`"),
     }
 }
