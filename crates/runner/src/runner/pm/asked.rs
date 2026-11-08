@@ -436,13 +436,18 @@ impl Runner {
             })
             .cloned();
         let done = match (&ruling, call.call) {
-            // The maintainer's words on an issue with no work item: the answer
-            // is kelpie posting `why` there.
-            (None, SaidHow::Nothing) if !why.is_empty() && !self.item_on(thread) => {
+            // The maintainer's words on a thread with no ruling: the answer is
+            // kelpie posting `why` there, where it has one.
+            (None, SaidHow::Nothing) if !why.is_empty() => {
                 self.pm_says_on(thread, &why);
                 Ok(format!("answered on #{thread}: {why}"))
             }
-            (_, SaidHow::Nothing) => Err("it made no call".to_owned()),
+            // With none, it made no call and has nothing to say, so the thread
+            // hears nothing.
+            (None, SaidHow::Nothing) => {
+                return Err(format!("said none on #{thread}: it made no call"));
+            }
+            (Some(_), SaidHow::Nothing) => Err("it made no call".to_owned()),
             (Some(ruling), SaidHow::SendBack) => self.pm_sent_back(ruling, &note, &why),
             (Some(ruling), SaidHow::Settle) => self.pm_settled(ruling, &why),
             (Some(ruling), SaidHow::Park) => {

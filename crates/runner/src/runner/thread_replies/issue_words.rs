@@ -20,7 +20,7 @@ impl Runner {
     // on an open issue with no work item and no triage wait, written since this
     // runner first asked for the comments. None for anyone else's comment, a
     // bot's, kelpie's own, and one on a pull request or a closed issue.
-    pub(super) fn issue_words(&mut self, comment: &ThreadComment) -> Option<String> {
+    pub(super) fn issue_words(&mut self, comment: &ThreadComment, asked: &[u64]) -> Option<String> {
         // A project with no project manager named reads the comments for its
         // rulings' answers alone: nothing here could answer what it held
         self.agents.pm.as_ref()?;
@@ -32,12 +32,18 @@ impl Runner {
         }
         let mine =
             self.state.posted.contains(&comment.id) || self.posted.borrow().contains(&comment.id);
-        // An issue with a work item is read by its comment round, and a triage
-        // wait is answered by its author's comments, not held here.
+        // An issue with a work item is read by its comment round. One whose
+        // triage asked its author is read by the triage poll alone, even where
+        // this read ended the wait, so the comment is judged: a later read, with
+        // the wait gone, would hold it.
         let waiting = (self.triage_waits())
             .iter()
             .any(|(issue, _)| *issue == comment.thread);
-        if mine || waiting || self.item_on(comment.thread) {
+        if waiting || asked.contains(&comment.thread) {
+            self.threads.judged.insert(comment.id, comment.created);
+            return None;
+        }
+        if mine || self.item_on(comment.thread) {
             return None;
         }
         // With no listing read yet, the issue is not known to be open, or even
@@ -55,6 +61,16 @@ impl Runner {
         let maintainer = plain_login(&self.maintainer().ok()?);
         (who == maintainer && app.is_none_or(|app| who != app))
             .then(|| held_line(comment.thread, comment.id, None, &comment.body))
+    }
+
+    // The issues whose triage asked their author and has not ended, which is
+    // what `triage_waits` lists and a wait on the author's own session adds.
+    pub(super) fn triage_asked(&self) -> Vec<u64> {
+        let mut asked: Vec<u64> = (self.triage_waits().into_iter())
+            .map(|(issue, _)| issue)
+            .collect();
+        asked.extend(self.triage_waiting().iter().map(|record| record.issue));
+        asked
     }
 
     // Keeps `comment` for a read that can decide it, by reaching back to when it
