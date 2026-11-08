@@ -142,6 +142,11 @@ async fn granted(door: &Path, ask: &Ask) -> Result<Visit, String> {
                     "the dog answered {CARGO_TEST} with the agent board's fit answer"
                 ));
             }
+            Some(Answer::Credit(_)) => {
+                return Err(format!(
+                    "the dog answered {CARGO_TEST} with the month's API spend"
+                ));
+            }
             None => {
                 return Err(format!(
                     "the dog closed the door before granting {CARGO_TEST}"

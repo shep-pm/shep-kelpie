@@ -17,6 +17,7 @@ use crate::agents::Tier;
 use crate::api_refusal::Refusal;
 use crate::home;
 use crate::ipc::{self, ClientStream};
+use crate::ports::Timestamp;
 use crate::settings::AgentName;
 
 /// The variable naming the door, which a runner sets for its workers
@@ -119,6 +120,10 @@ pub const PICK: &str = "pick";
 /// What an ask names to have the agent board say whether an agent still fits
 /// a kind of work: the dog answers one line and closes
 pub const FIT: &str = "fit";
+
+/// What an ask names to have the dog say what the agents billed to the API key
+/// spent in the month it asked in: the dog answers one line and closes
+pub const CREDIT: &str = "credit";
 
 /// What an ask names to tell the dog the API refused the key: the dog holds
 /// every API agent and answers [`Answer::Held`], then closes
@@ -299,6 +304,55 @@ pub enum Fits {
     No(Finding),
 }
 
+/// What the dog says about a [`CREDIT`] ask
+// wire format: changing this is a breaking change to the door
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Credit {
+    /// What the agents billed to the API key cost, in US dollars, since `since`
+    pub spent_usd: f64,
+    /// The first second of the UTC month the ask landed in
+    pub since: u64,
+    /// The first second of the next UTC month, when the grant resets
+    pub resets_at: u64,
+}
+
+/// The first second of `at`'s UTC month, and the first second of the month after it
+///
+/// The month's ends are what a credit answer carries, so a runner can tell how
+/// much of the month is left without knowing how kelpie counts one.
+pub fn month_around(at: Timestamp) -> (Timestamp, Timestamp) {
+    let at = utc(at);
+    let (year, month) = (at.year(), at.month());
+    let next = match month {
+        12 => first_of(year + 1, 1),
+        month => first_of(year, month + 1),
+    };
+    (
+        Timestamp(secs(first_of(year, month))),
+        Timestamp(secs(next)),
+    )
+}
+
+// `at` as a civil time in UTC. An instant jiff cannot hold is its own last one.
+fn utc(at: Timestamp) -> jiff::Zoned {
+    let seconds = i64::try_from(at.0).unwrap_or(i64::MAX);
+    let at = jiff::Timestamp::from_second(seconds).unwrap_or(jiff::Timestamp::MAX);
+    at.to_zoned(jiff::tz::TimeZone::UTC)
+}
+
+// The first instant of the month `year`-`month`, or jiff's last when no such month is there
+fn first_of(year: i16, month: i8) -> jiff::Timestamp {
+    jiff::civil::Date::new(year, month, 1)
+        .and_then(|day| day.to_zoned(jiff::tz::TimeZone::UTC))
+        .map(|day| day.timestamp())
+        .unwrap_or(jiff::Timestamp::MAX)
+}
+
+// `at` as seconds since the epoch. What jiff counts before it reads as its start.
+fn secs(at: jiff::Timestamp) -> u64 {
+    u64::try_from(at.as_second()).unwrap_or_default()
+}
+
 /// What the dog answers, one line each
 // wire format: changing this is a breaking change to the door
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -324,6 +378,8 @@ pub enum Answer {
     Picks(Vec<Pick>),
     /// What a fit ask answered about the agent and kind it named
     Fits(Fits),
+    /// What the agents billed to the API key spent in the month a credit ask landed in
+    Credit(Credit),
     /// Refused, saying why, and the dog closes the connection
     Error(String),
 }
@@ -429,7 +485,6 @@ mod tests {
 
     use super::*;
     use crate::agent_board::Measure;
-    use crate::ports::Timestamp;
 
     #[test]
     fn a_worker_never_gets_shep_s_socket_or_a_relative_one() {
@@ -697,6 +752,45 @@ mod tests {
             serde_json::to_value(&reading).unwrap()["reading"],
             json!(["sonnet-high"])
         );
+    }
+
+    #[test]
+    fn a_credit_answer_is_one_line_and_round_trips() {
+        let credit = Credit {
+            spent_usd: 12.5,
+            since: 1_788_220_800,
+            resets_at: 1_790_812_800,
+        };
+        let line = serde_json::to_string(&Answer::Credit(credit)).unwrap();
+        assert_eq!(
+            line,
+            r#"{"credit":{"spent_usd":12.5,"since":1788220800,"resets_at":1790812800}}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<Answer>(&line).unwrap(),
+            Answer::Credit(credit)
+        );
+        let ask = Ask::new(CREDIT, 42, "credit");
+        assert_eq!(
+            serde_json::to_value(&ask).unwrap(),
+            json!({ "take": "credit", "pid": 42, "what": "credit" })
+        );
+    }
+
+    #[test]
+    fn the_month_around_a_second_runs_from_the_first_to_the_next_first_in_utc() {
+        let month = |at| month_around(Timestamp(at));
+        let ends = |since, resets| (Timestamp(since), Timestamp(resets));
+        // 2026-09-21T14:13:20Z, mid-month
+        assert_eq!(month(1_790_000_000), ends(1_788_220_800, 1_790_812_800));
+        // 2026-09-01T00:00:00Z, the first second of a month
+        assert_eq!(month(1_788_220_800), ends(1_788_220_800, 1_790_812_800));
+        // 2026-09-30T23:59:59Z, the last second of one
+        assert_eq!(month(1_790_812_799), ends(1_788_220_800, 1_790_812_800));
+        // 2026-12-31T23:59:59Z, December into the January after it
+        assert_eq!(month(1_798_761_599), ends(1_796_083_200, 1_798_761_600));
+        // 2028-02-29T23:59:59Z, the last day of a leap February
+        assert_eq!(month(1_835_481_599), ends(1_832_976_000, 1_835_481_600));
     }
 
     // Each line was written by a build of its time, so a change that stops one reading breaks a runner.

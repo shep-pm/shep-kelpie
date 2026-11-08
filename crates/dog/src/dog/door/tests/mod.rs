@@ -688,6 +688,7 @@ async fn a_dead_door_is_taken_over_and_closed_to_others() {
     assert_eq!(mode & 0o777, 0o600);
 }
 
+mod credit;
 mod e2e;
 mod fit;
 mod forge;

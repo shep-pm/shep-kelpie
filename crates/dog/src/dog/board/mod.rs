@@ -1,17 +1,19 @@
-//! The agent board: every project's finished items, for the `pick` and `fit` asks
+//! The agent board: every project's finished items, for the `pick`, `fit` and `credit` asks
 //!
 //! Every [`LOAD_TICK`] the dog rereads each project's usage ledger in
-//! kelpie's home that changed, keeping its finished items. A `pick` ask
-//! reads the agents it names with `agent_board::pick` and orders none, each
-//! one's wait read from the [`availability`](super::availability): a plan's
-//! wait reads its window from the 50% mark. A `fit` ask reads every project's
-//! records at once, and the dog keeps what it has answered in its own marks
-//! file beside its book.
+//! kelpie's home that changed, keeping its finished items and what its calls
+//! cost each agent. A `pick` ask reads the agents it names with
+//! `agent_board::pick` and orders none, each one's wait read from the
+//! [`availability`](super::availability): a plan's wait reads its window from
+//! the 50% mark. A `fit` ask reads every project's records at once, and the
+//! dog keeps what it has answered in its own marks file beside its book. A
+//! `credit` ask sums what the API agents spent in the month it asked in.
 
+mod credit;
 mod fit;
 mod pick;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -26,6 +28,7 @@ use crate::home::ProjectName;
 use crate::settings::AgentName;
 use crate::usage::{self, FinishedLine, Line};
 
+pub(super) use credit::visit as credit_visit;
 pub(super) use fit::{load_marks, visit as fit_visit};
 pub(super) use pick::visit;
 
@@ -33,28 +36,32 @@ pub(super) use pick::visit;
 /// items of that kind when it did
 pub(super) type Marks = BTreeMap<(AgentName, String), u32>;
 
-/// The agents the board ranks, implementers and reviewers, and the finished items of every project
+/// The agents the board ranks and those that bill the API key, and what every project's ledgers gave
 #[derive(Debug)]
 pub struct Board {
     ranked: Arc<BTreeMap<AgentName, Agent>>,
-    ledgers: BTreeMap<ProjectName, Ledger>,
+    api: Arc<BTreeSet<AgentName>>,
+    ledgers: BTreeMap<ProjectName, Arc<Ledger>>,
     marks: Marks,
 }
 
+/// What one project's ledger gave the board when it was last read
 #[derive(Debug)]
 struct Ledger {
     stamp: Stamp,
     finished: Arc<[FinishedLine]>,
+    spent: Arc<credit::Spent>,
 }
 
 // A ledger's length and last write, which change with every line it gains.
 type Stamp = (u64, Option<SystemTime>);
 
-/// What a pick, a `fit` ask or `status` reads of the board, copied out of its lock
+/// What a pick, a `fit` ask, a `credit` ask or `status` reads of the board, copied out of its lock
 #[derive(Debug, Clone, Default)]
 pub struct View {
     ranked: Arc<BTreeMap<AgentName, Agent>>,
-    ledgers: Vec<Arc<[FinishedLine]>>,
+    api: Arc<BTreeSet<AgentName>>,
+    ledgers: Vec<Arc<Ledger>>,
     marks: Marks,
 }
 
@@ -66,31 +73,30 @@ impl View {
 }
 
 impl Board {
-    /// The implementers and reviewers among `agents`, with no ledger read yet
+    /// The implementers and reviewers among `agents`, and those that bill the API key, with no ledger read yet
     pub(super) fn new(agents: &Agents) -> Self {
         Self {
             ranked: Arc::new(ranked(agents)),
+            api: Arc::new(billed(agents)),
             ledgers: BTreeMap::new(),
             marks: Marks::new(),
         }
     }
 
-    /// Ranks the implementers and reviewers among `agents` from the next `view` on
+    /// Ranks the implementers and reviewers among `agents`, and names those that bill the API key, from the next `view` on
     ///
     /// A `View` already copied out keeps the agents it was copied with.
     pub(super) fn set_agents(&mut self, agents: &Agents) {
         self.ranked = Arc::new(ranked(agents));
+        self.api = Arc::new(billed(agents));
     }
 
-    /// What it holds now, for a pick, a `fit` ask or `status` to read without the lock
+    /// What it holds now, for a pick, a `fit` ask, a `credit` ask or `status` to read without the lock
     pub(super) fn view(&self) -> View {
         View {
             ranked: Arc::clone(&self.ranked),
-            ledgers: self
-                .ledgers
-                .values()
-                .map(|l| Arc::clone(&l.finished))
-                .collect(),
+            api: Arc::clone(&self.api),
+            ledgers: (self.ledgers.values()).map(Arc::clone).collect(),
             marks: self.marks.clone(),
         }
     }
@@ -101,6 +107,15 @@ fn ranked(agents: &Agents) -> BTreeMap<AgentName, Agent> {
     (agents.iter())
         .filter(|(_, agent)| ranks(agent.role))
         .map(|(name, agent)| (name.clone(), agent.clone()))
+        .collect()
+}
+
+// The agents whose calls bill the API key, whatever their role: a project
+// manager on `login: api` spends the same credit as a worker.
+fn billed(agents: &Agents) -> BTreeSet<AgentName> {
+    (agents.iter())
+        .filter(|(_, agent)| pick::bills_api(agent))
+        .map(|(name, _)| name.clone())
         .collect()
 }
 
@@ -131,18 +146,21 @@ pub(super) fn refresh(board: &Mutex<Board>, kelpie_home: &Path) -> usize {
     };
     let read: Vec<_> = (changed.into_iter())
         .filter_map(|(project, path, stamp)| {
+            let lines = usage::read(&path).ok()?;
+            let spent = Arc::new(credit::spent(&lines));
             let mut finished = Vec::new();
-            for line in usage::read(&path).ok()? {
+            for line in lines {
                 if let Line::Finished(line) = line {
                     finished.push(line);
                 }
             }
             Some((
                 project,
-                Ledger {
+                Arc::new(Ledger {
                     stamp,
                     finished: finished.into(),
-                },
+                    spent,
+                }),
             ))
         })
         .collect();
