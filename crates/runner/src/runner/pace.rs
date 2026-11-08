@@ -18,7 +18,7 @@ use super::report::{Begin, StepReport};
 use super::turn::reads::Job;
 use crate::agents::Runs;
 use crate::board::Skip;
-use crate::pacer::{Assessment, Hold, RECHECK_SECS, Reading, Scope, assess, named, spent};
+use crate::pacer::{Assessment, Hold, RECHECK_SECS, Reading, Scope, assess, named};
 use crate::ports::{Meter, PaddockHolder, Timestamp};
 use crate::settings::{Account, AgentHarness, AgentName, GatewayName, Limit, ModelHost};
 use crate::state::StateError;
@@ -153,12 +153,6 @@ impl Runner {
                 None => self.ports.meter_of(account).read(now),
             },
         };
-        // Only a spent window or week holds a turn or a dispatch. The agent
-        // board's waits read the 50% mark themselves, from `pacer::window`.
-        let limit = match &read {
-            Ok(usage) => spent(account, usage),
-            Err(_) => None,
-        };
         let mut assessment = match read {
             Ok(usage) => assess(account, now, &usage),
             Err(e) => {
@@ -166,10 +160,12 @@ impl Runner {
                 Assessment::unreadable(now, format!("cannot read {whose}usage: {e}"))
             }
         };
-        if let Some(reading) = &assessment.reading {
-            self.metrics.plan(account, reading);
+        // Only a spent window or week holds a turn or a dispatch, and an
+        // unread meter holds nothing.
+        match &assessment.reading {
+            Some(reading) => self.metrics.plan(account, reading),
+            None => assessment.window = None,
         }
-        assessment.window = limit;
         let hold = assessment.hold().cloned();
         self.pacing.insert(account, (now, assessment));
         Ok(hold.map_or(Pace::Clear, Pace::Held))

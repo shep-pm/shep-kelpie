@@ -318,7 +318,7 @@ async fn an_ask_naming_reviewers_ranks_a_local_one_before_a_hosted_one() {
 #[tokio::test]
 async fn a_reviewer_on_a_held_plan_finishes_after_its_hold() {
     let files = [("held.md", review_on_plan(""))];
-    let dog = dog_at(&files, &[], &[(Account::Claude, utilization(10, 60))]).await;
+    let dog = dog_at(&files, &[], &[(Account::Claude, utilization(10, 100))]).await;
 
     let picks = picked(&dog.socket, item(None, &["held"])).await;
 
