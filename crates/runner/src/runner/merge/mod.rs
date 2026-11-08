@@ -14,7 +14,7 @@ use super::gate::{settled, short};
 use super::report::{Begin, StepReport};
 use super::trigger::WhichItem;
 use crate::ports::{Checks, PullRequestState};
-use crate::settings::{Merging, RulingName};
+use crate::settings::RulingName;
 use crate::state::{MergeNotice, Notice, RulingKind, StateError, Stuck};
 use crate::ticket::TicketId;
 use crate::work_item::{Phase, Review, ReviewCallState, ReviewStage, Turn};
@@ -122,12 +122,9 @@ impl Runner {
     }
 
     /// Whether kelpie merges a head that passed every gate without asking:
-    /// `git.merging` while the table holds it, else `rulings.pm_decides.merge`
+    /// `rulings.pm_decides.merge`
     pub(super) fn merges_unasked(&self) -> bool {
-        match self.settings.git.merging {
-            Some(merging) => merging == Merging::Auto,
-            None => self.settings.rulings.pm_decides(RulingName::Merge),
-        }
+        self.settings.rulings.pm_decides(RulingName::Merge)
     }
 
     // Marking the draft ready can start a fresh CI run on the same head, so
@@ -172,9 +169,9 @@ impl Runner {
         if let Some(queued) = item.merge_queued {
             return self.queued(number, head, queued);
         }
-        // The gate asks again once the project is no longer `auto`.
+        // The gate asks again once `merge` is no longer `true`.
         if auto && !self.merges_unasked() {
-            let reason = "`git.merging` is no longer `auto`".to_owned();
+            let reason = "`merge` is no longer `true`".to_owned();
             return self.withdraw(issue, number, auto, reason);
         }
         let now = self.ports.clock.now();

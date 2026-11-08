@@ -40,7 +40,7 @@ fn the_last_object_after_the_reasoning_is_the_answer() {
                 on: ticket(12),
                 why: "a machine fault".into(),
             }],
-            answer: None,
+            answer: Vec::new(),
             follow_up: None,
             red: Vec::new(),
             votes: Vec::new(),
@@ -116,35 +116,29 @@ fn a_read_entry_with_no_item_or_no_more_is_named_and_dropped() {
 
 #[test]
 fn an_answer_takes_text_or_an_escalation_and_nothing_else() {
-    let text = read("{\"answer\": {\"item\": \"#7\", \"text\": \" Use it. \", \"why\": \"r\"}}");
+    let one = |text: &str| read(text).unwrap().answer.swap_remove(0);
+    let text = one("{\"answer\": {\"item\": \"#7\", \"text\": \" Use it. \", \"why\": \"r\"}}");
     assert_eq!(
-        text.unwrap().answer,
-        Some(Settle {
+        text,
+        Settle {
             item: ticket(7),
             how: How::Text("Use it.".into()),
             why: "r".into(),
             problem: None,
             board: None,
             candidates: Vec::new(),
-        })
+        }
     );
-    let passed = read(
+    let passed = one(
         "{\"answer\": {\"item\": 7, \"escalate\": \"--check\", \"problem\": \" The flag is \
          unnamed. \", \"board\": \"#9 waits behind it.\", \"why\": \"r\"}}",
     );
-    let passed = passed.unwrap().answer.unwrap();
     assert_eq!(passed.problem.as_deref(), Some("The flag is unnamed."));
     assert_eq!(passed.board.as_deref(), Some("#9 waits behind it."));
-    let escalate = read("{\"answer\": {\"item\": 7, \"escalate\": \"--check\", \"why\": \"r\"}}");
-    assert_eq!(
-        escalate.unwrap().answer.map(|a| a.how),
-        Some(How::Escalate(Some("--check".into())))
-    );
-    let bare = read("{\"answer\": {\"item\": 7, \"escalate\": true}}");
-    assert_eq!(
-        bare.unwrap().answer.map(|a| a.how),
-        Some(How::Escalate(None))
-    );
+    let escalate = one("{\"answer\": {\"item\": 7, \"escalate\": \"--check\", \"why\": \"r\"}}");
+    assert_eq!(escalate.how, How::Escalate(Some("--check".into())));
+    let bare = one("{\"answer\": {\"item\": 7, \"escalate\": true}}");
+    assert_eq!(bare.how, How::Escalate(None));
     for bad in [
         "{\"answer\": {\"item\": 7, \"text\": \"a\", \"escalate\": \"b\"}}",
         "{\"answer\": {\"item\": 7}}",
@@ -152,13 +146,46 @@ fn an_answer_takes_text_or_an_escalation_and_nothing_else() {
         "{\"answer\": {\"text\": \"a\"}}",
     ] {
         let read = read(bad).unwrap();
-        assert_eq!((read.answer, read.unread.len()), (None, 1), "{bad}");
+        assert_eq!((read.answer, read.unread.len()), (Vec::new(), 1), "{bad}");
     }
 }
 
 #[test]
+fn an_answer_is_one_object_or_a_list_of_them_and_a_bad_entry_is_named_alone() {
+    let one =
+        read("{\"answer\": {\"item\": 7, \"text\": \"Use it.\", \"why\": \"the docs\"}}").unwrap();
+    assert_eq!(one.answer.len(), 1, "one object alone is read");
+    assert_eq!(read("{\"answer\": []}").unwrap().answer, Vec::new());
+    assert_eq!(read("{\"answer\": null}").unwrap().answer, Vec::new());
+
+    let many = read(
+        "{\"answer\": [{\"item\": 7, \"text\": \"Use it.\", \"why\": \"the docs\"}, \
+         {\"item\": 9, \"escalate\": \"--check\", \"why\": \"a product call\"}, \
+         {\"item\": 11, \"text\": \"  \"}]}",
+    )
+    .unwrap();
+    let settled: Vec<(TicketId, How)> = (many.answer.iter())
+        .map(|s| (s.item, s.how.clone()))
+        .collect();
+    assert_eq!(
+        settled,
+        [
+            (ticket(7), How::Text("Use it.".into())),
+            (ticket(9), How::Escalate(Some("--check".into()))),
+        ]
+    );
+    assert_eq!(
+        many.unread,
+        [
+            "`answer`: `item`, then `text` or `escalate`, and `why`, not \
+             {\"item\":11,\"text\":\"  \"}"
+        ]
+    );
+}
+
+#[test]
 fn candidates_pass_a_question_on_with_or_without_a_recommendation() {
-    let settle = |text: &str| read(text).unwrap().answer.unwrap();
+    let settle = |text: &str| read(text).unwrap().answer.swap_remove(0);
     let drafted = settle(
         "{\"answer\": {\"item\": 7, \"escalate\": true, \"candidates\": [\" Use it. \", \"\", 4, \
          \"Ask the maintainer\"]}}",
@@ -171,7 +198,7 @@ fn candidates_pass_a_question_on_with_or_without_a_recommendation() {
         settle("{\"answer\": {\"item\": 7, \"text\": \"Go.\", \"candidates\": [\"a\", \"b\"]}}");
     assert_eq!(text.how, How::Text("Go.".into()));
     let none = read("{\"answer\": {\"item\": 7, \"candidates\": []}}").unwrap();
-    assert_eq!((none.answer, none.unread.len()), (None, 1));
+    assert_eq!((none.answer, none.unread.len()), (Vec::new(), 1));
 }
 
 #[test]

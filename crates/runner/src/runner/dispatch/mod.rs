@@ -104,7 +104,8 @@ impl Runner {
     // opens at most one, so nothing here checks `concurrency.active_items` again.
     pub(super) fn dispatch(&mut self) -> Result<Begin, StateError> {
         // The board was read before the pass took the lock, unless it opened since.
-        let read = self.take_board_read();
+        let mut read = self.take_board_read();
+        self.keep_registry(std::mem::take(&mut read.registry));
         let listed = read
             .ready
             .and_then(|ready| self.open_listed().map(|open| (ready, open)));

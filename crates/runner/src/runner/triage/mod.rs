@@ -48,6 +48,7 @@ mod scrub;
 pub(super) mod spam;
 pub(super) mod split;
 mod split_ask;
+pub(in crate::runner) mod unpublished;
 
 use super::contributions::post::forge_is_busy;
 use super::flight::triage::{Job, Research};
@@ -115,6 +116,8 @@ pub(super) struct Run {
     /// How many times the check's comment on each issue failed, short of
     /// `checks::CHECK_TRIES`
     pub(super) check_fails: BTreeMap<u64, u32>,
+    /// The packages a ready issue needs, as the registry answered the polls
+    pub(super) registry: unpublished::Looked,
 }
 
 /// An untouched issue, as `status` lists it
@@ -809,5 +812,7 @@ mod scrub_tests;
 mod spam_tests;
 #[cfg(test)]
 mod split_tests;
+#[cfg(test)]
+mod taken_off_tests;
 #[cfg(test)]
 mod verb_tests;

@@ -5,9 +5,9 @@
 //! an implementer, and an unstick a work item that is stuck now: parked on a
 //! ruling a stuck item raises, or with a call the board reads as idle.
 //! A fix names a stuck item too, and the open fix it waits on. Anything else
-//! is dropped, and named in the log. Each unstick and each fix runs on its
-//! own, so one wake that carried several stuck items can settle each, and an
-//! item named twice, in one key or across both, acts once.
+//! is dropped, and named in the log. Each unstick, fix and answer runs on its
+//! own, so one wake that carried several can settle each, and an item named
+//! twice, in one key or across both, acts once.
 
 use super::answer::{Action, Answer, Unstick};
 use super::red::Settled;
@@ -164,7 +164,17 @@ impl Runner {
                 Err(why) => dropped.push(why),
             }
         }
-        if let Some(settle) = &answer.answer {
+        // Each question the wake carried settles on its own, so one that cannot
+        // act leaves the others standing. One item is settled once, whichever
+        // entry named it first.
+        let mut answered: Vec<TicketId> = Vec::new();
+        for settle in &answer.answer {
+            let named = ticket_ref(settle.item);
+            if answered.contains(&settle.item) {
+                dropped.push(format!("answer {named}: the answer names it twice"));
+                continue;
+            }
+            answered.push(settle.item);
             match self.settle_question(settle)? {
                 Ok(done) => acted.push(done),
                 Err(why) => dropped.push(why),

@@ -8,14 +8,18 @@
 //! look. A read a pass did not use, or one kelpie's own write follows, is
 //! dropped. The next pass reads again.
 
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use super::Runner;
 use super::parent::{self, Refused, Unbuilt, Unlisted};
+use super::triage::unpublished::Read;
 use super::trigger::lock;
 use super::turn::Slot;
 use crate::board::{Blocker, OpenPullRequest, ReadyIssue, Skip, check};
-use crate::ports::{Forge, ForgeError, Meter, MeterError, Tickets, Timestamp, Utilization};
+use crate::ports::{
+    Forge, ForgeError, Meter, MeterError, Registry, Tickets, Timestamp, Utilization,
+};
 use crate::settings::{Account, ForgeSlug};
 use crate::ticket::TicketId;
 
@@ -36,6 +40,9 @@ pub(super) struct BoardJob {
     /// The accounts a new work item is paced on, read when the board may open one
     meters: Vec<(Account, Arc<dyn Meter>)>,
     adopting: bool,
+    /// The registry, and the packages found published, when this read asks it
+    /// of a ready issue's package. None under the lock.
+    registry: Option<(Arc<dyn Registry>, BTreeSet<String>)>,
 }
 
 /// What a read of the board found
@@ -54,6 +61,8 @@ pub(super) struct BoardRead {
     /// The search for a parent off the ready list, when the board lists none to close
     pub(super) unlisted: Option<Unlisted>,
     usage: Vec<(Account, Result<Utilization, MeterError>)>,
+    /// The registry's answers for the packages not yet found published
+    pub(super) registry: Read,
 }
 
 /// Reads the board, if a poll is due, asking the forge with the runner's lock let go
@@ -79,9 +88,11 @@ impl BoardJob {
             closed: Vec::new(),
             unlisted: None,
             usage: Vec::new(),
+            registry: Vec::new(),
         };
         if let Ok(ready) = &mut read.ready {
             read.unlinked = self.link_blockers(ready);
+            read.registry = self.ask_registry(ready);
         }
         let Ok(ready) = &read.ready else {
             return read;
@@ -119,6 +130,27 @@ impl BoardJob {
 }
 
 impl BoardJob {
+    // Asks the registry once for each package a ready issue without a work item needs that
+    // is not found published, as the triage poll does: it lists fewer issues than the board
+    // can, so an issue only the board sees would wait on a package no poll reads.
+    fn ask_registry(&self, ready: &[ReadyIssue]) -> Read {
+        let Some((registry, known)) = &self.registry else {
+            return Vec::new();
+        };
+        let mut asked = BTreeSet::new();
+        let mut read = Vec::new();
+        let waiting = ready.iter().filter(|i| !self.items.contains(&i.ticket));
+        for needed in waiting.flat_map(|issue| check::needs(&issue.body)) {
+            let package = needed.to_string();
+            if known.contains(&package) || !asked.insert(package) {
+                continue;
+            }
+            let answer = registry.published(&needed);
+            read.push((needed, answer));
+        }
+        read
+    }
+
     // Links each blocker an issue's `Blocked by:` line names that the source does not list, so
     // the pick reads one source. An issue with a work item or a finished one is left alone. Gives
     // the skip of each issue a link failed for, which the pick must not take.
@@ -184,7 +216,12 @@ impl Runner {
         if self.forge_hold.until(now).is_some() {
             return None;
         }
-        Some(self.job_at(now, None))
+        let mut job = self.job_at(now, None);
+        job.registry = Some((
+            Arc::clone(&self.ports.registry),
+            self.triage_run.registry.published().clone(),
+        ));
+        Some(job)
     }
 
     fn job_at(
@@ -205,6 +242,7 @@ impl Runner {
             unbuilt: self.unbuilt.clone(),
             meters: self.dispatch_meters(now),
             adopting: !self.state.adopted.is_empty(),
+            registry: None,
         }
     }
 

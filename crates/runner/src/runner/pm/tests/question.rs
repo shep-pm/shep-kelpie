@@ -1,11 +1,12 @@
 //! A worker's question through the project manager: it answers, or passes
 //! the question on with a recommendation
 
+use std::fmt::Write as _;
 use std::sync::Mutex;
 
 use serde_json::json;
 
-use super::{answered, pm_on, step_until, with_pm};
+use super::{answered, pm_on, pm_seen, step_until, with_pm};
 use crate::ports::AgentError;
 use crate::runner::flight::advance;
 use crate::runner::{Pass, Runner, StepReport, step};
@@ -19,6 +20,47 @@ const CHOICES: &str = "Done so far.\n\n<kelpie-question>\nWhich flag?\n- `--dry-
 
 pub(super) const ASKS: &str = "I added the flag.\n\n<kelpie-question>\nShould it be `--dry-run` or \
                     `--check`?\n\nBoth appear in the docs.\n</kelpie-question>\n";
+
+/// A worker's question listing two options, for #9
+const LISTS: &str = "Done so far.\n\n<kelpie-question>\nWhich flag?\n- `--dry-run`\n\
+                    - `--check`\n</kelpie-question>\n";
+
+/// What a wake says for `issue`'s worker asking the question `asked` holds,
+/// which is quoted line by line under the reason
+fn asked_about(issue: u64, asked: &str) -> String {
+    let body = asked
+        .split("<kelpie-question>")
+        .nth(1)
+        .unwrap()
+        .split("</kelpie-question>")
+        .next()
+        .unwrap()
+        .trim();
+    let mut out = format!("#{issue}'s worker asks, on ruling {issue}:\n");
+    for line in body.lines() {
+        match line.is_empty() {
+            true => out.push_str("\n>"),
+            false => {
+                let _ = write!(out, "\n> {line}");
+            }
+        }
+    }
+    out
+}
+
+/// #7 asking `seven` and #9 asking `nine`, each on its own ruling, both
+/// questions queued for the one wake that answers them
+fn both_asking(project: &str, seven: &'static str, nine: &'static str) -> (Rig, Mutex<Runner>) {
+    let (rig, runner) = asking(project, seven);
+    rig.ask(&runner, "add", Some("9"));
+    rig.claude.script([Scripted::Say(nine)]);
+    step_until(
+        &runner,
+        |r| matches!(r, StepReport::Asked { id, .. } if *id == ticket(9)),
+    );
+    assert!(pm_seen(&rig).is_empty(), "#7's question woke it on its own");
+    (rig, runner)
+}
 
 /// A project with a project manager, and issue 7's worker asking `question`
 /// on its first turn, the ruling raised
@@ -584,6 +626,170 @@ fn a_released_question_settled_while_its_comment_is_posted_is_edited_to_say_so()
     let edits = rig.github.edits();
     assert_eq!(edits.len(), 1, "the comment was never edited: {edits:?}");
     assert!(edits[0].1.starts_with("**Settled.**"), "{edits:?}");
+}
+
+// Each question a wake carried gets its own answer, and one the project
+// manager cannot act on leaves the rest standing.
+#[test]
+fn two_questions_in_a_wake_are_each_answered() {
+    let (rig, runner) = both_asking("unfezant", ASKS, LISTS);
+    rig.claude.script([Scripted::Say(
+        "{\"answer\": [{\"item\": 7, \"text\": \"Use --dry-run.\", \"why\": \"#7 names the \
+         flag\"}, {\"item\": 9, \"escalate\": \"--check\", \"why\": \"a product call\"}]}",
+    )]);
+    let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    let (woke_for, acted, dropped) = answered(Some(report));
+    assert_eq!(
+        woke_for,
+        [asked_about(7, ASKS), asked_about(9, LISTS)],
+        "both questions went in one wake"
+    );
+    assert_eq!(
+        acted,
+        [
+            "answered ruling 7 on #7",
+            "put ruling 9 on #9 to the maintainer"
+        ],
+        "{dropped:?}"
+    );
+    assert_eq!(dropped, Vec::<String>::new());
+    assert_eq!(pm_seen(&rig).len(), 1, "one wake for both questions");
+    let status = rig.ask(&runner, "status", None);
+    let left: Vec<&str> = (status["rulings"].as_array().unwrap().iter())
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        left,
+        ["9"],
+        "#7's ruling is answered, #9's waits on the maintainer"
+    );
+    assert!(
+        rig.alerts.posts().is_empty(),
+        "the maintainer was never asked"
+    );
+}
+
+#[test]
+fn one_object_still_reads_as_one_answer() {
+    let (rig, runner) = both_asking("pichu", ASKS, LISTS);
+    rig.claude.script([Scripted::Say(
+        "{\"answer\": {\"item\": 9, \"text\": \"Use --check.\", \"why\": \"shep uses it\"}}",
+    )]);
+    let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    let (woke_for, acted, dropped) = answered(Some(report));
+    assert_eq!(woke_for, [asked_about(7, ASKS), asked_about(9, LISTS)]);
+    assert_eq!(acted, ["answered ruling 9 on #9"]);
+    assert_eq!(dropped, Vec::<String>::new());
+}
+
+#[test]
+fn an_answer_that_fails_leaves_the_others_standing() {
+    let (rig, runner) = both_asking("staryu", LISTS, ASKS);
+    rig.claude.script([Scripted::Say(
+        "{\"answer\": [{\"item\": 7, \"escalate\": \"C\", \"why\": \"guess\"}, \
+         {\"item\": 9, \"text\": \"Use --check.\", \"why\": \"shep uses it\"}]}",
+    )]);
+    let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    let (_, acted, dropped) = answered(Some(report));
+    assert_eq!(acted, ["answered ruling 9 on #9"]);
+    assert_eq!(
+        dropped,
+        ["answer #7: choice C is past the 2 options the question lists"]
+    );
+    assert_eq!(
+        step_until(
+            &runner,
+            |r| matches!(r, StepReport::Alerted { id } if *id == ticket(7))
+        ),
+        StepReport::Alerted { id: ticket(7) },
+        "the question its answer could not settle goes out as it stands"
+    );
+    let [(_, alert)] = rig.alerts.posts().try_into().unwrap();
+    assert!(!alert.text.contains("PM "), "{}", alert.text);
+}
+
+#[test]
+fn a_second_answer_on_one_item_is_dropped_and_named() {
+    let (rig, runner) = both_asking("starmie", ASKS, LISTS);
+    rig.claude.script([Scripted::Say(
+        "{\"answer\": [{\"item\": 7, \"text\": \"Use --dry-run.\", \"why\": \"#7 names the \
+         flag\"}, {\"item\": 7, \"escalate\": \"--check\", \"why\": \"once more\"}]}",
+    )]);
+    let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    let (_, acted, dropped) = answered(Some(report));
+    assert_eq!(acted, ["answered ruling 7 on #7"]);
+    assert_eq!(dropped, ["answer #7: the answer names it twice"]);
+    let status = rig.ask(&runner, "status", None);
+    let left: Vec<&str> = (status["rulings"].as_array().unwrap().iter())
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(left, ["9"], "#7's ruling is settled, #9's still waits");
+}
+
+#[test]
+fn a_question_left_out_goes_to_the_maintainer_after_the_wake() {
+    let (rig, runner) = both_asking("magnemite", ASKS, LISTS);
+    rig.claude.script([Scripted::Say(
+        "{\"answer\": [{\"item\": 7, \"text\": \"Use --dry-run.\", \"why\": \"#7 names the \
+         flag\"}]}",
+    )]);
+    let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    let (_, acted, dropped) = answered(Some(report));
+    assert_eq!(acted, ["answered ruling 7 on #7"]);
+    assert_eq!(dropped, Vec::<String>::new());
+    assert_eq!(
+        step_until(
+            &runner,
+            |r| matches!(r, StepReport::Alerted { id } if *id == ticket(9))
+        ),
+        StepReport::Alerted { id: ticket(9) },
+        "#9's question went out as it stands"
+    );
+    let [(_, alert)] = rig.alerts.posts().try_into().unwrap();
+    let text = alert.text;
+    assert!(text.contains("Which flag?"), "{text}");
+    assert!(!text.contains("PM "), "{text}");
+}
+
+#[test]
+fn an_escalation_and_a_text_answer_in_one_wake_are_both_carried_out() {
+    let (rig, runner) = both_asking("electabuzz", LISTS, ASKS);
+    rig.claude.script([
+        Scripted::Say(
+            "{\"answer\": [{\"item\": 7, \"escalate\": \"--check\", \"why\": \"a product call\"}, \
+             {\"item\": 9, \"text\": \"Use --check.\", \"why\": \"shep uses it\"}]}",
+        ),
+        Scripted::Say("renamed"),
+    ]);
+    let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    let (_, acted, dropped) = answered(Some(report));
+    assert_eq!(
+        acted,
+        [
+            "put ruling 7 on #7 to the maintainer",
+            "answered ruling 9 on #9"
+        ],
+        "{dropped:?}"
+    );
+    assert_eq!(
+        step_until(
+            &runner,
+            |r| matches!(r, StepReport::Alerted { id } if *id == ticket(7))
+        ),
+        StepReport::Alerted { id: ticket(7) }
+    );
+    let [(_, alert)] = rig.alerts.posts().try_into().unwrap();
+    let text = alert.text;
+    assert!(text.contains("PM recommends: `--check`"), "{text}");
+    assert!(text.contains("PM says: a product call"), "{text}");
+
+    let ended = step_until(
+        &runner,
+        |r| matches!(r, StepReport::Ended { issue, .. } if *issue == ticket(9)),
+    );
+    assert!(matches!(ended, StepReport::Ended { .. }), "{ended:?}");
+    let worker = rig.claude.seen().last().unwrap().call.prompt.clone();
+    assert!(worker.contains("PM answered: Use --check."), "{worker}");
 }
 
 #[test]

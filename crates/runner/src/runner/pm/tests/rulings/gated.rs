@@ -4,28 +4,21 @@
 
 use std::sync::Mutex;
 
-use super::{answered, answers, asking, comments, left_to_pm, pending, settled};
+use super::{answered, answers, asking, comments, left_to_pm, on_merge, pending, settled};
 use crate::ports::Role;
 use crate::runner::{CHECKS_SETTLE, Runner, step};
-use crate::settings::Merging;
 use crate::state::{Ruling, RulingKind};
 use crate::test::{Rig, Scripted};
 
-/// [`left_to_pm`] under `auto`, with ruling 71 warning as `warn` sets it
+/// [`left_to_pm`], with ruling 71 warning as `warn` sets it
 fn warned(project: &str, warn: impl FnOnce(&mut Ruling)) -> (Rig, Mutex<Runner>) {
-    let (rig, runner) = left_to_pm(project, Merging::Auto);
+    let (rig, runner) = left_to_pm(project);
     {
         let mut runner = runner.lock().unwrap();
         let ruling = &mut runner.state.rulings[0];
         warn(ruling);
     }
     (rig, runner)
-}
-
-/// Sets a flag or note of the merge ruling's kind
-fn on_merge(ruling: &mut Ruling, set: impl FnOnce(&mut RulingKind)) {
-    assert!(matches!(ruling.kind, RulingKind::Merge { .. }));
-    set(&mut ruling.kind);
 }
 
 /// Has the project manager answer ruling 71 with a yes, and says what the

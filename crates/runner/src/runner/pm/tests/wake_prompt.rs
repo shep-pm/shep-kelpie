@@ -10,7 +10,7 @@ use crate::runner::pm::Wake;
 use crate::runner::pm::notes::{PM_STANDING, STANDING_MAX};
 use crate::runner::pm::prompt::{BOARD_INLINE, Notes, wake as prompt};
 use crate::runner::{StepReport, step};
-use crate::settings::{Harness, Merging};
+use crate::settings::Harness;
 use crate::test::{Rig, Scripted, ticket};
 
 fn read(rig: &Rig, name: &str) -> String {
@@ -372,7 +372,7 @@ fn a_tell_reaches_the_notes_once_verbatim_on_the_wake_that_answers_it() {
 
 #[test]
 fn a_wake_for_a_ruling_records_its_answer_and_not_nothing() {
-    let (rig, runner) = left_to_pm("w-answer", Merging::Auto);
+    let (rig, runner) = left_to_pm("w-answer");
     rig.claude
         .script_for(Role::Pm, [Scripted::Say(answers('A', false))]);
 
@@ -396,7 +396,7 @@ fn a_wake_for_a_ruling_records_its_answer_and_not_nothing() {
 
 #[test]
 fn a_wake_for_a_ruling_it_gave_no_answer_on_records_that() {
-    let (rig, runner) = left_to_pm("w-none", Merging::Auto);
+    let (rig, runner) = left_to_pm("w-none");
     rig.claude
         .script_for(Role::Pm, [Scripted::Say("{\"pick\": null}")]);
 
@@ -446,6 +446,14 @@ fn a_question_wake_lets_it_answer_what_it_can_argue() {
     assert!(
         !prompt.contains("the issue, the docs or an ADR settle it"),
         "the docs settling it is no longer the bar: {prompt}"
+    );
+    assert!(
+        prompt.contains("Answer each one the wake carried, in its own `answer` entry or as a list"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("at most 300 characters>\"} or a list of them"),
+        "{prompt}"
     );
 }
 

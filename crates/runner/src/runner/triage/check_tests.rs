@@ -2,18 +2,19 @@
 //! stand-ins: a passing issue is ready with no triage call, and only a failing
 //! one reaches the triager
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
 use super::checks::CHECK_TRIES;
 use super::pick_tests::{MAINTAINER, issue, list, rig_with, triaging};
+use super::poll_read::read_triage;
 use super::ready_tests::said;
-use super::research_tests::{APP, WORDS, calls, moves, pump, reply, restart, took_back, under};
+use super::research_tests::{APP, WORDS, calls, moves, pump, reply, under};
 use crate::board::{ReadyIssue, Skip, SubIssues, check};
 use crate::github::ApiError;
 use crate::ports::Timestamp;
-use crate::ports::{OpenIssue, Role};
+use crate::ports::{OpenIssue, RegistryError, Role};
 use crate::runner::slots_tests::dispatched;
 use crate::runner::{Pass, Runner, advance, step};
 use crate::state::{CheckTriage, IssueCheck};
@@ -308,7 +309,7 @@ fn a_still_failing_comment_the_forge_keeps_refusing_is_given_up() {
 }
 
 // A body that passes, with what the triager had a good answer for stated in it
-const ASSUMED: &str = "Touches: `src/start.rs`\n\n## What to build\n\n- Fix the crash on \
+pub(super) const ASSUMED: &str = "Touches: `src/start.rs`\n\n## What to build\n\n- Fix the crash on \
     start.\n- Assumed: it crashes on Linux only. Say otherwise.\n\n## Acceptance criteria\n\n\
     - [ ] `runner::start::it_starts`\n";
 
@@ -778,223 +779,159 @@ fn a_local_ticket_naming_a_fenced_path_is_skipped_and_the_board_goes_on() {
     assert!(error.contains(".claude/skills/x/SKILL.md"), "{error}");
 }
 
-// A passing line more than `PASSING`, so the edit changes the key and still passes
-fn edited(n: u32) -> String {
-    format!("{PASSING}\nEdit {n}.\n")
+// `PASSING` with a `Needs:` line naming `packages`, each as the line writes it
+fn needing(packages: &[&str]) -> String {
+    let named: Vec<String> = packages.iter().map(|p| format!("`{p}`")).collect();
+    format!("Needs: {}\n\n{PASSING}", named.join(", "))
 }
 
-// Issue 30 as the forge lists it with `body` and `labels`
-fn relisted(rig: &Rig, body: &str, labels: &[&str]) {
-    list(rig, filed(rig, MAINTAINER, body, labels));
-    rig.next_look();
-}
+const FOO: &str = "crates:foo@1.2.0";
+const BAR: &str = "npm:bar@3.0.0";
 
-// A rig whose passing issue the check made ready, which the maintainer then took
-// the label off
-fn taken_off(pick: &str) -> (Rig, Mutex<Runner>) {
-    let lines = format!("pick = \"{pick}\"");
-    let (rig, runner) = checking(&lines, MAINTAINER, PASSING, &PASSING_LABELS);
-    assert_eq!(step(&runner).unwrap(), None);
-    assert_eq!(moves(&rig), ["label ready-for-agent"]);
+// A rig whose board holds issue 30 ready, needing `packages`, with the poll yet to read
+fn waiting_on(packages: &[&str]) -> (Rig, Mutex<Runner>) {
+    let rig = rig_with("pick = \"off\"");
+    ready_on_the_board(&rig, &needing(packages), &PASSING_LABELS);
+    let runner = rig.open().unwrap();
     (rig, runner)
 }
 
-fn ready_seen(rig: &Rig) -> bool {
-    checks(rig)[0]["ready_seen"] == true
+// Reads the triage poll once more, a look after the last
+fn polled(rig: &Rig, runner: &Mutex<Runner>) {
+    rig.next_look();
+    read_triage(runner).unwrap();
 }
 
 #[test]
-fn a_first_pass_still_labels() {
-    let (rig, runner) = checking("pick = \"off\"", MAINTAINER, PASSING, &PASSING_LABELS);
+fn a_ready_issue_needing_an_unpublished_package_is_held() {
+    let (rig, runner) = waiting_on(&[FOO]);
 
-    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(step(&runner).unwrap(), None, "nothing starts");
 
-    assert_eq!(moves(&rig), ["label ready-for-agent"]);
-    assert!(ready_seen(&rig), "{}", checks(&rig));
-}
-
-#[test]
-fn a_label_the_maintainer_took_off_stays_off_after_an_edit() {
-    let (rig, runner) = taken_off("off");
-
-    relisted(&rig, &edited(1), &PASSING_LABELS);
-    assert_eq!(step(&runner).unwrap(), None);
-
-    assert_eq!(moves(&rig), ["label ready-for-agent"], "nothing put back");
-    assert!(ready_seen(&rig), "{}", checks(&rig));
-    relisted(&rig, &edited(2), &PASSING_LABELS);
-    assert_eq!(step(&runner).unwrap(), None);
-    assert_eq!(moves(&rig), ["label ready-for-agent"], "still off");
-}
-
-#[test]
-fn a_label_the_maintainer_took_off_stays_off_after_the_check_version_rises() {
-    let (rig, runner) = taken_off("off");
-    // A raised `check::VERSION` changes every key, so the kept one no longer matches
-    runner.lock().unwrap().state.checks[0].key = 0;
-
-    relisted(&rig, PASSING, &PASSING_LABELS);
-    assert_eq!(step(&runner).unwrap(), None);
-
-    assert_eq!(moves(&rig), ["label ready-for-agent"], "nothing put back");
-    assert_ne!(checks(&rig)[0]["key"], 0, "it was checked again");
-    assert!(ready_seen(&rig), "{}", checks(&rig));
-}
-
-#[test]
-fn a_label_the_maintainer_took_off_stays_off_after_a_failing_edit_and_a_fix() {
-    let (rig, runner) = taken_off("off");
-
-    relisted(&rig, FAILING, &PASSING_LABELS);
-    assert_eq!(step(&runner).unwrap(), None);
-    assert!(
-        ready_seen(&rig),
-        "a failing result keeps it: {}",
-        checks(&rig)
-    );
-    relisted(&rig, &edited(1), &PASSING_LABELS);
-    assert_eq!(step(&runner).unwrap(), None);
-
-    assert_eq!(moves(&rig), ["label ready-for-agent"], "nothing put back");
-}
-
-#[test]
-fn a_label_put_back_by_hand_stands_and_can_come_off_again() {
-    // Unlabelled and failing, so its first result has no `ready_seen`
-    let (rig, runner) = checking("pick = \"off\"", MAINTAINER, FAILING, &PASSING_LABELS);
-    assert_eq!(step(&runner).unwrap(), None);
-    assert!(!ready_seen(&rig), "{}", checks(&rig));
-
-    // The maintainer labels it by hand: the same text, so the same key
-    let mut labels = PASSING_LABELS.to_vec();
-    labels.push("ready-for-agent");
-    relisted(&rig, FAILING, &labels);
-    assert_eq!(step(&runner).unwrap(), None);
-    assert!(ready_seen(&rig), "seen on the listing: {}", checks(&rig));
-
-    // Fixed, with the label on, it stands: nothing is written
-    relisted(&rig, &edited(1), &labels);
-    assert_eq!(step(&runner).unwrap(), None);
-    assert_eq!(moves(&rig), Vec::<String>::new());
-
-    // Taken off again, it stays off
-    relisted(&rig, &edited(2), &PASSING_LABELS);
-    assert_eq!(step(&runner).unwrap(), None);
+    let skipped = rig.ask(&runner, "status", None)["skipped"].clone();
+    assert_eq!(skipped[0]["reason"], "unpublished", "{skipped}");
+    assert_eq!(skipped[0]["issue"], "30", "{skipped}");
+    assert_eq!(skipped[0]["package"], FOO, "{skipped}");
+    // Nothing in the issue is wrong, so it is told nothing and sent to no triager
+    assert_eq!(calls(&rig, Role::Triager).len(), 0);
     assert_eq!(moves(&rig), Vec::<String>::new());
 }
 
 #[test]
-fn kelpies_own_swap_is_not_the_maintainers() {
-    let (rig, runner) = checking(
-        "pick = \"maintainer\"",
-        MAINTAINER,
-        FAILING,
-        &["ready-for-agent"],
-    );
-    took_back(&rig, 30, MAINTAINER, "Crash on start", FAILING);
-    let runner = restart(&rig, runner);
-    rig.claude.script_for(Role::Triager, [reply(json!({}))]);
-
-    assert_eq!(step(&runner).unwrap(), None);
+fn a_package_no_poll_has_read_yet_is_asked_of_and_holds_the_issue_on_an_early_board_read() {
+    let (rig, runner) = waiting_on(&[FOO]);
     assert_eq!(
-        rig.github.label_takes(),
-        [(30, "ready-for-agent".to_owned())]
+        step(&runner).unwrap(),
+        None,
+        "held on the first poll's read"
     );
-    assert!(!ready_seen(&rig), "{}", checks(&rig));
+    // The maintainer edits the line to name a package, and the board is read before
+    // the triage poll is due again, as a work item's end makes it.
+    rig.forge.set_ready_body(30, &needing(&[BAR]));
+    runner.lock().unwrap().looks.board_moved();
 
-    // The edit passes: it is ready, as the first pass of any issue is
-    let mut labels = PASSING_LABELS.to_vec();
-    labels.push("needs-triage");
-    relisted(&rig, PASSING, &labels);
-    assert_eq!(step(&runner).unwrap(), None);
-    assert_eq!(moves(&rig).last().unwrap(), "label ready-for-agent");
+    assert_eq!(step(&runner).unwrap(), None, "nothing starts");
+
+    let asked = rig.registry.asked();
+    assert_eq!(asked.last().map(String::as_str), Some(BAR), "{asked:?}");
+    let skipped = rig.ask(&runner, "status", None)["skipped"].clone();
+    assert_eq!(skipped[0]["package"], BAR, "{skipped}");
 }
 
 #[test]
-fn a_triage_pass_leaves_it_off() {
-    let (rig, runner) = taken_off("maintainer");
-    // The edit fails, so the pass runs, and its rewrite would pass
-    let found = json!({ "type": "bug", "kind": "fix", "priority": "P2", "body": PASSING });
-    rig.claude.script_for(Role::Triager, [reply(found)]);
-    rig.claude
-        .script_for(Role::Representative, [Scripted::Say(WORDS)]);
-    relisted(&rig, FAILING, &PASSING_LABELS);
+fn an_issue_only_the_board_lists_has_its_package_asked_of_and_goes_on_once_published() {
+    // The board lists issue 30 as ready, and the triage poll's listing leaves it out, as
+    // a repository's thousand newest open issues may.
+    let rig = rig_with("pick = \"off\"");
+    rig.forge.list_ready(30, false);
+    rig.forge.set_ready_body(30, &needing(&[FOO]));
+    for label in PASSING_LABELS {
+        rig.forge.label(30, label);
+    }
+    let runner = rig.open().unwrap();
 
-    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(step(&runner).unwrap(), None, "held");
 
-    assert_eq!(calls(&rig, Role::Triager).len(), 1, "the pass ran");
+    assert_eq!(rig.registry.asked(), [FOO], "the board's read asked of it");
+    let skipped = rig.ask(&runner, "status", None)["skipped"].clone();
+    assert_eq!(skipped[0]["package"], FOO, "{skipped}");
+    rig.registry.publish(FOO);
+    rig.next_look();
+    let (started, _) = dispatched(step(&runner).unwrap());
+    assert_eq!(started.github(), Some(30));
+}
+
+#[test]
+fn it_goes_on_by_itself_once_the_package_is_published() {
+    let (rig, runner) = waiting_on(&[FOO]);
+    assert_eq!(step(&runner).unwrap(), None, "held");
+
+    rig.registry.publish(FOO);
+    rig.next_look();
+    let (started, _) = dispatched(step(&runner).unwrap());
+
+    assert_eq!(started.github(), Some(30));
+}
+
+#[test]
+fn a_registry_that_cannot_answer_holds_nothing_and_says_so_once() {
+    let (rig, runner) = waiting_on(&[FOO]);
+    rig.registry.fails(RegistryError::Unreachable(7));
+
+    read_triage(&runner).unwrap();
+    polled(&rig, &runner);
+    polled(&rig, &runner);
+
+    let notes = runner.lock().unwrap().take_notes();
+    let said: Vec<&String> = notes.iter().filter(|n| n.contains(FOO)).collect();
+    assert_eq!(said.len(), 1, "{notes:?}");
+    assert!(
+        said[0].contains("curl could not reach the registry"),
+        "{said:?}"
+    );
     assert_eq!(
-        rig.github.issue_edits(),
-        [],
-        "no rewrite is promised or written"
+        rig.registry.asked(),
+        [FOO, FOO, FOO],
+        "it asked at every poll"
     );
-    let moved = moves(&rig);
-    assert_eq!(moved[0], "label ready-for-agent");
-    assert!(
-        !moved[1..].contains(&"label ready-for-agent".to_owned()),
-        "{moved:?}"
-    );
-    assert_eq!(moved.last().unwrap(), "label needs-triage");
+    let (started, _) = dispatched(step(&runner).unwrap());
+    assert_eq!(started.github(), Some(30), "nothing held it");
 }
 
 #[test]
-fn a_label_taken_off_while_the_triager_ran_is_not_put_back() {
-    // The maintainer labelled it by hand, so the pass begins with it
-    let (rig, runner) = checking(
-        "pick = \"maintainer\"",
-        MAINTAINER,
-        FAILING,
-        &["ready-for-agent"],
-    );
-    let found = json!({ "type": "bug", "kind": "fix", "priority": "P2", "body": ASSUMED });
-    let hold = Hold::default();
-    let held = Scripted::HoldThenSay(hold.clone(), said(found));
-    rig.claude.script_for(Role::Triager, [held]);
+fn a_published_package_is_not_asked_of_twice() {
+    let (rig, runner) = waiting_on(&[FOO, BAR]);
+    rig.registry.publish(FOO);
 
-    assert!(matches!(advance(&runner).unwrap(), Pass::Started));
-    assert!(hold.entered(CALL_PATIENCE), "the research never began");
-    list(&rig, filed(&rig, MAINTAINER, FAILING, &[]));
-    hold.release();
-    pump(&runner, || {
-        let moved = moves(&rig);
-        moved.contains(&"label ready-for-agent".to_owned())
-            || moved.contains(&"label needs-triage".to_owned())
-    });
+    read_triage(&runner).unwrap();
+    polled(&rig, &runner);
 
-    let moved = moves(&rig);
-    assert!(
-        !moved.contains(&"label ready-for-agent".to_owned()),
-        "{moved:?}"
-    );
-    assert_eq!(moved.last().unwrap(), "label needs-triage");
+    // The published one once, the one not found at each poll
+    assert_eq!(rig.registry.asked(), [FOO, BAR, BAR]);
+    assert_eq!(step(&runner).unwrap(), None, "still held by the other");
+    let skipped = rig.ask(&runner, "status", None)["skipped"].clone();
+    assert_eq!(skipped[0]["package"], BAR, "{skipped}");
 }
 
 #[test]
-fn a_passing_issue_whose_needs_triage_will_not_come_off_gets_no_ready_label_yet() {
-    let mut labels = PASSING_LABELS.to_vec();
-    labels.push("needs-triage");
-    let (rig, runner) = checking("pick = \"maintainer\"", MAINTAINER, PASSING, &labels);
-    rig.github.refuse_label_removals(ApiError::Refused(422));
+fn the_registry_is_asked_with_the_lock_let_go() {
+    let (rig, runner) = waiting_on(&[FOO]);
+    let runner = Arc::new(runner);
+    let held = Arc::new(Mutex::new(Vec::new()));
+    {
+        let (runner, held) = (Arc::downgrade(&runner), Arc::clone(&held));
+        rig.registry.watch(move || {
+            let runner = runner.upgrade().expect("the runner is open");
+            // A lock the read holds is a lock a trigger waits on
+            held.lock().unwrap().push(runner.try_lock().is_err());
+        });
+    }
 
-    assert_eq!(step(&runner).unwrap(), None);
-    assert_eq!(moves(&rig), Vec::<String>::new(), "nothing went on");
+    read_triage(&runner).unwrap();
 
-    rig.github.accept_label_removals();
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    assert_eq!(moves(&rig), ["label ready-for-agent"]);
-    assert!(ready_seen(&rig), "{}", checks(&rig));
-}
-
-#[test]
-fn a_label_taken_off_stays_off_when_the_issue_is_closed_and_reopened() {
-    let (rig, runner) = taken_off("off");
-
-    rig.forge.unlist_open_issue(30);
-    rig.next_look();
-    assert_eq!(step(&runner).unwrap(), None);
-    relisted(&rig, &edited(1), &PASSING_LABELS);
-    assert_eq!(step(&runner).unwrap(), None);
-
-    assert_eq!(moves(&rig), ["label ready-for-agent"], "nothing put back");
+    assert_eq!(
+        *held.lock().unwrap(),
+        [false],
+        "the read was made under the lock"
+    );
 }

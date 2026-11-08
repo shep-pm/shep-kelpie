@@ -325,6 +325,18 @@ pub struct Needed {
     pub version: String,
 }
 
+impl fmt::Display for Needed {
+    // As the `Needs:` line writes it, which [`Needed::read`] reads back
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let registry = match self.registry {
+            Registry::Crates => "crates",
+            Registry::Npm => "npm",
+            Registry::Pypi => "pypi",
+        };
+        write!(f, "{registry}:{}@{}", self.name, self.version)
+    }
+}
+
 impl Needed {
     // `<registry>:<name>@<version>`, the version after the last `@` so that an
     // npm scope's own `@` stays in the name.
