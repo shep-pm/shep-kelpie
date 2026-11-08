@@ -265,14 +265,9 @@ mod tests {
                 "[app.dogs.kelpie.builds]\nmax_gb = 20\nmin_free_gb = 20",
             )
             .replace(
-                "# [app.dogs.kelpie.repo_setup]\n# plugins =",
-                "[app.dogs.kelpie.repo_setup]\nplugins =",
+                "# [app.dogs.kelpie.repo_setup]\n# extra =",
+                "[app.dogs.kelpie.repo_setup]\nextra =",
             )
-            .replace("# own =", "own =")
-            .replace("# roles =", "roles =")
-            .replace("# parts =", "parts =")
-            .replace("# skip =", "skip =")
-            .replace("# extra =", "extra =")
             .replace("# command = \"scripts/", "command = \"scripts/")
             .replace("# results =", "results =");
         // Each kind of skill once, every step naming it.
@@ -312,22 +307,16 @@ mod tests {
         );
     }
 
-    // Lookout edits a boolean, a list of strings and a table of strings, and
-    // no table of tables, so the repo setup uses nothing else.
+    // Lookout edits a table of strings, and no table of tables, so the repo
+    // setup uses nothing else.
     #[test]
-    fn each_repo_setup_key_is_a_boolean_a_list_of_strings_or_a_table_of_strings() {
+    fn repo_setup_extra_is_a_table_of_strings() {
         let root = schema();
         let project = resolve(&root, &root[SHEEP_SCHEMA_KEY]);
         let setup = resolve(&root, &project["properties"]["repo_setup"]);
-        let key = |name: &str| resolve(&root, &setup["properties"][name]);
-        assert_eq!(key("plugins")["type"], "boolean");
-        assert_eq!(key("own")["type"], "boolean");
-        for list in ["roles", "parts", "skip"] {
-            let items = resolve(&root, &key(list)["items"]);
-            assert_eq!(key(list)["type"], "array", "{list}");
-            assert_eq!(items["type"], "string", "{list}");
-        }
-        let extra = key("extra");
+        let properties = setup["properties"].as_object().expect("{setup}");
+        assert_eq!(properties.keys().collect::<Vec<_>>(), ["extra"], "{setup}");
+        let extra = resolve(&root, &properties["extra"]);
         assert_eq!(extra["type"], "object");
         let sources = extra["patternProperties"].as_object().unwrap();
         let source = resolve(&root, sources.values().next().unwrap());

@@ -275,9 +275,8 @@ compact_window = 200000
 # the project manager's recommendation is on the card. `true` has it answer.
 # The old `pm_alone` list still loads, as `true` for each kind it names, and
 # the migration turns it into the map. It also deletes the panel's `decide`,
-# `full_panel_paths`, `agents.advisor`, `agents.researcher` and `[researcher]`
-# table, and `advisor` and `researcher` from `repo_setup.roles`, which the
-# runner refuses.
+# `full_panel_paths`, `agents.advisor`, `agents.researcher`, the `[researcher]`
+# table and `repo_setup.roles`, which the runner refuses.
 # [app.dogs.kelpie.rulings.pm_decides]
 # question = false
 # agent-files = false
@@ -431,14 +430,9 @@ compact_window = 200000
 # turn on, each as `name@marketplace` with its marketplace's source as one
 # string: `github:owner/name`, `git:<url>` or `directory:<folder inside the
 # checkout>`, with `#<branch or tag>` after a `github` or `git` address.
-# `plugins`, `own`, `roles`, `parts` and `skip` still load and nothing reads
-# them: delete them.
+# `plugins`, `own`, `roles`, `parts` and `skip` are gone: the runner refuses
+# each by name until `shep kelpie settings migrate` deletes it.
 # [app.dogs.kelpie.repo_setup]
-# plugins = true
-# own = true
-# roles = ["worker", "reviewer", "pm"]
-# parts = ["skills", "agents", "commands", "hooks", "mcp"]
-# skip = ["noisy@house"]
 # extra = { "style@lab" = "github:acme/lab#v2" }
 
 # Where the project's tickets live. `github` takes them from the repo's issues.
@@ -452,20 +446,6 @@ compact_window = 200000
 # refuses `adopt`.
 [app.dogs.kelpie.tickets]
 source = "github"
-
-# A code graph of each work item's worktree for the reviewers' and the triager's
-# calls, served by codebase-memory-mcp: where a symbol is, what calls it, what it
-# touches, in one call instead of a run of greps. `shep kelpie tools install`
-# fetches the server, and a machine that has it gives every project the graph.
-# Kelpie indexes the worktree before each call given it, keeps the index under
-# `$SHEP_HOME/kelpie/<project>/code-graphs/`, and removes it with the worktree.
-# The server runs inside the call's sandbox like everything else in it. A
-# worker never gets it: the server's 17 tool definitions would ride in every
-# request of every turn, and no worker session recorded so far, on Claude Code
-# or pi, has answered one of them. Both keys load and nothing reads them.
-[app.dogs.kelpie.code_graph]
-enabled = false
-worker = false
 
 # A browser for the worker's Claude Code and pi turns, to look at the UI it
 # builds. Chromium cannot start inside the sandbox, so kelpie runs the

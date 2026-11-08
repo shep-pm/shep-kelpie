@@ -24,15 +24,13 @@ fn setting(keys: &str, enabled: [bool; 2]) -> (Rig, Mutex<Runner>) {
 }
 
 // The same, with the repo turning both plugins on
-fn narrowed(keys: &str) -> (Rig, Mutex<Runner>) {
+fn turning_on(keys: &str) -> (Rig, Mutex<Runner>) {
     setting(keys, [true, true])
 }
 
 #[test]
-fn a_plugin_the_repo_turns_on_loads_whatever_the_old_keys_say() {
-    // Every key that used to narrow is read by nothing now.
-    let old = "plugins = false\nown = false\nroles = [\"reviewer\"]\nparts = [\"skills\"]";
-    let (rig, runner) = narrowed(old);
+fn a_plugin_the_repo_turns_on_loads_and_the_table_narrows_nothing() {
+    let (rig, runner) = turning_on("");
     let skills = rig.paths().skills;
     let worker = call_of(&rig, Role::Worker);
     assert!(worker.plugin_dirs.contains(&skills.join("repo/style")));
@@ -49,8 +47,8 @@ fn a_plugin_the_repo_turns_on_loads_whatever_the_old_keys_say() {
 
 #[test]
 fn a_plugin_the_repo_turns_off_does_not_load() {
-    // `skip` names the plugin the repo turns on, which loads whatever it says.
-    let (rig, runner) = setting("skip = [\"style@house\"]", [true, false]);
+    // The repo's own `.claude/settings.json` decides, with nothing to say here.
+    let (rig, runner) = setting("", [true, false]);
     let skills = rig.paths().skills;
     let worker = call_of(&rig, Role::Worker);
     assert!(worker.plugin_dirs.contains(&skills.join("repo/style")));
@@ -144,7 +142,7 @@ fn extra_loads_a_plugin_the_repo_does_not_name() {
 
 #[test]
 fn a_changed_repo_setup_loads_when_the_runner_rereads() {
-    let (rig, runner) = narrowed("");
+    let (rig, runner) = turning_on("");
     let lab = marketplace(&rig, "lab", &[("loud", "loud")]);
     let extra = format!(
         "extra = {{ \"loud@lab\" = \"directory:{}\" }}\n",

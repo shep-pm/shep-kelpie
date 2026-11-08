@@ -369,8 +369,8 @@ async fn the_panels_expert_keys_and_roles_are_deleted_and_named_and_the_table_lo
         said[1].contains(
             "removed agents.advisor = \"advisor\", agents.researcher = \"researcher\", \
              researcher = { allowed_domains = [\"docs.rs\"] }, \
-             agents.reviewers = [\"standards\"], \
-             advisor from repo_setup.roles, researcher from repo_setup.roles"
+             repo_setup.roles = [\"worker\", \"advisor\", \"researcher\"], \
+             agents.reviewers = [\"standards\"]"
         ),
         "{said:?}"
     );
@@ -378,7 +378,7 @@ async fn the_panels_expert_keys_and_roles_are_deleted_and_named_and_the_table_lo
     assert!(table["agents"].get("advisor").is_none(), "{table:?}");
     assert!(table["agents"].get("researcher").is_none(), "{table:?}");
     assert!(table.get("researcher").is_none(), "{table:?}");
-    assert_eq!(table["repo_setup"]["roles"], serde_json::json!(["worker"]));
+    assert!(table["repo_setup"].get("roles").is_none(), "{table:?}");
 }
 
 #[tokio::test]
@@ -474,6 +474,29 @@ async fn local_rounds_keep_is_deleted_and_named_with_its_value_and_the_table_loa
     let table = scene.table();
     assert_eq!(table["local_rounds"]["keep_days"], 30, "the rest is kept");
     assert!(table["local_rounds"].get("keep").is_none(), "{table:?}");
+    let home = scene.shepherd.scratch("home");
+    let name = ProjectName::try_from("koji").unwrap();
+    let paths = ProjectPaths::under(&home.join("kelpie"), scene.shepherd.home(), &name);
+    Settings::from_table(&table, "koji", &home, &paths.folder).expect("the migrated table loads");
+}
+
+// `TABLE` with the `[code_graph]` table an older build wrote put back in it
+fn with_code_graph() -> String {
+    format!("{TABLE}\n[code_graph]\nenabled = true\nworker = false\n")
+}
+
+#[tokio::test]
+async fn the_code_graph_table_is_deleted_and_named_with_its_values_and_the_table_loads() {
+    let scene = Scene::holding(&with_code_graph()).await;
+
+    let said = scene.migrate().await.unwrap();
+
+    assert!(
+        said[1].contains("removed code_graph = { enabled = true, worker = false }"),
+        "{said:?}"
+    );
+    let table = scene.table();
+    assert!(table.get("code_graph").is_none(), "{table:?}");
     let home = scene.shepherd.scratch("home");
     let name = ProjectName::try_from("koji").unwrap();
     let paths = ProjectPaths::under(&home.join("kelpie"), scene.shepherd.home(), &name);
@@ -593,12 +616,40 @@ async fn the_issue_writers_role_is_deleted_from_repo_setup_and_the_table_loads()
 
     assert!(
         said[1].contains(
-            "removed agents.reviewers = [\"standards\"], issue-writer from repo_setup.roles"
+            "removed repo_setup.roles = [\"worker\", \"issue-writer\", \"pm\"], \
+             agents.reviewers = [\"standards\"]"
         ),
         "{said:?}"
     );
-    let roles = &scene.table()["repo_setup"]["roles"];
-    assert_eq!(*roles, serde_json::json!(["worker", "pm"]));
+    assert!(scene.table()["repo_setup"].get("roles").is_none());
+}
+
+#[tokio::test]
+async fn the_keys_repo_setup_lost_are_deleted_and_named_with_their_values_and_extra_is_kept() {
+    let lines = "[repo_setup]\nplugins = false\nown = false\n\
+                 roles = [\"worker\", \"pm\"]\nparts = [\"skills\"]\n\
+                 skip = [\"noisy@house\"]\nextra = { \"style@lab\" = \"github:acme/lab#v2\" }\n";
+    let scene = Scene::holding(&format!("{TABLE}\n{lines}")).await;
+
+    let said = scene.migrate().await.unwrap();
+
+    assert!(
+        said[1].contains(
+            "removed repo_setup.plugins = false, repo_setup.own = false, \
+             repo_setup.roles = [\"worker\", \"pm\"], repo_setup.parts = [\"skills\"], \
+             repo_setup.skip = [\"noisy@house\"]"
+        ),
+        "{said:?}"
+    );
+    let setup = &scene.table()["repo_setup"];
+    for key in ["plugins", "own", "roles", "parts", "skip"] {
+        assert!(setup.get(key).is_none(), "{key}: {setup:?}");
+    }
+    assert_eq!(
+        setup["extra"],
+        serde_json::json!({ "style@lab": "github:acme/lab#v2" }),
+        "the one key the table keeps"
+    );
 }
 
 #[tokio::test]

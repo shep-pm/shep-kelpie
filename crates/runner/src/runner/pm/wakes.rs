@@ -20,6 +20,7 @@ use crate::settings::AgentName;
 use crate::state::{ProjectState, Ruling, RulingKind, Stuck};
 use crate::ticket::TicketId;
 use crate::work_item::{Phase, ReviewWeight};
+use crate::worktree;
 
 /// What a work item is stuck on, which a new turn, phase or ruling is a
 /// different one of
@@ -487,8 +488,13 @@ impl Runner {
         if self.agents.pm.is_none() {
             return;
         }
-        let raised = (now.rulings.iter()).filter(|r| !was.rulings.iter().any(|w| w.id == r.id));
-        let stuck: Vec<Wake> = raised
+        let fresh: Vec<TicketId> = (now.rulings.iter())
+            .filter(|r| !was.rulings.iter().any(|w| w.id == r.id))
+            .map(|r| r.id)
+            .collect();
+        self.stuck_heads(now, &fresh);
+        let stuck: Vec<Wake> = (now.rulings.iter())
+            .filter(|r| fresh.contains(&r.id))
             .filter_map(|ruling| {
                 let ticket = ruling.issue?;
                 let ended = self.pm.after_end.contains_key(&ticket);
@@ -507,6 +513,41 @@ impl Runner {
             self.pm.threads_out.retain(|ticket| open.contains(ticket));
             (self.pm.threads_quiet).retain(|ticket, _| open.contains(ticket));
             (self.pm.conflicts).retain(|(a, b), _| open.contains(a) && open.contains(b));
+        }
+    }
+
+    /// Keeps the commit each newly raised timed-out or failed-turn ruling
+    /// found its work item's worktree at, so that ruling's case can say
+    /// whether the head moved since the last of them. A head git cannot read
+    /// leaves none and the ruling stands, with the reason in the notes.
+    fn stuck_heads(&mut self, now: &mut ProjectState, fresh: &[TicketId]) {
+        for ruling in &mut now.rulings {
+            if !fresh.contains(&ruling.id) {
+                continue;
+            }
+            let stuck = matches!(
+                &ruling.kind,
+                RulingKind::Stuck(Stuck::TurnTimeout { .. } | Stuck::TurnFailed { .. })
+            );
+            if !stuck {
+                continue;
+            }
+            let at = (now.work_items.iter())
+                .find(|item| Some(item.issue) == ruling.issue)
+                .map(|item| item.worktree.clone());
+            let head = match at {
+                Some(at) => worktree::head(&self.settings.git.checkout, &at)
+                    .map(Some)
+                    .map_err(|e| self.shown(e.to_string())),
+                None => Err("its work item is gone".to_owned()),
+            };
+            if let Err(why) = &head {
+                let id = ruling.id;
+                self.notes.push(format!(
+                    "kelpie could not read the head ruling {id} was raised at: {why}"
+                ));
+            }
+            ruling.stuck_head = head.unwrap_or(None);
         }
     }
 

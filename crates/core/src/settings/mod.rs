@@ -25,7 +25,6 @@ mod browser;
 mod budget;
 mod builds;
 mod ci;
-mod code_graph;
 mod contributions;
 mod dependencies;
 mod domains;
@@ -53,7 +52,6 @@ pub use browser::Browser;
 pub use budget::{Budget, PerItemUsd};
 pub use builds::Builds;
 pub use ci::{Ci, Concurrency, FixAttempts, TestCommand};
-pub use code_graph::CodeGraph;
 pub use contributions::{Contributions, Pick};
 pub use dependencies::{Dependencies, DependencyPick};
 pub use e2e::{E2e, RepoPath, ResultsDir, SshAlias};
@@ -65,7 +63,7 @@ pub use hooks::{HookPoint, PointKind, ProjectHook};
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use local_rounds::{KeepDays, LocalRounds, RoundsFolder};
 pub use peers::shown_table;
-pub use repo_setup::{CallRole, MarketplaceSource, Part, PluginId, RepoSetup};
+pub use repo_setup::{MarketplaceSource, Part, PluginId, RepoSetup};
 pub use reviewers::ListedReviewer;
 pub use rulings::{PM_ALONE, PM_DECIDES, RulingName, Rulings};
 pub use skills::{SkillChoice, SkillName, StepSkills};
@@ -128,19 +126,14 @@ pub struct Settings {
     /// The skill each step runs, over kelpie's vendored defaults
     #[serde(default)]
     pub skills: StepSkills,
-    /// Which of the repo's plugins reach which calls, and the plugins to add
-    /// that the repo does not turn on. Every plugin the repo turns on, for
-    /// every call, when absent.
+    /// The plugins to add that the repo does not turn on. What the repo turns
+    /// on reaches every call, and this table narrows nothing.
     #[serde(default)]
     pub repo_setup: RepoSetup,
     /// Where the project's tickets live: GitHub issues, or local files in
     /// kelpie's home. GitHub when absent.
     #[serde(default)]
     pub tickets: Tickets,
-    /// Whether workers and reviewers get a code graph of the worktree. Off
-    /// when absent.
-    #[serde(default)]
-    pub code_graph: CodeGraph,
     /// Whether a worker drives a browser to see the UI it builds, which
     /// hosts it reaches, and whether it is headed. Off when absent.
     #[serde(default)]
@@ -186,6 +179,8 @@ const WRITER: &str = "the issue writer is gone, and an issue is written with kel
 const RED_BUMP: &str = "a red bump is always closed with an issue filed, and the project manager \
                         decides what to do with it from the issue";
 const MIGRATE: &str = "delete it, or run `shep kelpie settings migrate`, which does";
+const NARROWING: &str = "the repo's `.claude` files decide what loads, and kelpie reads \
+                         none of these";
 
 // The keys removed features left behind
 const REMOVED: &[Removed] = &[
@@ -495,6 +490,36 @@ const REMOVED: &[Removed] = &[
     Removed {
         key: "triage.hand_ready",
         because: "the issue check decides whether a ready issue goes to the triager",
+        fix: MIGRATE,
+    },
+    Removed {
+        key: "repo_setup.plugins",
+        because: NARROWING,
+        fix: MIGRATE,
+    },
+    Removed {
+        key: "repo_setup.own",
+        because: NARROWING,
+        fix: MIGRATE,
+    },
+    Removed {
+        key: "repo_setup.roles",
+        because: NARROWING,
+        fix: MIGRATE,
+    },
+    Removed {
+        key: "repo_setup.parts",
+        because: NARROWING,
+        fix: MIGRATE,
+    },
+    Removed {
+        key: "repo_setup.skip",
+        because: NARROWING,
+        fix: MIGRATE,
+    },
+    Removed {
+        key: "code_graph",
+        because: "the graph follows `shep kelpie tools install`, and a worker never gets it",
         fix: MIGRATE,
     },
 ];

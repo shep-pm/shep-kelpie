@@ -849,6 +849,7 @@ fn an_older_state_file_loads_and_a_contribution_ruling_survives_a_save_and_a_loa
         approaches: Vec::new(),
         asked: None,
         borrowed: false,
+        stuck_head: None,
     });
     store.save(&state).unwrap();
     let text = fs::read_to_string(dir.path().join(STATE_FILE)).unwrap();

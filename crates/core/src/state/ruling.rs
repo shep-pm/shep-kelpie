@@ -54,6 +54,12 @@ pub struct Ruling {
     /// a yes merges too. Only the maintainer's yes passes it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub borrowed: bool,
+    /// The commit its worktree stood at when the ruling was raised, for a
+    /// timed-out or failed turn, so its case can say whether the head moved
+    /// since the last of them. None for any other kind, and for one whose
+    /// head git could not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stuck_head: Option<String>,
 }
 
 /// What the agent board says about one agent and one kind of work, as the
@@ -134,6 +140,7 @@ impl Ruling {
             approaches: Vec::new(),
             asked: None,
             borrowed: false,
+            stuck_head: None,
         }
     }
 
