@@ -10,21 +10,12 @@
 use super::Wake;
 use super::act::{WORDS, plain};
 use super::answer::{RedCall, RedHow};
+use super::fix::{Checked, TITLE};
+use crate::board::READY;
 use crate::board::briefing::ticket_ref;
-use crate::board::{READY, check};
-use crate::local_paths::Surface;
 use crate::runner::Runner;
 use crate::state::{Handled, StateError};
 use crate::ticket::TicketId;
-
-/// The most of an issue's title kept, in characters
-const TITLE: usize = 120;
-
-// The labels a fix is checked with besides its text. A triage pass puts the priority and kind on,
-// so the check here reads only the title and body, which are the project manager's to write.
-fn stood_in() -> [String; 2] {
-    ["priority: P0".to_owned(), "kind:fix".to_owned()]
-}
 
 /// What a call about a red workflow did
 pub(super) enum Settled {
@@ -71,30 +62,38 @@ impl Runner {
         let why = plain(&self.shown(call.why.clone()), WORDS);
         let (handled, settled, said) = match &call.how {
             RedHow::Fix { title, body } => {
-                if let Some(leak) = self.names_machine([title, body]) {
-                    return Ok(Err(format!("red {named}: the issue names {leak}")));
-                }
-                let title = plain(title, TITLE);
+                let draft = match self.checked(title, body) {
+                    Checked::Clear(draft) => draft,
+                    Checked::Machine(leak) => {
+                        return Ok(Err(format!("red {named}: the issue names {leak}")));
+                    }
+                    Checked::Refused(failures) => {
+                        let message = format!(
+                            "{named} is red on main at {} after a rerun, and I would open a fix \
+                             for it, but the fix fails the issue check, so I did not file it: \
+                             {}. {url}\nThe fix I drafted, {}:\n{body}\nWhy: {why}",
+                            short(&head),
+                            failures.join("; "),
+                            plain(title, TITLE)
+                        );
+                        let said = format!(
+                            "asked the maintainer about {named} red on main, since the fix I \
+                             drafted fails the issue check"
+                        );
+                        return self.settled_by(
+                            named,
+                            Handled::Asked,
+                            Settled::Asked(message),
+                            said,
+                        );
+                    }
+                };
+                let title = draft.title;
                 let body = format!(
-                    "{body}\n\n`{named}` is red on `main` at `{head}` after a rerun of its \
-                     failed jobs: {url}\n"
+                    "{}\n\n`{named}` is red on `main` at `{head}` after a rerun of its \
+                     failed jobs: {url}\n",
+                    draft.body
                 );
-                let failures = check::check(&title, &body, &stood_in());
-                if !failures.is_empty() {
-                    let failures: Vec<String> = failures.iter().map(ToString::to_string).collect();
-                    let message = format!(
-                        "{named} is red on main at {} after a rerun, and I would open a fix \
-                         for it, but the fix fails the issue check, so I did not file it: \
-                         {}. {url}\nThe fix I drafted, {title}:\n{body}\nWhy: {why}",
-                        short(&head),
-                        failures.join("; ")
-                    );
-                    let said = format!(
-                        "asked the maintainer about {named} red on main, since the fix I drafted \
-                         fails the issue check"
-                    );
-                    return self.settled_by(named, Handled::Asked, Settled::Asked(message), said);
-                }
                 let ticket = match self.file_ticket(&title, &body, &[READY]) {
                     Ok(ticket) => ticket,
                     Err(e) => return Ok(Err(format!("red {named}: cannot open the fix: {e}"))),
@@ -106,7 +105,7 @@ impl Runner {
                 (Handled::Fix(ticket), Settled::Fixed(ticket), said)
             }
             RedHow::Ask { log } => {
-                if let Some(leak) = self.names_machine([log]) {
+                if let Some(leak) = self.names_machine([log.as_str()]) {
                     return Ok(Err(format!("red {named}: the log lines name {leak}")));
                 }
                 let message = format!(
@@ -198,14 +197,6 @@ impl Runner {
     // item closed while they stayed red
     pub(in crate::runner) fn pm_forget_reds(&mut self, workflows: &[String]) {
         self.pm.red_woken.retain(|(w, _)| !workflows.contains(w));
-    }
-
-    // What on this machine `texts` name, which nothing kelpie posts may.
-    fn names_machine<'a>(&self, texts: impl IntoIterator<Item = &'a String>) -> Option<String> {
-        texts
-            .into_iter()
-            .find_map(|t| self.local.find(t, Surface::Prose))
-            .map(|leak| leak.to_string())
     }
 }
 
