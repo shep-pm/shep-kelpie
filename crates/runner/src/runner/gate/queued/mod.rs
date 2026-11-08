@@ -1,4 +1,4 @@
-//! A check stuck at queued or in progress on a finished run
+//! Checks held for approval or stuck on a finished run
 //!
 //! GitHub sometimes leaves one job of a finished run queued: the run reads
 //! completed, the job never starts, and its check never concludes. The
@@ -7,6 +7,7 @@
 //! A refused rerun means the run is still going, and it waits another cap.
 //! Still stuck, the item is parked on a `check-queued` ruling, unless every
 //! check left is running. A check with no run is ruled on past `JOB_TIMEOUT`.
+//! Held runs are never rerun; an entirely held head is ruled on at once.
 
 use std::collections::HashMap;
 

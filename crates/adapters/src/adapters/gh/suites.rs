@@ -2,7 +2,8 @@
 //!
 //! A workflow file GitHub cannot read still records a failed run on the
 //! commit, but with no check run, so the pull request's check rollup never
-//! names it. A commit's check suites do: one per workflow run.
+//! names it. Held workflows also leave no check run. A commit's suites
+//! name both, one per workflow run.
 
 use std::path::Path;
 
@@ -103,10 +104,7 @@ impl Suites {
         self
     }
 
-    /// `checks` once the workflows that started no job count as failed checks
-    ///
-    /// A pending rollup stays pending, so a red run names every failure once
-    /// it ends.
+    /// `checks` with held workflows pending and workflows that could not start failed
     pub(super) fn fold(&self, checks: Checks) -> Checks {
         let held = self.held();
         if !held.is_empty() {

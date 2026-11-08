@@ -494,7 +494,7 @@ fn a_held_check_beside_a_running_one_waits_on_the_running_one() {
     assert!(rig.forge.approvals().is_empty());
 
     rig.forge.set_checks(&head, Checks::Pending(vec![held]));
-    ruling_report(step(&runner).unwrap());
+    ruling_report(rig.verdict(&runner));
     assert!(rig.forge.whole_run_reruns().is_empty());
 }
 
@@ -505,9 +505,31 @@ fn a_held_head_is_never_merged() {
 
     ruling_report(rig.verdict(&runner));
     rig.clock.advance(JOB_TIMEOUT);
-    assert_eq!(step(&runner).unwrap(), None);
+    step(&runner).unwrap();
 
     assert!(rig.forge.merges().is_empty());
     assert!(rig.forge.approvals().is_empty());
+    assert!(rig.forge.whole_run_reruns().is_empty());
+}
+
+#[test]
+fn approving_held_runs_returns_to_the_reviews_ci_wait() {
+    let rig = Rig::new("shep");
+    rig.ci_on();
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude.script([Scripted::Push("work.txt", "work\n")]);
+    step(&runner).unwrap();
+    let head = rig.forge.head_of("kelpie/7").unwrap();
+    rig.forge.set_held_checks(&head, &[("test.yml", RUN)]);
+    ruling_report(rig.verdict(&runner));
+
+    rig.ask(&runner, "rule", Some("71 yes"));
+
+    assert_eq!(rig.forge.approvals(), [head]);
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["work_item"]["phase"]["state"], "review", "{status}");
+    assert_eq!(step(&runner).unwrap(), None, "CI settles after approval");
     assert!(rig.forge.whole_run_reruns().is_empty());
 }

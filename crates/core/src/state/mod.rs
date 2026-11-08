@@ -580,9 +580,9 @@ pub enum Stuck {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         rerun: bool,
     },
-    /// A check stayed queued after its run was rerun, or an app's check
-    /// never finished. A yes reruns the run, if any, and waits again; a no
-    /// waits.
+    /// Checks await approval, stayed queued after a rerun, or never finished
+    /// A yes approves held runs or reruns a stuck run, then waits for CI.
+    /// A no sends the worker a note for held runs, otherwise waits.
     CheckQueued {
         /// The head
         head: String,

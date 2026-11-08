@@ -664,8 +664,7 @@ pub enum PullRequestState {
 pub enum Checks {
     /// No check has reported on the head
     None,
-    /// At least one check is still running or queued, and these check runs
-    /// are still queued: none when every pending check has started
+    /// At least one check is pending, including workflows held for approval
     Pending(Vec<Queued>),
     /// Every check finished, and none failed
     Passed,
@@ -677,7 +676,7 @@ pub enum Checks {
     Failed(Vec<String>),
 }
 
-/// A check run still queued or in progress, as the pull request's rollup lists it
+/// A pending check run or a workflow held for approval
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Queued {
     /// The check's name
