@@ -243,6 +243,7 @@ pub fn srt_settings(policy: &Policy) -> Value {
 // `socket_folders` reach srt on macOS alone, and on Windows `allowLocalBinding`
 // is the install's loopback mode, not the policy's `listen`, since srt-win
 // refuses a session that asks for the other mode the install fixed.
+#[cfg(any(test, feature = "test-support"))]
 fn settings_on(policy: &Policy, platform: Platform, loopback_open: bool) -> Value {
     settings_for(
         policy,

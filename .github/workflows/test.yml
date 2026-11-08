@@ -57,6 +57,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --locked -- -D warnings
+      # No `--all-targets` builds no test target, so no dev-dependency turns on
+      # `test-support`: this is the build `shep kelpie upgrade` makes.
+      - run: cargo clippy --locked -- -D warnings
       - run: scripts/no-tmp-tempdir.sh
       - run: scripts/ticket-port.sh
 
