@@ -9,7 +9,7 @@ use super::ask::REPLY_HINT;
 use super::ask_tests::{A_WORDS, asked, asked_as, filed, posted, settled, wrote};
 use super::marker::MARKER;
 use super::pick_tests::MAINTAINER;
-use super::research_tests::{APP, calls, facts, reply};
+use super::research_tests::{APP, calls, facts, moves, reply};
 use crate::ports::Role;
 use crate::runner::step;
 use crate::test::{Rig, Scripted};
@@ -143,7 +143,6 @@ fn the_facts_mark_labels_files_and_criteria_as_already_on_the_issue() {
         "files": ["README.md"],
         "tests": ["runner::triage::it_posts"],
         "criteria": ["The comment names the answer."],
-        "open": [{ "question": "Which OS crashes?", "recommended": "Linux" }],
     });
     let (rig, runner) = filed("pick = \"maintainer\"", MAINTAINER, found);
     assert_eq!(step(&runner).unwrap(), None);
@@ -162,4 +161,33 @@ fn the_facts_mark_labels_files_and_criteria_as_already_on_the_issue() {
         assert!(said.contains(heading), "{said}");
     }
     assert_eq!(said.matches("already on the issue").count(), 4, "{said}");
+
+    // The claim holds for a pass that labels beside its comment: the labels the
+    // facts name go on right after it.
+    step_until(&runner, || moves(&rig).len() == 4);
+    assert_eq!(
+        moves(&rig),
+        ["comment", "label bug", "label P2", "label needs-approval"],
+        "the labels the facts name go on right after the comment"
+    );
+}
+
+#[test]
+fn an_ask_round_says_its_labels_come_when_the_triage_ends() {
+    let (rig, runner) = filed("pick = \"all\"", "newcomer", asked());
+    assert_eq!(step(&runner).unwrap(), None);
+    step_until(&runner, || posted(&rig).len() == 1);
+
+    let said = facts(&rig);
+    assert!(
+        said.contains("The labels are not on the issue yet."),
+        "{said}"
+    );
+    assert!(said.contains(" when this triage ends."), "{said}");
+    assert!(!said.contains("already on the issue"), "{said}");
+    assert_eq!(
+        moves(&rig),
+        ["comment"],
+        "the ask posts its comment and labels nothing"
+    );
 }

@@ -75,16 +75,20 @@ pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: 
         ask,
         settled,
         fallback,
+        stood,
         ..
     } = wording;
     let mut facts = String::from("Kelpie read the issue against the repo's main branch.\n");
-    if !labels.is_empty() {
-        let when = match ask {
-            true => " when this triage ends",
-            false => "",
+    // A stand by hand means kelpie labels nothing, and an ask owes its labels
+    // with the rest when the wait ends: only a pass that labels beside its
+    // comment can tell the reader the labels are there to see.
+    if !labels.is_empty() && !stood {
+        let (when, seen) = match ask {
+            true => (" when this triage ends", "not on the issue yet"),
+            false => ("", "already on the issue"),
         };
         facts.push_str(&format!(
-            "\nKelpie labels it: {}{when}. The labels are already on the issue.\n",
+            "\nKelpie labels it: {}{when}. The labels are {seen}.\n",
             labels.join(", ")
         ));
     }
