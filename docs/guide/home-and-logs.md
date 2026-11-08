@@ -3,6 +3,8 @@
 shep-kelpie keeps everything under `$SHEP_HOME/kelpie`, or the folder `KELPIE_HOME` names:
 
 - `agents`, `builds`, `codex`, `rulings`, `tools`, `totp` and `upgrade`, shared by every project
+- `marketplaces`, where the marketplaces a repo's plugins come from are kept, cloned or copied (see [Repo plugins](building.md#repo-plugins))
+- `upgrade.lock`, which the one `upgrade` running holds: a second refuses while it is held (see [Upgrading](upgrading.md#upgrading))
 - `retro-reports/unverified`, with each batch retro the project manager wrote, one file each, which shep-kelpie never reads again
 - `github`, with a folder for each owner's App: its id, slug and client id in `app.json`, and its private key in `key.pem`, readable by you alone
 - `dog`, with the dog's book and its door, `lease.sock`. The adopted dog gets `SHEP_HOME` and no `KELPIE_HOME` from shep, so it is always under `$SHEP_HOME/kelpie`, even with `KELPIE_HOME` set for your own commands

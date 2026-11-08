@@ -19,4 +19,4 @@ A ticket that needs such a file splits. The part a worker can build stays one is
 
 An issue that passes is ready for an implementer. [Commands](commands.md) lists every part it reads.
 
-The agent board picks the implementer an issue is built by ([Agents](agents.md)). Label it `agent:<name>!` to pin it to that implementer, listed or not, with no fallback: the board tries no other. A plain `agent:<name>` label does not choose. `shep kelpie issue "<request>"` and `issue --interactive` are gone, with the issue writer that ran them: the command says so and names the skill.
+The agent board picks the implementer an issue is built by ([Agents](agents.md)). Label it `agent:<name>!` to pin it to that implementer, with no fallback: the board tries no other. The name must be an implementer file the project allows, every implementer file where `agents.allow` names none, and a label naming no such file keeps the issue off the board. A plain `agent:<name>` label does not choose. `shep kelpie issue "<request>"` and `issue --interactive` are gone, with the issue writer that ran them: the command says so and names the skill.

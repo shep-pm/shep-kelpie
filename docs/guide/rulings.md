@@ -19,7 +19,7 @@ A ruling shows in the runner's log, in `shep kelpie status` and in `shep kelpie 
 - `shep kelpie rule 14 rerun`, for a `still-red` ruling that offers it: kelpie reruns the head's failed jobs once more and looks at CI again
 - `shep kelpie rule 14 restore`, for a `turn-failed` ruling that offers it: kelpie puts the uncommitted agent files back as the head has them and resumes the turn
 
-A ruling is named by its pull request's number, or by its ticket's id while it has no pull request: `rule 427 yes` answers the ruling on 427, and `rule k12 yes` one on the local ticket `k12`, which kelpie files none of yet (see [Commands](commands.md)). A work item waits on one ruling at a time, and GitHub numbers issues and pull requests from one sequence, so within a project a number names one ruling. `rule #427 yes` and `rule shep-kelpie#427 yes` read the same number, and a local id takes the `#` the same way: `rule shep-kelpie#k12 yes`. From a clone, the clone's project is looked at first. Elsewhere a number that one project has a ruling on works, and one that two projects have is refused with their names: `rule shep-kelpie#427 yes` picks one. Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` or an apostrophe. `-p` goes before the answer: after its first word, and after a `--`, a `-p` is part of the answer. `shep kelpie rule` alone lists the rulings waiting and asks which to answer and how. Each ruling's question says what `yes` and `no`, and on a merge ruling `rework`, do. A `no` or `rework` with a note is the worker's next turn.
+A ruling is named by its pull request's number, or by its ticket's id while it has no pull request: `rule 427 yes` answers the ruling on 427, and `rule k12 yes` one on the local ticket `k12`, which `shep kelpie ticket new` files, and which kelpie files itself for a deferred finding and a red dependency bump (see [Local tickets](tickets.md)). A work item waits on one ruling at a time, and GitHub numbers issues and pull requests from one sequence, so within a project a number names one ruling. `rule #427 yes` and `rule shep-kelpie#427 yes` read the same number, and a local id takes the `#` the same way: `rule shep-kelpie#k12 yes`. From a clone, the clone's project is looked at first. Elsewhere a number that one project has a ruling on works, and one that two projects have is refused with their names: `rule shep-kelpie#427 yes` picks one. Quotes are optional, but zsh still needs them around a note with `?`, `*`, `!` or an apostrophe. `-p` goes before the answer: after its first word, and after a `--`, a `-p` is part of the answer. `shep kelpie rule` alone lists the rulings waiting and asks which to answer and how. Each ruling's question says what `yes` and `no`, and on a merge ruling `rework`, do. A `no` or `rework` with a note is the worker's next turn.
 
 Where an App covers the repo, a ruling's comment is one short format, whatever its kind: the problem where there is one, a title, a table of what picking each option leads to, the project manager's pick and why where it gave them (`**Project manager: A**. CI is green and every reviewer read it.`, see [Rulings the project manager answers](#rulings-the-project-manager-answers)), and the ways to answer. A worker's question, and a contributor's ruling that lists options, letter their options and say the ways to answer under the table. Every other ruling, the merge ruling included, names each option once, under how you answer it, so the table is also its list of answers, and its pick reads by name (`**Project manager: Merge**`). Here is a merge ruling. Kelpie writes the effect of each option from what it knows: the items held behind the pull request, CI, the reviewers that read it, and roughly what another review round costs from the ledger:
 
@@ -88,7 +88,7 @@ With a project manager, it may answer a `stuck` ruling for you with a retry, or 
 
 ## Rulings the project manager answers
 
-`rulings.pm_decides` maps each kind of ruling to who answers it: `true` for the project manager, or `false` for you. Operational kinds, whose answer turns on facts it reads from the board, start `true`; `merge`, `question`, `agent-files`, `agent-fit` and `foreign-change` start `false`. A kind the map leaves out is yours:
+`rulings.pm_decides` maps each kind of ruling to who answers it: `true` for the project manager, or `false` for you. Operational kinds, whose answer turns on facts it reads from the board, start `true`; `merge`, `question`, `agent-files`, `agent-fit`, `foreign-change` and `over-budget` start `false`. `security`, `contribution-merge` and `local-model-spilled` are refused as `true` and never written. A kind the map leaves out is yours:
 
 ```toml
 [app.dogs.kelpie.rulings.pm_decides]
@@ -96,6 +96,7 @@ merge = false
 question = false
 agent-files = false
 foreign-change = false
+over-budget = false
 still-red = true
 turn-timeout = true
 # ... and every other kind, `true`
