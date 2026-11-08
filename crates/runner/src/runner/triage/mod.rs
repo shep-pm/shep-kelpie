@@ -790,6 +790,8 @@ mod hand_tests;
 #[cfg(test)]
 mod images_tests;
 #[cfg(test)]
+mod label_tests;
+#[cfg(test)]
 mod limits_tests;
 #[cfg(test)]
 mod local_tests;

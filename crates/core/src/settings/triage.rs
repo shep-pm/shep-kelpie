@@ -36,6 +36,10 @@ pub enum TriagePick {
     Off,
     /// The maintainer's own issues
     Maintainer,
+    /// The maintainer's own issues, and an outside issue only once the maintainer
+    /// puts `needs-triage` on it. Any other outside issue ends `needs-approval`
+    /// with no call.
+    Label,
     /// Every person's issues
     All,
 }

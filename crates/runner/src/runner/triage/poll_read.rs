@@ -317,7 +317,7 @@ impl Runner {
         self.check_issues(&open, pulls.as_ref(), &busy);
         let app = self.app_login();
         let only = match self.settings.triage.pick {
-            TriagePick::Maintainer => match self.maintainer() {
+            TriagePick::Maintainer | TriagePick::Label => match self.maintainer() {
                 Ok(login) => Some(login),
                 Err(_) => {
                     self.triage_run.listing = Some(Listing { open, pulls });

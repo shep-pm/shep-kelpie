@@ -3,7 +3,8 @@
 //! Each poll checks every open issue that is new or edited ([`check::key`]).
 //! It does so whatever `triage.pick` says, and keeps the result in `checks`.
 //! The maintainer's passing issue is labelled `ready-for-agent`. Anyone else's
-//! waits at `needs-triage` for the maintainer. A failing issue is owed the
+//! waits at `needs-approval` for the maintainer, and so does a failing one under
+//! `pick = "label"`. Under any other pick a failing issue is owed the
 //! triager, where the pick rule reaches it. The board holds a ready one
 //! meanwhile. Once its pass ends the issue is checked again. A rewrite that
 //! still fails gets one comment naming what the check refused.
@@ -16,7 +17,7 @@ use super::decided;
 use super::opened_by_us_or_people;
 use super::ready::READY_LABEL;
 use super::rewrite::new_kind_label;
-use crate::board::{READY, ReadyIssue, Skip, TRIAGE, check};
+use crate::board::{READY, ReadyIssue, Skip, TRIAGE, TRIAGE_GO, check};
 use crate::ports::{ForgeError, OpenIssue, OpenPull};
 use crate::settings::TriagePick;
 use crate::state::{CheckTriage, IssueCheck, StateError, TriageStep};
@@ -27,8 +28,8 @@ enum Act {
     Passed,
     // Its triage's rewrite still fails: one comment names the failures
     Refused,
-    // Nothing to write
-    Kept,
+    // It failed: nothing is written, but under `label` anyone else's waits
+    Failing,
 }
 
 /// The most closed issues whose `ready_seen` the check keeps
@@ -142,16 +143,16 @@ impl Runner {
             let decided = decided(&issue.labels);
             let (triage, act) = match (failures.is_empty(), ran) {
                 (true, _) => (CheckTriage::None, Act::Passed),
-                (false, true) if same || decided => (CheckTriage::None, Act::Kept),
+                (false, true) if same || decided => (CheckTriage::None, Act::Failing),
                 (false, true) => (CheckTriage::None, Act::Refused),
-                (false, false) if triaged && at.is_none() => (CheckTriage::None, Act::Kept),
-                (false, false) if triaged => (CheckTriage::Edited, Act::Kept),
-                (false, false) => (CheckTriage::Owed, Act::Kept),
+                (false, false) if triaged && at.is_none() => (CheckTriage::None, Act::Failing),
+                (false, false) if triaged => (CheckTriage::Edited, Act::Failing),
+                (false, false) => (CheckTriage::Owed, Act::Failing),
             };
             let done = match act {
                 Act::Passed => self.check_passed(issue, &mut ready_seen, &mut poll),
                 Act::Refused => self.check_refused(issue, key, &failures, &mut poll),
-                Act::Kept => true,
+                Act::Failing => self.check_failing(issue, &mut poll),
             };
             if !done {
                 continue;
@@ -328,10 +329,11 @@ impl Runner {
             .collect()
     }
 
-    // Makes the maintainer's passing issue ready, `needs-triage` off, and sets
-    // `ready_seen`. Puts `needs-triage` on anyone else's. Another triage label
-    // stands, and so does a work item, an open pull request that closes it, or
-    // the maintainer's take-off of a label it carried. Whether nothing is left.
+    // Makes the maintainer's passing issue ready, `needs-approval` off, and sets
+    // `ready_seen`. Puts `needs-approval` on anyone else's, bar one the maintainer
+    // asked a triage of, whose pass ends there. Another triage label stands, and
+    // so does a work item, an open pull request that closes it, or the
+    // maintainer's take-off of a label it carried. Whether nothing is left.
     fn check_passed(&mut self, issue: &OpenIssue, ready_seen: &mut bool, poll: &mut Poll) -> bool {
         let number = issue.number;
         // A split parent is never ready: its sub-issues are what the board takes.
@@ -358,8 +360,50 @@ impl Runner {
             },
             false if carries(&issue.labels, READY) => &[],
             false if self.settings.triage.pick == TriagePick::Off => &[],
+            false if self.go_asked(&issue.labels) => &[],
             false => &[(TRIAGE, true)],
         };
+        self.write_check_labels(issue, wanted, ready_seen, poll)
+    }
+
+    // Puts `needs-approval` on anyone else's failing issue under `label`, which
+    // the triager reaches only on the maintainer's go. Whether nothing is left.
+    fn check_failing(&mut self, issue: &OpenIssue, poll: &mut Poll) -> bool {
+        let number = issue.number;
+        let skipped = self.settings.triage.pick != TriagePick::Label
+            || decided(&issue.labels)
+            || carries(&issue.labels, READY)
+            || self.go_asked(&issue.labels)
+            || self.has_work_item(number)
+            || self.split_of(number).is_some()
+            || self.triage_record(number).is_some();
+        if skipped {
+            return true;
+        }
+        let Some(maintainer) = self.poll_maintainer(poll) else {
+            return false;
+        };
+        if self.is_own(&issue.author, &maintainer) {
+            return true;
+        }
+        self.write_check_labels(issue, &[(TRIAGE, true)], &mut false, poll)
+    }
+
+    // Whether `labels` carry the maintainer's go while `pick` is `label`
+    pub(super) fn go_asked(&self, labels: &[String]) -> bool {
+        self.settings.triage.pick == TriagePick::Label && carries(labels, TRIAGE_GO)
+    }
+
+    // Puts each of `wanted` on `issue`, or takes it off, where it is not so yet.
+    // Whether all were written, and none is left for the next poll.
+    fn write_check_labels(
+        &mut self,
+        issue: &OpenIssue,
+        wanted: &[(&str, bool)],
+        ready_seen: &mut bool,
+        poll: &mut Poll,
+    ) -> bool {
+        let number = issue.number;
         for &(label, on) in wanted {
             if carries(&issue.labels, label) == on {
                 continue;
