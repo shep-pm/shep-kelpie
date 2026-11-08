@@ -159,6 +159,11 @@ impl Dog {
     fn state(&self) -> SettingsState {
         self.standing.lock().unwrap().clone()
     }
+
+    // The credit size the board carries, as a `credit` ask would read it.
+    fn credit(&self) -> Option<f64> {
+        crate::dog::board::lock(&self.board).view().monthly_credit()
+    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -434,6 +439,39 @@ async fn a_changed_gateway_or_codex_home_applies_and_waits_for_nothing() {
     );
     assert_eq!(dog.models(), Vec::<String>::new());
     assert_eq!(dog.state(), SettingsState::default());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_changed_monthly_credit_applies_at_the_next_pass_and_waits_for_nothing() {
+    let mut dog = started_on(BASE).await;
+    assert_eq!(dog.credit(), None, "no `[api]` table is no credit line");
+
+    dog.edit("[api]\nmonthly_credit_usd = 100\n");
+    let lines = dog.pass().await;
+
+    assert_eq!(lines, ["applied api.monthly_credit_usd: 100"]);
+    assert_eq!(dog.credit(), Some(100.0));
+    assert_eq!(dog.state(), SettingsState::default(), "nothing waits");
+    assert_eq!(dog.pass().await, Vec::<String>::new(), "applied once");
+
+    dog.edit("[api]\nmonthly_credit_usd = 62.5\n");
+    assert_eq!(dog.pass().await, ["applied api.monthly_credit_usd: 62.5"]);
+    assert_eq!(dog.credit(), Some(62.5));
+
+    dog.edit(BASE);
+    assert_eq!(dog.pass().await, ["applied api.monthly_credit_usd: none"]);
+    assert_eq!(dog.credit(), None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_starts_monthly_credit_is_the_boards_from_the_first_ask() {
+    let dog = started_on("[api]\nmonthly_credit_usd = 62.5\n").await;
+
+    assert_eq!(
+        dog.credit(),
+        Some(62.5),
+        "no pass has run, yet the board answers with it"
+    );
 }
 
 #[tokio::test(start_paused = true)]

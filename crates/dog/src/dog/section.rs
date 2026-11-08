@@ -4,7 +4,7 @@ use shep_client::RequestError;
 use shep_client::shep_core::protocol::{DogSectionToml, RpcErrorCode};
 
 use crate::shepherd::Connection;
-use crate::webhook::KelpieSettings;
+use crate::webhook::{Api, KelpieSettings};
 
 /// What asking the shepherd for the section came to
 #[derive(Debug, PartialEq, Eq)]
@@ -98,16 +98,17 @@ fn checked(text: &str) -> Result<(), String> {
     KelpieSettings::check_trusted(text).map_err(|e| e.to_string())
 }
 
-// A section that does not parse whole: the `[leases]` table and the rest are
-// read apart, so a mistake in one leaves the other standing. A leftover
-// `[api_credit]` table is taken out first and named, so the rest of the
-// section still reads.
+// A section that does not parse whole: the `[leases]` and `[api]` tables and
+// the rest are read apart, so a mistake in one leaves the other standing. A
+// leftover `[api_credit]` table is taken out first and named, so the rest of
+// the section still reads.
 fn salvage(text: &str) -> KelpieSettings {
     let Ok(mut table) = text.parse::<toml::Table>() else {
         println!("cargo-test is held by 3 at a time");
         return KelpieSettings::default();
     };
     let leases = table.remove("leases");
+    let api = table.remove("api");
     let credit = table.remove("api_credit");
     let rest = toml::to_string(&table).unwrap_or_default();
     let mut settings = KelpieSettings::from_section(&rest).unwrap_or_default();
@@ -115,10 +116,31 @@ fn salvage(text: &str) -> KelpieSettings {
         Ok(leases) => settings.leases = leases.unwrap_or_default(),
         Err(e) => println!("[leases] is not right ({e}): cargo-test is held by 3 at a time"),
     }
+    settings.api = salvage_api(api);
     if credit.is_some() {
         println!("[api_credit] is gone: delete it from the [kelpie] section");
     }
     settings
+}
+
+// The `[api]` table on its own, so one wrong credit number cannot take the
+// webhook, the gateways and the rest down with it. What it says that is no
+// credit line is named and left as no credit line.
+fn salvage_api(api: Option<toml::Value>) -> Api {
+    let read: Api = match api.map(toml::Value::try_into).transpose() {
+        Ok(api) => api.unwrap_or_default(),
+        Err(e) => {
+            println!("[api] is not right ({e}): kelpie knows of no credit line");
+            return Api::default();
+        }
+    };
+    match read.check() {
+        Ok(()) => read,
+        Err(why) => {
+            println!("`api.monthly_credit_usd` {why}: kelpie knows of no credit line");
+            Api::default()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -169,6 +191,42 @@ mod tests {
         let both = "[leases]\ncargo-test = 0\n[api_credit]\nusd = 50\nday = 9\n";
         let settings = read_section(both).unwrap();
         assert_eq!(settings.leases.cargo_test_capacity().get(), 3);
+    }
+
+    // A bad `[api]` table is read apart from the rest, as `[leases]` is, so one
+    // wrong number cannot drop the webhook or the gateways the dog runs on.
+    #[test]
+    fn a_bad_api_table_leaves_the_rest_of_the_section_standing() {
+        let text = "gpu_metrics_url = \"http://gpu-box:9835/metrics\"\n\
+                    [webhook]\nkind = \"ntfy\"\nurl = \"https://ntfy.example/t\"\n\
+                    token = \"tk_abc\"\n\
+                    [gateways.paddock]\nurl = \"http://gpu:8700\"\nkey_env = \"PADDOCK_KEY\"\n\
+                    [api]\nmonthly_credit_usd = 0\n";
+        let settings = read_section(text).unwrap();
+        assert!(settings.webhook.is_some(), "the webhook stands");
+        assert!(settings.gpu_metrics_url.is_some());
+        assert_eq!(settings.gateways.len(), 1, "the gateway stands");
+        assert_eq!(
+            settings.api,
+            Api::default(),
+            "a credit of 0 is no credit line"
+        );
+
+        let text = text.replace("monthly_credit_usd = 0", "monthly_credit_usd = \"100\"");
+        let settings = read_section(&text).unwrap();
+        assert!(
+            settings.webhook.is_some(),
+            "text for a number is no credit line"
+        );
+        assert_eq!(settings.api, Api::default());
+    }
+
+    // A good `[api]` table stands beside a bad `[leases]` one, each read apart.
+    #[test]
+    fn a_good_api_table_stands_beside_a_bad_leases_table() {
+        let settings = salvage("[leases]\ncargo-test = 0\n[api]\nmonthly_credit_usd = 62.5\n");
+        assert_eq!(settings.leases.cargo_test_capacity().get(), 3);
+        assert_eq!(settings.api.monthly_credit_usd, Some(62.5));
     }
 
     #[test]

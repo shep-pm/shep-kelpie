@@ -343,7 +343,9 @@ mod tests {
             .replace(
                 "# [kelpie.leases]\n# cargo-test",
                 "[kelpie.leases]\ncargo-test",
-            );
+            )
+            .replace("# [kelpie.api]", "[kelpie.api]")
+            .replace("# monthly_credit_usd = 100", "monthly_credit_usd = 100");
         let example: toml::Table = toml::from_str(&example).unwrap();
         let section = toml::to_string(&example["kelpie"]).unwrap();
         let mut live = BTreeSet::new();
@@ -368,6 +370,8 @@ mod tests {
         );
         assert_eq!(fix_attempts["maximum"], u32::MAX);
         assert!(defs["EndpointUrl"]["pattern"].is_string());
+        let credit = &defs["Api"]["properties"]["monthly_credit_usd"];
+        assert_eq!(credit["exclusiveMinimum"], Value::from(0), "{credit}");
     }
 
     // Lookout groups a sheep's rows by table, under each table's title.

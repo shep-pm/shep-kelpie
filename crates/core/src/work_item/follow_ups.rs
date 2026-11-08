@@ -14,7 +14,7 @@ pub struct FollowUps {
     /// Whether a yes to a `follow-up` ruling allows filing
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ruled: bool,
-    /// Whether the findings must be filed unread as `needs-triage`
+    /// Whether the findings must be filed unread as `needs-approval`
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unread: bool,
     /// When the forge first refused to take them, since it last took one

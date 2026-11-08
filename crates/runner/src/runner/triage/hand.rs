@@ -3,7 +3,7 @@
 //! The issue check holds a maintainer's `ready-for-agent` issue that fails it off
 //! the board and owes it the triager, and takes back none that passes. What is
 //! left here is the swap an older build saved at [`TriageStep::Taken`]: the record
-//! is already there, so `ready-for-agent` comes off, `needs-triage` goes on, and
+//! is already there, so `ready-for-agent` comes off, `needs-approval` goes on, and
 //! the poll's listing is changed to match, so the issue is untouched in the same
 //! poll and its research starts ahead of the board's pick.
 
@@ -114,7 +114,7 @@ impl Runner {
             || self.state.dropped.contains(&id)
     }
 
-    // Swaps `ready-for-agent` for `needs-triage` on `issue`, as `listed` says it
+    // Swaps `ready-for-agent` for `needs-approval` on `issue`, as `listed` says it
     // stands, the first coming off before the second goes on so a stop between
     // them leaves it unready and still untouched. Each half is done only where
     // the listing shows it undone. Whether it is done.

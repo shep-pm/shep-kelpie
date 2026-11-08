@@ -4,7 +4,7 @@
 //! of them, the age of the author's account, and the size of the body. The
 //! maintainer's own issues and one `shep kelpie triage` asked for skip all four.
 //! The first holds an issue in `triage.due` for a free place. The next two end it
-//! at `needs-triage` with no call and no comment, final until the verb is asked.
+//! at `needs-approval` with no call and no comment, final until the verb is asked.
 //! The last cuts the body the call is given, and says in the fence that it did.
 //! Counts come from the calls saved in `ProjectState.triage`, so a cap survives a
 //! restart; a call on an issue with no record yet is saved under `triage.unrecorded`.
@@ -26,7 +26,7 @@ pub(in crate::runner) enum Held {
     /// The day's places are taken. The issue waits in `triage.due` for the next
     /// one, and is never dropped.
     Day,
-    /// The issue gets `needs-triage` with no call and no comment, and the pass
+    /// The issue gets `needs-approval` with no call and no comment, and the pass
     /// does not come back to it
     Final(TriageHeld),
 }
@@ -276,7 +276,7 @@ impl Runner {
         age
     }
 
-    // Labels `issue` `needs-triage` with no call and no comment, and records that
+    // Labels `issue` `needs-approval` with no call and no comment, and records that
     // `limit` held it. The hold is final: its label and record keep it out of the
     // due list, and `shep kelpie triage` can still be asked of it. A label the forge
     // refuses is a failed triage, tried at the next poll, and nothing is recorded.
