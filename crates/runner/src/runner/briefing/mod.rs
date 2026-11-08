@@ -741,8 +741,10 @@ pub(super) fn passed_over(skip: &Skip, shown: &dyn Fn(String) -> String) -> (Str
         Skip::PullRequest { pull_request, .. } => {
             (format!("PR #{pull_request} is open for it"), false)
         }
-        Skip::Finished { .. } => (
-            "kelpie finished it, and the forge has not closed it".into(),
+        Skip::Finished { issue } => (
+            format!(
+                "kelpie finished it, and the forge has not closed it; `shep kelpie add {issue}` takes it back"
+            ),
             false,
         ),
         Skip::Dropped { issue } => (
