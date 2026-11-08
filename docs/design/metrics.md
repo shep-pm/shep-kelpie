@@ -12,7 +12,7 @@ Kelpie's numbers, live, on shep's metrics endpoint. ADR 0012, #920.
 
 ## Series
 
-Calls, counted as each ledger line is appended (`Ledger::append`, `crates/core/src/usage/mod.rs`), written or not. A stopping runner's lines, imports and `shep kelpie issue`'s are not counted:
+Calls, counted as each ledger line is appended (`Ledger::append`, `crates/core/src/usage/mod.rs`), written or not. A stopping runner's lines and imports are not counted:
 
 - `kelpie_calls_total{role,kind,agent,harness,effort,ended}`: `agent` is the settings' name for it; `agent` and `effort` read `unknown` where the line has none (imported lines, a local round's effort)
 - Forge calls (`kelpie_forge_calls_total`) and the login's rate limit gauges (`kelpie_forge_rate_*`) are in `metrics-dog.md`; 18 series
