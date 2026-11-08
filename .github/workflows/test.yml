@@ -153,6 +153,12 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install the pinned shep
+        # gh reads the token from GH_TOKEN, which it takes over GITHUB_TOKEN
+        # (go-gh's pkg/auth). The docs job above hands gh its own the same way.
+        # Without a token gh asks api.github.com anonymously, at 60 reads an
+        # hour for the runner's IP, which other jobs on that IP can spend.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           asset=shep-x86_64-unknown-linux-gnu
           base=https://github.com/shep-pm/shep/releases/download/shep-v${SHEP_VERSION}
@@ -163,9 +169,10 @@ jobs:
           # answers 504 11 times in 12. The release is fine: its API read lists
           # the asset (id 712004089, 30817214 bytes, uploaded) and api.github.com
           # answers 302 for it 12 times in 12. gh takes a release asset through
-          # that API route with the job's own token, so it goes first and the
-          # plain download URL is the fallback, each file asked for every 20
-          # seconds until 300 seconds of the step have gone.
+          # that API route, and the step's GH_TOKEN is the job's own token, so
+          # gh goes first and the plain download URL is the fallback, each file
+          # asked for every 20 seconds until 300 seconds of the step have gone.
+          # A token gh cannot use, or a release it cannot see, falls to the curl.
           for file in "$asset.tar.gz" "$asset.sha256"; do
             until gh release download "shep-v${SHEP_VERSION}" --repo shep-pm/shep \
               --pattern "$file" --dir .shep --clobber ||
