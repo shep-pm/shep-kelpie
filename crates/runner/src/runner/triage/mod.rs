@@ -17,7 +17,7 @@ use serde::Serialize;
 use super::Runner;
 use super::report::Begin;
 use super::review::calls::build_call;
-use crate::board::{READY, TRIAGE};
+use crate::board::{READY, TRIAGE, TRIAGE_GO};
 use crate::ports::{
     AgentCall, AuthorAssociation, ForgeError, OpenIssue, Role, ThreadComment, Timestamp, Tools,
 };
@@ -737,31 +737,50 @@ fn decided(labels: &[String]) -> bool {
     (labels.iter()).any(|l| l != READY && l != TRIAGE && TRIAGE_LABELS.contains(&l.as_str()))
 }
 
+// Whose issues the pick rule reaches
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Whose<'a> {
+    // Every person's
+    Anyone,
+    // The maintainer's login, or the App's
+    Only(&'a str),
+    // The maintainer's login or the App's, and anyone's that carries the
+    // maintainer's `needs-triage`
+    Asked(&'a str),
+}
+
 // Whether `issue` is untouched, `owed` the triager for a failed check, and opened by
 // no bot but the App, after `since` unless it carries `ready-for-agent` or was `taken`
-// back from it, and by `only` or the App when one is named. `needs-triage` and a
+// back from it, and by `whose`. The maintainer's `needs-triage` under `Asked` counts
+// past `since`, `owed` and the author, and past a `needs-approval` at or below
+// `pruned_through`, which only the pass or the check put on. `needs-approval` and a
 // refused `ready-for-agent` are no decision: kelpie's record is.
 fn untouched(
     issue: &OpenIssue,
     since: Timestamp,
     pruned_through: u64,
-    only: Option<&str>,
+    whose: Whose<'_>,
     owed: bool,
     app: Option<&str>,
     taken: bool,
 ) -> bool {
+    let go = matches!(whose, Whose::Asked(_)) && issue.labels.iter().any(|l| l == TRIAGE_GO);
     let decided = (issue.labels.iter()).any(|l| {
         TRIAGE_LABELS.contains(&l.as_str())
-            && (l != TRIAGE || issue.number <= pruned_through)
+            && (l != TRIAGE || (issue.number <= pruned_through && !go))
             && l != READY
     });
     let held = taken || issue.labels.iter().any(|l| l == READY);
-    owed && !decided
+    let theirs = |login: &str| issue.author.eq_ignore_ascii_case(login) || is_app(&issue.author, app);
+    let reached = match whose {
+        Whose::Anyone => true,
+        Whose::Only(login) => theirs(login),
+        Whose::Asked(login) => go || theirs(login),
+    };
+    (owed || go) && !decided
         && opened_by_us_or_people(issue, app)
-        && (held || issue.created > since)
-        && only.is_none_or(|login| {
-            issue.author.eq_ignore_ascii_case(login) || is_app(&issue.author, app)
-        })
+        && (held || go || issue.created > since)
+        && reached
 }
 
 // The question texts a questions block asks: the lines `questions_block`

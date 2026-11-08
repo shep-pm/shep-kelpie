@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use super::super::Runner;
 use super::super::trigger::lock;
 use super::unpublished::Read;
-use super::{opened_by_us_or_people, ticket, untouched};
+use super::{Whose, opened_by_us_or_people, ticket, untouched};
 use crate::board::{READY, check};
 use crate::ports::{Forge, ForgeError, Issue, OpenIssue, OpenPull, Registry, Tickets, Timestamp};
 use crate::settings::{ForgeSlug, TriagePick};
@@ -139,7 +139,7 @@ impl PollJob {
                         i,
                         since,
                         pruned_through,
-                        None,
+                        Whose::Anyone,
                         true,
                         app,
                         self.taken.contains(&i.number),
@@ -316,7 +316,7 @@ impl Runner {
         // Those reach only an issue it refused.
         self.check_issues(&open, pulls.as_ref(), &busy);
         let app = self.app_login();
-        let only = match self.settings.triage.pick {
+        let maintainer = match self.settings.triage.pick {
             TriagePick::Maintainer | TriagePick::Label => match self.maintainer() {
                 Ok(login) => Some(login),
                 Err(_) => {
@@ -325,6 +325,11 @@ impl Runner {
                 }
             },
             TriagePick::All | TriagePick::Off => None,
+        };
+        let whose = match (&maintainer, self.settings.triage.pick) {
+            (Some(login), TriagePick::Label) => Whose::Asked(login),
+            (Some(login), _) => Whose::Only(login),
+            (None, _) => Whose::Anyone,
         };
         // A swap a `taken` record owes is finished here, before the board reads
         // its pick, and listed as the swap leaves it.
@@ -337,7 +342,7 @@ impl Runner {
                     i,
                     since,
                     pruned_through,
-                    only.as_deref(),
+                    whose,
                     self.check_owed(i.number),
                     app.as_deref(),
                     self.taken_seen(i.number).is_some(),
