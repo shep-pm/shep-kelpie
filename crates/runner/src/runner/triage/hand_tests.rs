@@ -9,7 +9,7 @@ use super::ask_tests::{A_WORDS, asked, filed_before, record, settled_ready, wrot
 use super::check_tests::{PASSING, PASSING_LABELS, checks};
 use super::pick_tests::{MAINTAINER, issue, list, rig_with};
 use super::research_tests::{calls, moves, nothing, reply, took_back, triage};
-use crate::board::TRIAGE;
+use crate::board::{TRIAGE, TRIAGE_GO};
 use crate::github::ApiError;
 use crate::ports::Role;
 use crate::runner::slots_tests::{ASKS, dispatched, issue_of};
@@ -82,6 +82,35 @@ fn a_taken_record_an_older_build_saved_still_finishes_its_swap() {
         status["working"],
         serde_json::json!([]),
         "no work item: {status}"
+    );
+}
+
+// A swap owed on the labels waits, and is not counted as the issue's failure
+#[test]
+fn a_taken_record_waits_out_a_label_swap_that_is_owed() {
+    let (rig, runner) = filed_before(PICK, MAINTAINER, asked(), |rig| {
+        hand_labelled(rig, MAINTAINER);
+    });
+    rig.forge
+        .set_repo_labels(&[TRIAGE_GO, "ready-for-agent", "kind:fix"]);
+    rig.github.refuse_label_renames(ApiError::Refused(403));
+    let runner = reopened_as_taken(&rig, runner);
+    for _ in 0..6 {
+        rig.next_look();
+        assert_eq!(step(&runner).unwrap(), None);
+    }
+    assert_eq!(rig.github.label_takes(), []);
+
+    rig.github.accept_label_renames();
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+    // The listing that poll held predates the swap, so it is read again.
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(
+        rig.github.label_takes(),
+        [(30, "ready-for-agent".to_owned())]
     );
 }
 

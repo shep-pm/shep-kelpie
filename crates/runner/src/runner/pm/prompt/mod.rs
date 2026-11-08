@@ -69,7 +69,7 @@ macro_rules! questions {
 /// ruling shows again to a session that has seen the answer without it
 macro_rules! follow_up_key {
     () => {
-        "\"follow_up\": null or {\"item\": <the work item whose follow-up ruling you decide>, \"decision\": \"yes\" | \"no\", \"label\"?: \"ready-for-agent\" | \"needs-triage\" (only with yes, may be left out), \"drop\"?: [{\"finding\": <its number in the wake>, \"why\": \"<why it is not worth filing>\"}] (only with yes, each number once, may be left out), \"why\": \"<one sentence, at most 300 characters>\"}"
+        "\"follow_up\": null or {\"item\": <the work item whose follow-up ruling you decide>, \"decision\": \"yes\" | \"no\", \"label\"?: \"ready-for-agent\" | \"needs-approval\" (only with yes, may be left out), \"drop\"?: [{\"finding\": <its number in the wake>, \"why\": \"<why it is not worth filing>\"}] (only with yes, each number once, may be left out), \"why\": \"<one sentence, at most 300 characters>\"}"
     };
 }
 
@@ -81,7 +81,7 @@ macro_rules! follow_ups {
          merged diff beside them, and check each finding against them and the docs. \
          Decide the ruling with `follow_up`, and the item's issue in `item`, and decide \
          each finding on its own: the wake numbers them from 1. `yes` files the findings \
-         as issues labelled `ready-for-agent` (or `needs-triage` if you give that \
+         as issues labelled `ready-for-agent` (or `needs-approval` if you give that \
          `label`, when the maintainer reads them first; leave `label` out otherwise, \
          and never give one with `no`), so file only a finding that is worth an issue \
          and reads well enough for a worker to take with no human read. With a `yes`, \
