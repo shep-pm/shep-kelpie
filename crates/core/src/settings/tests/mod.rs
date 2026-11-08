@@ -46,7 +46,6 @@ fn the_example_holds_the_first_build_defaults() {
     let s = parse(EXAMPLE).unwrap();
     assert_eq!(s.git.checkout, Path::new("/home/me/GitHub/shep"));
     assert_eq!(s.git.remote.unwrap().as_str(), "shep-pm/shep");
-    assert_eq!(s.git.merging, None);
     assert!(s.ci.block);
     assert_eq!(s.ci.fix_attempts.cap(), None);
     assert_eq!(s.concurrency.active_items.get(), 1);
@@ -105,18 +104,21 @@ fn a_missing_setting_is_named() {
 }
 
 #[test]
-fn the_example_holds_no_merging() {
-    assert_eq!(parse(EXAMPLE).unwrap().git.merging, None);
+fn git_merging_is_refused_by_name_and_says_migrate_deletes_it() {
     assert!(
         !EXAMPLE.contains("\nmerging = "),
         "the example sets `git.merging`"
     );
-}
-
-#[test]
-fn a_table_holding_git_merging_still_loads() {
-    let text = EXAMPLE.replace(GIT, &format!("{GIT}merging = \"ask\"\n"));
-    assert_eq!(parse(&text).unwrap().git.merging, Some(Merging::Ask));
+    for value in ["auto", "ask"] {
+        let text = EXAMPLE.replace(GIT, &format!("{GIT}merging = \"{value}\"\n"));
+        assert_eq!(
+            parse_err(&text),
+            "the [app.dogs.kelpie] table on shep: `git.merging` is no longer a setting, because `rulings.pm_decides.merge` holds \
+             what it held, whether a head that passed every gate merges unasked, with or \
+             without a project manager: delete it, or run `shep kelpie settings migrate`, \
+             which does"
+        );
+    }
 }
 
 #[test]
@@ -266,7 +268,8 @@ fn every_old_top_level_key_is_refused_at_once_naming_what_replaces_it() {
              - `forge`, {grouped}: move its value to `git.remote`, or delete it to read \
              the repo from the checkout's `origin`\n\
              - `merge_authority`, because it set both who merges and whether deferred \
-             findings are asked about: move its value to `git.merging`; deferred findings \
+             findings are asked about: move its value to `rulings.pm_decides.merge`, `true` for \
+             `auto`; deferred findings \
              always raise a follow-up ruling\n\
              - `ci`, {grouped}: move its value to `block` in a `[ci]` table\n\
              - `max_items`, {grouped}: move its value to `concurrency.active_items`\n\
@@ -466,20 +469,6 @@ fn a_misspelt_setting_is_named() {
         err.contains("`worker.turn_timout = 60`: unknown field `turn_timout`"),
         "{err}"
     );
-}
-
-#[test]
-fn merging_auto_is_accepted() {
-    let text = EXAMPLE.replace(GIT, &format!("{GIT}merging = \"auto\"\n"));
-    assert_eq!(parse(&text).unwrap().git.merging, Some(Merging::Auto));
-}
-
-#[test]
-fn merging_ask_surface_is_refused() {
-    let text = EXAMPLE.replace(GIT, &format!("{GIT}merging = \"ask-surface\"\n"));
-    let err = parse_err(&text);
-    assert!(err.contains("`git.merging = \"ask-surface\"`"), "{err}");
-    assert!(err.contains("unknown variant `ask-surface`"), "{err}");
 }
 
 #[test]

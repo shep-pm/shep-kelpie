@@ -96,54 +96,58 @@ fn merging(merging: &str, pm: bool) -> String {
     }
 }
 
+// The value `git.merging` held, as the line migrate says it deleted it
+fn deleted(said: &[String], held: &str) -> bool {
+    let line = said.iter().find(|l| l.starts_with("project koji"));
+    line.is_some_and(|l| l.contains(&format!("git.merging = \"{held}\"")))
+}
+
 #[tokio::test]
-async fn git_merging_auto_writes_merge_true_and_names_it() {
-    for pm in [false, true] {
-        let scene = Scene::holding(&merging("auto", pm)).await;
+async fn git_merging_auto_becomes_merge_true_and_is_deleted() {
+    for (pm, held) in [
+        (false, None),
+        (true, None),
+        (false, Some(false)),
+        (true, Some(false)),
+    ] {
+        let map = held.map_or(String::new(), |merge| {
+            format!("\n[rulings]\npm_decides = {{ merge = {merge} }}\n")
+        });
+        let scene = Scene::holding(&(merging("auto", pm) + &map)).await;
 
         let said = scene.migrate().await.unwrap();
 
-        let line = said.iter().find(|l| l.starts_with("project koji")).unwrap();
-        assert!(line.contains("rulings.pm_decides.merge = true"), "{said:?}");
-        assert!(
-            !line.contains("rulings.pm_decides.merge = false"),
-            "{said:?}"
-        );
         let table = scene.table();
-        assert_eq!(
-            map_of(&table)["merge"],
-            true,
-            "with a project manager: {pm}"
-        );
+        let note = format!("with a project manager: {pm}, merge held {held:?}: {said:?}");
+        assert_eq!(map_of(&table)["merge"], true, "{note}");
+        assert!(table["git"].get("merging").is_none(), "{note}");
+        assert!(deleted(&said, "auto"), "{note}");
+        let line = said.iter().find(|l| l.starts_with("project koji")).unwrap();
+        assert!(line.contains("rulings.pm_decides.merge = true"), "{note}");
     }
 }
 
 #[tokio::test]
-async fn git_merging_auto_turns_a_merge_false_the_table_holds_to_true() {
-    let table = merging("auto", false) + "\n[rulings]\npm_decides = { merge = false }\n";
-    let scene = Scene::holding(&table).await;
+async fn git_merging_ask_becomes_merge_false_and_is_deleted() {
+    for (pm, held) in [
+        (false, None),
+        (true, None),
+        (false, Some(true)),
+        (true, Some(true)),
+    ] {
+        let map = held.map_or(String::new(), |merge| {
+            format!("\n[rulings]\npm_decides = {{ merge = {merge} }}\n")
+        });
+        let scene = Scene::holding(&(merging("ask", pm) + &map)).await;
 
-    let said = scene.migrate().await.unwrap();
+        let said = scene.migrate().await.unwrap();
 
-    assert!(
-        said[0].contains("rulings.pm_decides.merge = true"),
-        "{said:?}"
-    );
-    assert_eq!(map_of(&scene.table())["merge"], true);
-}
-
-#[tokio::test]
-async fn git_merging_ask_holding_merge_true_writes_false_and_names_it() {
-    let table = merging("ask", true) + "\n[rulings]\npm_decides = { merge = true }\n";
-    let scene = Scene::holding(&table).await;
-
-    let said = scene.migrate().await.unwrap();
-
-    assert!(
-        said[0].contains("rulings.pm_decides.merge = false"),
-        "{said:?}"
-    );
-    assert_eq!(map_of(&scene.table())["merge"], false);
+        let table = scene.table();
+        let note = format!("with a project manager: {pm}, merge held {held:?}: {said:?}");
+        assert_eq!(map_of(&table)["merge"], false, "{note}");
+        assert!(table["git"].get("merging").is_none(), "{note}");
+        assert!(deleted(&said, "ask"), "{note}");
+    }
 }
 
 #[tokio::test]

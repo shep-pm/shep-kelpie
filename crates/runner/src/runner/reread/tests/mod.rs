@@ -10,7 +10,8 @@ mod triage;
 use std::path::Path;
 
 use crate::ports::Visibility;
-use crate::settings::{GatewayName, Merging, RulingName};
+use crate::settings::{GatewayName, RulingName};
+use crate::status::Merging;
 use crate::test::Rig;
 use crate::webhook::{KelpieSettings, WebhookKind};
 
@@ -44,25 +45,6 @@ fn a_changed_setting_takes_effect_at_once() {
     assert!(runner.settings().rulings.pm_decides(RulingName::Merge));
     assert_eq!(runner.settings().ci.fix_attempts.cap(), Some(2));
     assert_eq!(runner.status().merging, Merging::Auto);
-}
-
-#[test]
-fn a_change_to_git_merging_alone_changes_nothing() {
-    let rig = Rig::new("shep");
-    // A table an older build wrote, which `settings migrate` has not reached
-    rig.edit_settings(|s| {
-        let git = "[app.dogs.kelpie.git]\n";
-        assert!(s.contains(git), "the example's git table moved");
-        s.replace(git, &format!("{git}merging = \"ask\"\n"))
-    });
-    let runner = rig.open().unwrap();
-    let next = settings_with(&rig, |s| {
-        let flipped = s.replace("\nmerging = \"ask\"\n", "\nmerging = \"auto\"\n");
-        assert_ne!(flipped, s, "the table's `git.merging` moved");
-        flipped
-    });
-    let mut runner = runner.lock().unwrap();
-    assert_eq!(runner.reread(next, rig.kelpie_settings()), Ok(None));
 }
 
 #[test]

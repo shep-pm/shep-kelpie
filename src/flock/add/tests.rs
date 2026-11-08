@@ -362,7 +362,6 @@ async fn a_project_add_writes_loads_with_no_merging_and_merge_false() {
     assert!(table["git"].get("merging").is_none(), "{table:?}");
     assert_eq!(table["rulings"]["pm_decides"]["merge"], false, "{table:?}");
     let settings = scene.settings();
-    assert_eq!(settings.git.merging, None);
     assert!(!settings.rulings.pm_decides(RulingName::Merge));
 }
 
