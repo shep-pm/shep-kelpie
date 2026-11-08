@@ -18,12 +18,12 @@ Each ADR below is one decision that is hard to reverse. A later ADR can reopen p
 - 0012 [Kelpie's numbers go out on the shepherd channel](0012-kelpie-s-numbers-go-out-on-the-shepherd-channel.md): the runner and the dog send `kelpie_*` series as channel samples to shep's metrics dog, with bounded labels, and detail by work item stays in the ledger.
 - 0013 [Runners tell the dog in notes, not metric samples](0013-runners-tell-the-dog-in-notes-not-metric-samples.md): a runner's lease and window totals go up as shep notes, which the metrics dog never reads, and the dog reads an older runner's samples for one release.
 - 0014 [Tickets come from a source, and the board stays in kelpie](0014-tickets-come-from-a-source-the-board-stays-in-kelpie.md): each project names one ticket source, GitHub issues by default or a local store, read and written through a `Tickets` port by opaque id, while the order, holds, picks and overlap check stay kelpie's.
-- 0015 [Crates use only what is below them](0015-crates-use-only-what-is-below-them.md): the code is a Cargo workspace where a crate uses only what is below or beside it, so a module that reaches the wrong way fails to build, with five leaf crates and a dev-only `test_support` first.
+- 0015 [Crates use only what is below them](0015-crates-use-only-what-is-below-them.md): the code is a Cargo workspace where a crate uses only what is below or beside it, so a module that reaches the wrong way fails to build, with the leaves `process`, `facts`, `worker_folder`, `trim`, `disk`, `owner_only` and `tree`, plus a dev-only `test_support`.
 - 0016 [Kelpie takes any shepherd from its pinned shep on](0016-kelpie-takes-any-shepherd-from-its-pinned-shep-on.md): kelpie refuses only a shepherd on an earlier shep than it is built with, and leaves wire compatibility to shep's protocol handshake.
 - 0017 [The runner answers on a socket of its own](0017-the-runner-answers-on-a-socket-of-its-own.md): each runner answers a typed, versioned protocol and pushes its status stream on a local socket under kelpie's home, and the verbs use `shep trigger` for one release when no runner answers.
 - 0018 [The project manager decides, and the dog picks the agent](0018-the-pm-decides-and-the-dog-picks-the-agent.md): the panel, the issue writer and per-project agent lists go, the project manager answers the ruling kinds `rulings.pm_decides` gives it, an issue skill and a code check replace the issue writer with the triager only on issues that fail it, and the dog's agent board picks each implementer and reviewer at dispatch from the agent files by kind, tier, availability and `agents.slack`. Reopens two lines of 0006, and 0020 amends the board's ranking, the kinds the map refuses and the review count keys.
 - 0019 [Each worker has a clone of its own](0019-each-worker-has-a-clone-of-its-own.md): a worker's worktree is a clone with a git dir of its own beside it, borrowing the checkout's objects through alternates on every platform, so the fence grants it nothing in the checkout's `.git` that Windows cannot grant.
-- 0020 [The project manager makes the calls, and settings hold only what it cannot](0020-the-project-manager-makes-the-calls.md): free text on a ruling or a pull request goes to the project manager, which sets each item's agent and review plan at the pick and answers every kind `rulings.pm_decides` can hold, the dog reports who is available and ranks no more, a setting holds the agent files, that map or a fact kelpie cannot detect, and the gates hold in code with no setting. A direction, with no code moved yet. Its 2026-11-07 amendment sets `merge` in the map at `false` and keeps `security` and `contribution-merge` refused.
+- 0020 [The project manager makes the calls, and settings hold only what it cannot](0020-the-project-manager-makes-the-calls.md): free text on a ruling or a pull request goes to the project manager, which sets each item's agent and review plan at the pick and answers every kind `rulings.pm_decides` can hold, the dog reports who is available and ranks no more, a setting holds the agent files, that map or a fact kelpie cannot detect, and the gates hold in code with no setting. `git.merging` is refused and `rulings.pm_decides.merge` is live. Its two 2026-11-07 amendments let `merge` join the map at `false` while `security` and `contribution-merge` stay refused, and make open threads hold the merge until the project manager rules. Its 2026-11-08 amendment sends unread heads and fixes of a project's own work items back through a review pass when it names `agents.pm`.
 
 ## Decided against
 
@@ -54,6 +54,7 @@ Check this list before proposing an option. Where a later ADR reopened the decis
 - let `hooks` replace `worker.guard_hooks` (0009)
 - let a hook rewrite the text it judges (0009)
 - let a slow hook pass (0009)
+- a timeout setting for each hook (0009)
 - have `publish` cover only the text an agent wrote (0009)
 - one hook point for each Claude Code or Codex event (0009)
 - run the work item loop's hook points as Claude Code hooks (0009)
@@ -65,6 +66,10 @@ Check this list before proposing an option. Where a later ADR reopened the decis
 - the e2e host alone for a look at the UI (0011)
 - raw CDP from a crate in place of Playwright (0011)
 - shots on the pull request, in place of a live look (0011, and parked in 0006)
+- kelpie serves its own `/metrics` (0012)
+- scripts over the ledger and transcripts (0012)
+- a label per work item (0012)
+- OTLP from kelpie (0012)
 - keep lease totals as metric samples and have shep's metrics dog skip kelpie's names (0013)
 - rename lease totals to names the metrics dog takes (0013)
 - a socket of kelpie's own between runner and dog, for lease totals (0013)
@@ -87,6 +92,7 @@ Check this list before proposing an option. Where a later ADR reopened the decis
 - concurrency in the agent file (0018)
 - reviewers at once on one green head (0018)
 - project lineups inherited from the operator's defaults, shep-pm/shep#1079 (0018)
+- let the project manager weigh each agent's record in every pick (0018)
 - a project manager that watches every lock and meter itself (0018)
 - `CREATOR OWNER` or `OWNER RIGHTS` on the refs folder for a Windows worker (0019)
 - a Windows-only clone, with linked worktrees elsewhere (0019)
