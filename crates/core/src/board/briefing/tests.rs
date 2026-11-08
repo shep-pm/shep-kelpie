@@ -88,6 +88,7 @@ fn a_board_with_an_idle_worker_a_review_call_and_a_ruling_reads_whole() {
         }),
         agents: Vec::new(),
         plans: Vec::new(),
+        credit: None,
         events: events.to_vec(),
         woken_before: true,
         dropped: true,
@@ -205,6 +206,7 @@ fn briefing(items: Vec<Item>) -> Briefing<'static> {
         ready: None,
         agents: Vec::new(),
         plans: Vec::new(),
+        credit: None,
         events: Vec::new(),
         woken_before: false,
         dropped: false,
@@ -350,6 +352,7 @@ fn quoting(body: &str) -> String {
         }),
         agents: Vec::new(),
         plans: Vec::new(),
+        credit: None,
         events: Vec::new(),
         woken_before: false,
         dropped: false,
@@ -658,8 +661,17 @@ fn a_long_unblocks_list_is_cut_and_counted() {
     );
 }
 
-// A board with one implementer, so its agents section shows `plans`
+// A board with one implementer, so its agents section shows `plans` and `credit`
 fn plans_section(plans: Vec<PlanLine>) -> String {
+    section(plans, None)
+}
+
+// The same board with `credit` in place of any plan account
+fn credit_section(credit: CreditLine) -> String {
+    section(Vec::new(), Some(credit))
+}
+
+fn section(plans: Vec<PlanLine>, credit: Option<CreditLine>) -> String {
     let board = Briefing {
         agents: vec![agent(
             "sonnet-high",
@@ -667,11 +679,28 @@ fn plans_section(plans: Vec<PlanLine>) -> String {
             (Tier::Standard, None, Some("Work.")),
         )],
         plans,
+        credit,
         ..briefing(Vec::new())
     };
     let text = render(&board);
     let section = text.split("## Agents\n").nth(1).unwrap();
     section.split("\n## ").next().unwrap().to_owned()
+}
+
+// Whether `section` shows an API credit line of its own
+fn shows_credit(section: &str) -> bool {
+    section.lines().any(|l| l.starts_with("API credit: "))
+}
+
+// The API credit with `spent` of `monthly` dollars spent in a month that began
+// `since_ago` seconds before [`EPOCH`] and resets `resets_in` seconds after it
+fn credit(spent: f64, monthly: f64, since_ago: u64, resets_in: u64) -> CreditLine {
+    CreditLine {
+        spent_usd: spent,
+        monthly_usd: monthly,
+        since: Timestamp(EPOCH - since_ago),
+        resets_at: Timestamp(EPOCH + resets_in),
+    }
 }
 
 // A weekly window `used` percent spent that resets `resets_in` seconds after [`EPOCH`], read `read_ago` seconds before it
@@ -745,6 +774,91 @@ fn a_reading_from_before_the_weeks_reset_says_so() {
     }]);
     assert!(
         section.ends_with("\n\nClaude week: the reading predates the week's reset, read 8d ago\n"),
+        "{section}"
+    );
+}
+
+#[test]
+fn the_api_credit_shows_its_month_used_against_elapsed() {
+    let section = section(
+        vec![PlanLine {
+            name: "Claude".into(),
+            reading: week_read(16, 6 * 86_400 + 3600, 240),
+        }],
+        Some(credit(40.0, 100.0, 7 * 86_400, 23 * 86_400)),
+    );
+    assert!(
+        section.ends_with(
+            "\n\nClaude week: 16% used, 14% of the week gone, 6d 1h to the reset, \
+             on course for 114%, read 4m ago\n\
+             API credit: 40% used, 23% of the month gone, 23d to the reset, \
+             on course for 174%\n"
+        ),
+        "{section}"
+    );
+}
+
+#[test]
+fn no_credit_line_without_a_credit() {
+    let section = plans_section(vec![PlanLine {
+        name: "Claude".into(),
+        reading: week_read(16, 6 * 86_400 + 3600, 240),
+    }]);
+    assert!(!shows_credit(&section), "{section}");
+    assert!(!section.contains("bonus on top of the plans"), "{section}");
+    assert!(
+        section.contains("no reason to spend faster.\n\n- sonnet-high (implementer)"),
+        "the opening is unchanged: {section}"
+    );
+}
+
+#[test]
+fn the_credit_guidance_shows_with_the_credit_line_alone() {
+    let section = credit_section(credit(40.0, 100.0, 7 * 86_400, 23 * 86_400));
+    for part in [
+        "bonus on top of the plans",
+        "paced across the month so its course aims at 100%",
+        "the order alone decides: a local model that can start, then API credit \
+         while the API is not held, then a plan",
+    ] {
+        assert!(section.contains(part), "{part}\n{section}");
+    }
+    assert!(
+        section.contains("`shep kelpie tell --all`") && section.contains("`pm-standing.md`"),
+        "{section}"
+    );
+    let none = plans_section(Vec::new());
+    assert!(!none.contains("bonus on top of the plans"), "{none}");
+}
+
+#[test]
+fn a_credit_whose_reset_has_passed_shows_no_line() {
+    let section = credit_section(credit(40.0, 100.0, 7 * 86_400, 0));
+    assert!(!shows_credit(&section), "{section}");
+    assert!(!section.contains("bonus on top of the plans"), "{section}");
+    assert!(
+        section.ends_with("; no reading from the board\n"),
+        "no blank line block follows the bullets: {section}"
+    );
+}
+
+#[test]
+fn a_credit_course_is_left_out_while_no_share_of_the_month_is_gone() {
+    let section = credit_section(credit(40.0, 100.0, 0, 30 * 86_400));
+    assert!(
+        section.ends_with("\n\nAPI credit: 40% used, 0% of the month gone, 30d to the reset\n"),
+        "{section}"
+    );
+}
+
+#[test]
+fn a_credit_line_shows_with_no_plan_account_listed() {
+    let section = credit_section(credit(120.0, 100.0, 7 * 86_400, 23 * 86_400));
+    assert!(
+        section.ends_with(
+            "\n\nAPI credit: 120% used, 23% of the month gone, 23d to the reset, \
+             on course for 522%\n"
+        ),
         "{section}"
     );
 }

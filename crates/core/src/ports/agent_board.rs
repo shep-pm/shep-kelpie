@@ -6,7 +6,7 @@
 use std::fmt;
 
 use crate::api_refusal::Refusal;
-use crate::lease::door::{FitAsk, Fits, Pick, PickAsk};
+use crate::lease::door::{Credit, FitAsk, Fits, Pick, PickAsk};
 use crate::ports::Timestamp;
 use crate::settings::AgentName;
 
@@ -32,4 +32,10 @@ pub trait AgentBoard: Send + Sync + fmt::Debug {
     /// Tells the board the API refused the key, and returns when it holds every
     /// API agent until, or None when it cannot be asked
     fn refused(&self, refusal: &Refusal) -> Option<Timestamp>;
+
+    /// What the board says the agents billed to the API key spent in the month
+    /// it asked in, or None when it cannot be asked
+    ///
+    /// A `monthly_usd` of `None` is a credit of a size kelpie was never told.
+    fn credit(&self) -> Option<Credit>;
 }
