@@ -194,9 +194,42 @@ fn picked_for_opus(labels: &[&str]) -> (Rig, Mutex<Runner>) {
     (rig, runner)
 }
 
+const PINNED: &str = "#12: the project manager picked opus-high, but the issue's \
+                      `agent:sonnet-high!` label pins sonnet-high";
+
 #[test]
-fn a_picks_agent_that_can_start_runs_the_item_unpinned_over_the_issues_label() {
+fn the_issues_pinned_label_wins_over_a_picks_agent() {
     let (rig, runner) = picked_for_opus(&["agent:sonnet-high!", "kind:docs"]);
+
+    let report = step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+
+    assert!(
+        matches!(&report, StepReport::Dispatched { issue, agent, .. }
+            if *issue == ticket(12) && agent.as_str() == "sonnet-high"),
+        "{report:?}"
+    );
+    let mut held = runner.lock().unwrap();
+    let item = held.state.item(ticket(12)).unwrap();
+    assert_eq!(
+        (item.pinned, item.tier, item.slack, item.kind.as_deref()),
+        (true, Some(Tier::Heavy), Some(0), Some("docs"))
+    );
+    assert!(held.take_notes().iter().any(|n| n == PINNED));
+    // The pick's agent is never asked for: only the pinned ranking is.
+    let asks = rig.agent_board.asks();
+    let pins: Vec<_> = (asks.iter())
+        .map(|ask| ask.pin.as_ref().map(|p| p.as_str()))
+        .collect();
+    assert_eq!(pins, [Some("sonnet-high")]);
+    assert!(
+        asks.iter()
+            .all(|a| (a.tier, a.slack) == (Some(Tier::Heavy), Some(0)))
+    );
+}
+
+#[test]
+fn a_picks_agent_that_can_start_runs_the_item_unpinned() {
+    let (rig, runner) = picked_for_opus(&["kind:docs"]);
 
     let report = step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
 
@@ -207,27 +240,12 @@ fn a_picks_agent_that_can_start_runs_the_item_unpinned_over_the_issues_label() {
     );
     let held = runner.lock().unwrap();
     let item = held.state.item(ticket(12)).unwrap();
-    assert_eq!(
-        (item.pinned, item.tier, item.slack, item.kind.as_deref()),
-        (false, Some(Tier::Heavy), Some(0), Some("docs"))
-    );
-    assert!(
-        rig.forge
-            .labels_of(12)
-            .contains(&"agent:sonnet-high!".to_owned()),
-        "the issue's label is left as it was"
-    );
-    // The pick is asked for alone first, then the ranking behind it, which the
-    // label pins, for the pacer's walk to fall to.
+    assert_eq!((item.pinned, item.tier), (false, Some(Tier::Heavy)));
     let asks = rig.agent_board.asks();
     let pins: Vec<_> = (asks.iter())
         .map(|ask| ask.pin.as_ref().map(|p| p.as_str()))
         .collect();
-    assert_eq!(pins, [Some("opus-high"), Some("sonnet-high")]);
-    assert!(
-        asks.iter()
-            .all(|a| (a.tier, a.slack) == (Some(Tier::Heavy), Some(0)))
-    );
+    assert_eq!(pins, [Some("opus-high"), None]);
 }
 
 #[test]
@@ -277,21 +295,25 @@ fn a_picks_agent_that_cannot_start_within_the_slack_leaves_the_pick_to_the_board
 }
 
 #[test]
-fn a_picks_agent_that_cannot_start_falls_back_to_the_issues_pinned_label() {
-    let (rig, runner) = picked_for_opus(&["agent:sonnet-high!"]);
-    rig.agent_board.waits("opus-high", 60);
-    rig.agent_board.ranks_first(&["opus-high"]);
+fn a_pick_naming_the_pinned_agent_runs_it_pinned() {
+    let (rig, runner) = picked_for_opus(&["agent:opus-high!"]);
 
     let report = step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
 
     assert!(
         matches!(&report, StepReport::Dispatched { issue, agent, .. }
-            if *issue == ticket(12) && agent.as_str() == "sonnet-high"),
+            if *issue == ticket(12) && agent.as_str() == "opus-high"),
         "{report:?}"
     );
     let mut held = runner.lock().unwrap();
     assert!(held.state.item(ticket(12)).unwrap().pinned);
-    assert!(held.take_notes().iter().any(|n| n == BEHIND));
+    let notes = held.take_notes();
+    assert!(!notes.iter().any(|n| n.starts_with("#12")), "{notes:?}");
+    let asks = rig.agent_board.asks();
+    let pins: Vec<_> = (asks.iter())
+        .map(|ask| ask.pin.as_ref().map(|p| p.as_str()))
+        .collect();
+    assert_eq!(pins, [Some("opus-high"), Some("opus-high")]);
 }
 
 #[test]

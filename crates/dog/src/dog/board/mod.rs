@@ -4,8 +4,8 @@
 //! kelpie's home that changed, keeping its finished items and what its calls
 //! cost each agent. A `pick` ask reads the agents it names with
 //! `agent_board::pick` and orders none, each one's wait read from the
-//! [`availability`](super::availability): a plan's wait reads its window from
-//! the 50% mark. A `fit` ask reads every project's records at once, and the
+//! [`availability`](super::availability): a plan waits only while a window
+//! or its week is spent. A `fit` ask reads every project's records at once, and the
 //! dog keeps what it has answered in its own marks file beside its book. A
 //! `credit` ask sums what the API agents spent in the month it asked in.
 
