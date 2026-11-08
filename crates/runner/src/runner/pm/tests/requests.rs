@@ -142,7 +142,7 @@ fn a_request_pending_when_the_runner_stops_is_asked_again_when_it_starts() {
 // What the maintainer may ask about one ruling
 
 #[test]
-fn pm_decide_is_refused_on_a_question_and_on_a_failure_it_already_answered() {
+fn pm_decide_is_refused_on_a_question_and_on_a_stalled_turn() {
     let (rig, runner) = super::with_pm("asked-decide-rules");
     let runner = runner.lock().unwrap();
     let question = RulingKind::Question {
@@ -154,6 +154,7 @@ fn pm_decide_is_refused_on_a_question_and_on_a_failure_it_already_answered() {
 
     let failing = Ruling {
         issue: Some(ticket(7)),
+        stuck_head: Some("c0ffee1".into()),
         ..Ruling::new(
             ticket(7),
             "harness exited with 1",
@@ -167,11 +168,14 @@ fn pm_decide_is_refused_on_a_question_and_on_a_failure_it_already_answered() {
         )
     };
     assert_eq!(runner.pm_may_decide(&failing), Ok(()));
-    let record = Record::of(&failing, &Answer::Yes, Timestamp(1), Answerer::Pm);
-    record.append(&rig.paths().rulings).unwrap();
+    for _ in 0..2 {
+        let record = Record::of(&failing, &Answer::Yes, Timestamp(1), Answerer::Pm);
+        record.append(&rig.paths().rulings).unwrap();
+    }
+
     let refused = runner.pm_may_decide(&failing).unwrap_err();
     assert!(
-        refused.contains("already answered this failed turn"),
+        refused.contains("2 resumes at this head moved nothing"),
         "{refused}"
     );
 }

@@ -98,17 +98,6 @@ impl Record {
         }
     }
 
-    /// Whether the project manager answered the same failed turn as `ruling`,
-    /// for the same work item: its pull request's number names a ruling once
-    /// there is one, so the ticket is what stays the same
-    pub(in crate::runner) fn decided_by_pm(&self, ruling: &Ruling) -> bool {
-        let item = match (self.issue, ruling.issue) {
-            (Some(was), Some(is)) => was == is,
-            _ => self.id == ruling.id,
-        };
-        self.by_pm && item && self.stem.is_some() && self.stem == stem_of(ruling)
-    }
-
     /// Who answered it
     pub(in crate::runner) fn by(&self) -> Answerer {
         match self.by_pm {
@@ -146,8 +135,8 @@ fn known_kind<'de, D: serde::Deserializer<'de>>(
     }
 }
 
-// Why a failed turn failed, as `rulings.jsonl` keeps it, so the same failure
-// again on the same work item is one the project manager already answered.
+// Why a failed turn failed, as `rulings.jsonl` keeps it, so a later case can
+// say what each of the item's turn rulings was for.
 fn stem_of(ruling: &Ruling) -> Option<String> {
     let RulingKind::Stuck(Stuck::TurnFailed { why, .. }) = &ruling.kind else {
         return None;
@@ -331,15 +320,6 @@ mod tests {
         }
     }
 
-    fn decided(ruling: &Ruling) -> Record {
-        Record::of(
-            ruling,
-            &Answer::Text("A".into()),
-            Timestamp(1),
-            Answerer::Pm,
-        )
-    }
-
     fn failing(id: u64, why: &str) -> Ruling {
         let kind = RulingKind::from(Stuck::TurnFailed {
             why: why.into(),
@@ -403,13 +383,26 @@ mod tests {
         assert_eq!(records[0].kind, Some(RulingName::TurnTimeout));
     }
 
-    // The same failure on the same work item, whitespace aside, is the one the
-    // project manager answered, and another failure is not.
+    // A line an older build wrote with a `stem` still reads: the history keeps
+    // why each failed turn failed, whoever answered it.
     #[test]
-    fn a_turn_that_fails_again_the_same_way_is_the_failure_the_project_manager_answered() {
-        let before = decided(&failing(71, "harness  exited\nwith 1"));
+    fn a_line_with_a_stem_still_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("rulings.jsonl");
+        let line = serde_json::json!({
+            "id": 71, "at": 100, "issue": 7, "pull_request": 71, "asked": "q",
+            "answer": "yes", "kind": "turn-failed", "by_pm": true,
+            "stem": "turn-failed: harness exited with 1",
+        });
+        std::fs::write(&file, format!("{line}\n")).unwrap();
 
-        assert!(before.decided_by_pm(&failing(72, "harness exited with 1")));
-        assert!(!before.decided_by_pm(&failing(72, "harness exited with 2")));
+        let records = records(&file);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].stem.as_deref(),
+            Some("turn-failed: harness exited with 1")
+        );
+        assert_eq!(records[0].by(), Answerer::Pm);
     }
 }

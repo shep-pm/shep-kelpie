@@ -153,12 +153,36 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install the pinned shep
+        # gh reads the token from GH_TOKEN, which it takes over GITHUB_TOKEN
+        # (go-gh's pkg/auth). The docs job above hands gh its own the same way.
+        # Without a token gh asks api.github.com anonymously, at 60 reads an
+        # hour for the runner's IP, which other jobs on that IP can spend.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           asset=shep-x86_64-unknown-linux-gnu
           base=https://github.com/shep-pm/shep/releases/download/shep-v${SHEP_VERSION}
           mkdir -p .shep
-          curl -fsSL --retry 3 -o ".shep/$asset.tar.gz" "$base/$asset.tar.gz"
-          curl -fsSL --retry 3 -o ".shep/$asset.sha256" "$base/$asset.sha256"
+          # github.com's release download answers 504 right now, to everyone:
+          # runs 42467121601 and 42470501999 got 504 on all 14 tries over 305 s
+          # at these curls, and a plain HEAD of this same URL from a laptop
+          # answers 504 11 times in 12. The release is fine: its API read lists
+          # the asset (id 712004089, 30817214 bytes, uploaded) and api.github.com
+          # answers 302 for it 12 times in 12. gh takes a release asset through
+          # that API route, and the step's GH_TOKEN is the job's own token, so
+          # gh goes first and the plain download URL is the fallback, each file
+          # asked for every 20 seconds until 300 seconds of the step have gone.
+          # A token gh cannot use, or a release it cannot see, falls to the curl.
+          for file in "$asset.tar.gz" "$asset.sha256"; do
+            until gh release download "shep-v${SHEP_VERSION}" --repo shep-pm/shep \
+              --pattern "$file" --dir .shep --clobber ||
+              curl -fsSL --connect-timeout 10 --max-time 120 \
+                -o ".shep/$file" "$base/$file"; do
+              echo "shep ${SHEP_VERSION}: $file failed after ${SECONDS}s"
+              test "$SECONDS" -lt 300 || exit 1
+              sleep 20
+            done
+          done
           (cd .shep && sha256sum --check "$asset.sha256" && tar -xzf "$asset.tar.gz")
           test "$("$KELPIE_TEST_SHEP" --version | head -n 1)" = "shep ${SHEP_VERSION}"
       # A test binary that matches nothing passes, so the run must show

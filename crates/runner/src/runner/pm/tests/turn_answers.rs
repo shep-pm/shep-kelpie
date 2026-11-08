@@ -17,7 +17,7 @@ use crate::test::{CALL_PATIENCE, Rig, Scripted};
 /// Where a turn's last change sits, past the ten minutes a turn may be quiet for
 const STALE: u64 = Rig::EPOCH - 11 * 60;
 
-const BOTH: &str = "turn-timeout = true, turn-failed = true";
+pub(super) const BOTH: &str = "turn-timeout = true, turn-failed = true";
 
 /// The words an `ask` puts ahead of the resumed turn
 const PROGRESS: &str = "what you have done so far";
@@ -31,7 +31,7 @@ fn votes_on(ruling: u64, choice: char, extra: &str) -> &'static str {
     Box::leak(text.into_boxed_str())
 }
 
-fn votes(choice: char, extra: &str) -> &'static str {
+pub(super) fn votes(choice: char, extra: &str) -> &'static str {
     votes_on(7, choice, extra)
 }
 
@@ -41,12 +41,12 @@ fn timed_out() -> Scripted {
     Scripted::TimeOutPlanting("stale.rs", "fn stale() {}\n", STALE)
 }
 
-fn failed() -> Scripted {
+pub(super) fn failed() -> Scripted {
     Scripted::Fail(AgentError::Failed(Harness::ClaudeCode, "overloaded".into()))
 }
 
 /// A project with a project manager and `map` as its `rulings.pm_decides`
-fn project(name: &str, map: &str) -> (Rig, Mutex<Runner>) {
+pub(super) fn project(name: &str, map: &str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(name);
     rig.with_app();
     rig.maintainer("octocat");
@@ -87,12 +87,12 @@ fn resumed_prompt(rig: &Rig, runner: &Mutex<Runner>) -> String {
 }
 
 /// How the work item's phase reads in `status`
-fn phase(rig: &Rig, runner: &Mutex<Runner>) -> Value {
+pub(super) fn phase(rig: &Rig, runner: &Mutex<Runner>) -> Value {
     rig.ask(runner, "status", None)["work_item"]["phase"].clone()
 }
 
 /// The comment that asks the maintainer, if one was posted
-fn card(rig: &Rig) -> Option<String> {
+pub(super) fn card(rig: &Rig) -> Option<String> {
     (comments(rig).into_iter()).find(|c| c.starts_with("### "))
 }
 

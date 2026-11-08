@@ -541,7 +541,10 @@ stuck item's ruling for the maintainer, with a yes or, for CI still red, a
 note sending the worker back. On a `turn-timeout` or `turn-failed` ruling it
 resumes the turn, resumes it after a note asking what the worker has done so
 far, or parks it on the maintainer, who hears of that park alone and keeps the
-stopping of the work item. It may instead park a stuck item on an open fix, which keeps it parked with the ruling left for the maintainer and
+stopping of the work item. Two such rulings at one commit is the most it answers
+there: past that the next ruling at the same head is the maintainer's, its card
+saying that two resumes at that head moved nothing, and a `retry` the project
+manager asks for is dropped. It may instead park a stuck item on an open fix, which keeps it parked with the ruling left for the maintainer and
 names the fix on its card, and never retries a `turn-failed` ruling for a turn
 kelpie could not set up, since another try meets the same fault. A merge ruling
 takes three answers:
