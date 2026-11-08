@@ -46,6 +46,7 @@ pub mod paced_voice;
 mod pages;
 pub mod rate_limit;
 pub mod recorded_voice;
+mod registry;
 mod revalidated;
 mod reviewed;
 mod reviewer;
@@ -98,6 +99,7 @@ pub use rate_limit::{
     AppForges, AppReads, ForgeHold, RateHeld, Reading, Say, Warnings, says_used_up,
 };
 pub use recorded_voice::RecordedVoice;
+pub use registry::{Registry, RegistryError};
 pub use revalidated::Revalidated;
 pub use reviewed::{MaintainerReview, ReviewComment, Reviewed};
 pub use reviewer::{Reviewer, ReviewerError, RoundEnd, RoundStage};
@@ -956,6 +958,8 @@ pub struct Ports {
     pub metrics: Arc<dyn Sink>,
     /// The classifier each project's gateway serves, for triage's spam check
     pub classifier: Arc<dyn Classifier>,
+    /// Where the packages an issue needs are published, read by the triage poll
+    pub registry: Arc<dyn Registry>,
     /// The clock, shared with the forge's rate-limit hold
     pub clock: Arc<dyn Clock>,
     /// The login's forge hold and pace, kept by the dog where it is reached

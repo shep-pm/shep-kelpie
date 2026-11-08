@@ -34,6 +34,7 @@ pub(crate) mod paddock;
 mod pages;
 mod pi;
 mod process;
+mod registry;
 mod skills;
 mod srt;
 mod stop;
@@ -72,6 +73,7 @@ pub use local::LocalReviewer;
 pub use pages::PlaywrightPages;
 pub use pi::{PI_MINIMUM, PiCli};
 pub use process::{Sealed, end_groups, feeding};
+pub use registry::CurlRegistry;
 pub use srt::SandboxRuntime;
 #[cfg(any(test, feature = "test-support"))]
 pub use srt::srt_settings;

@@ -30,6 +30,7 @@ mod home;
 mod leased;
 mod memory;
 mod pages;
+mod registry;
 mod samples;
 mod sandbox;
 mod shepherd;
@@ -52,6 +53,7 @@ pub use home::Home;
 pub use leased::LeaseReads;
 pub use memory::Memory;
 pub use pages::{FakePages, clean as clean_visit};
+pub use registry::FakeRegistry;
 pub use samples::RecordedSink;
 pub use sandbox::OpenSandbox;
 #[cfg(test)]
