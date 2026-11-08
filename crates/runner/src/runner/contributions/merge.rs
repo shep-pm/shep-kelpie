@@ -1,7 +1,7 @@
 //! The maintainer's ruling on merging a contribution
 //!
-//! Only the maintainer merges someone else's work, so `git.merging = "auto"`
-//! does not reach a contribution. Once a poll, one whose pass has ended with green
+//! Only the maintainer merges someone else's work, so `rulings.pm_decides`
+//! never reaches a contribution's merge. Once a poll, one whose pass has ended with green
 //! CI on the same head gets a merge ruling, with no work item. It holds nothing.
 //! A thumbs up or down on the clean-pass note answers it too; the first answer wins.
 //! The answer is kept on the record (`ruled`) and carried out by the next poll:
