@@ -12,7 +12,7 @@ use crate::ports::{CLEAN, Checks, Clock as _, Finding, Severity, Timestamp};
 use crate::runner::review_bot::contribution_turns::{FINDING, contributed, until_summoned};
 use crate::runner::{CHECKS_SETTLE, Runner, step};
 use crate::settings::Contributions;
-use crate::state::Contribution;
+use crate::state::{Asked, Contribution};
 use crate::test::{Rig, Scripted, ScriptedRound};
 
 const DAY: u64 = Rig::DAY;
@@ -189,6 +189,54 @@ fn due_is_nudge_after_nudge_days_and_quiet_after_quiet_days_on_a_fake_clock() {
     assert_eq!(due(7 * DAY - 1), Some(Due::Nudge));
     assert_eq!(due(7 * DAY), Some(Due::Quiet));
     assert_eq!(due(30 * DAY), Some(Due::Quiet));
+}
+
+// Pull request 30 waiting on its contributor since whole day `since`, its ask
+// open since whole day `asked`
+fn asked_on(since: u64, asked: u64) -> Contribution {
+    let at = |day: u64| Timestamp(Rig::EPOCH + day * DAY);
+    let mut held = Contribution::new(30, "newcomer".into(), "2a8f1e6".into(), Timestamp(1));
+    held.waiting_since = Some(at(since));
+    held.asked = Some(Asked {
+        comment: 7,
+        at: at(asked),
+        asks: 1,
+        nos: 0,
+        read: Vec::new(),
+        closing: false,
+        thanked: false,
+    });
+    held
+}
+
+// What `held`'s clock reports at whole day `after`
+fn due_at(held: &Contribution, after: u64) -> Option<Due> {
+    let clock = Clock::of(held, &Contributions::default()).unwrap();
+    clock.due(Timestamp(Rig::EPOCH + after * DAY))
+}
+
+#[test]
+fn an_ask_made_late_at_nudge_still_gets_the_full_notice() {
+    let held = asked_on(0, 6);
+
+    assert_eq!(due_at(&held, 9), Some(Due::Nudge), "day 9 is not quiet");
+    assert_eq!(due_at(&held, 10), Some(Due::Quiet));
+}
+
+#[test]
+fn an_ask_made_on_time_keeps_its_deadline() {
+    let held = asked_on(0, 3);
+
+    assert_eq!(due_at(&held, 6), Some(Due::Nudge));
+    assert_eq!(due_at(&held, 7), Some(Due::Quiet));
+}
+
+#[test]
+fn an_ask_made_at_quiet_keeps_the_whole_window() {
+    let held = asked_on(7, 7);
+
+    assert_eq!(due_at(&held, 13), Some(Due::Nudge));
+    assert_eq!(due_at(&held, 14), Some(Due::Quiet));
 }
 
 #[test]

@@ -194,7 +194,9 @@ impl Runner {
             // A coded yes is dropped while answers are off, so the alert does not offer it.
             Wants::Merge if self.coded_answers_off() => Takes::MergeCodedOff,
             Wants::Merge => Takes::Merge,
-            Wants::YesOrNo => Takes::YesOrNo,
+            // A security ruling's alert names no head: a bare yes there is
+            // refused for the head the runner holds.
+            Wants::Trust | Wants::YesOrNo => Takes::YesOrNo,
         };
         Some(ReplyWith { ticket, takes })
     }

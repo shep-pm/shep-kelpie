@@ -6,7 +6,7 @@ How kelpie asks a contributor for a release and what it takes as one. ADR 0010. 
 
 - `follow_release` runs once a poll, after `follow_posts` and before `follow_answers`, for a contribution with a running clock. At `Clock::due` of `Nudge` the representative posts one comment through `Voice::post`: it names the review bots' open threads (only when a bot answered the pass; findings and nits as `flagged_lines`) and asks whether kelpie may take the pull request from here, by comment or by a thumbs up or down on it. `runner/contributions/release.rs`
 - `contributions[].asked` is `{ comment, at, asks, nos?, read?, closing?, thanked? }`, left out while none is open. `asks` and `nos` count asks and nos, `read` is the last 50 `Said` replies read as `other`, `closing` is the maintainer's close, `thanked` that its thanks was posted. A push or a cleared clock drops it, unless it is closing.
-- An ask first made at `Quiet` restarts the clock, so a contributor never nudged has the whole window. One made at `Nudge` keeps it.
+- An ask first made at `Quiet` restarts the clock, so a contributor never nudged has the whole window. One made at `Nudge` keeps it, but quiet comes no sooner than the ask plus `quiet_days - nudge_days` whole days (one when equal), so a late ask still gets its full notice. `contribution-talk.md`
 - A post on a contribution whose ask is still open past `Clock::acts_at`, the moment the clock said kelpie would take silence for a yes, carries the wait fact naming how many days late it is (`representative.md`, `runner/representative/sorry.rs`). #1967
 
 ## The answer
@@ -40,8 +40,3 @@ How kelpie asks a contributor for a release and what it takes as one. ADR 0010. 
 - It starts at `Phase::Review(Review::first())`: adopted, so `need_of` gives two reads with no plan yet, each the agent board's pick from reviewer files `agents.allow` holds except `contributions.security_reviewer` (`review.md`, `review-pick.md`). A `rework` starts at a worker's turn before that pass (`contribution-merge.md`).
 - `Runner::awaits_edits` runs in `release_one` where an open ask meets `Quiet` with no reply, after replies are read; an ask first made at `Quiet` is made as before. On a fork that is not `pushable` it raises `Held::NoEdits` (`reason: no-edits`) and releases nothing; an unreadable pull request waits for the next poll. Nothing is posted on the pull request.
 - `leave it open` pushes the number to `ProjectState.left_open`: `is_contribution` skips it, the record drops with its turns, and nothing is posted. An entry goes when the pull request leaves the open listing. `close with thanks` is as for `waiting`. State version 65.
-
-## Remote
-
-- `worktree::Remote` is where a work item's branch lives: `Origin`, or `Fork { url, branch }` for a contributor's fork. `prepare` (`Start::Pushed`), `origin_head`, `base_of`, `adopt`, `rebase` and `remove` take it. A work item records it as `remote`, left out for `Origin`; adopting a released fork contribution sets `Fork`, and every other caller passes `Origin`. A fork is fetched and pushed by URL, never added as a remote of the repo. `crates/process/src/worktree/`
-- A fork's branch is fetched to `refs/remotes/fork-<hash of the URL>/<branch>`, never under `origin`, so it cannot overwrite `origin/main`, which `Start::Main` and the catch-up with `main` always read. #631

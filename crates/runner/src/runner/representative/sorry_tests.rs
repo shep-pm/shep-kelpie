@@ -159,11 +159,10 @@ fn asked() -> (Rig, Mutex<Runner>) {
 
 // Lets `days` pass since the clock said kelpie would act on silence, then polls
 fn past_the_moment(rig: &Rig, runner: &Mutex<Runner>, days: u64) {
-    let since = contribution(rig, runner)["waiting_since"]
+    let to_quiet = contribution(rig, runner)["clock"]["days_to_quiet"]
         .as_u64()
         .expect("the clock runs");
-    let acts_at = since + QUIET_DAYS * DAY;
-    rig.clock.advance(acts_at + days * DAY - rig.clock.now().0);
+    rig.clock.advance((to_quiet + days) * DAY);
     poll_or_adopt(rig, runner);
 }
 

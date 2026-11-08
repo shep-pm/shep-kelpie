@@ -19,3 +19,8 @@ How kelpie pushes a fork worker's commits to the contributor's branch, and what 
 - It is never a promise to merge: the instruction forbids it, as the release ask's does, and only the maintainer's ruling decides a merge.
 - The work item knows its contributor: `WorkItem.contributor` is the login of the released record, set when `start_adoption` takes it and left out for any other work item, so an ordinary pull request's red CI posts nothing. State version 78.
 - A push of the contributor's after the release moves the head kelpie knew. The gate raises `foreign-change` as for any adopted pull request, and the commits kelpie has not pushed wait (see Push to the fork). A yes adopts the new head into the worktree. It is ruled on, never silently followed.
+
+## Remote
+
+- `worktree::Remote` is where a work item's branch lives: `Origin`, or `Fork { url, branch }` for a contributor's fork. `prepare` (`Start::Pushed`), `origin_head`, `base_of`, `adopt`, `rebase` and `remove` take it. A work item records it as `remote`, left out for `Origin`; adopting a released fork contribution sets `Fork`, and every other caller passes `Origin`. A fork is fetched and pushed by URL, never added as a remote of the repo. `crates/process/src/worktree/`
+- A fork's branch is fetched to `refs/remotes/fork-<hash of the URL>/<branch>`, never under `origin`, so it cannot overwrite `origin/main`, which `Start::Main` and the catch-up with `main` always read. #631

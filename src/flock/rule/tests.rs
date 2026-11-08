@@ -6,6 +6,11 @@ use crate::test::ticket;
 
 const FORMS: &str = "It takes `shep kelpie rule 14 yes` or `shep kelpie rule 14 no <note>`";
 const FORMS_427: &str = "It takes `shep kelpie rule 427 yes` or `shep kelpie rule 427 no <note>`";
+// What a refused answer to a contribution's security ruling is told it takes
+const TRUST_TAKES: &str = "it takes `yes <head>`, with 7 or more characters of the head \
+                           it trusts, or `no <note>`";
+// What a refused answer holding the project flag is told about it
+const WHERE_P: &str = "`-p` goes before the answer: `shep kelpie -p <project> rule 14 ...`";
 use crate::state::{Held, ProjectState, Resume, RulingKind, STATE_FILE, StateStore, Stuck};
 
 // A ruling on issue `id`, which is its number.
@@ -122,6 +127,101 @@ fn a_merge_ruling_takes_a_rework_and_another_ruling_refuses_one() {
         Err(format!(
             "ruling 14 was not answered: it takes `yes`, or `no <note>`. {FORMS}"
         ))
+    );
+}
+
+// A contribution's security ruling trusts only the head its yes names.
+fn security(id: TicketId, head: &str) -> Ruling {
+    let short = head.get(..7).unwrap_or(head);
+    Ruling {
+        pull_request: id.github(),
+        question: format!(
+            "The security review flagged #{id} at {short}, so nothing of it runs yet: \
+             `shep kelpie rule {id} yes {short}` trusts this head"
+        ),
+        kind: RulingKind::Contribution(Held::Security {
+            head: head.into(),
+            lines: Vec::new(),
+        }),
+        ..yes_or_no(id)
+    }
+}
+
+#[test]
+fn a_security_ruling_s_forms_name_yes_with_the_head() {
+    let home = tempfile::tempdir().unwrap();
+    waiting(
+        home.path(),
+        "koji",
+        vec![security(
+            ticket(246),
+            "5e46b09d0a1f2b3c4d5e6f708192a3b4c5d6e7f8",
+        )],
+    );
+    let projects = Projects::under(home.path());
+    let answer = |args: &[&str]| prepare(&projects, None, args, None);
+    // A yes naming the head, and a no, are taken as they are today.
+    assert_eq!(
+        answer(&["246", "yes", "5e46b09"]),
+        Ok((project("koji"), "246 yes 5e46b09".into()))
+    );
+    assert_eq!(
+        answer(&["246", "no", "leave", "it"]),
+        Ok((project("koji"), "246 no leave it".into()))
+    );
+    let err = answer(&["246", "yes", "5e46b09", "-p", "zendriver-rs"]).unwrap_err();
+    assert_eq!(
+        err,
+        format!(
+            "ruling 246 was not answered: {TRUST_TAKES}. It takes `shep kelpie rule 246 yes \
+             5e46b09` or `shep kelpie rule 246 no <note>`. `-p` goes before the answer: `shep \
+             kelpie -p <project> rule 246 ...`"
+        )
+    );
+    let err = answer(&["246"]).unwrap_err();
+    assert_eq!(
+        err,
+        "ruling 246 takes `shep kelpie rule 246 yes 5e46b09` or `shep kelpie rule 246 no <note>`"
+    );
+}
+
+#[test]
+fn a_refused_answer_holding_a_project_flag_says_where_it_goes() {
+    let (_home, projects) = two_projects();
+    let answer = |args: &[&str]| prepare(&projects, None, args, None);
+    for flag in ["-p", "--project"] {
+        let err = answer(&["14", "maybe", flag, "koji"]).unwrap_err();
+        assert_eq!(
+            err,
+            format!(
+                "ruling 14 was not answered: it takes `yes`, or `no <note>`. {FORMS}. {WHERE_P}"
+            ),
+            "{flag}"
+        );
+    }
+    // With no flag in it, the refusal says nothing of one.
+    assert_eq!(
+        answer(&["14", "maybe"]),
+        Err(format!(
+            "ruling 14 was not answered: it takes `yes`, or `no <note>`. {FORMS}"
+        ))
+    );
+}
+
+#[test]
+fn a_no_note_holding_a_project_flag_is_still_the_note() {
+    let (_home, projects) = two_projects();
+    let sent = prepare(
+        &projects,
+        None,
+        &["14", "no", "drop", "the", "-p", "flag"],
+        None,
+    );
+    assert_eq!(sent, Ok((project("koji"), "14 no drop the -p flag".into())));
+    let sent = prepare(&projects, None, &["14", "no drop the --project flag"], None);
+    assert_eq!(
+        sent,
+        Ok((project("koji"), "14 no drop the --project flag".into()))
     );
 }
 

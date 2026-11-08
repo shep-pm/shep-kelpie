@@ -210,7 +210,7 @@ impl Runner {
             let choices: &[&str] = match Wants::of(&ruling.kind) {
                 Wants::Answer => &[],
                 Wants::Merge => &["yes", "no", "rework"],
-                Wants::YesOrNo => &["yes", "no"],
+                Wants::Trust | Wants::YesOrNo => &["yes", "no"],
             };
             let details = json!({
                 "id": ruling.id,

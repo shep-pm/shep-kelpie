@@ -10,6 +10,7 @@ What a runner asks the maintainer, and how an answer comes back. The pass they s
 - Ruling = log line + `status` entry + webhook post, one question; `no <note>` is worker's next turn. #89
 - A ruling is named by its ticket id where the maintainer reads it: `#<pr>`, `#<issue>` before there is a pull request (a question waits for its draft, `workers.md`), or `k12` locally. The question, the webhook title, kelpie's GitHub comment and card and `status`'s `id` show it, and a reply starts with it. #508, #509, #1010
 - `rule <ruling> <answer>` (`rule 427`, `rule k12`; one ruling per item within a project), refuses an answer older than the ruling. An answer file left under an old counter id is read once, then refused. #509. Each trigger is `shep kelpie <verb>`, project from folder unless `-p`. #119, #507
+- A refused answer names every form its ruling takes. `Wants::Trust` is a contribution's security ruling's: its yes names the head it trusts (`yes <head>`, 7 characters or more), and `rule` names that head. An answer holding `-p` or `--project` as one of its own words is told the flag goes before the answer. #1969, `runner/words.rs`, `flock/rule/`
 - `rule` reaches a stopped runner via `<kelpie home>/<project>/answers/<ruling>` files applied next pass. `runner/trigger/`
 - One webhook (`discord` or `ntfy`) until shep carries questions; URL is a credential, passed to `curl` on stdin. ADR 0005, #333, `crates/core/src/webhook.rs`
 - ntfy reply carries TOTP (RFC 6238): a code posted on the alert sat on the topic it guarded. #111
