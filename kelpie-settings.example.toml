@@ -75,14 +75,19 @@ url = "https://ntfy.sh/your-private-topic"
 # the gateway knows it. `url` is the gateway's own `http://` address, with
 # its OpenAI routes under `/v1`. `key_env` names the variable in the
 # runner's environment holding the key the gateway gave kelpie: no agent
-# call sees that variable, and no file kelpie writes holds the key. Kelpie
-# takes no lease for a model behind a gateway, which queues its calls itself.
+# call sees that variable, and no file kelpie writes holds the key. A gateway
+# queues its own calls, so kelpie takes no lease of its own around them. A
+# turn or a review round on a `paddock` gateway holds a lease of the
+# gateway's own on its model, from its start to its end, so nothing it runs
+# on is evicted midway; an `openai` gateway holds no lease, and a model it
+# runs a turn on may be evicted.
 # A runner reads its gateways when it starts. The dog reads them again every
 # 30 seconds, but it sees a new `key_env` variable only after `shep disable
 # kelpie` and `shep enable kelpie`, so a model on a new gateway reads as
 # unknown until then.
-# `kind` says how kelpie talks to it beyond chat, `paddock` when absent and
-# the only kind so far.
+# `kind` says how kelpie talks to it beyond chat: `paddock` when it is left
+# out, or `openai` for any other OpenAI-compatible gateway, such as LiteLLM,
+# OpenRouter or a bare llama.cpp server.
 # [kelpie.gateways.paddock]
 # kind = "paddock"
 # url = "http://gpu-box:8700"
@@ -109,15 +114,14 @@ url = "https://ntfy.sh/your-private-topic"
 
 # Agents are not settings: each is a file of its own, `agents/<name>.md` in
 # kelpie's home (`$SHEP_HOME/kelpie/agents/`), YAML frontmatter then a
-# Markdown body. Kelpie ships `sonnet-high` and `opus-high`, which build,
-# and `defect-hunter-lite`, `defect-hunter` and `iq3-xxs-review`, which
-# review, and `shep kelpie add` writes them out and never overwrites one.
-# `iq3-xxs-review` runs on a gateway named `paddock`; it is first in the
-# default contribution pass only where this file holds that gateway. Kelpie
-# writes `qwen`, a reviewer that runs the
-# maintainer's qwen-review script, only where that script is installed. The
-# agent board picks each work item's implementer from the files below whose
-# role is `implementer`, and every reviewer file the project's `agents.allow`
+# Markdown body. Kelpie ships seven baselines, each saying what a role does
+# and binding no model, and three whole review bot agents, `coderabbit`,
+# `cubic` and `codex`. `shep kelpie add` writes a stub for each bot, never
+# overwriting one, and writes no stub for a baseline. Bind the lineup with
+# `shep kelpie agents init <harness>`, or one agent with `shep kelpie agents
+# new <role>`: a project with no implementer file is refused at its start.
+# The agent board picks each work item's implementer from the files below
+# whose role is `implementer`, and every reviewer file the project's `agents.allow`
 # holds, apart from `contributions.security_reviewer`, is a candidate for
 # each review round. Each round is the agent board's pick, once per reviewer,
 # ending sooner when no candidate can run. How many read a work item is the
@@ -143,8 +147,8 @@ url = "https://ntfy.sh/your-private-topic"
 #
 # A reviewer's body is its prompt, with `{{BASE}}` and `{{DIFF}}` where the
 # commit the change is against and the diff go, and kelpie adds the issue's
-# acceptance criteria. It runs a fresh session on `claude-code`, `codex` or
-# `pi`, which reads the worktree and runs no command; `paths` limits it to
+# acceptance criteria. It runs a fresh session on `claude-code`, `codex`,
+# `pi` or `goose`, which reads the worktree and runs no command; `paths` limits it to
 # pull requests that change a file under one of its globs, and
 # `second_look: true` runs it twice before the one fix turn, the second
 # time shown what the first found:

@@ -41,3 +41,7 @@ The decision:
 ADR 0017 adds `protocol` to the map, between `core` and `runner`: it holds the runner's typed requests, answers and owned status, and names only `core`, serde and serde_json.
 
 ADR 0017 also adds `client`, beside `runner`: it speaks the runner's socket and names only `protocol` and `core`. The root uses it.
+
+## Amendment, 2026-11-08: the leaves after the panel
+
+`panel` left the workspace with the panel (ba8e4fc13, ADR 0018). `disk`, `owner_only` and `tree` joined as leaves, each using no other workspace member. The leaves are now `process`, `facts`, `worker_folder`, `trim`, `disk`, `owner_only` and `tree`, beside the dev-only `test_support`. The dependency rule stands.

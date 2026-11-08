@@ -1,6 +1,6 @@
 # Tests a worker's sandbox cannot run
 
-A worker's sandbox binds no TCP port by design (`a_worker_binds_no_port` in `crates/runner/src/runner/core_tests/profile.rs`), and on macOS binds Unix sockets only in its own scratch folder, the one its `TMPDIR` names (#956). So some tests fail inside it and pass in CI. A red run of these in a worker is expected. It is not a bug in your change.
+A worker's sandbox binds no TCP port by design (`a_worker_binds_no_port` in `crates/runner/src/runner/core_tests/profile/mod.rs`), and on macOS binds Unix sockets only in its own scratch folder, the one its `TMPDIR` names (#956). So some tests fail inside it and pass in CI. A red run of these in a worker is expected. It is not a bug in your change.
 
 - Run what can run: `cargo test --lib <module path>` on the modules you changed.
 - Name in the pull request body the tests only CI ran.

@@ -225,11 +225,11 @@ mod tests {
             .replace("# routes = [\"/\"]", "routes = [\"/\"]")
             .replace("# pm = \"pm\"", "pm = \"pm\"")
             .replace(
-                "# [app.dogs.kelpie.rulings.pm_decides]\n# question =",
-                "[app.dogs.kelpie.rulings.pm_decides]\nquestion =",
+                "# [app.dogs.kelpie.rulings.pm_decides]\n# merge = false\n# question =",
+                "[app.dogs.kelpie.rulings.pm_decides]\nmerge = false\nquestion =",
             )
             .replace(
-                "# [app.dogs.kelpie.contributions]\n# pick = \"off\"\n# reviewers = [\"defect-hunter-lite\"]\n# security_reviewer = \"security-reviewer\"\n# quiet_days = 7\n# nudge_days = 3\n",
+                "# [app.dogs.kelpie.contributions]\n# pick = \"off\"\n# reviewers = [\"defect-hunter\"]\n# security_reviewer = \"security-reviewer\"\n# quiet_days = 7\n# nudge_days = 3\n",
                 "[app.dogs.kelpie.contributions]\npick = \"off\"\nreviewers = [\"defect-hunter\"]\nsecurity_reviewer = \"security-reviewer\"\nquiet_days = 7\nnudge_days = 3\n",
             )
             .replace(
