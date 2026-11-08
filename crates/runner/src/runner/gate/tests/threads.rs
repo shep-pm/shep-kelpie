@@ -518,7 +518,7 @@ fn a_close_whose_reply_is_refused_still_settles_the_thread() {
     let say: &'static str = Box::leak(
         String::from(
             "{\"threads\": [{\"item\": 7, \"thread\": 1, \"decision\": \"close\", \
-             \"why\": \"the guard sits in /Users/other/work.txt\"}]}",
+             \"why\": \"the guard sits in /Users/me/work.txt\"}]}",
         )
         .into_boxed_str(),
     );
