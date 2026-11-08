@@ -341,6 +341,13 @@ pub struct Triaged {
 }
 
 impl Triaged {
+    /// Whether the pass still waits on its author: for the answers to its
+    /// questions, or for the body their own session writes. It owes no label
+    /// meanwhile, and the board holds the issue (#1966).
+    pub fn open_questions(&self) -> bool {
+        self.asked.is_some() || self.questions.is_some() || self.local.is_some()
+    }
+
     /// Records that a triage call ran at `at`, keeping the times oldest first
     /// and the last [`TRIAGE_CALLS_KEPT`] of them
     pub fn add_call(&mut self, at: Timestamp) {

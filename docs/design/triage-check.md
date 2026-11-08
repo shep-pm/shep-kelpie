@@ -29,5 +29,5 @@ ADR 0018, cut 3: the board runs the issue check (`work.md`) on every new or edit
 - A body is never written over an edit the pass did not read. The record keeps `begun`, the hash of the body the call was made from, and the issue is read once more just before the write. A changed body gets no write and a notice, ends at `needs-approval`, and loses its `ran`, so the next poll checks the edit.
 - A priority the issue carries when its pass begins stands, as a `kind:` label does: the pass puts none on.
 - `triage.pick`, `triage.since` and `pruned_through` stay, but they decide only which failing issues reach the triager, `since` not for a held `ready-for-agent` one. The check runs whatever they say.
-- Another person's passing issue waits for the maintainer's label. The maintainer's failing hand-labelled issue is held and triaged, and keeps its label (`triage-hand.md`).
+- Another person's passing issue waits for the maintainer's label. The maintainer's failing hand-labelled issue is held and triaged, and its label comes off when its pass ends waiting (`triage-hand.md`).
 - The author's round, `wait_days` and `local` stay, now only for questions the triager has no good answer for.

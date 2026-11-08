@@ -306,6 +306,14 @@ impl Runner {
                 if ended {
                     return None;
                 }
+                // A pass that asked its author owes its labels still, and takes
+                // the queue's `ready-for-agent` back. This holds before the
+                // check's own reading, so the wait is what the board says.
+                if (self.triage_record(number)).is_some_and(|t| t.open_questions()) {
+                    return Some(Skip::Asked {
+                        issue: issue.ticket,
+                    });
+                }
                 let key = check::key(&issue.title, &issue.body, &issue.labels);
                 let kept = (self.state.checks.iter()).find(|c| c.issue == number);
                 let failures = match kept {
