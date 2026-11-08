@@ -49,13 +49,16 @@ fn a_changed_setting_takes_effect_at_once() {
 #[test]
 fn a_change_to_git_merging_alone_changes_nothing() {
     let rig = Rig::new("shep");
+    // A table an older build wrote, which `settings migrate` has not reached
+    rig.edit_settings(|s| {
+        let git = "[app.dogs.kelpie.git]\n";
+        assert!(s.contains(git), "the example's git table moved");
+        s.replace(git, &format!("{git}merging = \"ask\"\n"))
+    });
     let runner = rig.open().unwrap();
     let next = settings_with(&rig, |s| {
-        let flipped = match s.contains("\nmerging = \"ask\"\n") {
-            true => s.replace("\nmerging = \"ask\"\n", "\nmerging = \"auto\"\n"),
-            false => s.replace("\nmerging = \"auto\"\n", "\nmerging = \"ask\"\n"),
-        };
-        assert_ne!(flipped, s, "the example's `git.merging` moved");
+        let flipped = s.replace("\nmerging = \"ask\"\n", "\nmerging = \"auto\"\n");
+        assert_ne!(flipped, s, "the table's `git.merging` moved");
         flipped
     });
     let mut runner = runner.lock().unwrap();
