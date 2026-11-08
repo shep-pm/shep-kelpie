@@ -195,7 +195,7 @@ impl Runner {
                     self.pushed_back.forget(ticket, id);
                     let id = id.to_owned();
                     self.update_of(ticket, |item| {
-                        if !item.threads_accepted.iter().any(|t| *t == id) {
+                        if !item.threads_accepted.contains(&id) {
                             item.threads_accepted.push(id);
                         }
                     })

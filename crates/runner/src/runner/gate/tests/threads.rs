@@ -113,7 +113,10 @@ fn woken(rig: &Rig, n: usize) -> Vec<Seen> {
             return seen;
         }
         if Instant::now() >= deadline {
-            panic!("the project manager was woken {} times, not {n}", seen.len());
+            panic!(
+                "the project manager was woken {} times, not {n}",
+                seen.len()
+            );
         }
         std::thread::yield_now();
     }
@@ -257,10 +260,17 @@ fn an_open_nit_holds_the_merge_and_asks_the_project_manager() {
         "{}",
         wake.call.prompt
     );
-    assert!(wake.call.prompt.contains(&head[..7]), "{}", wake.call.prompt);
+    assert!(
+        wake.call.prompt.contains(&head[..7]),
+        "{}",
+        wake.call.prompt
+    );
 
     let status = rig.ask(&runner, "status", None);
-    assert_eq!(status["work_item"]["phase"]["state"], "ci", "it waits in CI");
+    assert_eq!(
+        status["work_item"]["phase"]["state"], "ci",
+        "it waits in CI"
+    );
     assert_eq!(status["rulings"], json!([]), "no merge ruling yet");
 
     step(&runner).unwrap();
@@ -294,7 +304,11 @@ fn an_open_writers_thread_holds_the_merge_and_asks_the_project_manager() {
         "{}",
         wake.call.prompt
     );
-    let line = wake.call.prompt.lines().find(|l| l.contains("1. work.txt:3"));
+    let line = wake
+        .call
+        .prompt
+        .lines()
+        .find(|l| l.contains("1. work.txt:3"));
     assert!(
         !line.expect("the thread's line").contains("public API"),
         "the worker's answer is not the thread: {}",
@@ -317,7 +331,9 @@ fn the_project_manager_cannot_close_the_maintainers_thread() {
     );
     let said = rig.forge.coderabbit.replies();
     assert!(
-        !said.iter().any(|(_, body)| body.starts_with("Closed as wrong")),
+        !said
+            .iter()
+            .any(|(_, body)| body.starts_with("Closed as wrong")),
         "{said:?}"
     );
     assert_eq!(rig.forge.coderabbit.resolved(), Vec::<String>::new());
@@ -335,7 +351,10 @@ fn a_push_back_replies_and_holds_the_merge_until_the_maintainer_answers() {
         "{acted:?}"
     );
     assert_eq!(dropped, Vec::<String>::new());
-    assert_eq!(last_reply(&rig), (id.clone(), "Pushed back: the race is real".to_owned()));
+    assert_eq!(
+        last_reply(&rig),
+        (id.clone(), "Pushed back: the race is real".to_owned())
+    );
     assert!(
         !rig.forge.coderabbit.resolved().contains(&id),
         "a pushed-back thread stays open"
@@ -387,7 +406,11 @@ fn a_fix_runs_one_worker_turn_and_comes_back_to_the_gate() {
     let (rig, runner, _) = at_the_gate(pm_project("threads-fix"), &[NIT]);
     worker_says(
         &rig,
-        [Scripted::PushSay("shorter.txt", "shorter\n", "thread 1: fixed")],
+        [Scripted::PushSay(
+            "shorter.txt",
+            "shorter\n",
+            "thread 1: fixed",
+        )],
     );
 
     let (acted, dropped) = ruled(&ruled_by(&rig, &runner, FIX));
@@ -399,7 +422,11 @@ fn a_fix_runs_one_worker_turn_and_comes_back_to_the_gate() {
     );
 
     let item = runner.lock().unwrap().state.work_items[0].clone();
-    assert_eq!(item.threads_sent, [THREAD], "the ruled thread goes to the worker");
+    assert_eq!(
+        item.threads_sent,
+        [THREAD],
+        "the ruled thread goes to the worker"
+    );
     assert_eq!(item.counts.fix_turns, 1);
 
     steps(&runner, |r| matches!(r, StepReport::FixPushed { .. }));
@@ -409,8 +436,10 @@ fn a_fix_runs_one_worker_turn_and_comes_back_to_the_gate() {
         panic!("{turns:?}");
     };
     assert!(
-        fix.contains("The project manager ruled on 1 open review thread(s) on your pull \
-                      request #71"),
+        fix.contains(
+            "The project manager ruled on 1 open review thread(s) on your pull \
+                      request #71"
+        ),
         "{fix}"
     );
     assert!(fix.contains("review-findings.md"), "{fix}");
@@ -543,7 +572,11 @@ fn a_declined_thread_closed_as_wrong_is_not_asked_again() {
     assert_eq!(rig.forge.coderabbit.resolved(), [THREAD]);
     let item = runner.lock().unwrap().state.work_items[0].clone();
     assert_eq!(item.threads_accepted, [THREAD], "the close settles it");
-    assert_eq!(pm_seen(&rig).len(), 2, "the settled thread is asked for no more");
+    assert_eq!(
+        pm_seen(&rig).len(),
+        2,
+        "the settled thread is asked for no more"
+    );
 }
 
 #[test]
@@ -595,8 +628,10 @@ fn the_item_waits_with_the_project_manager_down_and_raises_no_ruling() {
 fn a_restart_with_the_ask_out_asks_again() {
     let (rig, runner, _) = at_the_gate(pm_project("threads-restart"), &[NIT]);
     let hold = Hold::default();
-    rig.claude
-        .script_for(Role::Pm, [Scripted::Hold(hold.clone()), Scripted::Say(NOTHING)]);
+    rig.claude.script_for(
+        Role::Pm,
+        [Scripted::Hold(hold.clone()), Scripted::Say(NOTHING)],
+    );
     let driven = Driven::new(&runner);
     driven.started(); // the gate holds the merge and wakes the project manager
 
@@ -612,7 +647,11 @@ fn a_restart_with_the_ask_out_asks_again() {
     let runner = rig.open().unwrap();
     answers(&runner, 1);
 
-    assert_eq!(pm_seen(&rig).len(), 2, "a restart asks about the thread again");
+    assert_eq!(
+        pm_seen(&rig).len(),
+        2,
+        "a restart asks about the thread again"
+    );
     step(&runner).unwrap();
     assert_eq!(
         rig.ask(&runner, "status", None)["work_item"]["held_up"]["because"].as_str(),
@@ -673,7 +712,13 @@ fn fix_after_fix_parks_on_over_budget_and_raises_no_merge_ruling() {
     answers(&runner, 2);
     let seen = steps(&runner, |r| matches!(r, StepReport::Failed { .. }));
 
-    let StepReport::Failed { issue, id, question, .. } = seen.last().unwrap() else {
+    let StepReport::Failed {
+        issue,
+        id,
+        question,
+        ..
+    } = seen.last().unwrap()
+    else {
         panic!("{seen:?}");
     };
     assert_eq!(*issue, ticket(7));
@@ -699,9 +744,12 @@ fn a_push_back_asks_nothing_more_until_the_maintainer_replies() {
     assert_eq!(pm_seen(&rig).len(), 1, "the push-back holds the ask back");
     assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
 
-    rig.forge
-        .coderabbit
-        .person_replies(&id, "octocat", Standing::Writer, "Fair. I will fix it myself.");
+    rig.forge.coderabbit.person_replies(
+        &id,
+        "octocat",
+        Standing::Writer,
+        "Fair. I will fix it myself.",
+    );
     worker_says(&rig, [Scripted::Push("theirs.txt", "theirs\n")]);
     pm_says(&rig, [NOTHING]);
     answers(&runner, 1);
@@ -763,7 +811,9 @@ fn a_strangers_thread_holds_nothing_and_reaches_no_prompt() {
     assert!(pm_seen(&rig).is_empty(), "no model is asked about it");
     let notes = runner.lock().unwrap().take_notes();
     assert!(
-        notes.iter().any(|n| n.contains("1 open thread on #71 held nothing")),
+        notes
+            .iter()
+            .any(|n| n.contains("1 open thread on #71 held nothing")),
         "{notes:?}"
     );
 }
@@ -827,7 +877,10 @@ fn an_adopted_contribution_keeps_its_ruling_and_asks_nothing() {
         question.contains("1 nit left open (cubic)"),
         "its threads stay the maintainer's to read: {question}"
     );
-    assert!(pm_seen(&rig).is_empty(), "nothing is asked of the project manager");
+    assert!(
+        pm_seen(&rig).is_empty(),
+        "nothing is asked of the project manager"
+    );
 }
 
 #[test]
@@ -841,10 +894,10 @@ fn deferred_findings_are_still_filed_at_the_merge_after_a_follow_up_before_it() 
     );
     let rig = pm_project("threads-deferred");
     rig.merge_auto();
-    let (rig, runner, head) = at_the_gate_found(rig, &[found.clone()]);
+    let (rig, runner, head) = at_the_gate_found(rig, std::slice::from_ref(&found));
     std::fs::write(
         rig.build_7().join("deferred-findings.md"),
-        deferred(&[found.clone()]),
+        deferred(std::slice::from_ref(&found)),
     )
     .unwrap();
     open_bots(&rig, &head, &[NIT]);
@@ -869,7 +922,8 @@ fn at_the_gate_found(rig: Rig, found: &[Finding]) -> (Rig, Mutex<Runner>, String
     rig.ask(&runner, "add", Some("7"));
     runner.lock().unwrap().plan_two_reads_for_the_rig();
     rig.forge.open_pull_request(71, "kelpie/7", &[7]);
-    rig.reviewer.script([ScriptedRound::Findings(found.to_vec())]);
+    rig.reviewer
+        .script([ScriptedRound::Findings(found.to_vec())]);
     rig.claude.script([
         Scripted::Push("work.txt", "work\n"),
         Scripted::Push("fixed.txt", "fixed\n"),

@@ -479,7 +479,8 @@ pub enum RulingKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         late_fix: bool,
         /// The listed review bots' nits still open on the head, by bot,
-        /// when any are. They never hold a merge.
+        /// when any are. They hold a merge only where the project names a
+        /// project manager, which rules on every open thread first.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         nits: Option<String>,
         /// Every thread the listed review bots have open on the head, nits

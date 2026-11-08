@@ -63,6 +63,17 @@ The maintainer narrowed the two lines above (#1761, #1762). The rest of this rec
 - "none reaches the maintainer" holds for what the project manager can carry out. A gate #1761 holds, a `design` flag, a turn kelpie could not set up, a ruling raised in a drain, a wake that failed or gave no answer, and every contribution ruling still reach the maintainer.
 - `local-model-spilled` stays refused. No ruling raises it, and the name stays so ledger and history lines written before it went still read.
 
+### Amendment, 2026-11-07: the project manager rules on every thread open at the merge
+
+The maintainer ruled that no open thread reaches the merge unruled, nits included (#1824). It amends ADR 0007's rule that a bot's nits on a fix's head stay open.
+
+- A project that names `agents.pm` puts each open review thread of its own work item to the project manager at the gate, before the merge. It says fix here, follow up, or close it as wrong with a reason. Kelpie replies with the reason and resolves a closed thread, files a follow-up as a `ready-for-agent` issue and resolves its thread, and sends every fix to the worker as one turn.
+- On a thread the maintainer wrote in, the project manager may push back in place of closing. Kelpie replies with its reason and the thread stays open, so the merge waits for the maintainer's reply. It never closes the maintainer's thread.
+- A thread by someone outside the project reaches no model and holds nothing. A contribution's threads, and those of an adopted item with a `contributor`, stay the maintainer's under today's ruling.
+- No count of rounds limits this. The hard limit is the item's spend cap: a fix after a fix spends each turn, so it parks on `over-budget`. A worker on a harness that reports no dollars has no cap, so only the project manager's `follow-up` or `close` ends its fix loop.
+- A project with no `agents.pm` keeps its merge ruling, and its nits hold nothing.
+- The project manager down, or a drain, makes the item wait in CI with no ruling and no time limit.
+
 ## Considered options
 
 - **Keep the settings as the rulebook.** Every call would need a rule written before the work, so the maintainer reads a file to change how one item runs, and the change lands on every item at once.

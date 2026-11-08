@@ -306,10 +306,7 @@ impl FakeCodeRabbit {
             // A bot's thread, whose place in the talk is built from its activity
             None => {
                 let mut replies = self.thread_replies.lock().unwrap();
-                replies
-                    .entry(thread.to_owned())
-                    .or_default()
-                    .push(remark);
+                replies.entry(thread.to_owned()).or_default().push(remark);
             }
         }
         id
