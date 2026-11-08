@@ -8,7 +8,7 @@ use serde_json::json;
 use super::{answered, name_pm, pm_seen, question, step_until};
 use crate::board::{READY, TRIAGE};
 use crate::ports::{AgentError, Finding, Severity};
-use crate::runner::follow_up::tests::{after_merge, auto_merging_on, racy};
+use crate::runner::follow_up::tests::{after_merge, merged_by_hand_on, racy};
 use crate::runner::{Runner, StepReport, step};
 use crate::settings::Harness;
 use crate::test::ticket;
@@ -16,12 +16,12 @@ use crate::test::{Rig, Scripted};
 
 const LEAVES_IT: &str = "{\"answer\": null}";
 
-/// A project with a project manager whose issue 7 is ready to merge under
-/// `auto`, the worker having written `work` to `work.txt`
+/// A project with a project manager whose issue 7 the maintainer merged by hand,
+/// the worker having written `work` to `work.txt`
 fn ready_to_merge(project: &str, work: &'static str) -> (Rig, Mutex<Runner>) {
     let rig = Rig::new(project);
     name_pm(&rig);
-    auto_merging_on(rig, work, &[racy()])
+    merged_by_hand_on(rig, work, &[racy()])
 }
 
 /// ... merged, and the follow-up ruling raised
@@ -45,7 +45,7 @@ fn merged_with_two_findings(project: &str) -> (Rig, Mutex<Runner>) {
         "leaks a handle",
         "the file stays open",
     );
-    let (rig, runner) = auto_merging_on(rig, "work\n", &[racy(), leak]);
+    let (rig, runner) = merged_by_hand_on(rig, "work\n", &[racy(), leak]);
     let Some(StepReport::Ruling { id, .. }) = after_merge(&runner) else {
         panic!("the maintainer was not asked about the findings");
     };

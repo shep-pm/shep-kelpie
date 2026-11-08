@@ -6,7 +6,7 @@ use std::time::Instant;
 use serde_json::json;
 
 use crate::board::READY;
-use crate::ports::{Cost, Finding, PullRequestState, Role, Severity, Standing};
+use crate::ports::{Cost, PullRequestState, Role, Standing};
 use crate::runner::flight::tests::Driven;
 use crate::runner::retro::journal::{self, Entry};
 use crate::runner::review_bot::is_reply;
