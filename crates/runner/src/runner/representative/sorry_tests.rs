@@ -3,6 +3,8 @@
 
 use std::sync::Mutex;
 
+use serde_json::json;
+
 use super::{IssuePost, Opening, Post};
 use crate::ports::{Clock as _, Role, Timestamp};
 use crate::runner::Runner;
@@ -10,6 +12,7 @@ use crate::runner::contributions::pass_tests::read_through;
 use crate::runner::contributions::security_tests::contribution;
 use crate::runner::contributions::tests::poll_or_adopt;
 use crate::runner::review_bot::contribution_turns::{FINDING, contributed, until_summoned};
+use crate::state::StateStore;
 use crate::test::{Rig, Scripted, VIEWER};
 
 const CONTRIBUTOR: &str = "newcomer";
@@ -49,17 +52,17 @@ fn post<'a>(number: u64, said: &'a str) -> Post<'a> {
     }
 }
 
-// A post on an issue, greeting its author
-fn issue_post() -> IssuePost<'static> {
+// A post on issue 30, greeting `author`
+fn issue_post<'a>(author: &'a str) -> IssuePost<'a> {
     IssuePost {
         kind: "Write the triage comment",
         facts: "It is a bug.\n",
         earlier: &[],
         opening: Opening {
-            greet: Some(CONTRIBUTOR),
+            greet: Some(author),
             thanks: true,
         },
-        author: CONTRIBUTOR,
+        author,
         said: "It crashes when I run it.",
     }
 }
@@ -181,21 +184,45 @@ fn a_release_ask_acted_on_late_gets_the_fact() {
     );
 }
 
-// The heading a triage comment carries its questions under, which is what makes
-// it the ask a later post is late on
+// The heading a triage comment carries its questions under
 const QUESTIONS: &str = "❓ Q1 - Which OS crashes?\n\n➡️ Linux";
+
+// Issue 30 with its triage questions up `ago` days back, and its record holding
+// the ask open, or holding it settled when `settled`. The runner is reopened so
+// its state carries the record, which is what the ask's life is.
+fn triage_ask(rig: &Rig, runner: Mutex<Runner>, ago: u64, settled: bool) -> Mutex<Runner> {
+    let at = rig.clock.now().0.saturating_sub(ago * DAY);
+    wrote(rig, 30, VIEWER, QUESTIONS, ago);
+    let store = StateStore::new(rig.paths().state);
+    let found = store.load().unwrap().unwrap();
+    let mut saved = serde_json::to_value(&found).unwrap();
+    let mut held = json!({
+        "issue": 30, "comment": 100, "at": at, "author": CONTRIBUTOR, "seen": [],
+        "step": if settled { "done" } else { "commented" },
+    });
+    if !settled {
+        held["questions"] = json!({ "comment": 100, "at": at });
+    }
+    saved["triage"] = json!({
+        "since": found.triage.as_ref().map(|t| t.since).unwrap_or(Timestamp(at)),
+        "issues": [held],
+    });
+    store.save(&serde_json::from_value(saved).unwrap()).unwrap();
+    drop(runner);
+    rig.open().unwrap()
+}
 
 #[test]
 fn a_lapsed_triage_ask_acted_on_late_gets_the_fact() {
     let (rig, runner) = picking();
-    wrote(&rig, 30, VIEWER, QUESTIONS, WAIT_DAYS + 9);
+    let runner = triage_ask(&rig, runner, WAIT_DAYS + 9, false);
     rig.claude
         .script_for(Role::Representative, [Scripted::Say("Ok.")]);
 
     runner
         .lock()
         .unwrap()
-        .represent_issue(30, &issue_post())
+        .represent_issue(30, &issue_post(CONTRIBUTOR))
         .unwrap();
 
     let fact = owned(&rig).expect("the post owns the lapsed ask");
@@ -208,10 +235,29 @@ fn a_lapsed_triage_ask_acted_on_late_gets_the_fact() {
 }
 
 #[test]
+fn a_triage_ask_ended_on_schedule_leaves_nothing_to_own() {
+    // Its author never answered and kelpie ended the round when its wait ran
+    // out, which clears the ask from the record. The questions comment stays on
+    // the thread, and a post weeks later owns no wait for it.
+    let (rig, runner) = picking();
+    let runner = triage_ask(&rig, runner, WAIT_DAYS + 9, true);
+    rig.claude
+        .script_for(Role::Representative, [Scripted::Say("Ok.")]);
+
+    runner
+        .lock()
+        .unwrap()
+        .represent_issue(30, &issue_post(CONTRIBUTOR))
+        .unwrap();
+
+    assert_eq!(owned(&rig), None, "{}", prompt(&rig));
+}
+
+#[test]
 fn an_ask_the_author_answered_inside_its_wait_is_no_late_promise() {
     let (rig, runner) = picking();
-    // The ask, an answer inside its wait, and kelpie's word after the answer
-    wrote(&rig, 30, VIEWER, QUESTIONS, WAIT_DAYS + 9);
+    let runner = triage_ask(&rig, runner, WAIT_DAYS + 9, false);
+    // An answer inside its wait, and kelpie's word after the answer
     wrote(&rig, 30, CONTRIBUTOR, "Linux, on start.", WAIT_DAYS + 8);
     wrote(&rig, 30, VIEWER, "That settles most of it.", 1);
     rig.claude
@@ -220,10 +266,33 @@ fn an_ask_the_author_answered_inside_its_wait_is_no_late_promise() {
     runner
         .lock()
         .unwrap()
-        .represent_issue(30, &issue_post())
+        .represent_issue(30, &issue_post(CONTRIBUTOR))
         .unwrap();
 
     assert_eq!(owned(&rig), None, "{}", prompt(&rig));
+}
+
+#[test]
+fn a_maintainer_own_issue_owns_the_wait_kelpie_left_it() {
+    // The maintainer opened it and kelpie never answered. Their own word is not
+    // the answer to it, even though their login is one of ours.
+    let (rig, runner) = picking();
+    wrote(&rig, 30, BOSS, "It crashes on start, on Linux.", 5);
+    rig.claude
+        .script_for(Role::Representative, [Scripted::Say("Ok.")]);
+
+    runner
+        .lock()
+        .unwrap()
+        .represent_issue(30, &issue_post(BOSS))
+        .unwrap();
+
+    assert_eq!(
+        owned(&rig).as_deref(),
+        Some("This thread waited 5 days on kelpie or the maintainer before this post."),
+        "{}",
+        prompt(&rig)
+    );
 }
 
 #[test]

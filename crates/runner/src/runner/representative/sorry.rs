@@ -3,8 +3,9 @@
 //! A stopped runner or an ignored project leaves a contributor waiting, and a
 //! post that comes weeks later reads as if no time passed. `Runner::waited_line`
 //! works out how many days the thread waited on kelpie or the maintainer before
-//! this post, from the reader's last word against ours and from a promise kelpie
-//! said it would keep and did not. `represent_within` states it as a fact once
+//! this post, from the reader's last word against the answers kelpie and the
+//! maintainer wrote, and from an ask kelpie's own record still holds open past
+//! the moment it said it would act. `represent_within` states it as a fact once
 //! it reaches `contributions.nudge_days`, and the representative opens with it
 //! (`agents/representative.md`).
 
@@ -13,7 +14,6 @@ use super::{Post, Thread};
 use crate::ports::{ThreadComment, Timestamp};
 use crate::runner::contributions::clock::Clock;
 use crate::runner::thread_replies::plain_login;
-use crate::runner::triage::ask::holds_questions;
 use crate::state::{Asked, Contribution};
 use crate::ticket::TicketId;
 
@@ -36,7 +36,7 @@ impl Runner {
         };
         let days = unanswered(post, &comments, &ours, head, now)
             .into_iter()
-            .chain(promise(self, post, thread, &comments, &ours, now))
+            .chain(promise(self, post, thread, &comments, now))
             .max()?;
         let nudge = u64::from(self.settings.contributions.nudge_days.get());
         (days >= nudge).then(|| {
@@ -70,7 +70,8 @@ fn followed<'a>(runner: &'a Runner, post: &Post<'_>) -> Option<&'a Contribution>
 
 // How many days the reader's last word has gone unanswered, or `None` when the
 // newest word on the thread is ours. With none of ours at all, the wait runs
-// from their first word.
+// from their first word. The reader's own word never answers it: a maintainer's
+// own issue waits on kelpie like any other, even with their login in `ours`.
 fn unanswered(
     post: &Post<'_>,
     comments: &[ThreadComment],
@@ -85,7 +86,7 @@ fn unanswered(
         .collect();
     let last = theirs.iter().copied().chain(head).max();
     let ours_last = (comments.iter())
-        .filter(|c| ours.contains(&plain_login(&c.author)))
+        .filter(|c| plain_login(&c.author) != reader && ours.contains(&plain_login(&c.author)))
         .map(|c| c.created)
         .max();
     let from = match (ours_last, last) {
@@ -97,24 +98,18 @@ fn unanswered(
 }
 
 // How late this post is on a promise kelpie made on its thread: a release ask
-// whose quiet window closed, or a triage ask whose wait ran out
+// whose quiet window closed, or a triage ask still waiting on its author past
+// its own wait
 fn promise(
-    runner: &mut Runner,
+    runner: &Runner,
     post: &Post<'_>,
     thread: Thread<'_>,
     comments: &[ThreadComment],
-    ours: &[String],
     now: Timestamp,
 ) -> Option<u64> {
     match thread {
         Thread::PullRequest => release_late(runner, post, now),
-        Thread::Issue(_) => triage_late(
-            post,
-            comments,
-            ours,
-            runner.settings.triage.wait_days.get(),
-            now,
-        ),
+        Thread::Issue(_) => triage_late(runner, post, comments, now),
     }
 }
 
@@ -129,21 +124,26 @@ fn release_late(runner: &Runner, post: &Post<'_>, now: Timestamp) -> Option<u64>
     Some(days(clock.acts_at(), now))
 }
 
-// The days past the wait of a triage ask that no answer came inside. An ask
-// still waiting, or one the login it asked answered in time, is no promise kept
-// late.
+// The days past the wait of the triage ask `post`'s issue record still holds
+// open. The record is the ask's life: `triage_none` clears it when silence ends
+// the round on schedule, so a settled ask is nothing to own however long its
+// comment has been up. An answer inside the wait settles it the same way.
 fn triage_late(
+    runner: &Runner,
     post: &Post<'_>,
     comments: &[ThreadComment],
-    ours: &[String],
-    wait_days: u32,
     now: Timestamp,
 ) -> Option<u64> {
-    let asked_at = (comments.iter())
-        .filter(|c| ours.contains(&plain_login(&c.author)) && holds_questions(&c.body))
-        .map(|c| c.created)
-        .max()?;
-    let lapse = Timestamp(asked_at.0.saturating_add(u64::from(wait_days) * DAY));
+    let held = (runner.state.triage.iter())
+        .flat_map(|t| t.issues.iter())
+        .find(|t| t.issue == post.pull_request)?;
+    let asked_at = held
+        .questions
+        .as_ref()
+        .map(|q| q.at)
+        .or_else(|| held.asked.as_ref().map(|a| a.at))?;
+    let wait = u64::from(runner.settings.triage.wait_days.get());
+    let lapse = Timestamp(asked_at.0.saturating_add(wait * DAY));
     if now <= lapse {
         return None;
     }
