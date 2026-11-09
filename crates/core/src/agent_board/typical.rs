@@ -348,6 +348,7 @@ mod tests {
                 typical: unpriced,
                 local: false,
                 held: false,
+                full: false,
             },
             Candidate {
                 agent: &opus,
@@ -356,6 +357,7 @@ mod tests {
                 typical: history.item("opus", Tier::Standard, Some("fix")),
                 local: false,
                 held: false,
+                full: false,
             },
         ];
         let picks = (pick(&Item::default(), &candidates).into_iter())

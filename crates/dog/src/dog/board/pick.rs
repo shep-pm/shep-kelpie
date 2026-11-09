@@ -90,6 +90,10 @@ fn candidates<'a>(
         .filter(|(name, _)| names.contains(name))
         .map(|(name, agent)| {
             let (typical, turn) = estimate(&history, name.as_str(), agent, kind);
+            let full = (agent.runs.gateway())
+                .and_then(|(gateway, model)| shown.load(gateway, model))
+                .flatten()
+                .is_some_and(|load| agent_board::full(&load));
             Candidate {
                 agent: name,
                 fit: &agent.fit,
@@ -97,19 +101,21 @@ fn candidates<'a>(
                 typical,
                 local: !(agent.runs.session()).is_some_and(|(_, limit)| !limit.is_local()),
                 held: bills_api(agent) && shown.api_held(now).is_some(),
+                full,
             }
         })
         .collect()
 }
 
 // What the dog reads of `candidate`, which starts in `wait` seconds. The ask's
-// runner orders it, so the cost, tier, local, held and budget all go with it.
+// runner orders it, so the cost, tier, local, held, full and budget all go with it.
 fn read(candidate: &Candidate<'_>, agent: &Agent, wait: u64, api: Budget) -> Pick {
     Pick {
         cost_usd: candidate.typical.cost_usd,
         tier: Some(candidate.fit.tier()),
         local: candidate.local,
         held: candidate.held,
+        full: candidate.full,
         budget: Some(budget(agent, candidate.local, api)),
         ..Pick::new(
             candidate.agent.clone(),

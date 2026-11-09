@@ -35,6 +35,14 @@ pub fn wait(availability: Availability<'_>, turn_secs: u64, now: Timestamp) -> O
     }
 }
 
+/// Whether `load`'s queue holds at least as many lease asks as the model has
+/// turns, so one more worker waits more than a full turn
+///
+/// A model that lists no slots has no turn limit and is never full.
+pub fn full(load: &ModelLoad) -> bool {
+    load.slots > 0 && load.waiting >= load.slots
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,6 +86,31 @@ mod tests {
     #[test]
     fn a_model_with_no_slots_listed_waits_nothing() {
         assert_eq!(wait(load(0, 3, 0), 600, Timestamp(0)), Some(0));
+    }
+
+    #[test]
+    fn a_queue_as_deep_as_the_turns_is_full() {
+        let full = |slots, held, waiting| {
+            super::full(&ModelLoad {
+                slots,
+                held,
+                waiting,
+            })
+        };
+        assert!(full(2, 2, 2));
+        assert!(full(2, 0, 3), "a longer queue is full too");
+        assert!(!full(2, 2, 1), "one short of the turns");
+        assert!(!full(2, 2, 0), "held turns alone are not a queue");
+    }
+
+    #[test]
+    fn a_model_with_no_slots_listed_is_never_full() {
+        let none = ModelLoad {
+            slots: 0,
+            held: 3,
+            waiting: 5,
+        };
+        assert!(!super::full(&none));
     }
 
     #[test]

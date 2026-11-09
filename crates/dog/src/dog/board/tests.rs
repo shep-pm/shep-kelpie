@@ -9,7 +9,7 @@ use crate::agents::Tier;
 use crate::api_refusal::{CREDIT_RECHECK_SECS, Refusal};
 use crate::dog::availability::{Availability, Readers, Sources, read};
 use crate::lease::door::{Budget, Pick, PickAsk};
-use crate::ports::{Meter, Timestamp, Utilization};
+use crate::ports::{Meter, ModelLoad, Timestamp, Utilization};
 use crate::settings::{Account, Gateway, GatewayName, Gateways};
 use crate::test::{EPOCH, FakeClock, FakeMeter, LeaseReads, utilization, write_in};
 
@@ -172,6 +172,22 @@ async fn seen_plans(
     claude: Utilization,
     codex: Utilization,
 ) -> Availability {
+    seen_leased(
+        agents,
+        gateways,
+        Arc::new(LeaseReads::default()),
+        (claude, codex),
+    )
+    .await
+}
+
+// What the dog has read once of `agents`' models through `leases` and of the plans.
+async fn seen_leased(
+    agents: &Agents,
+    gateways: &Gateways,
+    leases: Arc<LeaseReads>,
+    (claude, codex): (Utilization, Utilization),
+) -> Availability {
     let sources = Sources::of(agents, gateways);
     let shown = Mutex::new(Availability::new(&sources));
     let meter = |usage| {
@@ -180,7 +196,7 @@ async fn seen_plans(
         Arc::new(meter) as Arc<dyn Meter>
     };
     let readers = Readers {
-        leases: Arc::new(LeaseReads::default()),
+        leases,
         meters: BTreeMap::from([
             (Account::Claude, meter(claude)),
             (Account::Codex, meter(codex)),
@@ -282,6 +298,70 @@ async fn a_model_behind_a_gateway_with_no_load_to_read_waits_nothing() {
         status["local"]["wait"],
         Value::Null,
         "paddock's load is unread"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_local_model_with_its_turns_queued_is_read_as_full() {
+    let dir = tempfile::tempdir().unwrap();
+    let on = |gateway: &str| {
+        format!(
+            "---\nrole: implementer\nharness: pi\nmodel: coder\neffort: low\n\
+             gateway: {gateway}\ncontext: 65536\n---\n"
+        )
+    };
+    write_in(dir.path(), "local.md", &on("paddock"));
+    write_in(dir.path(), "lite.md", &on("lite"));
+    write_in(dir.path(), "plan.md", &format!("{ON_CLAUDE}---\n"));
+    let agents = Agents::load(dir.path()).unwrap();
+    let table: BTreeMap<GatewayName, Gateway> = toml::from_str(
+        "[paddock]\nurl = \"http://gpu:8700\"\nkey_env = \"PADDOCK_KEY\"\n\
+         [lite]\nkind = \"openai\"\nurl = \"http://lite:4000\"\nkey_env = \"LITE_KEY\"\n",
+    )
+    .unwrap();
+    let gateways = Gateways::reading(table, |_| Some("key".to_owned()));
+    let board = Board::new(&agents);
+    let ask = PickAsk {
+        agents: ["local", "lite", "plan"].map(AgentName::kelpies).to_vec(),
+        ..ask_all()
+    };
+    // Each agent the board reads, by name, with whether it reads it as full.
+    let full_after = |load: Option<ModelLoad>| {
+        let (agents, gateways, board, ask) = (&agents, &gateways, &board, &ask);
+        async move {
+            let leases = Arc::new(LeaseReads::default());
+            leases.loaded(load);
+            let idle = (utilization(10, 0), utilization(0, 0));
+            let shown = seen_leased(agents, gateways, leases, idle).await;
+            let picks = pick::answer(&board.view(), &shown, ask, Timestamp(EPOCH));
+            let read: BTreeMap<_, _> = (picks.into_iter())
+                .map(|p| (p.agent.to_string(), p.full))
+                .collect();
+            read
+        }
+    };
+    let load = |waiting| {
+        Some(ModelLoad {
+            slots: 2,
+            held: 2,
+            waiting,
+        })
+    };
+
+    let queued = full_after(load(2)).await;
+    assert_eq!(
+        (queued["local"], queued["lite"], queued["plan"]),
+        (true, false, false),
+        "paddock's queue is as deep as its 2 turns; a gateway with no load read and a plan are never full"
+    );
+    assert!(
+        !full_after(load(1)).await["local"],
+        "one short of its turns"
+    );
+    assert_ne!(
+        full_after(None).await.get("local"),
+        Some(&true),
+        "a load that could not be read is never full"
     );
 }
 

@@ -7,7 +7,7 @@ use super::briefing::passed_over;
 use super::pace::{Started, Walked};
 use super::pm::Picked;
 use super::trigger::issue_list;
-use crate::agent_board::starts_within_slack;
+use crate::agent_board::available;
 use crate::board::check::{fenced, label_kind};
 use crate::board::{
     self, LabelError, OpenPullRequest, READY, ReadyIssue, Skip, agent_label, old_worker_label,
@@ -426,7 +426,7 @@ impl Runner {
 
     // The implementers the agent board ranks for `ticket`'s work item. The
     // project manager's agent is asked for alone first and takes the item
-    // when it can start within the slack. Else, or when `labels` pin another
+    // when it can start within the slack and its model's queue is not full. Else, or when `labels` pin another
     // agent, the ask is as if none were named.
     pub(super) fn ranked(
         &self,
@@ -464,12 +464,15 @@ impl Runner {
                 ..ask.clone()
             };
             let picks = self.board_picks(&alone).map_err(AddError::Unpicked)?;
-            if (picks.iter()).any(|pick| starts_within_slack(pick.wait, alone.slack)) {
+            if (picks.iter()).any(|pick| available(pick, alone.slack)) {
                 picked = Some(agent);
-            } else {
+            } else if pin.is_none() {
+                let why = match picks.iter().any(|pick| pick.full) {
+                    true => "whose model's queue is full",
+                    false => "which cannot start within its slack",
+                };
                 note = Some(format!(
-                    "{}: the project manager picked {agent}, which cannot start within its \
-                     slack, so the agent board picks",
+                    "{}: the project manager picked {agent}, {why}, so the agent board picks",
                     ticket.shown()
                 ));
             }

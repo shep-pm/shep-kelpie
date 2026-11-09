@@ -3,7 +3,7 @@
 //! It answers in memory, so a test of dispatch never reaches the dog. It
 //! starts by ranking every agent an ask allows in the order the ask lists
 //! them, with no wait, and by saying every agent fits every kind. A test puts
-//! some of them first, ranks its own order, with its own finishes, makes one wait,
+//! some of them first, ranks its own order, with its own finishes, makes one wait or full,
 //! ranks nobody, says one agent does not fit a kind, notes the API's refusals,
 //! says what the month spent of the API credit, or makes the board unreachable.
 //! Its readings of the agents a board write asks about answer from the same
@@ -46,6 +46,8 @@ struct Book {
     readings: Vec<Vec<AgentName>>,
     // The seconds each agent a test has set one for waits before it can start
     waits: BTreeMap<AgentName, u64>,
+    // The agents a test has said have a full queue
+    full: Vec<AgentName>,
     refusals: Vec<Refusal>,
     // What each refusal is answered with, None until a test sets one.
     hold: Option<Timestamp>,
@@ -93,6 +95,12 @@ impl FakeAgentBoard {
     pub fn waits(&self, agent: &str, secs: u64) {
         let name = AgentName::try_from(agent.to_owned()).unwrap();
         self.book.lock().unwrap().waits.insert(name, secs);
+    }
+
+    /// Each pick ranks `agent` as having a full queue, however soon it can start
+    pub fn is_full(&self, agent: &str) {
+        let name = AgentName::try_from(agent.to_owned()).unwrap();
+        self.book.lock().unwrap().full.push(name);
     }
 
     /// Each fit ask about `agent` and `kind` answers that it fits
@@ -173,7 +181,11 @@ impl AgentBoard for FakeAgentBoard {
         };
         let picks = (order.into_iter().filter(fits)).map(|(agent, finish)| {
             let wait = book.waits.get(&agent).copied().unwrap_or(0);
-            Pick::new(agent, finish, wait)
+            let full = book.full.contains(&agent);
+            Pick {
+                full,
+                ..Pick::new(agent, finish, wait)
+            }
         });
         Some(picks.collect())
     }
@@ -193,7 +205,11 @@ impl AgentBoard for FakeAgentBoard {
             .filter(|(agent, _)| agents.contains(agent))
             .map(|(agent, finish)| {
                 let wait = book.waits.get(&agent).copied().unwrap_or(0);
-                Pick::new(agent, finish, wait)
+                let full = book.full.contains(&agent);
+                Pick {
+                    full,
+                    ..Pick::new(agent, finish, wait)
+                }
             });
         Some(picks.collect())
     }

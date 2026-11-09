@@ -35,6 +35,8 @@ pub struct Candidate<'a> {
     pub local: bool,
     /// Whether its wait is a hold on its API key, which ranks it behind every agent that can start
     pub held: bool,
+    /// Whether its local model's queue holds at least as many asks as it has turns
+    pub full: bool,
 }
 
 /// An agent the board would pick
@@ -77,15 +79,14 @@ pub fn pick<'a>(item: &Item<'_>, candidates: &[Candidate<'a>]) -> Vec<Choice<'a>
 
 /// `picks` in the order the board tries them
 ///
-/// An agent that can start within `slack` minutes (see [`starts_within_slack`])
-/// is available, and the available come first: one held on its API key after
-/// every one that is not, then cost, a local agent with no priced history
-/// counting as free. An agent with no cost follows, lowest tier first as a
+/// The [`available`] agents come first:
+/// one held on its API key after every one that is not, then cost, a local
+/// agent with no priced history counting as free. An agent with no cost follows, lowest tier first as a
 /// stand-in for price. Ties go soonest finish first, then by name. The rest
 /// follow, soonest start first, then by name.
 pub fn rank(picks: Vec<Pick>, slack: Option<u32>) -> Vec<Pick> {
     let (mut available, mut rest): (Vec<_>, Vec<_>) =
-        (picks.into_iter()).partition(|p| starts_within_slack(p.wait, slack));
+        (picks.into_iter()).partition(|p| available(p, slack));
     available.sort_by(|a, b| {
         a.held
             .cmp(&b.held)
@@ -125,6 +126,15 @@ fn priced(pick: &Pick) -> Option<f64> {
 /// however long either takes, and marks an agent available to [`rank`].
 pub fn starts_within_slack(wait: u64, slack: Option<u32>) -> bool {
     wait <= u64::from(slack.unwrap_or(DEFAULT_SLACK_MINUTES)) * 60
+}
+
+/// Whether `pick` is available: it can start within `slack` minutes (see
+/// [`starts_within_slack`]) and its model's queue is not full
+///
+/// [`rank`] puts the available first, and the project manager's own pick
+/// stands only while it is available.
+pub fn available(pick: &Pick, slack: Option<u32>) -> bool {
+    !pick.full && starts_within_slack(pick.wait, slack)
 }
 
 // An item with no kind goes only to an agent whose file names no kinds
@@ -179,6 +189,7 @@ mod tests {
             typical: Typical { secs, cost_usd },
             local: false,
             held: false,
+            full: false,
         }
     }
 
@@ -354,6 +365,41 @@ mod tests {
             },
             "ranking changes none of what it read"
         );
+    }
+
+    #[test]
+    fn a_full_local_agent_ranks_after_an_available_hosted_one() {
+        let (local, hosted) = (name("local"), name("hosted"));
+        let picks = vec![
+            Pick {
+                local: true,
+                full: true,
+                ..read(&local, 600, None)
+            },
+            read(&hosted, 1800, Some(5.0)),
+        ];
+        assert_eq!(
+            ranked(picks, None),
+            ["hosted", "local"],
+            "free and quick to start, yet its queue is as deep as its turns"
+        );
+    }
+
+    #[test]
+    fn a_full_agent_follows_the_available_soonest_start_first() {
+        let (full, sooner, later) = (name("full"), name("sooner"), name("later"));
+        let waiting = |agent, wait| Pick {
+            wait,
+            full: true,
+            local: true,
+            ..read(agent, 600, None)
+        };
+        let picks = vec![
+            waiting(&later, 300),
+            waiting(&sooner, 100),
+            read(&full, 900, Some(1.0)),
+        ];
+        assert_eq!(ranked(picks, None), ["full", "sooner", "later"]);
     }
 
     #[test]
