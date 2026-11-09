@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 
 use super::super::Runner;
 use super::super::contributions::post::forge_is_busy;
+use super::ask::Purpose;
 use super::comment::{FALLBACK_PRIORITY, NEEDS_TRIAGE};
 use super::ready::{READY_LABEL, Ready, ReadyLabels};
 use super::research::{Drafted, Found};
@@ -109,7 +110,7 @@ impl Runner {
     // or the lines that say why none is filed. Only the maintainer's own issue
     // is split, and one already split is not split again.
     pub(super) fn judged_split(&self, issue: u64, found: &Found) -> Ready {
-        if self.split_of(issue).is_some() {
+        if self.split_held(issue) {
             return Ready::Not;
         }
         let mut failures = Vec::new();
@@ -131,6 +132,22 @@ impl Runner {
         }
     }
 
+    // Whether `issue`'s saved plan stands against the split this pass brings: a
+    // plan with a draft filed is never split again, and one still held gives way
+    // only to the pass the maintainer's correction asked for
+    fn split_held(&self, issue: u64) -> bool {
+        let Some(split) = self.split_of(issue) else {
+            return false;
+        };
+        !split.filed.is_empty() || !self.replanning(issue)
+    }
+
+    // Whether this pass is the one a maintainer's correction under the ask asked
+    // for, which alone takes a held plan away
+    fn replanning(&self, issue: u64) -> bool {
+        (self.triage_tries.get(&issue)).is_some_and(|t| t.purpose == Purpose::SplitCorrection)
+    }
+
     // The drafts of `found`'s split as they are filed, labels and all
     fn split_drafts(&self, issue: u64, found: &Found) -> Vec<SplitDraft> {
         let seen = self.triage_seen(issue);
@@ -146,10 +163,10 @@ impl Runner {
 
     // The drafts of a reply that splits someone else's `issue`, to save as a
     // plan the maintainer's yes releases. Their body is never written, so only
-    // the drafts are checked. A draft that fails, a split already planned, or
-    // no maintainer login to ask files and asks nothing.
+    // the drafts are checked. A draft that fails, a split already filed, or no
+    // maintainer login to ask files and asks nothing.
     pub(super) fn asked_split(&self, issue: u64, found: &Found) -> Ready {
-        if found.split.is_empty() || self.split_of(issue).is_some() {
+        if found.split.is_empty() || self.split_held(issue) {
             return Ready::Not;
         }
         if let Err(why) = self.maintainer() {

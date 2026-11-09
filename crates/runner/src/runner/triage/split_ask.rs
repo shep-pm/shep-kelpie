@@ -2,18 +2,20 @@
 //!
 //! Every split waits on the maintainer's word, whoever filed the issue, and the
 //! gate is code: [`Runner::label_split`] files nothing while the plan's `asked`
-//! is set. Once the pass ends, [`Runner::ask_held_split`] puts `needs-approval`
-//! on the parent and [`Runner::ask_split`] posts a comment naming the maintainer,
-//! whose id and time `asked` holds from then on; before it, `asked` holds the
-//! triage comment, which no reply can be to. A `yes` or `ok` ([`super::heard`])
-//! clears `asked` and steps the record back to `body-written`, where the next
-//! poll files the split. `no`, and silence `triage.wait_days`, drop the plan.
+//! is set. [`Runner::ask_held_split`] puts `needs-approval` on the parent, and
+//! [`Runner::ask_split`] posts a comment naming the maintainer, whose id and time
+//! `asked` holds; before it, `asked` holds the triage comment. A `yes` or `ok`
+//! ([`super::heard`]) clears it and steps the record back to `body-written`;
+//! `no`, and silence `triage.wait_days`, drop the plan. Anything else the
+//! maintainer writes corrects it: the triager plans the split again.
 
 use super::super::Runner;
 use super::super::contributions::post::forge_is_busy;
+use super::super::report::Begin;
 use super::super::thread_replies::plain_login;
 use super::WaitingLabel;
-use super::ask::says_yes;
+use super::ask::{Purpose, says_no, says_yes};
+use super::research::Round;
 use crate::board::{AGENT_LABEL, PIN, TRIAGE};
 use crate::ports::{ForgeError, PostedComment, Timestamp};
 use crate::state::{SplitDraft, StateError, TriageQuestions, TriageSplit, TriageStep};
@@ -24,14 +26,27 @@ fn ask_marker(comment: u64) -> String {
     format!("<!-- kelpie:split-ask #{comment} -->")
 }
 
-// The comment that asks `maintainer` to say yes to `drafts`, ending in `marker`.
-// `own` is the maintainer's own issue, and `from_issue` that the split is the
-// author's rather than kelpie's
+// The comment that asks `maintainer` to say yes to `drafts`, ending in `marker`
 fn ask_text(
     maintainer: &str,
     drafts: &[SplitDraft],
     days: u32,
     marker: &str,
+    own: bool,
+    from_issue: bool,
+) -> String {
+    format!(
+        "{}\n\n{marker}",
+        ask_body(maintainer, drafts, days, own, from_issue)
+    )
+}
+
+// What the ask says of `drafts`, its marker aside. `own` is the maintainer's own
+// issue, and `from_issue` that the split is the author's rather than kelpie's
+fn ask_body(
+    maintainer: &str,
+    drafts: &[SplitDraft],
+    days: u32,
     own: bool,
     from_issue: bool,
 ) -> String {
@@ -74,7 +89,7 @@ fn ask_text(
     }
     text.push_str(&format!(
         "\n{yes} Only your reply counts. With no reply in {days} days the plan is dropped and \
-         the issue stays as it is.\n\n{marker}"
+         the issue stays as it is."
     ));
     text
 }
@@ -226,21 +241,90 @@ impl Runner {
         Ok(())
     }
 
-    // Hears what the maintainer wrote under the ask of `issue`, oldest first:
-    // the first `yes` releases the split and the first `no` drops it. Any
-    // other text leaves the wait open.
+    // Hears what the maintainer wrote under the ask of `issue`: their oldest
+    // reply decides. `yes` releases the split, `no` drops it, and anything else
+    // corrects the plan, which asks for a pass that plans it again.
     pub(super) fn heard_split(&mut self, issue: u64, replies: &[&str]) -> Result<(), StateError> {
-        for reply in replies {
-            if says_yes(reply) {
-                return self.allow_split(issue);
+        let Some(reply) = replies.first() else {
+            return Ok(());
+        };
+        if says_yes(reply) {
+            return self.allow_split(issue);
+        }
+        if says_no(reply) {
+            let note = format!("triage #{issue}: the maintainer said no, so its split is dropped");
+            return self.drop_split(issue, note);
+        }
+        self.correct_split(issue, reply);
+        Ok(())
+    }
+
+    // Keeps the maintainer's correction of `issue`'s split, which the pass that
+    // plans it again is made from. The plan stays held until that pass answers.
+    fn correct_split(&mut self, issue: u64, said: &str) {
+        let tries = self.triage_tries.entry(issue).or_default();
+        let told = tries.correction.is_some();
+        tries.correction = Some(said.trim().to_owned());
+        if !told {
+            self.notes.push(format!(
+                "triage #{issue}: the maintainer corrected its split, so the triager plans it \
+                 again"
+            ));
+        }
+    }
+
+    // The split the maintainer was asked about, as kelpie asked it, and their
+    // correction of it: what the pass that plans it again reads beside the issue
+    pub(super) fn split_round(&self, issue: u64) -> Option<Round> {
+        let split = self.split_of(issue)?;
+        let maintainer = self.maintainer().ok()?;
+        let own = self
+            .triage_record(issue)
+            .is_some_and(|t| self.own_author(&t.author));
+        let asked = ask_body(
+            &maintainer,
+            &split.drafts,
+            self.settings.triage.wait_days.get(),
+            own,
+            split.from_issue,
+        );
+        let corrected = (self.triage_tries.get(&issue))?.correction.clone()?;
+        Some(Round::Correction { asked, corrected })
+    }
+
+    // The pass a maintainer's correction asks for, if one is owed. It takes a
+    // triager slot as the author's round does, and the plan it corrects stays
+    // held until it answers.
+    pub(super) fn split_fix_due(&mut self) -> Result<Option<Begin>, StateError> {
+        for (issue, _) in self.split_waits() {
+            if self.flights.triage_tried(issue)
+                || self.flights.triaging() == Some(issue)
+                || self.triage_given_up(issue)
+            {
+                continue;
             }
-            if super::ask::says_no(reply) {
-                let note =
-                    format!("triage #{issue}: the maintainer said no, so its split is dropped");
-                return self.drop_split(issue, note);
+            if !(self.triage_tries.get(&issue)).is_some_and(|t| t.correction.is_some()) {
+                continue;
+            }
+            // A comment the pass worded but could not post is posted again, not
+            // redone by another call
+            if (self.triage_tries.get(&issue)).is_some_and(|t| t.waiting.is_some()) {
+                self.retry_triage(issue)?;
+                continue;
+            }
+            let Some(author) = self.triage_record(issue).map(|t| t.author.clone()) else {
+                continue;
+            };
+            let limited = self.triage_limited(&author, false);
+            if limited && self.triage_round_held() {
+                continue;
+            }
+            self.flights.triage_try(issue);
+            if let Some(job) = self.triage_job(issue, Purpose::SplitCorrection, limited) {
+                return Ok(Some(Begin::Triage(Box::new(job))));
             }
         }
-        Ok(())
+        Ok(None)
     }
 
     // Clears the hold on the split of `issue` and steps its record back to

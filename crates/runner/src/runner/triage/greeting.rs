@@ -43,6 +43,13 @@ pub(super) const LOCAL_READ_KIND: &str = "Write the triage comment on this issue
     what the reader does next. It is a comment, not a review: no verdict, and nothing promised. \
     It runs about 20 to 60 words.";
 
+/// What kind of post the representative is asked for on the pass that plans a
+/// split again after the maintainer corrected the ask for it
+pub(super) const SPLIT_AGAIN_KIND: &str = "Write the triage comment that plans this issue's \
+    split again, after its maintainer corrected the split kelpie asked them to approve. Say what \
+    kelpie now found, and name the new drafts only where the facts list them. It is a comment, \
+    not a review: no verdict, and nothing promised. It runs about 20 to 60 words.";
+
 /// What kind of post the representative is asked for on an issue that
 /// something else already covers
 pub(super) const DUPLICATE_KIND: &str = "Write the short comment that closes this issue as a \

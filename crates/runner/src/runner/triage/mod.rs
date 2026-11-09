@@ -24,7 +24,7 @@ use crate::ports::{
 use crate::settings::{ExpertAgent, Settings};
 use crate::state::{ProjectState, StateError, TriageState, TriageStep, Triaged};
 use crate::ticket::TicketId;
-use research::{Listed, ListedPull};
+use research::{Listed, ListedPull, Round};
 
 use super::thread_replies::plain_login;
 use ask::Purpose;
@@ -327,7 +327,12 @@ impl Runner {
         // The author's round: the second triager call, once their answers are
         // in, the body their own session rewrote, and a questions comment or a
         // prompt a restart left owed.
-        self.triage_round_due()
+        if let Some(begin) = self.triage_round_due()? {
+            return Ok(Some(begin));
+        }
+        // A maintainer's correction under a split ask, which asks for the split
+        // to be planned again
+        self.split_fix_due()
     }
 
     // Reads `issue`'s comments, once, for a triage comment of the App's own: one
@@ -528,10 +533,13 @@ impl Runner {
         // the repo alone, and its `body` would be written into the issue as if the
         // author wrote it.
         let settling = match purpose {
-            Purpose::Answers => self.answers_round(issue),
+            Purpose::Answers => self
+                .answers_round(issue)
+                .map(|(asked, answers)| Round::Answers { asked, answers }),
+            Purpose::SplitCorrection => self.split_round(issue),
             Purpose::First | Purpose::LocalRead => None,
         };
-        if matches!(purpose, Purpose::Answers) && settling.is_none() {
+        if matches!(purpose, Purpose::Answers | Purpose::SplitCorrection) && settling.is_none() {
             return None;
         }
         let subject = research::Subject {

@@ -20,6 +20,18 @@ pub(super) enum Reader {
     Other,
 }
 
+/// What a pass did with a split the maintainer corrected under its ask
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum Replanned {
+    /// The pass is not one that plans a split again
+    #[default]
+    No,
+    /// Their words came to a new plan, which waits on a yes of its own
+    Planned,
+    /// Their words came to no split, and the plan they corrected is dropped
+    None,
+}
+
 /// What the comment is for
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Wording {
@@ -28,6 +40,9 @@ pub(super) struct Wording {
     /// The reply splits the maintainer's own issue, whose sub-issues wait on
     /// their yes
     pub(super) split: bool,
+    /// The pass planned a split again under the maintainer's correction of the
+    /// ask for it
+    pub(super) split_again: Replanned,
     /// The comment asks its author the open questions
     pub(super) ask: bool,
     /// The pass reads the author's answers
@@ -135,6 +150,9 @@ pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: 
             }
         }
     }
+    if wording.split_again != Replanned::No {
+        facts.push_str(&replanned_facts(wording.split_again));
+    }
     match ready {
         true => {
             facts.push_str(
@@ -160,6 +178,24 @@ pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: 
         }
     }
     facts
+}
+
+// What the representative is told of a split planned again under the
+// maintainer's correction: the new plan, or none and the plan gone
+fn replanned_facts(again: Replanned) -> String {
+    match again {
+        Replanned::No => String::new(),
+        Replanned::Planned => String::from(
+            "\nKelpie planned the split again from what the maintainer wrote under its ask, and \
+             asks them to say yes to the new plan in a comment of its own. Never ask the \
+             maintainer to file a sub-issue themselves.\n",
+        ),
+        Replanned::None => String::from(
+            "\nKelpie planned the split again from what the maintainer wrote under its ask and \
+             found no split their words support, so the plan is dropped and no sub-issue is \
+             filed. Never ask the maintainer to file a sub-issue themselves.\n",
+        ),
+    }
 }
 
 // What the representative is told of a split: the sub-issues to come, in order,

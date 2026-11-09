@@ -58,7 +58,8 @@ impl Runner {
 
     // Reads the maintainer's replies under each ask for a split of someone
     // else's issue. Nobody else's word counts: not the author's, not another
-    // writer's, and a reply from anyone else gets no answer.
+    // writer's, and a reply from anyone else gets no answer. What they write
+    // that is neither `yes` nor `no` corrects the plan (`heard_split`).
     fn hear_split_asks(&mut self, comments: &[ThreadComment]) -> Result<(), StateError> {
         let Ok(maintainer) = self.maintainer() else {
             return Ok(());

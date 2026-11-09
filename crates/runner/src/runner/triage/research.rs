@@ -213,6 +213,16 @@ const P0_RECOMMENDED: &str = "P1";
 /// answer recommended, which would be one
 const P0_PLAIN_QUESTION: &str = "How urgent is this for you?";
 
+/// What a second pass reads beside the issue: what kelpie asked, and the answer
+/// it is re-searching
+pub(super) enum Round {
+    /// The questions kelpie asked its author and their answers
+    Answers { asked: String, answers: String },
+    /// The split kelpie asked the maintainer to say yes to, and their
+    /// correction of it
+    Correction { asked: String, corrected: String },
+}
+
 /// The issue a research call is given: its number, its title, its body, the
 /// size its body is cut at, 0 for no cut, and who opened it: how the forge
 /// counts them and the role they are asked as
@@ -253,16 +263,16 @@ fn author_line(association: Option<AuthorAssociation>, role: AuthorRole) -> Stri
 
 /// What the triager is asked about `subject`'s issue: the issue, the open
 /// issues and pull requests, each fenced, and the shape of the reply. A body
-/// past `max_body_kb` kilobytes is cut, and the fence says it was. The author's
-/// second pass is given `settling`, and a pass asked again over an issue kelpie
-/// already triaged is given `earlier`: the earlier triage comments on it and
-/// their author's replies, fenced, which it must not ask over again.
+/// past `max_body_kb` kilobytes is cut, and the fence says it was. A second pass
+/// is given `settling`, the round it re-searches, and a pass asked again over an
+/// issue kelpie already triaged is given `earlier`: the earlier triage comments
+/// on it and their author's replies, fenced, which it must not ask over again.
 pub(super) fn prompt(
     subject: &Subject<'_>,
     open: &[Listed],
     pulls: &[ListedPull],
     max_questions: usize,
-    settling: Option<&(String, String)>,
+    settling: Option<&Round>,
     earlier: Option<&str>,
     implementers: &[AgentName],
 ) -> String {
@@ -308,7 +318,7 @@ pub(super) fn prompt(
     };
     let round = match settling {
         None => String::new(),
-        Some((questions, answers)) => format!(
+        Some(Round::Answers { asked, answers }) => format!(
             "\n\n{}\n\n{}\n\nThis is the second pass on this issue, the one that reads its \
              author's answers: the questions kelpie asked and their answers are fenced above \
              with the issue. Read them against the repo, and answer again for what is still \
@@ -318,8 +328,20 @@ pub(super) fn prompt(
              under the author's own text in the issue, and never in place of it, unless the \
              maintainer opened the issue and it passes the issue check, when it writes it over \
              the issue and labels the issue `ready-for-agent`.",
-            fenced("The questions kelpie asked its author", questions),
+            fenced("The questions kelpie asked its author", asked),
             fenced("The author's answers", answers),
+        ),
+        Some(Round::Correction { asked, corrected }) => format!(
+            "\n\n{}\n\n{}\n\nThis is the pass that re-searches this issue after its maintainer \
+             corrected the split kelpie asked them to approve: the ask and their correction are \
+             fenced above with the issue. Kelpie asks you to plan the split again from their \
+             words: answer `split` with the sub-issues their correction means, in the order \
+             kelpie files them, and `body` with the whole issue's body as the parent keeps it. \
+             Answer `split` as `[]` when their words mean no split after all, and kelpie drops \
+             the plan. Ask nothing in `open` about the split: only the maintainer decides it, and \
+             kelpie files no sub-issue of its own.",
+            fenced("The split kelpie asked about", asked),
+            fenced("The maintainer's correction", corrected),
         ),
     };
     let rounds = match earlier {
