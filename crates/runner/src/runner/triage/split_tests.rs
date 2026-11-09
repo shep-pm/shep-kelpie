@@ -20,7 +20,7 @@ pub(super) const BODY: &str = "Touches:\n- `src/start.rs` (new)\n\n## What to bu
 const LABELS: [&str; 3] = ["kind:fix", "priority: P2", "area:split"];
 
 // A draft of a split with the labels the check needs, blocked by `after`
-fn draft(title: &str, body: &str, after: &[usize]) -> Value {
+pub(super) fn draft(title: &str, body: &str, after: &[usize]) -> Value {
     json!({ "title": title, "body": body, "labels": LABELS, "after": after })
 }
 
@@ -45,7 +45,11 @@ fn planned(drafts: &[Value], filed: &[&str]) -> (Rig, Mutex<Runner>) {
 }
 
 // [`planned`] with the author's questions held as `asked` says, or null
-fn planned_asking(drafts: &[Value], filed: &[&str], asked: Value) -> (Rig, Mutex<Runner>) {
+pub(super) fn planned_asking(
+    drafts: &[Value],
+    filed: &[&str],
+    asked: Value,
+) -> (Rig, Mutex<Runner>) {
     let rig = rig_with("pick = \"maintainer\"");
     rig.forge.set_repo_labels(&[
         "needs-approval",
@@ -529,7 +533,7 @@ pub(super) fn heard(rig: &Rig, runner: &Mutex<Runner>) {
 }
 
 // The maintainer says yes under the ask, and `filed` drafts go
-fn yes(rig: &Rig, runner: &Mutex<Runner>, filed: u64) {
+pub(super) fn yes(rig: &Rig, runner: &Mutex<Runner>, filed: u64) {
     wrote(rig, MAINTAINER, "yes");
     heard(rig, runner);
     step_until(runner, || rig.github.issues_created() == filed);

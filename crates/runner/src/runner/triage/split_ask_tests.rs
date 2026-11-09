@@ -9,8 +9,10 @@ use super::answers_tests::step_until;
 use super::ask_tests::{posted, wrote};
 use super::pick_tests::MAINTAINER;
 use super::research_tests::APP;
-use super::split_tests::{BODY, app_writes, drawn, heard, judged, saved_split, splitting_with};
-use crate::runner::Runner;
+use super::split_tests::{
+    BODY, app_writes, draft, drawn, heard, judged, planned_asking, saved_split, splitting_with, yes,
+};
+use crate::runner::{Runner, step};
 use crate::state::{StateStore, TriageQuestions, TriageStep};
 use crate::test::Rig;
 
@@ -374,4 +376,49 @@ fn a_hand_label_that_ends_the_pass_drops_the_plan_it_never_asked() {
     wrote(&rig, MAINTAINER, "ok");
     heard(&rig, &runner);
     assert_eq!(rig.github.issues_created(), 0, "a bare ok files nothing");
+}
+
+// What a lost ask post leaves: the parent back at `body-written`, the plan held
+// by its triage comment, and `needs-approval` on the issue from the call that
+// did not finish. That label is the ask's own, so the next poll asks again
+// rather than taking it for one the maintainer put on and dropping the plan.
+#[test]
+fn a_lost_ask_post_asks_again_and_keeps_the_split() {
+    let held = json!({ "comment": 101, "at": 4_000_000_000_u64 });
+    let drafts = [
+        draft("fix(a): first", BODY, &[]),
+        draft("fix(b): second", BODY, &[0]),
+    ];
+    let (rig, runner) = planned_asking(&drafts, &[], held);
+    rig.forge.label(30, "needs-approval");
+    let start = rig.github.writes().len();
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(posted(&rig).len(), 1, "the ask goes up: {:?}", posted(&rig));
+    assert_eq!(
+        saved_split(&rig)["drafts"].as_array().map(Vec::len),
+        Some(2),
+        "the plan stands"
+    );
+    assert_ne!(
+        saved_split(&rig)["asked"]["comment"].as_u64().unwrap(),
+        saved_record(&rig)["comment"].as_u64().unwrap(),
+        "the wait is dated from the ask"
+    );
+    assert_eq!(saved_record(&rig)["step"], "done");
+    assert_eq!(
+        rig.github.issues_created(),
+        0,
+        "nothing files before the yes"
+    );
+    assert_eq!(
+        app_writes(&rig, start),
+        ["label #30 needs-approval", "comment #30"],
+        "the parent waits at `needs-approval`"
+    );
+
+    yes(&rig, &runner, 2);
+    assert_eq!(rig.forge.sub_issues_of(30), [900, 901]);
+    assert_eq!(saved_split(&rig)["filed"], json!(["900", "901"]));
 }

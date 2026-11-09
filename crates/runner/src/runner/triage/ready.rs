@@ -374,13 +374,17 @@ impl Runner {
             .filter(|l| TRIAGE_LABELS.contains(&l.as_str()))
             .cloned()
             .collect();
-        // `ready-for-agent` is this step's own label, so on the issue here it is
-        // kelpie's: a lost answer or a crash before the step saved leaves it there, and
-        // the pass finishes the labelling rather than reading it as the maintainer's.
+        // This step's own labels: `ready-for-agent`, and for a split parent the
+        // `needs-approval` its ask waits under. Either, on the issue here, is
+        // kelpie's from a call whose answer was lost, and the pass finishes.
         // Any other triage label here came by hand and stands.
+        let own: Vec<&str> = match self.split_of(issue).is_some() {
+            true => vec![READY, TRIAGE],
+            false => vec![READY],
+        };
         let owed: Vec<String> = carried
             .iter()
-            .filter(|l| l.as_str() != READY)
+            .filter(|l| !own.contains(&l.as_str()))
             .cloned()
             .collect();
         if let Some(label) = stood(&owed, &seen) {
