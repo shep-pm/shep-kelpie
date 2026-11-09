@@ -445,6 +445,9 @@ const CORRECTED: &str = "Not two. Split it three ways, one per language family."
 // What the representative says for the comment that plans the split again
 const AGAIN: &str = "Kelpie planned the split again from your reply.";
 
+// What the facts say so the comment never asks for a hand-filed sub-issue
+const NEVER_FILE: &str = "Never ask the maintainer to file a sub-issue themselves.";
+
 // Someone else's issue 30, its ask corrected by the maintainer, and the triager
 // answering the pass that correction asks for with `found`. With it, the comment
 // id the first ask went up under.
@@ -591,10 +594,8 @@ fn a_new_pass_with_no_split_drops_the_plan_and_says_so() {
     let said = worded(&rig, 1);
     assert!(said.contains("planned the split again"), "{said}");
     assert!(said.contains("no split"), "{said}");
-    assert!(
-        !said.contains("file it yourself") && !said.contains("file the sub-issues yourself"),
-        "{said}"
-    );
+    assert!(said.contains(NEVER_FILE), "{said}");
+    assert!(!said.contains("file it yourself"), "{said}");
 }
 
 // The maintainer's own issue: its body is rewritten again, and its comment names
@@ -632,6 +633,7 @@ fn a_correction_on_the_maintainers_own_issue_replaces_the_plan() {
     assert!(said.contains("planned the split again"), "{said}");
     assert!(said.contains("1. fix(a): one"), "{said}");
     assert!(said.contains("2. fix(b): two (after 1)"), "{said}");
+    assert!(said.contains(NEVER_FILE), "{said}");
 
     yes(&rig, &runner, 3);
 
