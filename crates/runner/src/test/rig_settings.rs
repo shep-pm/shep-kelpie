@@ -77,6 +77,14 @@ impl Rig {
         });
     }
 
+    /// Makes the project's `git.catch_up` `conflicts`, read when a runner next opens
+    pub fn catch_up_on_conflicts(&self) {
+        self.edit_settings(|s| {
+            assert!(s.contains(GIT), "the example's git table moved");
+            s.replace(GIT, &format!("{GIT}catch_up = \"conflicts\"\n"))
+        });
+    }
+
     /// Gives the project a hook at each of `points` that runs `script`, a
     /// shell script written to the rig's home as `name`, read when a
     /// runner next opens

@@ -4,6 +4,7 @@ mod builds;
 mod dependencies;
 mod e2e;
 mod gateway_kind;
+mod git;
 mod pacing;
 mod registries;
 mod repo_setup;

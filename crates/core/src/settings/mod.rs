@@ -58,7 +58,7 @@ pub use e2e::{E2e, RepoPath, ResultsDir, SshAlias};
 pub use gateway::{
     Gateway, GatewayKey, GatewayKind, GatewayName, Gateways, KeyVar, ModelHost, Route, Timing,
 };
-pub use git::{BaseBranch, DEFAULT_BASE, Git, GithubLogin};
+pub use git::{BaseBranch, CatchUp, DEFAULT_BASE, Git, GithubLogin};
 pub use hooks::{HookPoint, PointKind, ProjectHook};
 pub use local::{ContextSize, Endpoint, EndpointUrl, LocalCommand, LocalRound};
 pub use local_rounds::{KeepDays, LocalRounds, RoundsFolder};
