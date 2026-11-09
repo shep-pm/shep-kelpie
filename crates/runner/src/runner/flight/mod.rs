@@ -28,6 +28,7 @@ use super::report::{Begin, ReviewCall, Reviewed, Spent, StepReport};
 use super::review::run_review_call;
 use super::transcript_count::Mark;
 use super::trigger::lock;
+use super::turn::Handled;
 use super::turn_hooks::TurnHooks;
 use crate::board::briefing::elapsed;
 use crate::ports::{
@@ -615,10 +616,18 @@ impl Runner {
             return Ok(Ended::Recorded(None));
         }
         // A turn the API refuses for spent credit or a spent limit tells the
-        // board and moves its work item on, with no ruling.
-        if let Some(handed) = self.hand_off_refused(ticket, &result)? {
-            self.flights.flying.remove(&ticket);
-            return Ok(Ended::Recorded(Some(handed)));
+        // board and moves its work item on, with no ruling. One Codex refuses
+        // for its plan's limit does too, or waits for the hold on Codex.
+        match self.hand_off_refused(ticket, &result)? {
+            Handled::Moved(handed) => {
+                self.flights.flying.remove(&ticket);
+                return Ok(Ended::Recorded(Some(handed)));
+            }
+            Handled::Waits => {
+                self.flights.flying.remove(&ticket);
+                return Ok(Ended::Recorded(None));
+            }
+            Handled::No => {}
         }
         let again = self.flights.flying.get(&ticket).is_some_and(|f| f.again);
         if !again && matches!(result, Err(AgentError::NoSession(..))) {

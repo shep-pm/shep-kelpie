@@ -20,8 +20,9 @@ pub mod upgrade;
 pub use shep_kelpie_core::{
     agent_board, agents, api_refusal, board, bridge, browse, coderabbit, codex, confine, cubic,
     fence, forge_ledger, forwarder, guard, home, hooks, ipc, lease, local_paths, local_tickets,
-    metrics, pacer, package_managers, pm_answer, ports, profile, review_bot, settings, shep_home,
-    shepherd, skills, state, ticket, totp, usage, watch, webhook, work_item, work_kind,
+    metrics, pacer, package_managers, plan_refusal, pm_answer, ports, profile, review_bot,
+    settings, shep_home, shepherd, skills, state, ticket, totp, usage, watch, webhook, work_item,
+    work_kind,
 };
 
 // The real ports and the forge, each kept under the name it had here

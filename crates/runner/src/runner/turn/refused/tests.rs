@@ -257,3 +257,147 @@ fn a_read_the_pacer_asks_for_names_the_agent_it_is_for_not_one_it_held_ahead() {
         "{report:?}"
     );
 }
+
+const CODEX: &str =
+    "---\nrole: implementer\nharness: codex\nmodel: gpt-5-codex\neffort: medium\n---\n";
+// Codex's own wording, as recorded.
+const CODEX_LIMIT: &str = "You've hit your usage limit. Upgrade to Pro \
+                           (https://chatgpt.com/explore/pro), visit \
+                           https://chatgpt.com/codex/settings/usage to purchase more credits \
+                           or try again at 5:46 PM.";
+// 5:46 PM UTC on the rig's day, the zone the tests read the time in.
+const CODEX_BACK: u64 = Rig::EPOCH + 12_760;
+
+// Issue 7 open on `codex`, ranked ahead of `others`, labelled `labels`. Codex's
+// meter reads under 100%, as it does when Codex refuses.
+fn on_codex(others: &[&str], labels: &[&str]) -> (Rig, Mutex<Runner>) {
+    let rig = Rig::new("acme");
+    rig.write_agent("codex", CODEX);
+    rig.write_agent("coder", CODER);
+    rig.agent_board.ranks(&[&["codex"], others].concat());
+    rig.codex_meter.set(Rig::utilization(40, 93));
+    for label in labels {
+        rig.forge.label(7, label);
+    }
+    rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 2"));
+    let runner = rig.open().unwrap();
+    runner.lock().unwrap().zone = jiff::tz::TimeZone::UTC;
+    rig.ask(&runner, "add", Some("7"));
+    (rig, runner)
+}
+
+fn codex_holding(rig: &Rig, runner: &Mutex<Runner>) -> Value {
+    rig.ask(runner, "status", None)["pacer"]["codex"]["holding"].clone()
+}
+
+#[test]
+fn a_codex_usage_limit_holds_codex_and_moves_the_item_on() {
+    let (rig, runner) = on_codex(&["coder"], &[]);
+    rig.claude
+        .script([refused_with(Harness::Codex, CODEX_LIMIT)]);
+
+    let report = step(&runner).unwrap();
+
+    assert!(
+        matches!(&report, Some(StepReport::HandedOff { issue, from, to, .. })
+            if *issue == ticket(7) && from.as_str() == "codex" && to.as_str() == "coder"),
+        "{report:?}"
+    );
+    assert_eq!(item(&rig, &runner)["agent"], "coder");
+    assert_eq!(rulings(&rig, &runner), 0);
+    let holding = codex_holding(&rig, &runner);
+    assert_eq!(holding["kind"], "window", "{holding}");
+    assert_eq!(holding["until"], CODEX_BACK, "{holding}");
+
+    rig.claude.script([Scripted::Say("done")]);
+    step(&runner).unwrap();
+    let prompt = rig
+        .claude
+        .calls()
+        .pop()
+        .expect("the next pick's call")
+        .prompt;
+    assert!(prompt.contains("usage limit"), "{prompt}");
+    assert!(prompt.contains("2026-09-21T17:46:00Z"), "{prompt}");
+}
+
+#[test]
+fn a_pinned_item_waits_on_the_codex_hold_with_no_ruling() {
+    let (rig, runner) = on_codex(&["coder"], &["agent:codex!"]);
+    rig.claude
+        .script([refused_with(Harness::Codex, CODEX_LIMIT)]);
+
+    let report = step(&runner).unwrap();
+
+    assert!(
+        !matches!(
+            report,
+            Some(StepReport::Failed { .. } | StepReport::HandedOff { .. })
+        ),
+        "{report:?}"
+    );
+    assert_eq!(rulings(&rig, &runner), 0);
+    assert_eq!(item(&rig, &runner)["agent"], "codex");
+    assert_eq!(codex_holding(&rig, &runner)["until"], CODEX_BACK);
+
+    // The hold keeps the turn from starting.
+    rig.clock.advance(3600);
+    step(&runner).unwrap();
+    assert_eq!(rig.claude.calls().len(), 1, "no second call while it holds");
+    assert_eq!(rulings(&rig, &runner), 0);
+
+    // Past its time the turn starts again, on the session it never began.
+    rig.clock.advance(CODEX_BACK - Rig::EPOCH);
+    rig.claude.script([Scripted::Say("done")]);
+    step(&runner).unwrap();
+    let calls = rig.claude.calls();
+    assert_eq!(calls.len(), 2, "the turn starts once the hold ends");
+    assert!(matches!(calls[1].session, crate::ports::Session::New(_)));
+    assert_eq!(rulings(&rig, &runner), 0);
+}
+
+#[test]
+fn a_held_codex_agent_is_not_picked_for_a_new_item() {
+    let (rig, runner) = on_codex(&["coder"], &[]);
+    rig.claude
+        .script([refused_with(Harness::Codex, CODEX_LIMIT)]);
+    step(&runner).unwrap();
+
+    rig.forge.list_ready(8, false);
+    rig.next_look();
+    let report = step(&runner).unwrap();
+
+    assert!(
+        matches!(&report, Some(StepReport::Dispatched { issue, .. }) if *issue == ticket(8)),
+        "{report:?}"
+    );
+    let items = rig.ask(&runner, "status", None)["work_items"].clone();
+    let eight = items.as_array().unwrap().iter().find(|i| i["issue"] == "8");
+    assert_eq!(
+        eight.map(|i| i["agent"].clone()),
+        Some(Value::from("coder"))
+    );
+    assert_eq!(
+        rig.claude.calls().len(),
+        1,
+        "Codex is called once, for the refused turn"
+    );
+}
+
+#[test]
+fn a_codex_failure_that_is_no_limit_still_parks() {
+    let (rig, runner) = on_codex(&["coder"], &[]);
+    rig.claude.script([refused_with(
+        Harness::Codex,
+        "stream disconnected before completion",
+    )]);
+
+    let report = step(&runner).unwrap();
+
+    assert!(
+        matches!(report, Some(StepReport::Failed { .. })),
+        "{report:?}"
+    );
+    parked_on(&rig, &runner, "codex", "stream disconnected");
+    assert_eq!(codex_holding(&rig, &runner), Value::Null);
+}

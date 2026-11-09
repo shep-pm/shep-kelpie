@@ -243,6 +243,13 @@ pi = "yes"
 codex = { cannot = "Codex runs on the ChatGPT account it is logged in to", doc = "docs/design/agents.md", says = "ChatGPT plan windows beside Claude's" }
 goose = { cannot = "goose runs on a model an OpenAI-compatible server serves, with no Anthropic key", doc = "docs/design/agents.md", says = "a model on an OpenAI-compatible server" }
 
+[harness.plan-limit-refusal]
+what = "A turn refused for its plan's usage limit holds the plan's account until the time the refusal names"
+claude-code = { cannot = "its refusal keeps its own path", doc = "crates/core/src/plan_refusal.rs", says = "Claude Code and the API keep their own refusal paths" }
+pi = { cannot = "pi has no plan account", doc = "crates/core/src/plan_refusal.rs", says = "pi and goose have no plan account" }
+codex = "yes"
+goose = { cannot = "goose has no plan account", doc = "crates/core/src/plan_refusal.rs", says = "pi and goose have no plan account" }
+
 [harness.doctor]
 what = "`shep kelpie doctor` checks the harness is installed and logged in"
 claude-code = "yes"

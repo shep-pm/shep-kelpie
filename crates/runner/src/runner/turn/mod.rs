@@ -43,6 +43,7 @@ use crate::worker_folder;
 use crate::worktree::{self, Start};
 use handover::{Handover, Refused};
 use held_up::Reason;
+pub(super) use refused::Handled;
 use unfinished::StartFailure;
 use unfinished::{awaits_a_push, timed_out, uncommitted_prompt};
 pub(super) use unfinished::{failed, named_files};
