@@ -117,6 +117,7 @@ impl Recorder {
             return;
         }
         kept.sent_at = Some(now);
+        kept.lapse_plans(now);
         for sample in kept.series.values() {
             self.sink.send(sample);
         }

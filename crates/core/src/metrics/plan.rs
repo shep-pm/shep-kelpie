@@ -1,8 +1,9 @@
 //! An account's plan limits, as the pacer last read them
 
-use super::{Family, Label, Recorder};
+use super::{Family, Kept, Label, Recorder};
 use crate::pacer::Reading;
 use crate::ports::SeriesKind::Gauge;
+use crate::ports::Timestamp;
 use crate::settings::Account;
 
 const USED: Family = Family {
@@ -29,6 +30,29 @@ impl Recorder {
                 reason = "Unix seconds stay far below 2^53"
             )]
             self.set(&RESETS_AT, labels, window.resets_at.0 as f64);
+        }
+    }
+}
+
+impl Kept {
+    /// Zeroes the share used of each window that reset at or before `now`
+    ///
+    /// A runner that makes no call reads no usage, so its last reading would
+    /// otherwise outlive the window it measured.
+    pub(super) fn lapse_plans(&mut self, now: Timestamp) {
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "Unix seconds stay far below 2^53"
+        )]
+        let now = now.0 as f64;
+        let lapsed: Vec<Vec<Label>> = (self.series.iter())
+            .filter(|((name, _), sample)| *name == RESETS_AT.name && sample.value <= now)
+            .map(|((_, labels), _)| labels.clone())
+            .collect();
+        for labels in lapsed {
+            if let Some(used) = self.series.get_mut(&(USED.name, labels)) {
+                used.value = 0.0;
+            }
         }
     }
 }

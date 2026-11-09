@@ -841,6 +841,31 @@ fn a_pacer_reading_sets_the_plan_gauges() {
 }
 
 #[test]
+fn a_window_that_reset_since_the_last_reading_is_sent_as_unused() {
+    let (recorder, sink) = recorder();
+    let window = |used_pct, resets_at| crate::ports::Window {
+        used_pct,
+        resets_at: Timestamp(resets_at),
+    };
+    let reading = crate::pacer::Reading {
+        at: Timestamp(1_000),
+        session: window(40, 2_000),
+        week: window(88, 5_000),
+    };
+    recorder.plan(crate::settings::Account::Claude, &reading);
+    let used = |window: &str| {
+        let labels = [("account", "claude"), ("window", window)];
+        sink.value("kelpie_plan_used_ratio", &labels)
+    };
+    recorder.refresh(Timestamp(1_999));
+    assert_eq!((used("session"), used("week")), (Some(0.4), Some(0.88)));
+    recorder.refresh(Timestamp(2_059));
+    assert_eq!((used("session"), used("week")), (Some(0.0), Some(0.88)));
+    recorder.refresh(Timestamp(5_000));
+    assert_eq!((used("session"), used("week")), (Some(0.0), Some(0.0)));
+}
+
+#[test]
 fn a_turn_claude_code_compacted_counts_one_compaction() {
     let rig = Rig::new("shep");
     let runner = rig.open().unwrap();

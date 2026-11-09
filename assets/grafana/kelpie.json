@@ -838,7 +838,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "max by (account, window) (kelpie_plan_used_ratio{sheep=~\"$sheep\"})",
+          "expr": "max by (account, window) (kelpie_plan_used_ratio{sheep=~\"$sheep\"} and on (sheep, id, fold, account, window) (kelpie_plan_resets_at_seconds > time()))",
           "legendFormat": "{{account}} {{window}}"
         }
       ],

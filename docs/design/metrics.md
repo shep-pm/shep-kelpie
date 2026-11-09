@@ -23,7 +23,7 @@ Calls, counted as each ledger line is appended (`Ledger::append`, `crates/core/s
 
 Plan limits: gauges the pacer sets whenever it reads an account's usage (`Runner::pace`, `runner/pace.rs`), not when the reading fails. `account` is `claude` or `codex` (`Account::as_str`). `crates/core/src/metrics/plan.rs`
 
-- `kelpie_plan_used_ratio{account,window}`: `window` is `session` (5 hours) or `week`, 0 to 1
+- `kelpie_plan_used_ratio{account,window}`: `window` is `session` (5 hours) or `week`, 0 to 1, 0 from its reset to the next read
 - `kelpie_plan_resets_at_seconds{account,window}`: Unix seconds
 
 - The runner's lock: `kelpie_runner_lock_held_seconds_total` and `kelpie_runner_lock_holds_total{le}` (`1`, `+Inf`), three series. `runner-lock.md`, `crates/core/src/metrics/lock.rs`
