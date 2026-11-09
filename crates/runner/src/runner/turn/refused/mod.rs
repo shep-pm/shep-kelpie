@@ -1,18 +1,12 @@
-//! A worker's turn the API refuses for spent credit or a spent limit
+//! A worker's turn that its account refuses for a spent limit
 //!
 //! A turn on an API agent that ends with [`AgentError::Failed`] whose text
-//! [`refusal`] reads tells the agent board, which holds every API agent. An
-//! unpinned work item then goes to the first other agent the board ranks and
-//! the pacer lets start, on a session of its own, with a note of why and no
-//! ruling. A pinned item, one with no such agent, and any other failure park
-//! as a failed turn does, with the API's message. A refusal on a plan agent
-//! is no API refusal and parks the same.
-//!
-//! A turn on a Codex agent that ends with [`AgentError::Failed`] whose text
-//! [`codex_limit`] reads holds Codex until the time it names, since the meter
-//! reads under 100% when Codex refuses. An unpinned work item goes on as above;
-//! a pinned one, or one with no agent to go to, waits on the hold with no
-//! ruling and starts again once the hold ends.
+//! [`refusal`] reads tells the agent board, which holds every API agent. A
+//! turn on a Codex agent whose text [`codex_limit`] reads holds Codex until
+//! the time it names. An unpinned work item then goes to the first other agent
+//! the board ranks and the pacer lets start, on a session of its own, with a
+//! note and no ruling. A pinned item or one with no such agent parks on an
+//! API refusal, and on Codex's waits on the hold. Any other failure parks.
 
 use super::super::Runner;
 use super::super::pace::Walked;
