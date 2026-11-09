@@ -7,12 +7,13 @@ use std::sync::{Mutex, PoisonError, TryLockError};
 
 use serde::Serialize;
 
+use super::contributions;
 use super::gpu::GpuStatus;
 use super::lock_hold::Held;
 use super::pace::PacerStatus;
 use super::posted::{Body, Posted, Queued};
 use super::timings;
-use super::{RuleError, Runner};
+use super::{Answer, RuleError, Runner};
 use crate::board::Skip;
 use crate::ports::PaddockHolder;
 use crate::ports::{SessionId, Timestamp};
@@ -517,11 +518,19 @@ fn from_posted(posted: &Posted, request: &Request) -> Option<Reply> {
     if let Some(verb) = queued_verb(request) {
         let body = posted.body()?;
         // A ruling the posted status does not list is refused here, since the
-        // reply is the only place its refusal would reach the maintainer.
-        if let Request::Rule(id, _) = request
-            && !ruling_waits(&body.status, *id)
-        {
-            return Some(Reply::Refused(RuleError::NoSuchRuling(*id).to_string()));
+        // reply is the only place its refusal would reach the maintainer. So is
+        // an answer that does not fit the ruling it lists: the pass would refuse
+        // it too, with only the log and `status` to say so.
+        if let Request::Rule(id, given) = request {
+            if !ruling_waits(&body.status, *id) {
+                return Some(Reply::Refused(RuleError::NoSuchRuling(*id).to_string()));
+            }
+            if let Some(ruling) = posted_ruling(&body.status, *id) {
+                let answer: Answer = given.clone().into();
+                if let Err(e) = contributions::fits(&answer, &ruling) {
+                    return Some(Reply::Refused(e.to_string()));
+                }
+            }
         }
         // The answer is read back before the verb is queued, so a post this
         // crate cannot read leaves the verb for the pass, which applies it once.
@@ -594,6 +603,16 @@ fn ruling_waits(status: &serde_json::Value, id: TicketId) -> bool {
     let named = id.to_string();
     (status["rulings"].as_array())
         .is_some_and(|rulings| rulings.iter().any(|r| r["id"].as_str() == Some(&named)))
+}
+
+// The ruling the posted `status` lists under `id`, or `None` when it lists none
+// or holds one this build cannot read.
+fn posted_ruling(status: &serde_json::Value, id: TicketId) -> Option<Ruling> {
+    let named = id.to_string();
+    (status["rulings"].as_array())?
+        .iter()
+        .find(|r| r["id"].as_str() == Some(&named))
+        .and_then(|r| serde_json::from_value(r.clone()).ok())
 }
 
 // The posted status as a reply, with `draining` as the flag stands now.

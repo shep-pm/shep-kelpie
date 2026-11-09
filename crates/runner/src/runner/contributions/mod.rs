@@ -29,7 +29,7 @@ pub(super) use bots::waiting_on;
 pub use clock::Followed;
 pub(super) use push::Sent;
 pub(super) use ruling::{
-    ADOPT_ANYWAY, CLOSE_WITH_THANKS, KEEP_WAITING, LEAVE_OPEN, flagged_lines, keep_answer,
+    ADOPT_ANYWAY, CLOSE_WITH_THANKS, KEEP_WAITING, LEAVE_OPEN, fits, flagged_lines, keep_answer,
     raise_budget, rule_merge, settle, trust,
 };
 
