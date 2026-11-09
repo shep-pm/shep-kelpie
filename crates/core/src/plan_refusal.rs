@@ -2,6 +2,9 @@
 //!
 //! The runner reads a failed Codex turn's text with [`codex_limit`] and holds
 //! Codex until the time it names. The wording is Codex's own, recorded.
+//!
+//! Only Codex needs it: Claude Code and the API keep their own refusal paths,
+//! and pi and goose have no plan account.
 
 use jiff::tz::TimeZone;
 

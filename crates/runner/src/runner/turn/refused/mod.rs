@@ -56,6 +56,7 @@ impl Runner {
         let Some((call, ..)) = self.flights.turn_call(ticket) else {
             return Ok(Handled::No);
         };
+        // parity: harness.plan-limit-refusal
         if call.harness.harness() == Harness::Codex {
             return self.hand_off_codex(ticket, text, &call.session);
         }
