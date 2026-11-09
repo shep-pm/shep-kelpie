@@ -15,7 +15,7 @@ use super::local::body_hash;
 use super::research::Found;
 use super::{TRIAGE_LABELS, WaitingLabel};
 use crate::board::has_criteria;
-use crate::board::{READY, TRIAGE};
+use crate::board::{READY, TRIAGE, TRIAGE_GO};
 use crate::local_paths::{Leak, Surface};
 use crate::ports::{ForgeError, NewLabel};
 use crate::state::{CheckTriage, SplitDraft, StateError, TriageStep};
@@ -362,19 +362,26 @@ impl Runner {
     }
 
     // Puts on the labels the reply gave and then `ready-for-agent`, last, taking
-    // off the `needs-approval` an earlier pass left. A triage label put on by hand
-    // since the pass began is read for here too: kelpie labels nothing over it,
-    // whether it came after the body went on or while the call ran.
+    // off the `needs-approval` an earlier pass left and the go that asked for
+    // this pass. A triage label put on by hand since the pass began stands:
+    // kelpie labels nothing over it, at the body write or here.
     pub(super) fn label_ready(&mut self, issue: u64) -> Result<ReadyLabels, StateError> {
         let seen = self.triage_seen(issue);
-        let carried = match self.triage_labels_now(issue) {
-            Ok(carried) => carried,
+        // Every label, not only the triage ones: the go the maintainer put on to
+        // ask for this pass is no triage label, so it is none of what stands,
+        // yet this step takes it off.
+        let all = match self.labels_now(issue) {
+            Ok(all) => all,
             Err(e) => {
                 let why = format!("cannot read its labels: {e}");
                 self.triage_failed(issue, &why, !forge_is_busy(&e));
                 return Ok(ReadyLabels::Held);
             }
         };
+        let carried: Vec<String> = (all.iter())
+            .filter(|l| TRIAGE_LABELS.contains(&l.as_str()))
+            .cloned()
+            .collect();
         // `ready-for-agent` is this step's own label, so on the issue here it is
         // kelpie's: a lost answer or a crash before the step saved leaves it there, and
         // the pass finishes the labelling rather than reading it as the maintainer's.
@@ -421,6 +428,17 @@ impl Runner {
             && let Err(e) = self.label_issue(issue, TRIAGE, false)
         {
             let why = format!("cannot take `{TRIAGE}` off: {e}");
+            self.triage_failed(issue, &why, !forge_is_busy(&e));
+            return Ok(ReadyLabels::Held);
+        }
+        // Nor is an issue both ready for the board and still asking for its
+        // triage, so the go comes off here too, under every pick: only `label`
+        // takes a spent go off at all, and only at the next poll. The reading
+        // above ruled out a label put on by hand, and a go is no triage label.
+        if all.iter().any(|l| l == TRIAGE_GO)
+            && let Err(e) = self.label_issue(issue, TRIAGE_GO, false)
+        {
+            let why = format!("cannot take `{TRIAGE_GO}` off: {e}");
             self.triage_failed(issue, &why, !forge_is_busy(&e));
             return Ok(ReadyLabels::Held);
         }
