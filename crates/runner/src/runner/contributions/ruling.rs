@@ -382,25 +382,21 @@ fn settle_no_edits(
 /// The fewest characters of a head's hash a yes may name
 const LEAST: usize = 7;
 
-/// Records the head a yes to `ruling` trusts, in `next`, so it counts as passed
+/// Whether `answer` fits `ruling`, as an answer to it
 ///
-/// A yes trusts only the head the ruling is about, since a yes meant for one
-/// head must not trust the next. Any other answer trusts nothing.
+/// A yes fits a ruling that trusts a head only when it names that head, since a
+/// yes meant for one head must not trust the next.
 ///
 /// # Errors
 ///
 /// [`RuleError::Head`] when a yes to a contribution's ruling names no head or
 /// another, or names a head of a ruling that is not one.
-pub(in crate::runner) fn trust(
-    next: &mut ProjectState,
-    answer: &Answer,
-    ruling: &Ruling,
-) -> Result<(), RuleError> {
+pub(in crate::runner) fn fits(answer: &Answer, ruling: &Ruling) -> Result<(), RuleError> {
     let id = ruling.id;
-    let held = match (&ruling.kind, answer) {
+    match (&ruling.kind, answer) {
         (RulingKind::Contribution(Held::Security { head, .. }), Answer::Yes) => {
             let why = format!("trusts a head, so a yes names it: `yes {}`", short(head));
-            return Err(RuleError::Head(id, why));
+            Err(RuleError::Head(id, why))
         }
         (RulingKind::Contribution(Held::Security { head, .. }), Answer::Trust(named)) => {
             let named = named.to_ascii_lowercase();
@@ -413,18 +409,39 @@ pub(in crate::runner) fn trust(
                 );
                 return Err(RuleError::Head(id, why));
             }
-            head
+            Ok(())
         }
         (_, Answer::Trust(_)) => {
             let why = "trusts no head, so a yes is only `yes`".to_owned();
-            return Err(RuleError::Head(id, why));
+            Err(RuleError::Head(id, why))
         }
-        _ => return Ok(()),
+        _ => Ok(()),
+    }
+}
+
+/// Records the head a yes to `ruling` trusts, in `next`, so it counts as passed
+///
+/// A yes that fits the ruling trusts the head it names. Any other answer trusts
+/// nothing.
+///
+/// # Errors
+///
+/// What [`fits`] refuses.
+pub(in crate::runner) fn trust(
+    next: &mut ProjectState,
+    answer: &Answer,
+    ruling: &Ruling,
+) -> Result<(), RuleError> {
+    fits(answer, ruling)?;
+    let (Answer::Trust(_), RulingKind::Contribution(Held::Security { head, .. })) =
+        (answer, &ruling.kind)
+    else {
+        return Ok(());
     };
     let followed = (next.contributions.iter_mut())
-        .find(|c| ruling.pull_request == Some(c.pull_request) && c.head == *held);
+        .find(|c| ruling.pull_request == Some(c.pull_request) && c.head == *head);
     if let Some(followed) = followed {
-        followed.passed = Some(held.clone());
+        followed.passed = Some(head.clone());
     }
     Ok(())
 }

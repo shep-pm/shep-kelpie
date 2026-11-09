@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::ports::{Checks, Cost, Timestamp, Usage};
 use crate::runner::posted::Queued;
-use crate::runner::{Answer, StepReport, step};
+use crate::runner::{Answer, StepReport, contributions, queued, step};
 use crate::skills::Step;
 use crate::state::{Finished, ProjectState, StateStore};
 use crate::test::{Rig, Scripted, ticket};
@@ -632,6 +632,94 @@ fn rule_is_answered_while_the_pass_holds_the_lock_and_an_unknown_id_is_refused_a
         postings.take_queued(),
         [Queued::Rule(ticket(71), Answer::No("not yet".into()))],
         "the refused id queued nothing"
+    );
+}
+
+// What the security reviewer finds in a contribution's head
+const FLAGGED: &str = "HIGH|build.rs:3|downloads and runs a script|it runs at build time";
+
+// A contribution whose head the security review flagged: pull request 30, its
+// ruling waiting on the maintainer, and its head returned
+fn flagged_contribution() -> (Rig, Mutex<Runner>, String) {
+    let (rig, runner) = contributions::tests::picking("all");
+    rig.claude.script([Scripted::Text(FLAGGED)]);
+    let head = contributions::security_tests::contribute(&rig, 30, |h| {
+        std::fs::write(h.join("build.rs"), "fn main() {}\n").unwrap();
+    });
+    assert_eq!(step(&runner).unwrap(), None);
+    assert_eq!(
+        step(&runner).unwrap(),
+        Some(StepReport::Alerted { id: ticket(30) })
+    );
+    (rig, runner, head)
+}
+
+#[test]
+fn a_queued_plain_yes_to_a_ruling_that_trusts_a_head_is_refused_at_once() {
+    let (rig, runner, head) = flagged_contribution();
+    let (runner, postings) = posted(&rig, runner);
+
+    let refused = asked_during_a_pass(&runner, "rule", Some("30 yes"));
+
+    assert_eq!(
+        refused,
+        json!({
+            "error": format!("ruling 30: trusts a head, so a yes names it: `yes {}`", &head[..7])
+        })
+    );
+    assert_eq!(
+        postings.take_queued(),
+        Vec::<Queued>::new(),
+        "the refused answer queued nothing"
+    );
+    assert_eq!(
+        rig.ask(&runner, "status", None)["rulings"]
+            .as_array()
+            .map(Vec::len),
+        Some(1),
+        "the ruling still waits"
+    );
+}
+
+#[test]
+fn a_queued_yes_naming_the_head_is_queued_and_applied_by_the_pass() {
+    let (rig, runner, head) = flagged_contribution();
+    let (runner, postings) = posted(&rig, runner);
+    let named = head.get(..7).expect("a commit hash");
+
+    let reply = asked_during_a_pass(&runner, "rule", Some(&format!("30 yes {named}")));
+
+    assert_eq!(reply["rulings"][0]["id"], "30", "{reply}");
+    assert!(postings.needs_wake(), "the answer waits for the pass");
+
+    queued::take_up(&runner);
+
+    assert!(!postings.needs_wake(), "the pass took it up");
+    let status = rig.ask(&runner, "status", None);
+    assert_eq!(status["rulings"], json!([]), "the ruling is answered");
+    assert_eq!(status["contributions"][0]["passed"], head, "{status}");
+    assert_eq!(status.get("standing"), None, "the pass applied it");
+}
+
+#[test]
+fn a_queued_yes_naming_another_head_is_refused_at_once() {
+    let (rig, runner, head) = flagged_contribution();
+    let (runner, postings) = posted(&rig, runner);
+
+    let refused = asked_during_a_pass(&runner, "rule", Some("30 yes 1111111111111111"));
+
+    let why = refused["error"].as_str().expect("a refusal");
+    assert!(why.contains(&head[..7]), "{refused}");
+    assert!(why.contains("a yes must name"), "{refused}");
+    assert_eq!(
+        postings.take_queued(),
+        Vec::<Queued>::new(),
+        "the refused answer queued nothing"
+    );
+    assert_eq!(
+        rig.ask(&runner, "status", None)["contributions"][0].get("passed"),
+        None,
+        "no head is trusted"
     );
 }
 
