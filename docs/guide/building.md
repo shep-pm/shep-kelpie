@@ -16,7 +16,7 @@ Kelpie keeps what is private off the forge. It refuses, and never sends, any com
 
 - a path that names you: your home folder, kelpie's home and the project's checkout, `/home/<name>`, `C:\Users\<name>`, and the scratch folders `/private/tmp` and `/var/folders`
 - an address on a local network, such as `192.168.1.20` or `host.local`
-- in a post kelpie makes to a public repo, a project of your flock whose repo GitHub marks private, as `owner/name` or by its bare name. The `gh` calls and commits of a worker are not held to this rule
+- in a post kelpie makes to a public repo, a project of your flock whose repo GitHub marks private, as `owner/name` or by its bare name. A repo whose bare name is `kelpie` is named only by `owner/name`, since kelpie's own name is in most of its posts. The `gh` calls and commits of a worker are not held to this rule
 
 A `~/` path goes through, since it is the same folder on every machine that runs shep. A post to a repo GitHub marks private may name another private project. A refusal says which rule fired and never repeats the text. The flock's repos are read when the runner starts, so a project added later is covered after the runner restarts.
 

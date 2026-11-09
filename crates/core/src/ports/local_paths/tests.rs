@@ -184,6 +184,19 @@ fn the_name_of_a_private_project_is_posted_on_a_repo_that_is_private_too() {
 }
 
 #[test]
+fn kelpies_own_name_is_posted_though_a_private_project_shares_it() {
+    let (forge, fake) = guarded();
+    fake.set_visibility_of(&repo("acme/kelpie"), Visibility::Private);
+    let forge = forge.with_flock(vec![repo("shep-pm/lab"), repo("acme/kelpie")]);
+    let text = "kelpie planned the split again, and `shep kelpie rule 3 yes` tries it again";
+    forge.create_issue(&slug(), "a title", text, &[]).unwrap();
+    assert_eq!(fake.created().len(), 1);
+    let full = "ported from acme/kelpie";
+    assert!(forge.create_issue(&slug(), "a title", full, &[]).is_err());
+    assert_eq!(fake.created().len(), 1);
+}
+
+#[test]
 fn the_name_of_a_public_project_or_a_longer_word_is_posted() {
     for text in [
         "ported from acme/site",
