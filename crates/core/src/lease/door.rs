@@ -279,6 +279,9 @@ pub struct Pick {
     /// Whether its wait is a hold on its API key
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub held: bool,
+    /// Whether its local model's queue holds at least as many asks as it has turns
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub full: bool,
     /// Which budget its calls draw from, or None from a dog that does not say
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget: Option<Budget>,
@@ -286,7 +289,7 @@ pub struct Pick {
 
 impl Pick {
     /// `agent`, finishing in `finish` seconds and starting in `wait`, with no
-    /// cost, tier, place in the list, budget, and neither local nor held
+    /// cost, tier, place in the list, budget, and neither local, held nor full
     pub fn new(agent: AgentName, finish: u64, wait: u64) -> Self {
         Self {
             agent,
@@ -296,6 +299,7 @@ impl Pick {
             tier: None,
             local: false,
             held: false,
+            full: false,
             budget: None,
         }
     }
@@ -747,6 +751,7 @@ mod tests {
             tier: Some(Tier::Heavy),
             local: true,
             held: true,
+            full: true,
             budget: Some(Budget::Credit),
             ..Pick::new(AgentName::kelpies("opus-high"), 900, 300)
         };
@@ -754,7 +759,8 @@ mod tests {
             serde_json::to_value(&read).unwrap(),
             json!({
                 "agent": "opus-high", "finish": 900, "wait": 300, "cost_usd": 1.5,
-                "tier": "heavy", "local": true, "held": true, "budget": "credit"
+                "tier": "heavy", "local": true, "held": true, "full": true,
+                "budget": "credit"
             })
         );
     }

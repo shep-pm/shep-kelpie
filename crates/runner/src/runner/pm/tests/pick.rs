@@ -294,6 +294,45 @@ fn a_picks_agent_that_cannot_start_within_the_slack_leaves_the_pick_to_the_board
     assert!(held.take_notes().iter().any(|n| n == BEHIND));
 }
 
+const FULL: &str = "#12: the project manager picked opus-high, whose model's queue is full, \
+                    so the agent board picks";
+
+#[test]
+fn a_picks_agent_whose_model_is_full_leaves_the_pick_to_the_board() {
+    let (rig, runner) = picked_for_opus(&[]);
+    rig.agent_board.is_full("opus-high");
+
+    let report = step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+
+    assert!(
+        matches!(&report, StepReport::Dispatched { issue, agent, .. }
+            if *issue == ticket(12) && agent.as_str() == "sonnet-high"),
+        "{report:?}"
+    );
+    let mut held = runner.lock().unwrap();
+    assert!(!held.state.item(ticket(12)).unwrap().pinned);
+    let notes = held.take_notes();
+    assert!(notes.iter().any(|n| n == FULL), "{notes:?}");
+}
+
+#[test]
+fn a_pin_on_a_full_agent_still_wins() {
+    let (rig, runner) = picked_for_opus(&["agent:opus-high!"]);
+    rig.agent_board.is_full("opus-high");
+
+    let report = step_until(&runner, |r| matches!(r, StepReport::Dispatched { .. }));
+
+    assert!(
+        matches!(&report, StepReport::Dispatched { issue, agent, .. }
+            if *issue == ticket(12) && agent.as_str() == "opus-high"),
+        "{report:?}"
+    );
+    let mut held = runner.lock().unwrap();
+    assert!(held.state.item(ticket(12)).unwrap().pinned);
+    let notes = held.take_notes();
+    assert!(!notes.iter().any(|n| n.starts_with("#12")), "{notes:?}");
+}
+
 #[test]
 fn a_pick_naming_the_pinned_agent_runs_it_pinned() {
     let (rig, runner) = picked_for_opus(&["agent:opus-high!"]);
