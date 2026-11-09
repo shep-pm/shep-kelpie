@@ -64,7 +64,7 @@ fn still_asking(rig: &Rig) {
 }
 
 // The parent's triage record as the state file holds it, with no verb run
-fn saved_record(rig: &Rig) -> Value {
+pub(super) fn saved_record(rig: &Rig) -> Value {
     let store = StateStore::new(rig.paths().state);
     let saved = serde_json::to_value(store.load().unwrap().unwrap()).unwrap();
     saved["triage"]["issues"][0].clone()

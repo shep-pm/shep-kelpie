@@ -118,9 +118,9 @@ impl Runner {
     }
 
     // Posts the comment that asks the maintainer to say yes to the split of
-    // `issue`, once, and saves it as the wait. False when it could not be
-    // posted, which is tried at the next poll. A plan with no maintainer to ask
-    // is dropped.
+    // `issue`, once, and saves it as the wait. False when it could not be done,
+    // which the next poll tries again: the label, the post, and the forge call
+    // that names the login to ask. Only a forge that never names one drops it.
     pub(super) fn ask_split(&mut self, issue: u64) -> Result<bool, StateError> {
         let Some(split) = self.split_of(issue).cloned() else {
             return Ok(true);
@@ -132,6 +132,18 @@ impl Runner {
         let maintainer = match self.maintainer() {
             Ok(login) => login,
             Err(why) => {
+                // The plan is kept and the parent keeps `needs-approval`, so the
+                // next poll asks the forge again. A forge that cannot name a
+                // login across every try is a project with no maintainer to ask.
+                let counts = !forge_is_busy(&why);
+                self.triage_failed(
+                    issue,
+                    &format!("cannot name the maintainer its split asks: {why}"),
+                    counts,
+                );
+                if !self.triage_given_up(issue) {
+                    return Ok(false);
+                }
                 let note = format!(
                     "triage #{issue}: its split asks the maintainer and none is named, so it is \
                      dropped: {why}"
