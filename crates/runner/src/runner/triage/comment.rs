@@ -435,6 +435,13 @@ impl Runner {
         // `plan` names its drafts in the comment and `held` does not: the
         // maintainer's own issue lists them, an outside one asks for them later
         let (mut plan, mut refused, mut held) = (Vec::new(), Vec::new(), Vec::new());
+        // The pass answered with no split, as against one that proposed a split
+        // which never reached the ask: refused, left unwritten, or stood over
+        let no_split = stood.is_none()
+            && matches!(
+                ready,
+                ready::Ready::Body(_) | ready::Ready::Rewrite(_) | ready::Ready::Not
+            );
         let (ready_body, rewrite) = match (stood.as_ref(), ready) {
             (Some(label), _) => {
                 self.notes.push(format!(
@@ -499,13 +506,14 @@ impl Runner {
         let answers_body = answers_body.or(rewrite);
         // A pass the maintainer's correction asked for, and whether their words
         // came to a plan: an outside issue's drafts are `held`, not `plan`
-        let split_again = match (corrected, !(plan.is_empty() && held.is_empty())) {
-            (true, true) => Replanned::Planned,
-            (true, false) => Replanned::None,
-            (false, _) => Replanned::No,
+        let split_again = match (corrected, !(plan.is_empty() && held.is_empty()), no_split) {
+            (true, true, _) => Replanned::Planned,
+            (true, false, true) => Replanned::None,
+            (true, false, false) => Replanned::Unfiled,
+            (false, _, _) => Replanned::No,
         };
         let kind = match split_again {
-            Replanned::Planned | Replanned::None => SPLIT_AGAIN_KIND,
+            Replanned::Planned | Replanned::None | Replanned::Unfiled => SPLIT_AGAIN_KIND,
             Replanned::No => match (answers, local, ask) {
                 (true, _, _) => ANSWERS_KIND,
                 (false, true, _) => LOCAL_READ_KIND,

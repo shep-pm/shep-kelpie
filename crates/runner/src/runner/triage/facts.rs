@@ -30,6 +30,9 @@ pub(super) enum Replanned {
     Planned,
     /// Their words came to no split, and the plan they corrected is dropped
     None,
+    /// Their words came to a split that never reached the ask, and the plan they
+    /// corrected is dropped all the same
+    Unfiled,
 }
 
 /// What the comment is for
@@ -194,6 +197,12 @@ fn replanned_facts(again: Replanned) -> String {
             "\nKelpie planned the split again from what the maintainer wrote under its ask and \
              found no split their words support, so the plan is dropped and no sub-issue is \
              filed. Never ask the maintainer to file a sub-issue themselves.\n",
+        ),
+        Replanned::Unfiled => String::from(
+            "\nKelpie planned the split again from what the maintainer wrote under its ask, but \
+             the new plan did not reach a new ask, so the plan is dropped and no sub-issue is \
+             filed. Do not say their words support no split. Never ask the maintainer to file a \
+             sub-issue themselves.\n",
         ),
     }
 }

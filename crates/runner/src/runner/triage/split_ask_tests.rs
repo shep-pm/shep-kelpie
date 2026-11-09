@@ -598,6 +598,37 @@ fn a_new_pass_with_no_split_drops_the_plan_and_says_so() {
     assert!(!said.contains("file it yourself"), "{said}");
 }
 
+// A new split the issue check refuses never reaches an ask: the comment says so,
+// and never that the maintainer's words support no split
+#[test]
+fn a_new_split_the_check_refuses_is_dropped_and_not_called_no_split() {
+    let failing = [
+        drawn("fix(a): one", BODY, &[], Value::Null),
+        drawn("fix(b): two", "Touches: `src/b.rs`\n", &[0], Value::Null),
+    ];
+    let (rig, runner) = asked_of_maintainer(PICK_MAINTAINER);
+    rig.claude
+        .script_for(Role::Representative, [Scripted::Say(AGAIN)]);
+    rig.claude
+        .script_for(Role::Triager, [reply(judged(&failing))]);
+
+    wrote(&rig, MAINTAINER, CORRECTED);
+    heard(&rig, &runner);
+    step_until(&runner, || posted(&rig).len() == 3);
+
+    assert_eq!(saved_split(&rig), Value::Null, "no plan is left held");
+    assert_eq!(rig.github.issues_created(), 0);
+    assert_eq!(posted(&rig).len(), 3, "no ask follows a refused split");
+    let said = worded(&rig, 1);
+    assert!(said.contains("did not reach a new ask"), "{said}");
+    assert!(
+        said.contains("Do not say their words support no split"),
+        "{said}"
+    );
+    assert!(!said.contains("found no split"), "{said}");
+    assert!(said.contains(NEVER_FILE), "{said}");
+}
+
 // The maintainer's own issue: its body is rewritten again, and its comment names
 // the new drafts
 #[test]
