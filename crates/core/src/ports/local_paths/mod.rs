@@ -23,6 +23,7 @@ use crate::hooks::{Hooks, Role, SharedHooks};
 use crate::local_paths::{Leak, LocalPaths, Surface, names_repo};
 use crate::review_bot::{Activity, Login};
 use crate::settings::ForgeSlug;
+use crate::shepherd::DOG;
 
 mod tickets;
 
@@ -58,8 +59,11 @@ impl Flock {
             .filter(|repo| !repo.as_str().eq_ignore_ascii_case(destination.as_str()))
             .filter(|repo| {
                 // A repo sharing the destination's bare name is the destination to
-                // the reader, so only its full slug names it.
-                let by_bare_name = !repo.name().eq_ignore_ascii_case(destination.name());
+                // the reader, and one sharing kelpie's own name is kelpie, so only
+                // its full slug names it.
+                let by_bare_name = ![destination.name(), DOG]
+                    .iter()
+                    .any(|name| repo.name().eq_ignore_ascii_case(name));
                 names_repo(text, repo, by_bare_name)
             })
             .collect();
