@@ -60,16 +60,19 @@ pub(super) fn names((old, was): Reach<'_>, (new, now): Reach<'_>) -> Vec<&'stati
         remote: _,   // waits for the next start
         base: old_base,
         maintainer: old_maintainer,
+        catch_up: old_catch_up,
     } = old_git;
     let Git {
         checkout: _,
         remote: _,
         base: new_base,
         maintainer: new_maintainer,
+        catch_up: new_catch_up,
     } = new_git;
     [
         ("git.base", old_base != new_base),
         ("git.maintainer", old_maintainer != new_maintainer),
+        ("git.catch_up", old_catch_up != new_catch_up),
         ("ci", old_ci != new_ci),
         ("concurrency", old_concurrency != new_concurrency),
         ("budget", old_budget != new_budget),

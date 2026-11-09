@@ -18,6 +18,7 @@ use super::report::{Begin, StepReport};
 use crate::fence;
 use crate::ports::{TestRun, TestRunner};
 use crate::profile;
+use crate::settings::CatchUp;
 use crate::ticket::TicketId;
 use crate::work_item::WorkItem;
 use crate::worktree::{self, Base, Remote, Start, Worktree, WorktreeError};
@@ -176,6 +177,7 @@ pub(in crate::runner) struct Standing {
     remote: Remote,
     head: String,
     base: String,
+    catch_up: CatchUp,
 }
 
 impl Ask for Standing {
@@ -188,8 +190,18 @@ impl Ask for Standing {
             remote,
             head,
             base,
+            catch_up,
         } = self;
-        worktree::base_of(&checkout, &branch, &head, &remote, &base)
+        let standing = worktree::base_of(&checkout, &branch, &head, &remote, &base)?;
+        // A head git cannot judge stays behind, and is caught up as under `always`.
+        let merges_clean = standing == Base::Behind
+            && catch_up == CatchUp::Conflicts
+            && worktree::merge_conflicts(&checkout, &head, &base) == Ok(false);
+        Ok(if merges_clean {
+            Base::Current
+        } else {
+            standing
+        })
     }
 
     fn job(self) -> Git {
@@ -363,6 +375,7 @@ impl Runner {
             remote: item.remote.clone(),
             head: head.to_owned(),
             base: self.item_base(item).to_owned(),
+            catch_up: self.settings.git.catch_up,
         });
         let read = self.read_git(self.reads.git.bases.get(head).cloned(), ask)?;
         let base =

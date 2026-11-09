@@ -38,6 +38,14 @@ remote = "shep-pm/shep"
 # GitHub notifies you. The login `gh` acts as when absent, so set this when
 # that is not you, such as a bot account.
 # maintainer = "octocat"
+# When a pull request that lacks the latest base is caught up with it.
+# "always" rebases it and tests it again, as kelpie always did. "conflicts"
+# catches it up only when merging it into the base conflicts, so a head
+# that merges cleanly goes on untested against the new base: set it for a
+# repo with a GitHub merge queue, or one that accepts an occasional red base.
+# "conflicts" needs git 2.38 or later on the host, or it acts as "always".
+# "always" when absent.
+# catch_up = "conflicts"
 
 [app.dogs.kelpie.ci]
 # Whether the repo runs CI on pull requests, which a merge waits for green

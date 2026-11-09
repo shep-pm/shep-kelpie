@@ -218,6 +218,48 @@ fn a_branch_behind_main_is_rebased_and_asked_about_only_after_ci_on_the_new_head
     );
 }
 
+#[test]
+fn a_branch_behind_main_with_no_conflict_passes_the_gate_unrebased_under_catch_up_conflicts() {
+    let (rig, runner, head) = Rig::with_pull_request_set("shep", Rig::catch_up_on_conflicts);
+    rig.land_on_origin("landed.txt");
+    rig.forge.set_checks(&head, Checks::Passed);
+
+    ruling_report(rig.verdict(&runner));
+
+    assert_eq!(
+        rig.forge.head_of("kelpie/7"),
+        Some(head.clone()),
+        "not rebased"
+    );
+    assert_eq!(
+        rig.ask(&runner, "status", None)["rulings"][0]["kind"],
+        json!({ "kind": "merge", "head": head })
+    );
+}
+
+#[test]
+fn a_branch_behind_main_that_conflicts_is_caught_up_under_catch_up_conflicts() {
+    let (rig, runner, head) = Rig::with_pull_request_set("shep", Rig::catch_up_on_conflicts);
+    rig.land("work.txt", "landed elsewhere\n");
+    rig.forge.set_checks(&head, Checks::Passed);
+
+    let report = step(&runner).unwrap();
+
+    assert!(
+        matches!(report, Some(StepReport::Conflicted { .. })),
+        "{report:?}"
+    );
+    rig.claude.script([Scripted::FinishMerge]);
+    step(&runner).unwrap();
+    let turn = rig.claude.calls().pop().unwrap();
+    assert!(
+        turn.prompt.contains("conflicts with main"),
+        "{}",
+        turn.prompt
+    );
+    assert_eq!(rig.ask(&runner, "status", None)["rulings"], json!([]));
+}
+
 // Seen live on the playground: the step after a rebase read the head
 // from before the push, and parked the worker on a false ruling.
 #[test]

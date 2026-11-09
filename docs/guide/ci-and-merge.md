@@ -6,6 +6,15 @@ After the review's last reviewer, kelpie waits for CI on the pull request's head
 
 A commit someone else pushes to a work item's branch, or a label or ready state kelpie did not set, parks it on a `foreign-change` ruling. A pull request that changes agents' own files, such as `.claude` or `.mcp.json`, parks it on an `agent-files` ruling. A pull request you merge by hand ends its work item; one closed without merging parks it. A work item already parked on a ruling reads its pull request at most once every five minutes: a merge ends the item and withdraws its ruling, and a close replaces its ruling with a `closed` one, except for the follow-up ruling after kelpie's own merge, which is not read. An item parked on that `closed` ruling is read on, and a pull request reopened and merged ends it.
 
+## A branch behind `main`
+
+Each merge leaves every other open pull request lacking the latest `main`. `git.catch_up` says what kelpie does then:
+
+- `always`, the default: kelpie catches the branch up with `main` (a rebase, or a merge where the commits are not kelpie's to rewrite), and CI runs again on the new head before the merge.
+- `conflicts`: kelpie catches the branch up only when merging it into `main` conflicts, or when git cannot say, which includes any git before 2.38, whose `merge-tree` has no `--write-tree`. A head that merges cleanly goes on as it stands: the merge ruling, the review's catch-up and the merge itself treat it as current, and nothing runs again. The combination of the head and the new `main` is tested by the merge queue's own run, or by `main`'s CI after the merge, which a red `main` already sends to the project manager.
+
+The dependency rules follow bumps by their own up-to-date check and do not read `git.catch_up`.
+
 ## A red `main`
 
 kelpie reads the latest run of each workflow on `main` every 15 minutes and reruns the failed jobs of each new red head once, with `gh run rerun --failed`. A head that is red again after its rerun is the project manager's: it reads the failed log, which kelpie writes into its folder, and either opens a fix work item at the front of the board or asks you with the log lines it read. A project without `agents.pm` gets the one webhook notice and nothing more. It may still start issues clear of the failing area. `status` lists each red workflow with what is being done about it under `red_workflows`, and the board shows the same under `## Red on main`.

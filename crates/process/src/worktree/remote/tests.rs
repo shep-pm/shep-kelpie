@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::worktree::{
     Base, Rebase, Remote, Start, Worktree, WorktreeError, adopt, base_of, clone, head, holds_work,
-    origin_head, prepare, push_commits, rebase, remove,
+    merge_conflicts, origin_head, prepare, push_commits, rebase, remove,
 };
 use shep_kelpie_test_support::git;
 
@@ -898,4 +898,35 @@ fn remove_deletes_the_branch_on_origin_when_its_pre_push_hook_fails() {
         ),
         ""
     );
+}
+
+// A branch off `main`'s first commit that sets `file` to `text`, pushed to origin
+fn branch_setting(rig: &Rig, branch: &str, file: &str, text: &str) -> String {
+    let repo = rig.repo();
+    git(&repo, &["checkout", "--quiet", "-b", branch, "origin/main"]);
+    std::fs::write(repo.join(file), text).unwrap();
+    git(&repo, &["add", file]);
+    git(&repo, &["commit", "--quiet", "-m", branch]);
+    git(&repo, &["push", "--quiet", "origin", branch]);
+    let tip = git(&repo, &["rev-parse", "HEAD"]);
+    git(&repo, &["checkout", "--quiet", "main"]);
+    tip
+}
+
+#[test]
+fn merge_conflicts_says_no_for_a_clean_merge_and_yes_for_a_conflicting_one() {
+    let rig = Rig::new();
+    let repo = rig.repo();
+    let clean = branch_setting(&rig, "clean", "other.txt", "mine\n");
+    let conflicting = branch_setting(&rig, "conflicting", "shared.txt", "mine\n");
+    std::fs::write(repo.join("shared.txt"), "theirs\n").unwrap();
+    git(&repo, &["add", "shared.txt"]);
+    git(&repo, &["commit", "--quiet", "-m", "main moves"]);
+    git(&repo, &["push", "--quiet", "origin", "main"]);
+    git(&repo, &["fetch", "--quiet", "origin"]);
+
+    assert_eq!(merge_conflicts(&repo, &clean, "main"), Ok(false));
+    assert_eq!(merge_conflicts(&repo, &conflicting, "main"), Ok(true));
+    let missing = "0".repeat(40);
+    assert!(merge_conflicts(&repo, &missing, "main").is_err());
 }

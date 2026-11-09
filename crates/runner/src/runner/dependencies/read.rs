@@ -8,8 +8,7 @@
 //! A poll the forge refuses is read again at the next pass.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::board::{OpenPullRequest, is_bump};
@@ -20,7 +19,7 @@ use crate::runner::trigger::lock;
 use crate::runner::voice::Writer;
 use crate::settings::{Dependencies, ForgeSlug};
 use crate::state::{Bump, RedStep, StateError};
-use crate::worktree::{self, Base, Remote, in_repo};
+use crate::worktree::{self, Base, Remote};
 
 // The longest list of changed paths read for one bump, in bytes
 const PATHS_LIMIT: usize = 1 << 20;
@@ -151,7 +150,7 @@ impl Job {
         )
         .map_err(|e| e.to_string());
         let conflicts = matches!(base, Ok(Base::Behind))
-            .then(|| merge_conflicts(&self.checkout, &pr.commit, &self.base));
+            .then(|| worktree::merge_conflicts(&self.checkout, &pr.commit, &self.base));
         let passed = matches!(pr.checks, Checks::Passed | Checks::Skipped);
         let proved = self.bumps.iter().any(|b| {
             b.pull_request == pr.number
@@ -178,40 +177,6 @@ impl Job {
             conflicts,
             web,
         }
-    }
-}
-
-// Whether merging `head` into `origin/<base>` has conflicts, which git says
-// without touching the checkout. [`worktree::base_of`] has just fetched both.
-fn merge_conflicts(checkout: &Path, head: &str, base: &str) -> Result<bool, String> {
-    let tip = format!("origin/{base}");
-    let args = ["merge-tree", "--write-tree", "--no-messages", &tip, head];
-    let output = in_repo(checkout)
-        .arg("--no-replace-objects")
-        .args(args)
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .map_err(|e| e.to_string())?;
-    // Exit 1 with a tree first is a merge with conflicts. A missing commit
-    // also exits 1, with nothing on stdout, and git before 2.38 fails otherwise.
-    match output.status.code() {
-        Some(0) => Ok(false),
-        Some(1) => {
-            let tree = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .unwrap_or_default()
-                .to_owned();
-            match tree.is_empty() || !tree.bytes().all(|b| b.is_ascii_hexdigit()) {
-                true => Err(format!("git merge-tree said nothing of {head}")),
-                false => Ok(true),
-            }
-        }
-        _ => Err(format!(
-            "git merge-tree failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        )),
     }
 }
 

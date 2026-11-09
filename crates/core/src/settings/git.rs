@@ -28,6 +28,23 @@ pub struct Git {
     /// when absent.
     #[serde(default)]
     pub maintainer: Option<GithubLogin>,
+    /// When a pull request behind the base is caught up with it: `always`, or
+    /// only when it `conflicts`. `always` when absent.
+    #[serde(default)]
+    pub catch_up: CatchUp,
+}
+
+/// When a branch behind the base is caught up with it
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum CatchUp {
+    /// Whenever it lacks the latest base: it is rebased and tested again
+    #[default]
+    Always,
+    /// Only when merging it into the base conflicts. A branch that merges
+    /// cleanly goes on as it stands, and what tests the combination is the
+    /// repo's merge queue or the base's own CI.
+    Conflicts,
 }
 
 /// The branch work items are cut from and merged into, on `origin`, when a

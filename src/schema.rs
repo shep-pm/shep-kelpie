@@ -252,6 +252,7 @@ mod tests {
             .replace("# representative =", "representative =")
             .replace("# maintainer =", "maintainer =")
             .replace("# base =", "base =")
+            .replace("# catch_up =", "catch_up =")
             .replace(
                 "# [app.dogs.kelpie.e2e]\n# host =",
                 "[app.dogs.kelpie.e2e]\nhost =",

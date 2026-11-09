@@ -26,6 +26,7 @@ mod catch_up;
 mod changed;
 pub mod clone;
 mod common;
+mod conflicts;
 mod contribution;
 mod in_process;
 #[cfg(test)]
@@ -44,6 +45,7 @@ pub use borrowed::borrowed;
 pub use cache::{Pruned, TurnMark, prune};
 pub use catch_up::{Rebase, rebase};
 pub use changed::{Moved, changed_files, moved_since};
+pub use conflicts::merge_conflicts;
 pub use contribution::{
     Change, Opaque, Touched, change as contribution_change, changed_paths,
     checkout as contribution_checkout,
