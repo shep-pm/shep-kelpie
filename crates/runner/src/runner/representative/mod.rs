@@ -29,6 +29,7 @@ use crate::usage::{CallKind, Draft, Line, Spent, ended};
 use crate::work_item::new_session_id;
 
 pub(in crate::runner) mod reading;
+mod sorry;
 
 /// How long a call may run before it is ended
 const CEILING: Duration = Duration::from_secs(15 * 60);
@@ -192,6 +193,7 @@ impl Runner {
         thread: Thread<'_>,
         ceiling: Duration,
     ) -> Result<(String, Cost), RepresentError> {
+        let waited = self.waited_line(post, thread);
         let agent = (self.settings.representative(&self.book)).map_err(RepresentError::Agent)?;
         let folder = &self.paths.representative;
         fs::create_dir_all(folder).map_err(|e| {
@@ -214,7 +216,7 @@ impl Runner {
                 agent.model.effort,
                 Session::New(session),
                 folder.clone(),
-                self.post_prompt(post, thread),
+                self.post_prompt(post, thread, waited.as_deref()),
             )
         };
         let call = self.prepared(call).map_err(RepresentError::Setup)?;
@@ -266,10 +268,10 @@ impl Runner {
         })
     }
 
-    // What the call is asked: the kind of post, the facts, the earlier posts
-    // that can still be read, and the contributor's text, the last two fenced
-    // as data.
-    fn post_prompt(&self, post: &Post<'_>, thread: Thread<'_>) -> String {
+    // What the call is asked: the kind of post, the facts, which carry the wait
+    // line when the thread has waited on our side, the earlier posts that can
+    // still be read, and the contributor's text, the last two fenced as data.
+    fn post_prompt(&self, post: &Post<'_>, thread: Thread<'_>, waited: Option<&str>) -> String {
         // A clock past what a date can hold leaves the line out, not a wrong day.
         let today = (day(self.ports.clock.now()))
             .map(|today| format!("Today is {}.\n\n", today.strftime("%A %-d %B %Y")))
@@ -278,9 +280,13 @@ impl Runner {
             Thread::PullRequest => String::new(),
             Thread::Issue(opening) => issue_place(post, opening),
         };
+        let facts = match waited {
+            Some(line) => format!("{}\n{line}", post.facts.trim_end()),
+            None => post.facts.to_owned(),
+        };
         let mut prompt = format!(
-            "{today}{place}Kind of post: {}\n\nFacts:\n{}\n",
-            post.kind, post.facts
+            "{today}{place}Kind of post: {}\n\nFacts:\n{facts}\n",
+            post.kind
         );
         let earlier: Vec<String> = (post.earlier.iter())
             .filter_map(|&id| self.ports.forge.comment_marks(&self.remote, id).ok())
@@ -562,5 +568,7 @@ fn mention(chars: &[char]) -> Option<usize> {
     Some(len)
 }
 
+#[cfg(test)]
+mod sorry_tests;
 #[cfg(test)]
 mod tests;

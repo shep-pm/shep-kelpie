@@ -7,7 +7,7 @@
 //! nothing open clears it, as does a new head.
 //!
 //! [`Clock::due`] says when `nudge_days` and `quiet_days` have passed, or when an
-//! open ask's own notice has run (`release.rs`).
+//! open ask's notice has run (`release.rs`), and [`Clock::acts_at`] is that moment.
 
 use serde::Serialize;
 
@@ -69,6 +69,12 @@ impl Clock {
     /// Whole days until the contribution counts as quiet, 0 once it does
     pub(super) fn days_to_quiet(&self, now: Timestamp) -> u64 {
         self.quiet_at().0.saturating_sub(now.0).div_ceil(DAY)
+    }
+
+    /// The moment the clock says kelpie acts on the contributor's silence, which
+    /// is what an ask promises and what a post that comes after it is late on
+    pub(in crate::runner) fn acts_at(&self) -> Timestamp {
+        self.quiet_at()
     }
 
     /// Whole days from a restart of the clock to its quiet
