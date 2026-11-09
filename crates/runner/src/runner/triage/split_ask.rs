@@ -1,21 +1,22 @@
-//! A split of someone else's issue, held until the maintainer says yes
+//! A split held until the maintainer says yes
 //!
-//! Only the maintainer's word starts git work, and the gate is code:
-//! [`Runner::label_split`] files nothing while the plan's `asked` is set. Once
-//! the pass ends, [`Runner::ask_split`] posts a new comment naming the
-//! maintainer, and that comment's id and time are what `asked` holds from then
-//! on. Before it goes up `asked` holds the triage comment, which no reply can
-//! be to. The maintainer's `yes` or `ok` ([`super::heard`]) clears `asked` and
-//! steps the record back to `body-written`, where the next poll files the
-//! split. `no` drops the plan, and so does silence `triage.wait_days`.
+//! Every split waits on the maintainer's word, whoever filed the issue, and the
+//! gate is code: [`Runner::label_split`] files nothing while the plan's `asked`
+//! is set. Once the pass ends, [`Runner::ask_held_split`] puts `needs-approval`
+//! on the parent and [`Runner::ask_split`] posts a comment naming the maintainer,
+//! whose id and time `asked` holds from then on; before it, `asked` holds the
+//! triage comment, which no reply can be to. A `yes` or `ok` ([`super::heard`])
+//! clears `asked` and steps the record back to `body-written`, where the next
+//! poll files the split. `no`, and silence `triage.wait_days`, drop the plan.
 
 use super::super::Runner;
 use super::super::contributions::post::forge_is_busy;
 use super::super::thread_replies::plain_login;
+use super::WaitingLabel;
 use super::ask::says_yes;
 use crate::board::{AGENT_LABEL, PIN, TRIAGE};
 use crate::ports::{ForgeError, PostedComment, Timestamp};
-use crate::state::{SplitDraft, StateError, TriageQuestions, TriageStep};
+use crate::state::{SplitDraft, StateError, TriageQuestions, TriageSplit, TriageStep};
 
 // The marker that ends the ask made for the triage comment `comment`: a post
 // whose answer was lost is found by it and not made again
@@ -23,11 +24,40 @@ fn ask_marker(comment: u64) -> String {
     format!("<!-- kelpie:split-ask #{comment} -->")
 }
 
-// The comment that asks `maintainer` to say yes to `drafts`, ending in `marker`
-fn ask_text(maintainer: &str, drafts: &[SplitDraft], days: u32, marker: &str) -> String {
+// The comment that asks `maintainer` to say yes to `drafts`, ending in `marker`.
+// `own` is the maintainer's own issue, and `from_issue` that the split is the
+// author's rather than kelpie's
+fn ask_text(
+    maintainer: &str,
+    drafts: &[SplitDraft],
+    days: u32,
+    marker: &str,
+    own: bool,
+    from_issue: bool,
+) -> String {
+    let source = match (own, from_issue) {
+        (true, true) => {
+            "This split is yours: you spelled it out in the issue, and kelpie \
+                         drafted each sub-issue from it."
+        }
+        (true, false) => "Kelpie worked the split out itself.",
+        (false, true) => {
+            "Its author spelled this split out in the issue, and kelpie drafted \
+                         each sub-issue from it."
+        }
+        (false, false) => "Kelpie worked the split out from what the issue asks for.",
+    };
+    let yes = match own {
+        true => "Reply `yes` if this is the split you meant, or `no` to drop the plan.",
+        false => {
+            "Reply `yes` to approve the split and the directions its author gave, or `no` \
+                 to drop the plan."
+        }
+    };
     let mut text = format!(
-        "@{maintainer} Kelpie judged this issue too big for one work item. With your yes it \
-         files these sub-issues of it, in this order, each labelled `ready-for-agent`:\n\n"
+        "@{maintainer} Kelpie judged this issue too big for one work item. {source} Every draft \
+         below passes kelpie's issue check. With your yes it files these sub-issues of it, in \
+         this order, each labelled `ready-for-agent`:\n\n"
     );
     for (n, draft) in drafts.iter().enumerate() {
         text.push_str(&format!("{}. {}", n + 1, draft.title.trim()));
@@ -43,13 +73,23 @@ fn ask_text(maintainer: &str, drafts: &[SplitDraft], days: u32, marker: &str) ->
         text.push('\n');
     }
     text.push_str(&format!(
-        "\nReply `yes` to file them, or `no` to drop the plan. Only your reply counts. With no \
-         reply in {days} days the plan is dropped and the issue stays as it is.\n\n{marker}"
+        "\n{yes} Only your reply counts. With no reply in {days} days the plan is dropped and \
+         the issue stays as it is.\n\n{marker}"
     ));
     text
 }
 
 impl Runner {
+    // Whether `split`'s ask has gone up: `asked` naming the issue's own triage
+    // comment holds the filing with no ask posted yet
+    pub(super) fn ask_posted(&self, split: &TriageSplit) -> bool {
+        let Some(held) = split.asked else {
+            return false;
+        };
+        self.triage_record(split.issue)
+            .is_none_or(|record| record.comment != held.comment)
+    }
+
     // The issues whose split waits on the maintainer's word, each with when
     // the ask went up. A plan whose ask is not posted yet has no wait.
     pub(in crate::runner) fn split_waits(&self) -> Vec<(u64, Timestamp)> {
@@ -57,13 +97,24 @@ impl Runner {
             return Vec::new();
         };
         (triage.splits.iter())
-            .filter_map(|split| Some((split.issue, split.asked?)))
-            .filter(|(issue, held)| {
-                self.triage_record(*issue)
-                    .is_none_or(|record| record.comment != held.comment)
-            })
-            .map(|(issue, held)| (issue, held.at))
+            .filter(|split| self.ask_posted(split))
+            .filter_map(|split| Some((split.issue, split.asked?.at)))
             .collect()
+    }
+
+    // Puts `needs-approval` on `issue` and posts the comment that asks the
+    // maintainer to say yes to its split. False when either could not be done,
+    // which the next poll tries again.
+    pub(super) fn ask_held_split(&mut self, issue: u64) -> Result<bool, StateError> {
+        if let Err(failed) = self.put_waiting_label(issue) {
+            let counts = match &failed {
+                WaitingLabel::Make(_) => true,
+                WaitingLabel::Label(e) => !forge_is_busy(e),
+            };
+            self.triage_failed(issue, &failed.to_string(), counts);
+            return Ok(false);
+        }
+        self.ask_split(issue)
     }
 
     // Posts the comment that asks the maintainer to say yes to the split of
@@ -89,9 +140,19 @@ impl Runner {
                 return Ok(true);
             }
         };
+        let own = self
+            .triage_record(issue)
+            .is_some_and(|t| self.own_author(&t.author));
         let days = self.settings.triage.wait_days.get();
         let marker = ask_marker(comment.unwrap_or_default());
-        let text = ask_text(&maintainer, &split.drafts, days, &marker);
+        let text = ask_text(
+            &maintainer,
+            &split.drafts,
+            days,
+            &marker,
+            own,
+            split.from_issue,
+        );
         // An ask whose post answer was lost is on the forge already
         let found = match self.ask_found(issue, &marker) {
             Ok(found) => found,

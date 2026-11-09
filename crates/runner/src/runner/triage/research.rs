@@ -58,6 +58,9 @@ pub(in crate::runner) struct Found {
     /// item to hold, in the order they are filed. Kelpie keeps them only for the
     /// maintainer's own issue.
     pub(in crate::runner) split: Vec<Drafted>,
+    /// The triager followed a split the issue itself spells out, which is the
+    /// author's, rather than worked one out itself
+    pub(in crate::runner) from_issue: bool,
 }
 
 /// One sub-issue the research drafted, as far as kelpie could read it
@@ -138,6 +141,8 @@ struct Reply {
     body: Option<String>,
     #[serde(default)]
     split: Option<Vec<Drawn>>,
+    #[serde(default)]
+    split_from: Option<String>,
 }
 
 // A draft as the triager wrote it, before kelpie reads it
@@ -356,7 +361,8 @@ pub(super) fn prompt(
          \"a conventional commit subject\", \"body\": \"the sub-issue's whole body\", \"priority\": \
          \"P1\" | \"P2\" | \"P3\" | \"P4\" | null, \"kind\": \"feat\" | \"fix\" | \"docs\" | \
          \"refactor\" | \"perf\" | \"test\" | \"ci\" | \"chore\" | \"style\" | null, \"after\": \
-         [indices of earlier drafts it waits on], \"agent\": null | \"an implementer's name\"}}]}}",
+         [indices of earlier drafts it waits on], \"agent\": null | \"an implementer's name\"}}], \
+         \"split_from\": \"issue\" | \"kelpie\" | null}}",
         fenced("The issue", &issue),
         fenced("The open issues' numbers and titles", &listing),
         fenced(
@@ -389,7 +395,9 @@ fn split_hint(implementers: &[AgentName]) -> String {
          `after` lists the indices, counted from 0, of the earlier drafts it waits on. Kelpie \
          files them, links them to this issue and blocks each on its `after`, so write none of \
          that, and the issue itself never goes `ready-for-agent`. Answer `split` as `[]` for an \
-         issue one work item holds. {agents} Answer `agent` only where the issue asks for an \
+         issue one work item holds. Answer `split_from` as `issue` when the issue itself spells \
+         the split out and you followed it, and as `kelpie` when you worked the split out. \
+         {agents} Answer `agent` only where the issue asks for an \
          implementer. If it names a family and no one agent, pick one, answer `agent` with it, \
          and write an `Assumed: <the pick and why>. Say otherwise.` line in that draft's body. \
          A question is only ever about what kelpie can do: never offer anything off the list in \
@@ -510,6 +518,8 @@ pub(in crate::runner) fn read_reply(
         split: (reply.split.unwrap_or_default().into_iter())
             .map(drafted)
             .collect(),
+        from_issue: (reply.split_from.as_deref().map(str::trim))
+            .is_some_and(|from| from.eq_ignore_ascii_case("issue")),
     })
 }
 

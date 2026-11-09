@@ -4,10 +4,10 @@
 //! a restart and files nothing twice. Every draft is checked first and a
 //! failing one files none. Then each draft goes, in order: its labels made, the
 //! ticket filed and saved, linked as a sub-issue, blocked by what it waits on,
-//! and `ready-for-agent` last. The parent never gets `ready-for-agent`.
-//!
-//! The plan comes from the triager's `split`: [`Runner::judged_split`] checks
-//! the parent's body and every draft, and a refusal files nothing.
+//! and `ready-for-agent` last. The parent never gets `ready-for-agent`. The
+//! plan comes from the triager's `split`: [`Runner::judged_split`] checks the
+//! parent's body and every draft. Every saved plan waits for the maintainer's
+//! yes before a draft goes ([`super::split_ask`]).
 
 use std::collections::BTreeSet;
 
@@ -224,6 +224,7 @@ pub(super) fn plan(
     triage: &mut TriageState,
     issue: u64,
     drafts: Vec<SplitDraft>,
+    from_issue: bool,
     hold: Option<TriageQuestions>,
 ) {
     if drafts.is_empty() {
@@ -233,6 +234,7 @@ pub(super) fn plan(
     triage.splits.push(TriageSplit {
         issue,
         drafts,
+        from_issue,
         filed: Vec::new(),
         asked: hold,
     });
@@ -299,11 +301,11 @@ impl Runner {
     // Takes back the plan saved for `issue` when its pass ends with no body
     // written, since nothing the comment promised came to be: its drafts are
     // never filed, and a later reply may split the issue again. A plan with a
-    // draft filed, or held, is part done and stays.
+    // draft filed, or with its ask up, is part done and stays.
     pub(super) fn unplan(&mut self, issue: u64) -> Result<(), StateError> {
         let owed = self
             .split_of(issue)
-            .is_some_and(|s| s.filed.is_empty() && s.asked.is_none());
+            .is_some_and(|s| s.filed.is_empty() && !self.ask_posted(s));
         if !owed {
             return Ok(());
         }
@@ -376,7 +378,8 @@ impl Runner {
 
     // Files the split saved for `issue`, which carries `carried`, or says why
     // it did not. The caller ruled out a hand triage label. The parent comes off
-    // `ready-for-agent` first, and `needs-triage` before the first draft goes.
+    // `ready-for-agent` first, and `needs-approval` before the first draft goes.
+    // A plan still waiting for the maintainer's yes is asked instead of filed.
     pub(super) fn label_split(
         &mut self,
         issue: u64,
@@ -413,7 +416,14 @@ impl Runner {
             return Ok(ReadyLabels::Stood);
         }
         if split.asked.is_some() {
-            return Ok(ReadyLabels::Held);
+            // The plan waits for the maintainer's yes, whoever filed the issue:
+            // the parent carries `needs-approval` while it waits, and the ask
+            // goes up under the triage comment.
+            if !self.ask_held_split(issue)? {
+                return Ok(ReadyLabels::Held);
+            }
+            self.triage_stepped(issue, TriageStep::Done)?;
+            return Ok(ReadyLabels::Stood);
         }
         if carried.iter().any(|l| l == TRIAGE)
             && let Err(e) = self.label_issue(issue, TRIAGE, false)

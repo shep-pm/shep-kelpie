@@ -240,6 +240,7 @@ fn a_record_whose_split_is_held_is_kept_past_the_cap() {
         splits: vec![TriageSplit {
             issue: 1,
             drafts: Vec::new(),
+            from_issue: false,
             filed: Vec::new(),
             asked: Some(TriageQuestions {
                 comment: 9,
@@ -709,7 +710,7 @@ fn a_taken_back_record_saves_as_taken_and_is_not_pruned() {
 
 // A split saves as its drafts and the children filed so far, and a file saved
 // before splits existed loads with none. An empty `filed` and `asked` are left
-// out.
+// out, as a split the triager worked out leaves `from_issue`.
 #[test]
 fn a_saved_split_survives_a_load() {
     let dir = tempfile::tempdir().unwrap();
@@ -743,6 +744,7 @@ fn a_saved_split_survives_a_load() {
                     after: vec![0],
                 },
             ],
+            from_issue: true,
             filed: vec![crate::test::ticket(900)],
             asked: None,
         }],
@@ -760,8 +762,27 @@ fn a_saved_split_survives_a_load() {
                 { "title": "feat(a): first", "body": "Touches: `a.rs`", "labels": ["kind:feat"] },
                 { "title": "feat(b): second", "body": "Touches: `b.rs`", "after": [0] }
             ],
+            "from_issue": true,
             "filed": ["900"]
         }])
     );
     assert_eq!(store.load().unwrap(), Some(state));
+}
+
+// A split saved before `from_issue` existed loads as kelpie's own
+#[test]
+fn a_split_saved_without_from_issue_loads_as_kelpies() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path());
+    let mut old = serde_json::to_value(ProjectState::new()).unwrap();
+    old["version"] = 105.into();
+    old["triage"] = serde_json::json!({
+        "since": 7,
+        "splits": [{ "issue": 30, "drafts": [{ "title": "fix(a): one", "body": "b" }] }]
+    });
+    fs::write(dir.path().join(STATE_FILE), old.to_string()).unwrap();
+
+    let loaded = store.load().unwrap().expect("a saved state");
+    let splits = loaded.triage.map(|t| t.splits).unwrap_or_default();
+    assert!(!splits[0].from_issue);
 }
