@@ -25,7 +25,8 @@ pub(super) enum Reader {
 pub(super) struct Wording {
     /// The check passes the rewrite, which makes the issue ready for the board
     pub(super) ready: bool,
-    /// The reply splits the issue, and kelpie files its sub-issues
+    /// The reply splits the maintainer's own issue, whose sub-issues wait on
+    /// their yes
     pub(super) split: bool,
     /// The comment asks its author the open questions
     pub(super) ask: bool,
@@ -161,13 +162,16 @@ pub(super) fn facts(found: &Found, labels: &[String], wording: Wording, reader: 
     facts
 }
 
-// What the representative is told of a split: the sub-issues to come, in order
+// What the representative is told of a split: the sub-issues to come, in order,
+// and that none of them goes before the maintainer says yes
 fn split_facts(found: &Found) -> String {
     let mut facts = String::from(
-        "\nThe issue is too big for one work item. Kelpie rewrites its body from this report \
-         and files these sub-issues of it, in this order, each labelled `ready-for-agent`. The \
-         issue itself never goes ready for an agent: it stays open until its sub-issues close. \
-         Say that the issue is split, and name the sub-issues to come:\n",
+        "\nThe issue is too big for one work item. Kelpie rewrites its body from this report, \
+         and files none of these sub-issues until the maintainer says yes to the split. On their \
+         yes they go in this order, each labelled `ready-for-agent`. The issue itself never goes \
+         ready for an agent: it stays open until its sub-issues close. The author is the \
+         maintainer: speak to them as \"you\", say that the split waits for their yes, and name \
+         the sub-issues to come:\n",
     );
     for (n, part) in found.split.iter().enumerate() {
         facts.push_str(&format!("{}. {}", n + 1, part.title));

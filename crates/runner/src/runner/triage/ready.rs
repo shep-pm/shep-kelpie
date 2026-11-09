@@ -7,13 +7,13 @@
 //! `ready-for-agent` last. Otherwise the body goes under the issue's text, and
 //! the issue ends `needs-approval`. The comment is worded first. A reply that
 //! splits the issue is made ready as a split or refused as one
-//! ([`super::split`]). On anyone else's issue it only saves the plan, held.
+//! ([`super::split`]), and every split is saved held for the maintainer's yes.
 
 use super::super::Runner;
 use super::super::contributions::post::{forge_is_busy, refused_text};
+use super::TRIAGE_LABELS;
 use super::local::body_hash;
 use super::research::Found;
-use super::{TRIAGE_LABELS, WaitingLabel};
 use crate::board::has_criteria;
 use crate::board::{READY, TRIAGE, TRIAGE_GO};
 use crate::local_paths::{Leak, Surface};
@@ -52,7 +52,7 @@ pub(in crate::runner) enum Ready {
     Local(Leak),
     /// The maintainer's own issue, which the research judged too big for one
     /// work item: the body to write over the issue's, which never goes ready,
-    /// and the drafts to file as its sub-issues
+    /// and the drafts to file as its sub-issues once the maintainer says yes
     Split {
         body: String,
         drafts: Vec<SplitDraft>,
@@ -62,14 +62,14 @@ pub(in crate::runner) enum Ready {
     SplitRefused(Vec<String>),
     /// Someone else's issue, which the research judged too big for one work
     /// item: the drafts to save as a plan held until the maintainer says yes.
-    /// The issue's body is never written.
+    /// The issue's body is never written, and its comment names no draft.
     Ask(Vec<SplitDraft>),
 }
 
 /// Whether kelpie is going to rewrite `issue`, with `labels` the pass puts on,
 /// and whether that makes it ready. Only an issue whose author is
 /// `Runner::own_author`, the maintainer or the App, is ever rewritten or made
-/// ready; a split of any other is held for the maintainer's yes. The body is read against the same local guard every App post goes
+/// ready. Every split is saved held for the maintainer's yes. The body is read against the same local guard every App post goes
 /// through: the comment is worded before the body is written, so text the
 /// guard would refuse is dropped here rather than promised there.
 pub(in crate::runner) fn readiness(
@@ -324,15 +324,7 @@ impl Runner {
         if begun_with_ready && !self.take_ready_back(issue)? {
             return Ok(());
         }
-        if let Err(failed) = self.put_waiting_label(issue) {
-            let counts = match &failed {
-                WaitingLabel::Make(_) => true,
-                WaitingLabel::Label(e) => !forge_is_busy(e),
-            };
-            self.triage_failed(issue, &failed.to_string(), counts);
-            return Ok(());
-        }
-        if !self.ask_split(issue)? {
+        if !self.ask_held_split(issue)? {
             return Ok(());
         }
         self.triage_stepped(issue, TriageStep::Done)?;
@@ -382,13 +374,17 @@ impl Runner {
             .filter(|l| TRIAGE_LABELS.contains(&l.as_str()))
             .cloned()
             .collect();
-        // `ready-for-agent` is this step's own label, so on the issue here it is
-        // kelpie's: a lost answer or a crash before the step saved leaves it there, and
-        // the pass finishes the labelling rather than reading it as the maintainer's.
+        // This step's own labels: `ready-for-agent`, and for a split parent the
+        // `needs-approval` its ask waits under. Either, on the issue here, is
+        // kelpie's from a call whose answer was lost, and the pass finishes.
         // Any other triage label here came by hand and stands.
+        let own: Vec<&str> = match self.split_of(issue).is_some() {
+            true => vec![READY, TRIAGE],
+            false => vec![READY],
+        };
         let owed: Vec<String> = carried
             .iter()
-            .filter(|l| l.as_str() != READY)
+            .filter(|l| !own.contains(&l.as_str()))
             .cloned()
             .collect();
         if let Some(label) = stood(&owed, &seen) {

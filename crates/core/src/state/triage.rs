@@ -48,6 +48,10 @@ fn is_zero(n: &u64) -> bool {
     *n == 0
 }
 
+fn is_false(flag: &bool) -> bool {
+    !*flag
+}
+
 /// How many finished triage records are kept, the oldest going first
 ///
 /// An issue whose record went is told apart from an untouched one by its
@@ -176,15 +180,21 @@ pub struct TriageSplit {
     pub issue: u64,
     /// The drafts in the order they are filed
     pub drafts: Vec<SplitDraft>,
+    /// The split follows one the issue itself spells out, which is the author's,
+    /// rather than one kelpie judged up. The ask says which.
+    ///
+    /// Left out while false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub from_issue: bool,
     /// The tickets filed so far: draft `n` is `filed[n]`, saved before the next
     /// write, so a restart files no draft twice
     ///
     /// Left out while empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filed: Vec<TicketId>,
-    /// The comment holding the filing back for an answer: the issue's author's,
-    /// or on someone else's issue the maintainer's yes. While it is set,
-    /// nothing is filed.
+    /// The comment the maintainer's yes is heard under: their own ask, or,
+    /// before it goes up, the issue's triage comment, which no reply can be to.
+    /// While it is set, nothing is filed.
     ///
     /// Left out unless the filing waits on an answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]

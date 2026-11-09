@@ -6,21 +6,21 @@ use std::sync::Mutex;
 use serde_json::{Value, json};
 
 use super::answers_tests::step_until;
-use super::ask_tests::{posted, wrote};
+use super::ask_tests::wrote;
 use super::pick_tests::{MAINTAINER, issue, list, rig_with};
 use super::research_tests::{APP, WORDS, calls, facts, reply, triage};
 use crate::ports::Role;
 use crate::runner::{Runner, step};
-use crate::state::{StateStore, TriageQuestions, TriageStep};
+use crate::state::StateStore;
 use crate::test::{Rig, Scripted};
 
-const BODY: &str = "Touches:\n- `src/start.rs` (new)\n\n## What to build\n\n- Fix the \
+pub(super) const BODY: &str = "Touches:\n- `src/start.rs` (new)\n\n## What to build\n\n- Fix the \
     crash on start.\n\n## Acceptance criteria\n\n- [ ] `runner::start::it_starts`\n";
 
 const LABELS: [&str; 3] = ["kind:fix", "priority: P2", "area:split"];
 
 // A draft of a split with the labels the check needs, blocked by `after`
-fn draft(title: &str, body: &str, after: &[usize]) -> Value {
+pub(super) fn draft(title: &str, body: &str, after: &[usize]) -> Value {
     json!({ "title": title, "body": body, "labels": LABELS, "after": after })
 }
 
@@ -45,7 +45,11 @@ fn planned(drafts: &[Value], filed: &[&str]) -> (Rig, Mutex<Runner>) {
 }
 
 // [`planned`] with the author's questions held as `asked` says, or null
-fn planned_asking(drafts: &[Value], filed: &[&str], asked: Value) -> (Rig, Mutex<Runner>) {
+pub(super) fn planned_asking(
+    drafts: &[Value],
+    filed: &[&str],
+    asked: Value,
+) -> (Rig, Mutex<Runner>) {
     let rig = rig_with("pick = \"maintainer\"");
     rig.forge.set_repo_labels(&[
         "needs-approval",
@@ -69,7 +73,7 @@ fn planned_asking(drafts: &[Value], filed: &[&str], asked: Value) -> (Rig, Mutex
 }
 
 // What the App wrote on the repo, in order, from its `skip`th write
-fn app_writes(rig: &Rig, skip: usize) -> Vec<String> {
+pub(super) fn app_writes(rig: &Rig, skip: usize) -> Vec<String> {
     let writes = rig.github.writes();
     (writes.into_iter().skip(skip))
         .filter_map(|(_, call)| {
@@ -101,11 +105,11 @@ fn filed_bodies(rig: &Rig) -> Vec<String> {
         .collect()
 }
 
-fn parent_record(rig: &Rig, runner: &Mutex<Runner>) -> Value {
+pub(super) fn parent_record(rig: &Rig, runner: &Mutex<Runner>) -> Value {
     triage(rig, runner)["issues"][0].clone()
 }
 
-fn saved_split(rig: &Rig) -> Value {
+pub(super) fn saved_split(rig: &Rig) -> Value {
     let store = StateStore::new(rig.paths().state);
     let saved = serde_json::to_value(store.load().unwrap().unwrap()).unwrap();
     saved["triage"]["splits"][0].clone()
@@ -214,10 +218,14 @@ fn a_held_split_still_takes_ready_for_agent_off_the_parent() {
     assert_eq!(
         rig.github.issues_created(),
         0,
-        "the questions hold the filing"
+        "the maintainer's yes holds the filing"
     );
     let writes = app_writes(&rig, start);
-    assert_eq!(writes, ["unlabel #30 ready-for-agent"]);
+    assert_eq!(
+        writes,
+        ["unlabel #30 ready-for-agent", "label #30 needs-approval"],
+        "the parent waits at `needs-approval`"
+    );
 }
 
 #[test]
@@ -465,12 +473,12 @@ fn a_split_cut_short_by_triage_going_off_says_so_at_the_next_start() {
 
 // What the triager answers for an issue it judges too big: a parent body and
 // `drafts`
-fn judged(drafts: &[Value]) -> Value {
+pub(super) fn judged(drafts: &[Value]) -> Value {
     json!({ "type": "enhancement", "kind": "fix", "priority": "P2", "body": BODY, "split": drafts })
 }
 
 // The triager's draft with no labels of its own: kelpie gives them
-fn drawn(title: &str, body: &str, after: &[usize], agent: Value) -> Value {
+pub(super) fn drawn(title: &str, body: &str, after: &[usize], agent: Value) -> Value {
     json!({ "title": title, "body": body, "priority": "P2", "kind": "fix", "after": after, "agent": agent })
 }
 
@@ -491,7 +499,7 @@ fn splitting_labelled(
 }
 
 // [`splitting_labelled`] under the settings `lines` give
-fn splitting_with(
+pub(super) fn splitting_with(
     found: impl FnOnce(&Rig) -> Value,
     lines: &str,
     author: &str,
@@ -514,6 +522,21 @@ fn splitting_with(
     rig.claude.script_for(Role::Triager, [reply(found(&rig))]);
     let runner = rig.open().unwrap();
     (rig, runner)
+}
+
+// The poll goes by with whatever was written on the issue since
+pub(super) fn heard(rig: &Rig, runner: &Mutex<Runner>) {
+    rig.next_look();
+    assert_eq!(step(runner).unwrap(), None);
+    rig.next_look();
+    assert_eq!(step(runner).unwrap(), None);
+}
+
+// The maintainer says yes under the ask, and `filed` drafts go
+pub(super) fn yes(rig: &Rig, runner: &Mutex<Runner>, filed: u64) {
+    wrote(rig, MAINTAINER, "yes");
+    heard(rig, runner);
+    step_until(runner, || rig.github.issues_created() == filed);
 }
 
 // The labels each filed issue was created with, in order
@@ -542,7 +565,18 @@ fn the_triager_splits_an_issue_that_never_asked() {
 
     assert_eq!(step(&runner).unwrap(), None);
 
-    assert_eq!(rig.github.issues_created(), 2);
+    // The body goes over the issue's at once; the drafts wait for the yes
+    assert_eq!(rig.github.issues_created(), 0);
+    assert_eq!(rig.github.issue_edits(), [(30, BODY.trim_end().to_owned())]);
+    let said = facts(&rig);
+    assert!(said.contains("1. fix(a): first"), "{said}");
+    assert!(said.contains("2. fix(b): second (after 1)"), "{said}");
+    assert!(said.contains("waits for their yes"), "{said}");
+    assert!(!said.contains("Say the issue is ready"), "{said}");
+    assert_eq!(parent_record(&rig, &runner)["step"], "done");
+
+    yes(&rig, &runner, 2);
+
     assert_eq!(rig.forge.sub_issues_of(30), [900, 901]);
     assert_eq!(rig.forge.links_added(), [(901, 900)]);
     let writes = app_writes(&rig, 0);
@@ -554,12 +588,6 @@ fn the_triager_splits_an_issue_that_never_asked() {
         writes.contains(&"label #900 ready-for-agent".to_owned()),
         "{writes:?}"
     );
-    assert_eq!(rig.github.issue_edits(), [(30, BODY.trim_end().to_owned())]);
-    let said = facts(&rig);
-    assert!(said.contains("1. fix(a): first"), "{said}");
-    assert!(said.contains("2. fix(b): second (after 1)"), "{said}");
-    assert!(!said.contains("Say the issue is ready"), "{said}");
-    assert_eq!(parent_record(&rig, &runner)["step"], "done");
     assert_eq!(filed_labels(&rig)[0], ["kind:fix", "priority: P2"]);
 }
 
@@ -572,6 +600,8 @@ fn a_named_implementer_gets_a_pinned_agent_label() {
     let (rig, runner) = splitting(|_| judged(&drafts), "maintainer", MAINTAINER);
 
     assert_eq!(step(&runner).unwrap(), None);
+
+    yes(&rig, &runner, 2);
 
     let labels = filed_labels(&rig);
     assert_eq!(labels[0], ["kind:fix", "priority: P2", "agent:opus-high!"]);
@@ -615,6 +645,8 @@ fn a_family_named_gives_one_agent_and_an_assumed_line() {
     let (rig, runner) = splitting(|_| judged(&drafts), "maintainer", MAINTAINER);
 
     assert_eq!(step(&runner).unwrap(), None);
+
+    yes(&rig, &runner, 1);
 
     assert_eq!(filed_labels(&rig)[0][2], "agent:opus-high!");
     assert!(
@@ -708,204 +740,9 @@ fn a_draft_with_no_priority_takes_the_one_the_issue_carries() {
 
     assert_eq!(step(&runner).unwrap(), None);
 
+    yes(&rig, &runner, 2);
+
     let labels = filed_labels(&rig);
     assert_eq!(labels[0], ["kind:fix", "priority: P1"]);
     assert_eq!(labels[1], ["kind:fix", "priority: P1"]);
-}
-
-// Someone else's issue 30, which the triager splits in two, up to the new
-// comment that asks the maintainer: the pass ended and the ask is the second
-// comment on the issue
-fn asked_to_split(lines: &str) -> (Rig, Mutex<Runner>) {
-    let two = [
-        drawn("fix(a): first", BODY, &[], Value::Null),
-        drawn("fix(b): second", BODY, &[0], Value::Null),
-    ];
-    let (rig, runner) = splitting_with(|_| judged(&two), lines, "newcomer", &[]);
-    step_until(&runner, || posted(&rig).len() == 2);
-    (rig, runner)
-}
-
-// The poll goes by with whatever was written on the issue since
-fn heard(rig: &Rig, runner: &Mutex<Runner>) {
-    rig.next_look();
-    assert_eq!(step(runner).unwrap(), None);
-    rig.next_look();
-    assert_eq!(step(runner).unwrap(), None);
-}
-
-// What was filed, left alone, and asked: nothing filed, and the one ask held
-fn still_asking(rig: &Rig) {
-    assert_eq!(rig.github.issues_created(), 0);
-    assert_eq!(rig.forge.sub_issues_of(30), Vec::<u64>::new());
-    assert_eq!(
-        posted(rig).len(),
-        2,
-        "no answer to anyone: {:?}",
-        posted(rig)
-    );
-    assert!(saved_split(rig)["asked"]["comment"].is_u64());
-}
-
-const PICK_ALL: &str = "pick = \"all\"";
-
-#[test]
-fn a_split_on_someone_elses_issue_asks_in_a_new_comment_and_files_nothing() {
-    let (rig, _runner) = asked_to_split(PICK_ALL);
-
-    let comments = posted(&rig);
-    assert!(!comments[0].contains("fix(a): first"), "{}", comments[0]);
-    let ask = &comments[1];
-    assert!(ask.contains(&format!("@{MAINTAINER}")), "{ask}");
-    assert!(ask.contains("fix(a): first"), "{ask}");
-    assert!(ask.contains("fix(b): second (after 1)"), "{ask}");
-    assert!(ask.contains("`yes`"), "{ask}");
-    still_asking(&rig);
-    assert_eq!(
-        saved_split(&rig)["drafts"].as_array().map(Vec::len),
-        Some(2)
-    );
-    assert_eq!(rig.github.issue_edits(), [], "the author's body stands");
-    assert!(app_writes(&rig, 0).contains(&"label #30 needs-approval".to_owned()));
-}
-
-#[test]
-fn the_maintainers_yes_files_in_order() {
-    let (rig, runner) = asked_to_split(PICK_ALL);
-    let start = app_writes(&rig, 0).len();
-
-    wrote(&rig, MAINTAINER, "yes");
-    heard(&rig, &runner);
-    step_until(&runner, || rig.github.issues_created() == 2);
-
-    assert_eq!(
-        app_writes(&rig, start),
-        [
-            "file fix(a): first",
-            "label #900 ready-for-agent",
-            "file fix(b): second",
-            "label #901 ready-for-agent",
-        ]
-    );
-    assert_eq!(rig.forge.sub_issues_of(30), [900, 901]);
-    assert_eq!(rig.forge.links_added(), [(901, 900)]);
-    assert_eq!(rig.github.issue_edits(), [], "the author's body stands");
-    assert_eq!(saved_split(&rig)["asked"], Value::Null);
-}
-
-#[test]
-fn a_strangers_yes_files_nothing() {
-    let (rig, runner) = asked_to_split(PICK_ALL);
-
-    wrote(&rig, "passerby", "yes");
-    heard(&rig, &runner);
-
-    still_asking(&rig);
-}
-
-#[test]
-fn a_writers_yes_files_nothing() {
-    let (rig, runner) = asked_to_split(PICK_ALL);
-
-    wrote(&rig, "collaborator", "yes");
-    heard(&rig, &runner);
-
-    still_asking(&rig);
-}
-
-#[test]
-fn the_authors_own_yes_files_nothing() {
-    let (rig, runner) = asked_to_split(PICK_ALL);
-
-    wrote(&rig, "newcomer", "yes please, ok?");
-    wrote(&rig, "newcomer", "yes");
-    heard(&rig, &runner);
-
-    still_asking(&rig);
-}
-
-#[test]
-fn a_no_drops_the_split() {
-    let (rig, runner) = asked_to_split(PICK_ALL);
-
-    wrote(&rig, MAINTAINER, "No.");
-    heard(&rig, &runner);
-
-    assert_eq!(rig.github.issues_created(), 0);
-    assert_eq!(saved_split(&rig), Value::Null);
-    assert_eq!(posted(&rig).len(), 2, "no answer to the no");
-    wrote(&rig, MAINTAINER, "yes");
-    heard(&rig, &runner);
-    assert_eq!(rig.github.issues_created(), 0, "a later yes has no plan");
-}
-
-#[test]
-fn other_words_leave_the_wait_open() {
-    let (rig, runner) = asked_to_split(PICK_ALL);
-
-    wrote(&rig, MAINTAINER, "Make it three, then yes");
-    wrote(&rig, MAINTAINER, "okay, but later");
-    heard(&rig, &runner);
-    still_asking(&rig);
-
-    wrote(&rig, MAINTAINER, "ok");
-    heard(&rig, &runner);
-    step_until(&runner, || rig.github.issues_created() == 2);
-}
-
-#[test]
-fn silence_drops_the_split() {
-    let (rig, runner) = asked_to_split("pick = \"all\"\nwait_days = 2");
-
-    rig.clock.advance(Rig::DAY);
-    heard(&rig, &runner);
-    still_asking(&rig);
-
-    rig.clock.advance(Rig::DAY);
-    heard(&rig, &runner);
-
-    assert_eq!(saved_split(&rig), Value::Null);
-    assert_eq!(rig.github.issues_created(), 0);
-    assert_eq!(posted(&rig).len(), 2, "nothing more is posted");
-}
-
-// The saved plan put back to what it was before its ask went up: held by the
-// triage comment, with the record at the `labelled` step. This is what a pass
-// that stopped before the ask leaves.
-fn before_the_ask(runner: &Mutex<Runner>) {
-    let mut runner = runner.lock().unwrap();
-    let mut next = runner.state.clone();
-    let triage = next.triage.as_mut().unwrap();
-    let record = triage.issues.iter_mut().find(|t| t.issue == 30).unwrap();
-    record.step = TriageStep::Labelled;
-    let comment = record.comment;
-    let at = record.at;
-    triage.splits[0].asked = Some(TriageQuestions { comment, at });
-    runner.save(next).unwrap();
-}
-
-#[test]
-fn an_ask_whose_post_answer_was_lost_is_found_and_not_posted_again() {
-    let (rig, runner) = asked_to_split(PICK_ALL);
-    let asked = saved_split(&rig)["asked"]["comment"].as_u64().unwrap();
-
-    before_the_ask(&runner);
-    assert!(runner.lock().unwrap().ask_split(30).unwrap());
-
-    assert_eq!(posted(&rig).len(), 2, "the ask is not posted twice");
-    assert_eq!(saved_split(&rig)["asked"]["comment"], asked);
-}
-
-#[test]
-fn a_hand_label_that_ends_the_pass_drops_the_plan_it_never_asked() {
-    let (rig, runner) = asked_to_split(PICK_ALL);
-    before_the_ask(&runner);
-    rig.forge.label(30, "ready-for-agent");
-
-    runner.lock().unwrap().label_waiting_step(30).unwrap();
-
-    assert_eq!(saved_split(&rig), Value::Null, "no plan waits on no ask");
-    wrote(&rig, MAINTAINER, "ok");
-    heard(&rig, &runner);
-    assert_eq!(rig.github.issues_created(), 0, "a bare ok files nothing");
 }

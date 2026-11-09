@@ -853,6 +853,10 @@ mod scrub_tests;
 #[cfg(test)]
 mod spam_tests;
 #[cfg(test)]
+mod split_ask_login_tests;
+#[cfg(test)]
+mod split_ask_tests;
+#[cfg(test)]
 mod split_tests;
 #[cfg(test)]
 mod swap_tests;

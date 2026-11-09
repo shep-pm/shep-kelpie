@@ -81,9 +81,9 @@ pub(in crate::runner) struct Tries {
     // The drafts of the split the reply gave for the issue, kept until the
     // record carries them
     pub(super) split: Vec<SplitDraft>,
-    // That `split` is of someone else's issue, so the plan is saved held for
-    // the maintainer's yes and nothing is filed on it before
-    pub(super) split_held: bool,
+    // That the reply's split follows one the issue itself spells out, which the
+    // ask says
+    pub(super) from_issue: bool,
     // The labels the issue carried when its pass began, so a triage label it
     // carries later came by hand and stands; kept once, whatever retry runs
     pub(in crate::runner) seen: Option<Vec<String>>,
@@ -425,6 +425,8 @@ impl Runner {
         let ready = ready::readiness(self, issue, author, found, &labels);
         // A rewrite the check still refuses is written as settled answers are,
         // and the issue ends `needs-approval`.
+        // `plan` names its drafts in the comment and `held` does not: the
+        // maintainer's own issue lists them, an outside one asks for them later
         let (mut plan, mut refused, mut held) = (Vec::new(), Vec::new(), Vec::new());
         let (ready_body, rewrite) = match (stood.as_ref(), ready) {
             (Some(label), _) => {
@@ -582,8 +584,8 @@ impl Runner {
             None => labels,
         };
         tries.ready_body = ready_body;
-        tries.split_held = !held.is_empty();
         tries.split = if held.is_empty() { plan } else { held };
+        tries.from_issue = found.from_issue;
         tries.stood = stood;
         tries.duplicate = None;
         tries.ask = ask;
@@ -748,11 +750,10 @@ impl Runner {
         let labels = (self.triage_tries.get(&issue)).map_or_else(Vec::new, |t| t.labels.clone());
         let ready_body = (self.triage_tries.get(&issue)).and_then(|t| t.ready_body.clone());
         let split = (self.triage_tries.get(&issue)).map_or_else(Vec::new, |t| t.split.clone());
-        // A plan held for the maintainer starts held by this comment, which no
-        // reply can be to, so nothing is filed before its own ask goes up
-        let hold = (self.triage_tries.get(&issue))
-            .is_some_and(|t| t.split_held)
-            .then_some(TriageQuestions { comment, at });
+        let from_issue = (self.triage_tries.get(&issue)).is_some_and(|t| t.from_issue);
+        // Every split waits for the maintainer's yes. This comment holds the
+        // filing until kelpie's own ask goes up under it, and no reply can be to it
+        let hold = (!split.is_empty()).then_some(TriageQuestions { comment, at });
         // The labels the pass began with go into the record with it: a pass
         // that resumes after a restart has no in-memory reading left, and
         // without these it takes kelpie's own `needs-approval` for the
@@ -815,7 +816,7 @@ impl Runner {
             record.add_call(at);
         }
         triage.issues.push(record);
-        super::split::plan(triage, issue, split, hold);
+        super::split::plan(triage, issue, split, from_issue, hold);
         // The triager ran on the issue as the check last read it, so its end
         // is checked again.
         if let Some(kept) = next.checks.iter_mut().find(|c| c.issue == issue) {
@@ -837,7 +838,7 @@ impl Runner {
             tries.duplicate = None;
             tries.ready_body = None;
             tries.split.clear();
-            tries.split_held = false;
+            tries.from_issue = false;
             tries.stood = None;
             tries.ask = false;
             tries.local_seen = None;
