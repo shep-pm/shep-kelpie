@@ -14,8 +14,10 @@ use super::super::contributions::post::forge_is_busy;
 use super::super::representative::IssuePost;
 use super::addressed::Cover;
 use super::ask::{self, Purpose};
-use super::facts::{Reader, Wording, duplicate_facts, facts};
-use super::greeting::{ANSWERS_KIND, ASK_KIND, DUPLICATE_KIND, KIND, LOCAL_READ_KIND};
+use super::facts::{Reader, Replanned, Wording, duplicate_facts, facts};
+use super::greeting::{
+    ANSWERS_KIND, ASK_KIND, DUPLICATE_KIND, KIND, LOCAL_READ_KIND, SPLIT_AGAIN_KIND,
+};
 use super::marker::{MARKER, duplicate_marker};
 use super::ready;
 use super::research::{Addressed, Found, Question};
@@ -115,6 +117,9 @@ pub(in crate::runner) struct Tries {
     // The author's answers, heard while the questions wait and kept until the
     // second call is made with them
     pub(in crate::runner) answers: Option<String>,
+    // What the maintainer wrote under a split ask that corrected its plan, kept
+    // until the pass that plans the split again is made with it
+    pub(super) correction: Option<String>,
     // That the body the author's own session was told to rewrite has changed, so
     // the triager reads the issue again
     pub(in crate::runner) local_edit: bool,
@@ -213,6 +218,7 @@ impl Runner {
         // triager, which reads the issue again, and not the representative.
         let said = match purpose {
             Purpose::Answers => tries.answers.clone().unwrap_or_else(|| said.to_owned()),
+            Purpose::SplitCorrection => tries.correction.clone().unwrap_or_else(|| said.to_owned()),
             Purpose::First | Purpose::LocalRead => said.to_owned(),
         };
         tries.shown = shown.to_owned();
@@ -389,6 +395,7 @@ impl Runner {
         let purpose = self.triage_tries.get(&issue).map(|t| t.purpose);
         let answers = purpose == Some(Purpose::Answers);
         let local = purpose == Some(Purpose::LocalRead);
+        let corrected = purpose == Some(Purpose::SplitCorrection);
         let ask = purpose == Some(Purpose::First)
             && stood.is_none()
             && !found.open.is_empty()
@@ -428,6 +435,13 @@ impl Runner {
         // `plan` names its drafts in the comment and `held` does not: the
         // maintainer's own issue lists them, an outside one asks for them later
         let (mut plan, mut refused, mut held) = (Vec::new(), Vec::new(), Vec::new());
+        // The pass answered with no split, as against one that proposed a split
+        // which never reached the ask: refused, left unwritten, or stood over
+        let no_split = stood.is_none()
+            && matches!(
+                ready,
+                ready::Ready::Body(_) | ready::Ready::Rewrite(_) | ready::Ready::Not
+            );
         let (ready_body, rewrite) = match (stood.as_ref(), ready) {
             (Some(label), _) => {
                 self.notes.push(format!(
@@ -490,11 +504,22 @@ impl Runner {
         };
         let rewritten = rewrite.is_some();
         let answers_body = answers_body.or(rewrite);
-        let kind = match (answers, local, ask) {
-            (true, _, _) => ANSWERS_KIND,
-            (false, true, _) => LOCAL_READ_KIND,
-            (false, false, true) => ASK_KIND,
-            (false, false, false) => KIND,
+        // A pass the maintainer's correction asked for, and whether their words
+        // came to a plan: an outside issue's drafts are `held`, not `plan`
+        let split_again = match (corrected, !(plan.is_empty() && held.is_empty()), no_split) {
+            (true, true, _) => Replanned::Planned,
+            (true, false, true) => Replanned::None,
+            (true, false, false) => Replanned::Unfiled,
+            (false, _, _) => Replanned::No,
+        };
+        let kind = match split_again {
+            Replanned::Planned | Replanned::None | Replanned::Unfiled => SPLIT_AGAIN_KIND,
+            Replanned::No => match (answers, local, ask) {
+                (true, _, _) => ANSWERS_KIND,
+                (false, true, _) => LOCAL_READ_KIND,
+                (false, false, true) => ASK_KIND,
+                (false, false, false) => KIND,
+            },
         };
         // Only the maintainer is told the files, tests and criteria: text posted
         // to anyone else holds no file path or code term, so the words and the
@@ -529,6 +554,7 @@ impl Runner {
         let wording = Wording {
             ready: ready_body.is_some() && plan.is_empty(),
             split: !plan.is_empty(),
+            split_again,
             ask,
             answers,
             local,
@@ -751,6 +777,10 @@ impl Runner {
         let ready_body = (self.triage_tries.get(&issue)).and_then(|t| t.ready_body.clone());
         let split = (self.triage_tries.get(&issue)).map_or_else(Vec::new, |t| t.split.clone());
         let from_issue = (self.triage_tries.get(&issue)).is_some_and(|t| t.from_issue);
+        // The pass a maintainer's correction asked for, with its correction still
+        // in hand
+        let corrected = (self.triage_tries.get(&issue))
+            .is_some_and(|t| t.purpose == Purpose::SplitCorrection && t.correction.is_some());
         // Every split waits for the maintainer's yes. This comment holds the
         // filing until kelpie's own ask goes up under it, and no reply can be to it
         let hold = (!split.is_empty()).then_some(TriageQuestions { comment, at });
@@ -816,7 +846,17 @@ impl Runner {
             record.add_call(at);
         }
         triage.issues.push(record);
-        super::split::plan(triage, issue, split, from_issue, hold);
+        // The pass a maintainer's correction asked for found no split: the plan it
+        // corrected goes with it, and its comment says so.
+        if corrected && split.is_empty() {
+            triage.splits.retain(|s| s.issue != issue);
+            self.notes.push(format!(
+                "triage #{issue}: its maintainer corrected its split and the new pass found no \
+                 split, so the plan is dropped"
+            ));
+        } else {
+            super::split::plan(triage, issue, split, from_issue, hold);
+        }
         // The triager ran on the issue as the check last read it, so its end
         // is checked again.
         if let Some(kept) = next.checks.iter_mut().find(|c| c.issue == issue) {
@@ -845,6 +885,7 @@ impl Runner {
             tries.answers_body = None;
             tries.local_edit = false;
             tries.local_read = None;
+            tries.correction = None;
             // The labels the record now holds as begun-with are the ones the
             // pass reads from here on: the in-memory reading must not keep an
             // older, emptier one.

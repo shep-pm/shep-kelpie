@@ -266,7 +266,10 @@ impl Runner {
                 Ok(())
             }
             (Ok(_), Some(Ok(found))) => match flight.purpose {
-                Purpose::First | Purpose::Answers | Purpose::LocalRead => self.post_triage(
+                Purpose::First
+                | Purpose::Answers
+                | Purpose::LocalRead
+                | Purpose::SplitCorrection => self.post_triage(
                     issue,
                     &flight.author,
                     &flight.said,

@@ -31,6 +31,9 @@ pub(in crate::runner) enum Purpose {
     /// The pass that reads the issue again after its author's own session
     /// rewrote its body
     LocalRead,
+    /// The pass that plans a split again after the maintainer corrected the ask
+    /// for it
+    SplitCorrection,
 }
 
 // The lines around the text kelpie writes under an issue's own
