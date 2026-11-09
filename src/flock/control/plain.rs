@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 
-use crate::ports::Probability;
+use crate::ports::{Probability, Wait};
 use crate::state::TriageHeld;
 
 /// `sheep`'s block from `status`, the runner's answer, under a header that
@@ -219,6 +219,17 @@ fn items(status: &Value, lines: &mut Vec<String>) {
                 "      step failed {} times since {since}: {reason}",
                 failing["failures"].as_u64().unwrap_or(0),
             ));
+        }
+        let waiting = &item["waiting"];
+        if let Ok(why) = serde_json::from_value::<Wait>(waiting["why"].clone()) {
+            let since = match waiting["since"].as_u64() {
+                Some(at) => format!(
+                    "{} UTC",
+                    crate::board::briefing::date_time(crate::ports::Timestamp(at))
+                ),
+                None => "an unknown time".to_owned(),
+            };
+            lines.push(format!("      waiting for {} since {since}", why.as_str()));
         }
         if let Some(why) = item["install_failed"].as_str() {
             lines.push(format!("      package install failed: {why}"));

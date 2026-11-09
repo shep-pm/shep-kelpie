@@ -112,6 +112,72 @@ fn a_work_item_whose_step_keeps_failing_says_how_often_since_when_and_why() {
 }
 
 #[test]
+fn a_turn_waiting_for_a_lease_says_so_and_since_when() {
+    let body = r#"{"project":"koji","work_items":[
+        {"issue":"9","title":"Fix the other","phase":{"state":"implement"},
+         "turn":{"state":"running","since":1790000000},"pull_request":null,
+         "waiting":{"since":1790000000,"why":"lease"}}],"rulings":[]}"#;
+
+    assert_eq!(
+        plain_status("koji", body, None),
+        [
+            "koji",
+            "  run: running",
+            "  build: not recorded",
+            "  work items:",
+            "    #9 Fix the other: phase implement, turn running, no PR",
+            "      waiting for a lease on its model since 2026-09-21 14:13 UTC",
+            "  rulings waiting: none",
+        ]
+    );
+}
+
+#[test]
+fn a_turn_waiting_on_a_busy_gateway_says_so() {
+    let body = r#"{"project":"koji","work_items":[
+        {"issue":"9","title":"Fix the other","phase":{"state":"implement"},
+         "turn":{"state":"running"},"pull_request":null,
+         "waiting":{"since":1790000000,"why":"busy"}}],"rulings":[]}"#;
+
+    let lines = plain_status("koji", body, None);
+
+    assert!(
+        lines.contains(
+            &"      waiting for its gateway, which answered busy since 2026-09-21 14:13 UTC"
+                .to_owned()
+        ),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn a_turn_with_no_wait_adds_no_line() {
+    let body = r#"{"project":"koji","work_items":[
+        {"issue":"9","title":"Fix the other","phase":{"state":"implement"},
+         "turn":{"state":"running"},"pull_request":null,"waiting":null},
+        {"issue":"10","title":"Left out","phase":{"state":"implement"},
+         "turn":{"state":"running"},"pull_request":null}],"rulings":[]}"#;
+
+    let lines = plain_status("koji", body, None);
+
+    assert!(!lines.iter().any(|line| line.contains("waiting for")));
+    assert_eq!(lines.len(), 7, "{lines:?}");
+}
+
+#[test]
+fn an_unknown_wait_adds_no_line() {
+    let body = r#"{"project":"koji","work_items":[
+        {"issue":"9","title":"Fix the other","phase":{"state":"implement"},
+         "turn":{"state":"running"},"pull_request":null,
+         "waiting":{"since":1790000000,"why":"a reason from a later build"}}],"rulings":[]}"#;
+
+    let lines = plain_status("koji", body, None);
+
+    assert!(!lines.iter().any(|line| line.contains("waiting for")));
+    assert_eq!(lines.len(), 6, "{lines:?}");
+}
+
+#[test]
 fn a_plain_status_names_the_red_workflow_how_long_it_has_been_red_and_its_run() {
     let body = r#"{"project":"koji","work_items":[],"red_workflows":[
         {"workflow":"test","first_run":91,"run":91,"head":"head91","since":1700000000,
