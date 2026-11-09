@@ -7,28 +7,46 @@
 //! ruling. A pinned item, one with no such agent, and any other failure park
 //! as a failed turn does, with the API's message. A refusal on a plan agent
 //! is no API refusal and parks the same.
+//!
+//! A turn on a Codex agent that ends with [`AgentError::Failed`] whose text
+//! [`codex_limit`] reads holds Codex until the time it names, since the meter
+//! reads under 100% when Codex refuses. An unpinned work item goes on as above;
+//! a pinned one, or one with no agent to go to, waits on the hold with no
+//! ruling and starts again once the hold ends.
 
 use super::super::Runner;
 use super::super::pace::Walked;
 use super::super::report::StepReport;
+use super::CONTINUE;
 use crate::api_refusal::refusal;
 use crate::lease::door::PickAsk;
 use crate::pacer::Scope;
-use crate::ports::{AgentError, AgentReply};
-use crate::settings::{AgentName, Limit};
+use crate::plan_refusal::codex_limit;
+use crate::ports::{AgentError, AgentReply, Session, Timestamp};
+use crate::settings::{Account, AgentName, Harness, Limit};
 use crate::state::StateError;
 use crate::ticket::TicketId;
+use crate::work_item::Turn;
 
 /// How many characters of the API's message a handoff note quotes
 const QUOTED: usize = 300;
 
+/// What came of a worker turn that ended in a failure
+pub(in crate::runner) enum Handled {
+    /// The turn was no refusal this module handles
+    No,
+    /// The work item went to another agent, with this report
+    Moved(StepReport),
+    /// The work item stays and waits on a hold, with no ruling
+    Waits,
+}
+
 impl Runner {
     /// Tells the board the API refused `ticket`'s worker turn that just ended
-    /// with `result`, and hands the work item to the next pick when it can
+    /// with `result`, or holds Codex when its plan did, and hands the work
+    /// item to the next pick when it can
     ///
-    /// Returns the handoff's report, or None when the turn was no refusal, or
-    /// its item stays and parks as a failed turn. Call it while the turn's
-    /// flight still stands, for the agent it ran.
+    /// Call it while the turn's flight still stands, for the agent it ran.
     ///
     /// # Errors
     ///
@@ -37,18 +55,21 @@ impl Runner {
         &mut self,
         ticket: TicketId,
         result: &Result<AgentReply, AgentError>,
-    ) -> Result<Option<StepReport>, StateError> {
+    ) -> Result<Handled, StateError> {
         let Err(AgentError::Failed(_, text)) = result else {
-            return Ok(None);
-        };
-        let Some(refusal) = refusal(text) else {
-            return Ok(None);
+            return Ok(Handled::No);
         };
         let Some((call, ..)) = self.flights.turn_call(ticket) else {
-            return Ok(None);
+            return Ok(Handled::No);
+        };
+        if call.harness.harness() == Harness::Codex {
+            return self.hand_off_codex(ticket, text, &call.session);
+        }
+        let Some(refusal) = refusal(text) else {
+            return Ok(Handled::No);
         };
         if !call.harness.bills_api() {
-            return Ok(None);
+            return Ok(Handled::No);
         }
         if self.ports.agent_board.refused(&refusal).is_none() {
             self.notes.push(format!(
@@ -56,30 +77,100 @@ impl Runner {
                 ticket.shown()
             ));
         }
-        let Some((to, finish)) = self.on(Some(ticket)).next_pick()? else {
-            return Ok(None);
+        let Some((to, finish)) = self.on(Some(ticket)).next_pick(&Limit::Api)? else {
+            return Ok(Handled::No);
         };
         let why = format!("the API refused the key it ran on: {}", quoted(text));
         let handed = self.move_item(to, None, finish, &why, true)?;
-        if let Some(StepReport::HandedOff {
+        let Some(StepReport::HandedOff {
             issue, from, to, ..
         }) = &handed
-        {
-            self.builds_turn_ended();
-            self.dev_server_ended();
-            self.notes.push(format!(
-                "{} is handed from {from} to {to}: the API refused its key",
-                issue.shown()
-            ));
+        else {
+            return Ok(Handled::No);
+        };
+        self.builds_turn_ended();
+        self.dev_server_ended();
+        self.notes.push(format!(
+            "{} is handed from {from} to {to}: the API refused its key",
+            issue.shown()
+        ));
+        Ok(handed.map_or(Handled::No, Handled::Moved))
+    }
+
+    // A Codex turn that failed on its plan's usage limit holds Codex until the
+    // time the text names, then goes to the next pick or waits on the hold.
+    fn hand_off_codex(
+        &mut self,
+        ticket: TicketId,
+        text: &str,
+        session: &Session,
+    ) -> Result<Handled, StateError> {
+        let Some(until) = codex_limit(text, self.ports.clock.now(), &self.zone) else {
+            return Ok(Handled::No);
+        };
+        let when = shown(until);
+        let reason = format!(
+            "Codex refused a turn for its plan's usage limit, so no turn starts on it until {when}"
+        );
+        self.hold_account(Account::Codex, until, reason);
+        self.builds_turn_ended();
+        self.dev_server_ended();
+        let held = Limit::Account(Account::Codex);
+        if let Some((to, finish)) = self.on(Some(ticket)).next_pick(&held)? {
+            let why = format!(
+                "Codex refused a turn for its plan's usage limit, which holds Codex until {when}: {}",
+                quoted(text)
+            );
+            if let Some(handed) = self.move_item(to, None, finish, &why, true)? {
+                if let StepReport::HandedOff {
+                    issue, from, to, ..
+                } = &handed
+                {
+                    self.notes.push(format!(
+                        "{} is handed from {from} to {to}: Codex's usage limit holds Codex until {when}",
+                        issue.shown()
+                    ));
+                }
+                return Ok(Handled::Moved(handed));
+            }
         }
-        Ok(handed)
+        self.save_time()?;
+        self.turn_waits(ticket, session)?;
+        self.notes.push(format!(
+            "{}'s turn waits for Codex's usage limit, which holds until {when}",
+            ticket.shown()
+        ));
+        Ok(Handled::Waits)
+    }
+
+    // Puts `ticket`'s turn that just failed back to a turn that has not begun,
+    // which the pacer holds until the hold ends.
+    fn turn_waits(&mut self, ticket: TicketId, session: &Session) -> Result<(), StateError> {
+        let mut next = self.state.clone();
+        let Some(item) = next.item_mut(ticket) else {
+            return Ok(());
+        };
+        item.turn = match std::mem::replace(&mut item.turn, Turn::Due) {
+            Turn::Running {
+                prompt: Some(prompt),
+                ..
+            } => Turn::Next { prompt },
+            Turn::Running { prompt: None, .. } if matches!(session, Session::Resume(_)) => {
+                Turn::Next {
+                    prompt: CONTINUE.to_owned(),
+                }
+            }
+            Turn::Running { prompt: None, .. } => Turn::Due,
+            other => other,
+        };
+        self.save(next)
     }
 
     // The agent the current work item goes to and the seconds it takes to
     // finish, or None when it stays: pinned, or no other agent the board
-    // ranks that the pacer lets start. Every API agent shares the key the API
-    // refused, so none is a pick.
-    fn next_pick(&mut self) -> Result<Option<(AgentName, u64)>, StateError> {
+    // ranks that the pacer lets start. Every agent on `spent` shares the key
+    // or login that was refused, so none is a pick.
+    fn next_pick(&mut self, spent: &Limit) -> Result<Option<(AgentName, u64)>, StateError> {
         let Some(item) = self.current().filter(|item| !item.pinned) else {
             return Ok(None);
         };
@@ -95,7 +186,7 @@ impl Runner {
             return Ok(None);
         };
         let others: Vec<_> = (picks.iter())
-            .filter(|pick| self.agent_limit(&pick.agent) != Some(Limit::Api))
+            .filter(|pick| self.agent_limit(&pick.agent).as_ref() != Some(spent))
             .collect();
         // Each agent is walked alone, so a read the pacer asks for names the
         // agent it is for, and the agents it held ahead of it stay passed over.
@@ -109,6 +200,14 @@ impl Runner {
         }
         Ok(None)
     }
+}
+
+// `at` as the date and time in UTC a hold's note names.
+fn shown(at: Timestamp) -> String {
+    let seconds = i64::try_from(at.0).unwrap_or(i64::MAX);
+    jiff::Timestamp::from_second(seconds)
+        .unwrap_or(jiff::Timestamp::MAX)
+        .to_string()
 }
 
 // The first `QUOTED` characters of the API's message, on one line.

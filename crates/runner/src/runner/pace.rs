@@ -18,7 +18,7 @@ use super::report::{Begin, StepReport};
 use super::turn::reads::Job;
 use crate::agents::Runs;
 use crate::board::Skip;
-use crate::pacer::{Assessment, Hold, RECHECK_SECS, Reading, Scope, assess, named};
+use crate::pacer::{Assessment, Hold, HoldKind, RECHECK_SECS, Reading, Scope, assess, named};
 use crate::ports::{Meter, PaddockHolder, Timestamp};
 use crate::settings::{Account, AgentHarness, AgentName, GatewayName, Limit, ModelHost};
 use crate::state::StateError;
@@ -176,6 +176,34 @@ impl Runner {
         let (read_at, last) = self.pacing.get(&account)?;
         let trusted = now.0 < read_at.0 + RECHECK_SECS;
         last.hold().filter(|hold| trusted && now < hold.until)
+    }
+
+    /// Holds `account` until `until`, because its plan refused a turn
+    ///
+    /// The hold is trusted to its end, so a meter that still reads under
+    /// [`SPENT_PCT`](crate::pacer::SPENT_PCT) does not lift it. A longer hold already standing is kept.
+    pub(super) fn hold_account(&mut self, account: Account, until: Timestamp, reason: String) {
+        let now = self.ports.clock.now();
+        let last = self.pacing.get(&account).map(|(_, last)| last);
+        if last
+            .and_then(|last| last.hold())
+            .is_some_and(|h| h.until >= until && now < h.until)
+        {
+            return;
+        }
+        let reading = last.and_then(|last| last.reading);
+        let hold = Hold {
+            kind: HoldKind::Window,
+            reason,
+            until,
+        };
+        let assessment = Assessment {
+            reading,
+            window: Some(hold),
+        };
+        // `still_held` trusts a reading for `RECHECK_SECS`, so it is aged to end with the hold.
+        let read_at = Timestamp(until.0.saturating_sub(RECHECK_SECS).max(now.0));
+        self.pacing.insert(account, (read_at, assessment));
     }
 
     /// Whether a trusted hold still keeps `agent` from starting a turn

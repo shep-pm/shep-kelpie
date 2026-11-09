@@ -231,6 +231,8 @@ pub struct Runner {
     ports: Ports,
     // The pacer's last reading of each account's usage and when, kept in memory only
     pacing: BTreeMap<Account, (Timestamp, Assessment)>,
+    // The zone Codex's refusals name a time in: the machine's own
+    zone: jiff::tz::TimeZone,
     // What the board passed over on its last poll, kept in memory only
     skipped: Vec<Skip>,
     // The issues triage found untouched on its last poll, kept in memory only
@@ -635,6 +637,7 @@ impl Runner {
             state,
             ports,
             pacing: BTreeMap::new(),
+            zone: jiff::tz::TimeZone::system(),
             skipped: Vec::new(),
             triage_due: Vec::new(),
             triage_queue: Vec::new(),
