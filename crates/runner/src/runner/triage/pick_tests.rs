@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use super::research_tests::{WORDS, calls, nothing, reply};
 use crate::board::TRIAGE;
+use crate::github::Verb;
 use crate::ports::{AuthorAssociation, Clock, OpenIssue, Role, Timestamp};
 use crate::runner::trigger::lock;
 use crate::runner::{Runner, advance, answer, step};
@@ -61,6 +62,23 @@ pub(super) fn due(rig: &Rig, runner: &Mutex<Runner>) -> Vec<u64> {
     numbers
         .iter()
         .map(|i| i["issue"].as_u64().unwrap())
+        .collect()
+}
+
+// The App's label writes on issue `number`, in the order it made them: `+` for
+// a label put on, `-` for one taken off
+pub(super) fn label_writes(rig: &Rig, number: u64) -> Vec<String> {
+    rig.github
+        .writes()
+        .into_iter()
+        .filter(|(_, call)| call.path.contains(&format!("/issues/{number}/labels")))
+        .filter_map(|(_, call)| match call.verb {
+            Verb::Delete => Some(format!("- {}", call.path.rsplit('/').next()?)),
+            _ => {
+                let body: Value = serde_json::from_str(call.body.as_deref()?).ok()?;
+                Some(format!("+ {}", body["labels"][0].as_str()?))
+            }
+        })
         .collect()
 }
 

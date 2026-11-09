@@ -6,11 +6,11 @@ use std::sync::Mutex;
 use serde_json::{Value, json};
 
 use super::marker::MARKER;
-use super::pick_tests::{MAINTAINER, issue, list, rig_with};
+use super::pick_tests::{MAINTAINER, issue, label_writes, list, rig_with};
 use super::research_tests::{
     WORDS, calls, crashed_with, facts, moves, nothing, pump, reply, triage, under,
 };
-use crate::board::TRIAGE;
+use crate::board::{READY, TRIAGE, TRIAGE_GO};
 use crate::github::ApiError;
 use crate::ports::Role;
 use crate::runner::{Pass, Runner, advance, step};
@@ -63,6 +63,19 @@ fn filed_at(
         .script_for(Role::Representative, [Scripted::Say(WORDS)]);
     let runner = rig.open().unwrap();
     (rig, runner)
+}
+
+// The same, with issue 30 carrying only the maintainer's ask for its triage
+// (`needs-triage`), put on by hand
+fn asked_by_hand(pick: &str) -> (Rig, Mutex<Runner>) {
+    filed_before(pick, MAINTAINER, |rig| {
+        rig.forge.label(30, TRIAGE_GO);
+        let mut asked = issue(rig, 30, MAINTAINER, 5);
+        asked.title = "Crash on start".to_owned();
+        asked.body = "It crashes when I run it.".to_owned();
+        asked.labels = vec![TRIAGE_GO.to_owned()];
+        list(rig, asked);
+    })
 }
 
 // The labels a repo may hold for the pass, named bare
@@ -126,8 +139,12 @@ fn a_maintainer_issue_it_is_sure_of_gets_the_new_body_its_labels_and_ready_for_a
     );
 }
 
+// `needs-approval`, which is what the waiting path leaves: the labelling step
+// takes it off rather than leave the issue both ready for the board and waiting
+// on the maintainer. It is not read as a label put on by hand, since it is the
+// one an earlier pass of kelpie's put on.
 #[test]
-fn a_needs_triage_put_on_by_hand_comes_off_when_the_issue_is_made_ready() {
+fn a_needs_approval_put_on_by_hand_comes_off_when_the_issue_is_made_ready() {
     let (rig, runner) = filed_before("maintainer", MAINTAINER, |rig| {
         rig.forge.label(30, TRIAGE);
         let mut by_hand = issue(rig, 30, MAINTAINER, 5);
@@ -157,6 +174,90 @@ fn a_needs_triage_put_on_by_hand_comes_off_when_the_issue_is_made_ready() {
         ]
     );
     assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "ready");
+}
+
+// The maintainer's ask for a triage does not outlive the pass it asked for:
+// under `maintainer` nothing else takes it off but the labelling step.
+#[test]
+fn a_needs_triage_comes_off_when_the_issue_is_made_ready_under_maintainer() {
+    let (rig, runner) = asked_by_hand("maintainer");
+    rig.claude.script_for(Role::Triager, [reply(sure())]);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(
+        label_writes(&rig, 30),
+        [
+            "+ bug",
+            "+ P2",
+            "+ kind:fix",
+            "- needs-triage",
+            "+ ready-for-agent"
+        ],
+        "the go comes off before `ready-for-agent` goes on"
+    );
+    assert_eq!(triage(&rig, &runner)["issues"][0]["step"], "ready");
+}
+
+// Under `label` the same step takes it off rather than the next poll, which
+// finds the go gone from the issue while the record holds it and forgets it.
+#[test]
+fn a_needs_triage_comes_off_when_the_issue_is_made_ready_under_label() {
+    let (rig, runner) = asked_by_hand("label");
+    rig.claude.script_for(Role::Triager, [reply(sure())]);
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(
+        label_writes(&rig, 30),
+        [
+            "+ bug",
+            "+ P2",
+            "+ kind:fix",
+            "- needs-triage",
+            "+ ready-for-agent"
+        ],
+        "the go comes off at the labelling step, not at the next poll"
+    );
+
+    // The issue as the pass left it, on the forge as on the board's list.
+    let mut ready = issue(&rig, 30, MAINTAINER, 5);
+    ready.title = "Crash on start".to_owned();
+    ready.body = BODY.trim_end().to_owned();
+    ready.labels = ["bug", "P2", "kind:fix", READY].map(str::to_owned).to_vec();
+    list(&rig, ready);
+    rig.next_look();
+    assert_eq!(step(&runner).unwrap(), None);
+
+    // Once, at the labelling step: the poll found no go left to take.
+    assert_eq!(rig.github.label_takes(), [(30, TRIAGE_GO.to_owned())]);
+    assert_eq!(calls(&rig, Role::Triager).len(), 1, "nothing starts again");
+    let held = triage(&rig, &runner)["issues"][0].clone();
+    assert_eq!(held["step"], "ready");
+    let seen = held["seen"].as_array().cloned().unwrap_or_default();
+    assert!(seen.iter().all(|l| l != TRIAGE_GO), "{held}: no go held");
+}
+
+// A go the forge will not take off holds the step: `ready-for-agent` does not
+// go on, so no issue is left asking for a triage the board has taken.
+#[test]
+fn a_needs_triage_take_off_the_forge_refuses_holds_the_step() {
+    let (rig, runner) = asked_by_hand("maintainer");
+    rig.claude.script_for(Role::Triager, [reply(sure())]);
+    rig.github.refuse_label_removals(ApiError::Refused(500));
+
+    assert_eq!(step(&runner).unwrap(), None);
+
+    assert_eq!(
+        label_writes(&rig, 30),
+        ["+ bug", "+ P2", "+ kind:fix", "- needs-triage"],
+        "the take-off was refused, so `ready-for-agent` does not go on"
+    );
+    assert_eq!(
+        triage(&rig, &runner)["issues"][0]["step"],
+        "body-written",
+        "the labelling step is tried at the next poll"
+    );
 }
 
 #[test]
