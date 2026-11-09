@@ -30,6 +30,7 @@ pub mod local_tickets;
 pub mod metrics;
 pub mod pacer;
 pub mod package_managers;
+pub mod plan_refusal;
 pub mod pm_answer;
 pub mod ports;
 pub mod profile;
