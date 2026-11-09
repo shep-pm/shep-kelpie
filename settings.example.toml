@@ -43,6 +43,7 @@ remote = "shep-pm/shep"
 # catches it up only when merging it into the base conflicts, so a head
 # that merges cleanly goes on untested against the new base: set it for a
 # repo with a GitHub merge queue, or one that accepts an occasional red base.
+# "conflicts" needs git 2.38 or later on the host, or it acts as "always".
 # "always" when absent.
 # catch_up = "conflicts"
 
