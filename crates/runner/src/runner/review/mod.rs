@@ -227,11 +227,13 @@ impl Runner {
             item.review_base(self.item_base(item)),
         );
         let build = item.build.clone();
-        let (criteria, pull_request) =
-            match (self.criteria(ticket), self.body_note(item.pull_request)) {
-                (Ok(criteria), Ok(note)) => (criteria, note),
-                (Err(reason), _) | (_, Err(reason)) => return Ok(self.gate_failed(reason)),
-            };
+        let (criteria, issue_body, pull_request) = match (
+            self.criteria_and_body(ticket),
+            self.body_note(item.pull_request),
+        ) {
+            (Ok((criteria, body)), Ok(note)) => (criteria, body, note),
+            (Err(reason), _) | (_, Err(reason)) => return Ok(self.gate_failed(reason)),
+        };
         // `criteria` reads the issue from the forge with the runner's lock held,
         // and a `drain` answered from the posted copy in that time sets its flag
         // there. Checked again before the round is booked, so no reviewer call
@@ -264,10 +266,8 @@ impl Runner {
             ask.as_ref()
                 .map(|(command, folder, tool)| (*command, folder.as_path(), *tool)),
         );
-        prompt.push_str(&prompts::disputes_note(&item.disputes));
-        prompt.push_str(&prompts::asked_note(&item.held));
-        prompt.push_str(&prompts::plan_note(item.review_plan.as_ref()));
-        prompt.push_str(&pull_request);
+        let standing = self.standing_note(ticket, Some(&issue_body));
+        prompt.push_str(&prompts::notes(item, &standing, &pull_request));
         let call =
             calls::reviewer_call(ticket, &worktree, &self.paths.worker, model, prompt, tests);
         match call.and_then(|call| self.prepared(call)) {

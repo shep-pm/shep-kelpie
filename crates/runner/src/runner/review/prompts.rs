@@ -9,7 +9,7 @@ use std::path::Path;
 
 use super::calls::severity_tag;
 use crate::ports::{CLEAN, Finding};
-use crate::work_item::{Dispute, ReviewPlan};
+use crate::work_item::{Dispute, ReviewPlan, WorkItem};
 
 /// `body` with `base` and `diff` in their places
 fn filled(body: &str, base: &str, diff: &str) -> String {
@@ -116,6 +116,33 @@ pub(in crate::runner) fn plan_note(plan: Option<&ReviewPlan>) -> String {
         "\n\nThe project manager planned the reads of this pull request, yours among \
          them, for this: {about}\nGive it your attention beside the rest of the change."
     )
+}
+
+/// What a reader is told of the standing `lines` that bind the work item, to
+/// add after its prompt, and nothing when there are none
+pub(in crate::runner) fn standing_note(lines: &str) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!(
+        "\n\nThe project manager keeps these standing rulings, and each names this work \
+         item, a work item it waits on, or a file it touches. Report a change that breaks a \
+         line, in the same format as any finding.\n\n--- the standing rulings ---\n{lines}\n\
+         --- end ---"
+    )
+}
+
+/// What follows a reader's prompt: the disputes, what earlier rounds asked,
+/// the plan, the `standing` lines, then the `pull_request`'s body note
+pub(in crate::runner) fn notes(item: &WorkItem, standing: &str, pull_request: &str) -> String {
+    [
+        disputes_note(&item.disputes),
+        asked_note(&item.held),
+        plan_note(item.review_plan.as_ref()),
+        standing_note(standing),
+        pull_request.to_owned(),
+    ]
+    .concat()
 }
 
 /// The most of a pull request's body a reader is given, in bytes, the end of it
