@@ -156,6 +156,8 @@ pub(super) struct Desk {
     // Each ready issue whose hold ended on a close, which a pick wake decides even
     // as the only choice, until it starts, leaves the board or the wake ends
     after_hold: BTreeSet<TicketId>,
+    // The part of `after_hold` the pick wake due or in flight was sent for
+    after_asked: BTreeSet<TicketId>,
     // Each red head it was woken for, so a head wakes it once
     red_woken: BTreeSet<(String, String)>,
     // Each fix work item read closed while its workflow was red, and when it was first read so
@@ -402,6 +404,7 @@ impl Runner {
             None if self.pm.asked_pick => Choice::Wait,
             None => {
                 self.pm.asked_pick = true;
+                self.pm.after_asked = self.pm.after_hold.clone();
                 self.pm_due(Wake::Pick(self.pm_choices(takeable), self.free_slots()));
                 Choice::Wait
             }
@@ -598,7 +601,7 @@ impl Runner {
                 Wake::Pick(_, free) => {
                     self.pm.pick = Some(Pick::Rule(free.max(1)));
                     self.pm.asked_pick = false;
-                    self.pm.after_hold.clear();
+                    self.pm_wake_ended();
                 }
                 Wake::Told => self.pm_due(Wake::Told),
                 Wake::Conflict(..) | Wake::Stuck { .. } => self.pm.lapsed = true,
