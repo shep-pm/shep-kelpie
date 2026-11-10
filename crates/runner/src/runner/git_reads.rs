@@ -326,6 +326,9 @@ impl Ask for Installing {
 /// How long one `cargo fetch` may run
 const FETCH_WITHIN: Duration = Duration::from_secs(10 * 60);
 
+/// The empty folder in the project's own that a fetch starts in, which no worker may write
+const FETCH_FOLDER: &str = "fetch";
+
 /// The environment variable that moves cargo's home, and with it the cache a fetch fills
 const CARGO_HOME: &str = "CARGO_HOME";
 
@@ -553,6 +556,10 @@ impl Runner {
         if matches!(started.issue(), Some(Err(_))) || !matches!(started.token(), Some(Ok(_))) {
             return None;
         }
+        // Cargo and rustup run what a config or toolchain file in the folder they start in names,
+        // and a worker writes its worktree and its build folder. The fetch starts in a folder of
+        // the runner's own, which holds nothing.
+        let cwd = self.paths.folder.join(FETCH_FOLDER);
         let kept = self.fetches.get(&item.issue);
         let runs: Vec<_> = package_managers::folders(&item.worktree)
             .into_iter()
@@ -562,7 +569,7 @@ impl Runner {
                 (!fetched).then(|| {
                     let run = CargoFetch {
                         manifest: folder.join("Cargo.toml"),
-                        cwd: item.build.clone(),
+                        cwd: cwd.clone(),
                         ceiling: FETCH_WITHIN,
                     };
                     (folder, digest, run)
@@ -572,6 +579,8 @@ impl Runner {
         if runs.is_empty() {
             return None;
         }
+        // A folder that cannot be made fails the fetch, which is noted.
+        let _ = std::fs::create_dir_all(&cwd);
         let job = self.git_job(Git::Fetch(Fetching {
             fetcher: Arc::clone(&self.ports.package_fetcher),
             runs,

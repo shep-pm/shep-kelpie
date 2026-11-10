@@ -371,10 +371,14 @@ fn a_worktree_with_a_cargo_lock_is_fetched_on_the_host_before_the_first_turn() {
 
     let [fetch] = rig.tests.fetched().try_into().unwrap();
     assert_eq!(fetch.manifest, rig.worktree_7().join("Cargo.toml"));
+    // A folder no worker writes: cargo and rustup run what a config or toolchain file in the
+    // folder they start in names, and a worker writes its worktree and its build folder.
+    assert_eq!(fetch.cwd, rig.paths().folder.join("fetch"));
+    assert!(fetch.cwd.is_dir(), "the folder is made");
     assert_eq!(
-        fetch.cwd,
-        rig.build_7(),
-        "never the worktree, which a worker writes"
+        std::fs::read_dir(&fetch.cwd).unwrap().count(),
+        0,
+        "the folder holds nothing a worker could have put there"
     );
     assert_eq!(rig.tests.ran(), [], "the sandboxed install ran nothing");
     assert_eq!(rig.claude.seen().len(), 1, "the turn ran");
@@ -398,7 +402,7 @@ fn a_cargo_lock_below_the_root_is_fetched_from_its_own_manifest() {
 
     let [fetch] = rig.tests.fetched().try_into().unwrap();
     assert_eq!(fetch.manifest, rig.worktree_7().join("web/Cargo.toml"));
-    assert_eq!(fetch.cwd, rig.build_7());
+    assert_eq!(fetch.cwd, rig.paths().folder.join("fetch"));
 }
 
 #[test]

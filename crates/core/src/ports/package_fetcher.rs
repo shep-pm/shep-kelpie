@@ -12,10 +12,10 @@ use std::time::Duration;
 pub struct CargoFetch {
     /// A `Cargo.toml`, with its `Cargo.lock` beside it
     pub manifest: PathBuf,
-    /// The folder it runs in: the work item's build folder, never its worktree
+    /// The folder it runs in: one no worker may write, so it holds nothing a worker put there
     ///
-    /// Cargo and rustup read config and toolchain files from the folder they run in, and a worker
-    /// can write the worktree's.
+    /// Cargo and rustup read config and toolchain files from the folder they run in and run what
+    /// those name, outside any sandbox. A worker can write its worktree and its build folder.
     pub cwd: PathBuf,
     /// How long it may run before it is killed
     pub ceiling: Duration,

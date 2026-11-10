@@ -1,8 +1,8 @@
 //! A worker's pinned crates, fetched on the host with `cargo fetch`
 //!
 //! The fetch runs outside any sandbox, so it may write the shared cargo cache a worker's own
-//! sandbox may not. It runs from the work item's build folder, since cargo and rustup read config
-//! and toolchain files from the folder they run in and a worker can write the worktree's.
+//! sandbox may not. It runs from a folder no worker writes, since cargo and rustup read config
+//! and toolchain files from the folder they run in and run what those name.
 
 use std::ffi::OsString;
 
