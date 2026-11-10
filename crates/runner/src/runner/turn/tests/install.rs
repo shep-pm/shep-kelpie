@@ -1,7 +1,8 @@
-//! A fresh worktree's packages, installed in the worker's sandbox before its first turn
+//! A fresh worktree's packages, installed in the worker's sandbox before its first turn, and its
+//! pinned crates, fetched on the host
 
 use super::*;
-use crate::ports::TestOutcome;
+use crate::ports::{FetchOutcome, TestOutcome};
 
 // The first turn of issue 7 in a project whose `main` keeps `files`, with the install
 // answering `outcomes`, and the runner after it
@@ -343,4 +344,189 @@ fn a_good_install_clears_the_failure_status_shows() {
 
     assert_eq!(rig.tests.ran().len(), 2, "no second install ran");
     assert_eq!(shown_failure(&rig, &runner), json!(null));
+}
+
+// The first turn of issue 7 in a project whose `main` keeps `files`, each with its text, with
+// the host's fetches answering `fetches`, and the runner after it
+fn fetch_turn(files: &[(&str, &str)], fetches: Vec<FetchOutcome>) -> (Rig, Mutex<Runner>) {
+    let rig = Rig::new("shep");
+    for (file, text) in files {
+        rig.land(file, text);
+    }
+    rig.tests.script_fetch(fetches);
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    rig.claude
+        .script([Scripted::Reply(usage(1), Cost(20_085_300))]);
+    step(&runner).unwrap();
+    (rig, runner)
+}
+
+#[test]
+fn a_worktree_with_a_cargo_lock_is_fetched_on_the_host_before_the_first_turn() {
+    let (rig, _) = fetch_turn(
+        &[("Cargo.toml", ""), ("Cargo.lock", "# pins\n")],
+        Vec::new(),
+    );
+
+    let [fetch] = rig.tests.fetched().try_into().unwrap();
+    assert_eq!(fetch.manifest, rig.worktree_7().join("Cargo.toml"));
+    assert_eq!(
+        fetch.cwd,
+        rig.build_7(),
+        "never the worktree, which a worker writes"
+    );
+    assert_eq!(rig.tests.ran(), [], "the sandboxed install ran nothing");
+    assert_eq!(rig.claude.seen().len(), 1, "the turn ran");
+}
+
+const LOCKED: [(&str, &str); 2] = [("Cargo.toml", ""), ("Cargo.lock", "# pins\n")];
+
+// Issue 7's next turn, which a `Reply` ends
+fn next_turn(rig: &Rig, runner: &Mutex<Runner>) {
+    rig.claude
+        .script([Scripted::Reply(usage(1), Cost(20_085_300))]);
+    step(runner).unwrap();
+}
+
+#[test]
+fn a_cargo_lock_below_the_root_is_fetched_from_its_own_manifest() {
+    let (rig, _) = fetch_turn(
+        &[("web/Cargo.toml", ""), ("web/Cargo.lock", "# pins\n")],
+        Vec::new(),
+    );
+
+    let [fetch] = rig.tests.fetched().try_into().unwrap();
+    assert_eq!(fetch.manifest, rig.worktree_7().join("web/Cargo.toml"));
+    assert_eq!(fetch.cwd, rig.build_7());
+}
+
+#[test]
+fn a_worktree_with_no_cargo_lock_is_not_fetched() {
+    let (rig, _) = fetch_turn(&[("Cargo.toml", ""), ("README.md", "")], Vec::new());
+
+    assert_eq!(rig.tests.fetched(), []);
+    assert_eq!(rig.claude.seen().len(), 1, "the turn ran");
+}
+
+#[test]
+fn a_cargo_lock_that_has_not_changed_is_not_fetched_again_on_the_next_turn() {
+    let (rig, runner) = fetch_turn(&LOCKED, Vec::new());
+    next_turn(&rig, &runner);
+
+    assert_eq!(rig.claude.seen().len(), 2, "the second turn ran");
+    assert_eq!(
+        rig.tests.fetched().len(),
+        1,
+        "the second turn fetched again"
+    );
+}
+
+#[test]
+fn a_cargo_lock_that_changed_since_the_last_fetch_is_fetched_again() {
+    let (rig, runner) = fetch_turn(&LOCKED, Vec::new());
+    std::fs::write(rig.worktree_7().join("Cargo.lock"), "# a new pin\n").unwrap();
+    next_turn(&rig, &runner);
+    next_turn(&rig, &runner);
+
+    assert_eq!(rig.claude.seen().len(), 3);
+    assert_eq!(
+        rig.tests.fetched().len(),
+        2,
+        "fetched once for the first lock and once for the changed one"
+    );
+}
+
+#[test]
+fn a_failed_fetch_does_not_fail_the_turn_and_is_noted_once() {
+    let failed = |output: &str| FetchOutcome::Failed {
+        output: output.to_owned(),
+    };
+    let (rig, runner) = fetch_turn(
+        &LOCKED,
+        vec![
+            failed("error: failed to download `serde v1.0.0`"),
+            FetchOutcome::TimedOut,
+        ],
+    );
+    assert_eq!(
+        rig.claude.seen().len(),
+        1,
+        "the failed fetch stopped the turn"
+    );
+    let notes = runner.lock().unwrap().take_notes();
+    let [note] = notes.as_slice() else {
+        panic!("{notes:?}");
+    };
+    assert!(note.contains("issue #7"), "{note}");
+    assert!(note.contains("failed to download `serde v1.0.0`"), "{note}");
+
+    // The next turn fetches again, and says nothing more.
+    next_turn(&rig, &runner);
+    assert_eq!(
+        rig.tests.fetched().len(),
+        2,
+        "no second fetch after a failure"
+    );
+    assert_eq!(rig.claude.seen().len(), 2);
+    assert_eq!(runner.lock().unwrap().take_notes(), Vec::<String>::new());
+}
+
+#[test]
+fn a_fetch_that_never_ran_is_noted_with_its_reason() {
+    let not_run = FetchOutcome::NotRun {
+        reason: "cannot start cargo: not found".to_owned(),
+    };
+    let (rig, runner) = fetch_turn(&LOCKED, vec![not_run]);
+
+    assert_eq!(rig.claude.seen().len(), 1);
+    let notes = runner.lock().unwrap().take_notes();
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("cannot start cargo: not found")),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn a_project_whose_build_env_names_cargo_home_is_not_fetched() {
+    let rig = Rig::new("shep");
+    rig.edit_settings(|s| s.replace("build_env = {}", "build_env = { CARGO_HOME = \"cargo\" }"));
+    for (file, text) in LOCKED {
+        rig.land(file, text);
+    }
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    next_turn(&rig, &runner);
+
+    assert_eq!(rig.claude.seen().len(), 1, "the turn ran");
+    assert_eq!(rig.tests.fetched(), []);
+}
+
+#[test]
+fn a_compaction_turn_fetches_nothing() {
+    let rig = Rig::new("shep");
+    for (file, text) in LOCKED {
+        rig.land(file, text);
+    }
+    // The first fetch fails, so the next turn that may fetch does.
+    rig.tests.script_fetch([FetchOutcome::TimedOut]);
+    let runner = rig.open().unwrap();
+    rig.ask(&runner, "add", Some("7"));
+    // Its session grows past the mark, so the next turn is sent behind a `/compact`.
+    rig.claude.script([Scripted::SayAt("done", 150_001)]);
+    step(&runner).unwrap();
+    assert_eq!(rig.tests.fetched().len(), 1);
+
+    rig.claude.script([Scripted::Say("compacted")]);
+    let compacted = step(&runner).unwrap();
+    assert!(
+        matches!(compacted, Some(StepReport::WorkerCompacted { .. })),
+        "{compacted:?}"
+    );
+    assert_eq!(rig.tests.fetched().len(), 1, "a compaction runs no code");
+
+    next_turn(&rig, &runner);
+    assert_eq!(rig.tests.fetched().len(), 2, "the turn after it fetches");
 }
