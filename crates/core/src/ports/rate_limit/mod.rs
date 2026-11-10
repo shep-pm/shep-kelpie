@@ -300,7 +300,7 @@ impl RateHeld {
             Some(_) => self.held_until(error, now),
             None => fallback_from(now),
         };
-        self.no_login_until.store(until.0, Ordering::SeqCst);
+        self.no_login_until.fetch_max(until.0, Ordering::SeqCst);
         (self.say)(format!(
             "gh answered without a login, so its calls are held until {}, and the App's calls go on",
             time_of(until)
