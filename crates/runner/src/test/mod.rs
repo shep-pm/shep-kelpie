@@ -515,6 +515,7 @@ impl Rig {
             alerts: Arc::new(self.alerts.clone()),
             leases: Arc::new(self.leases.clone()),
             test_runner: Arc::new(self.tests.clone()),
+            package_fetcher: Arc::new(self.tests.clone()),
             dev_servers: Arc::new(self.dev_servers.clone()),
             e2e_runner: Arc::new(self.e2e.clone()),
             pages: Arc::new(self.pages.clone()),

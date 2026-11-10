@@ -307,6 +307,9 @@ pub struct Runner {
     // good install or the item's leaving clears it. Kept in memory only: a restart empties
     // `install_ran` too, and the next turn's install sets it again where packages are missing
     install_failed: BTreeMap<TicketId, String>,
+    // What each work item's host fetches of its pinned crates have left. Kept in memory only: a
+    // restart fetches again, which a warm cache answers at once
+    fetches: BTreeMap<TicketId, git_reads::Fetches>,
     // The calls this process has in flight, kept in memory only
     flights: flight::Flights,
     // The browsers opened for turns about to launch, kept in memory only
@@ -669,6 +672,7 @@ impl Runner {
             started: Vec::new(),
             install_ran: BTreeSet::new(),
             install_failed: BTreeMap::new(),
+            fetches: BTreeMap::new(),
             flights: flight::Flights::default(),
             opened: browser::Opened::default(),
             planned: dev_server::Planned::default(),
@@ -897,6 +901,7 @@ impl Runner {
         let open = |issue: &TicketId| self.state.item(*issue).is_some();
         self.install_ran.retain(open);
         self.install_failed.retain(|issue, _| open(issue));
+        self.fetches.retain(|issue, _| open(issue));
         self.pushed_back.keep_only(&self.state.open_tickets());
         self.pm_reads_kept(&self.state.open_tickets());
         self.metrics.work_items(&self.state);

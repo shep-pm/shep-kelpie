@@ -39,6 +39,27 @@ impl Runner {
         startable.count()
     }
 
+    /// Whether a pick wake is due for `takeable`: two issues an agent could
+    /// start, or one whose hold just ended on a close
+    pub(super) fn pm_asks_pick(&self, takeable: &[TicketId]) -> bool {
+        self.pm_choices(takeable) >= 2 || self.pm_hold_ended(takeable)
+    }
+
+    /// Whether an issue in `takeable` has a hold that ended on a close, which
+    /// no pick has decided, and an agent could start it
+    pub(super) fn pm_hold_ended(&self, takeable: &[TicketId]) -> bool {
+        takeable
+            .iter()
+            .any(|t| self.pm.after_hold.contains(t) && !self.pm.unstartable.contains_key(t))
+    }
+
+    /// Forgets the released issues the pick wake that ended was sent for. One
+    /// released while its call ran waits for the next wake.
+    pub(super) fn pm_wake_ended(&mut self) {
+        let asked = std::mem::take(&mut self.pm.after_asked);
+        self.pm.after_hold.retain(|t| !asked.contains(t));
+    }
+
     /// Forgets each unstartable issue the board no longer lists, or whose
     /// pacer hold lapsed, called once a pass
     pub(super) fn pm_forget_unstartable(&mut self, takeable: &[TicketId]) {

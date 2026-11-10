@@ -6,14 +6,16 @@ use std::sync::Mutex;
 
 use serde_json::{Value, json};
 
+use super::until::{UNTIL_7, held_by};
 use super::{
     NOTHING, PICK_12, answered, asked_again, past_the_window, pm_on, pm_seen, step_until, with_pm,
 };
 use crate::agents::Tier;
 use crate::board::briefing::date_time;
-use crate::ports::{Clock, Session, Timestamp};
+use crate::ports::{AgentError, Clock, Session, Timestamp};
 use crate::runner::{Runner, StepReport, step};
-use crate::test::{Rig, Scripted, ticket};
+use crate::settings::Harness;
+use crate::test::{FakeForge, Rig, Scripted, ticket};
 use crate::work_item::{Holder, ReviewPlan};
 
 // A project with #9 and #12 ready, whose project manager picked #12 and has
@@ -851,4 +853,142 @@ fn an_answer_that_names_no_agent_for_a_waiting_item_does_not_wake_it_again_at_on
         assert_eq!(step(&runner).unwrap(), None);
     }
     assert_eq!(pm_seen(&rig).len(), 1);
+}
+
+// #7 and #8 open, #9 the only ready issue and held as `hold` says, then `close` dropped
+fn released(hold: &'static str, close: &str) -> (Rig, Mutex<Runner>) {
+    let (rig, runner, _) = held_by(hold);
+    rig.forge.unlist_ready(12);
+    rig.clock.advance(61);
+    step(&runner).unwrap();
+    rig.ask(&runner, "drop", Some(close));
+    rig.clock.advance(61);
+    (rig, runner)
+}
+
+// How many pick wakes the project manager has had
+fn pick_wakes(rig: &Rig) -> usize {
+    let seen = pm_seen(rig);
+    seen.iter()
+        .filter(|s| s.call.prompt.contains("ready issues could fill"))
+        .count()
+}
+
+const PICK_9_OPUS: &str = "{\"pick\": {\"issue\": 9, \"agent\": \"opus-high\"}}";
+
+fn woke_for_9(runner: &Mutex<Runner>) -> Vec<String> {
+    let report = step_until(runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    answered(Some(report)).0
+}
+
+// The wake's pick reasons, whatever else it carries: a stuck item's ruling asked
+// about again (`runner/pm/unanswered.rs`) rides along in the same wake
+fn woke_for_pick(runner: &Mutex<Runner>) -> Vec<String> {
+    (woke_for_9(runner).iter())
+        .filter(|w| w.contains("ready issues could fill"))
+        .cloned()
+        .collect()
+}
+
+// The agent that opened #9, once a step does
+fn started_9(runner: &Mutex<Runner>) -> Option<String> {
+    let started = step_until(runner, |r| matches!(r, StepReport::Dispatched { .. }));
+    let StepReport::Dispatched { issue, agent, .. } = started else {
+        return None;
+    };
+    (issue == ticket(9)).then(|| agent.as_str().to_owned())
+}
+
+#[test]
+fn an_issue_whose_hold_ended_on_a_close_wakes_a_pick_though_it_is_the_only_choice() {
+    let (rig, runner) = released(UNTIL_7, "7");
+    rig.claude.script([Scripted::Say(PICK_9)]);
+
+    let woke_for = woke_for_pick(&runner);
+
+    assert_eq!(woke_for.len(), 1, "{woke_for:?}");
+    assert!(
+        woke_for[0].contains("1 ready issues could fill"),
+        "{woke_for:?}"
+    );
+}
+
+#[test]
+fn a_pick_naming_an_agent_for_a_released_issue_starts_it_on_that_agent() {
+    let (rig, runner) = released(UNTIL_7, "7");
+    rig.claude.script([Scripted::Say(PICK_9_OPUS)]);
+
+    woke_for_9(&runner);
+
+    assert_eq!(started_9(&runner).as_deref(), Some("opus-high"));
+}
+
+#[test]
+fn a_released_issue_starts_on_the_rule_when_the_project_manager_is_down() {
+    let (rig, runner, _) = held_by(UNTIL_7);
+    rig.forge.unlist_ready(12);
+    let down = AgentError::Failed(Harness::ClaudeCode, "overloaded".into());
+    rig.claude.script([Scripted::Fail(down)]);
+    rig.ask(&runner, "tell", Some("hello"));
+    step_until(&runner, |r| matches!(r, StepReport::PmFailed { .. }));
+    let calls = pick_wakes(&rig);
+
+    rig.ask(&runner, "drop", Some("7"));
+    rig.clock.advance(61);
+
+    assert!(started_9(&runner).is_some());
+    assert_eq!(pick_wakes(&rig), calls, "no wake while it is down");
+}
+
+#[test]
+fn a_pick_of_null_for_a_released_issue_starts_it_on_the_rule_and_asks_no_more() {
+    let (rig, runner) = released(UNTIL_7, "7");
+    rig.claude.script([Scripted::Say(NOTHING)]);
+    woke_for_9(&runner);
+    let calls = pick_wakes(&rig);
+
+    assert!(started_9(&runner).is_some());
+    for _ in 0..3 {
+        rig.next_look();
+        step(&runner).unwrap();
+    }
+
+    assert_eq!(pick_wakes(&rig), calls);
+}
+
+#[test]
+fn a_hold_ended_by_a_changed_issue_wakes_no_pick() {
+    let (rig, runner, _) = held_by(UNTIL_7);
+    rig.forge.unlist_ready(12);
+    let edited = format!("{}\nA new line.\n", FakeForge::passing_body(9));
+    rig.forge.set_ready_body(9, &edited);
+    let calls = pick_wakes(&rig);
+    rig.clock.advance(61);
+
+    assert!(started_9(&runner).is_some());
+    assert_eq!(pick_wakes(&rig), calls);
+}
+
+#[test]
+fn a_hold_naming_no_until_wakes_a_pick_when_any_work_item_closes() {
+    let (rig, runner) = released("{\"pick\": null, \"hold\": [9]}", "8");
+    rig.claude.script([Scripted::Say(PICK_9)]);
+
+    assert_eq!(woke_for_pick(&runner).len(), 1);
+}
+
+#[test]
+fn a_released_issue_that_cannot_start_does_not_wake_a_pick_on_every_step() {
+    let (rig, runner) = released(UNTIL_7, "7");
+    rig.agent_board.ranks(&[]);
+    rig.claude.script([Scripted::Say(PICK_9)]);
+    woke_for_9(&runner);
+    let calls = pick_wakes(&rig);
+
+    for _ in 0..3 {
+        rig.next_look();
+        assert_eq!(step(&runner).unwrap(), None);
+    }
+
+    assert_eq!(pick_wakes(&rig), calls);
 }

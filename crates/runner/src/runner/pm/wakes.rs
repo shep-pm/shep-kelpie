@@ -574,10 +574,11 @@ impl Runner {
             .filter(|&issue| now.item(issue).is_none())
             .collect();
         // A hold waits on the work item it names, or on any when it names none.
-        now.end_holds_on(&closed);
+        let released = now.end_holds_on(&closed);
         if self.agents.pm.is_none() {
             return;
         }
+        self.pm.after_hold.extend(released);
         let fresh: Vec<TicketId> = (now.rulings.iter())
             .filter(|r| !was.rulings.iter().any(|w| w.id == r.id))
             .map(|r| r.id)
