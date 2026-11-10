@@ -4,13 +4,15 @@ use std::sync::Mutex;
 
 use serde_json::{Value, json};
 
-use super::{answered, pm_on, step_until};
-use crate::runner::{Runner, StepReport, step};
-use crate::test::{FakeForge, Rig, Scripted};
+use super::{NOTHING, answered, pm_on, step_until};
+use crate::ports::Role;
+use crate::runner::flight::advance;
+use crate::runner::{Pass, Runner, StepReport, step};
+use crate::test::{CALL_PATIENCE, FakeForge, Hold, Rig, Scripted};
 
 /// A project with three slots and as many pending rulings, #7 and #8 open and stuck, #9 and #12 ready,
 /// whose project manager answered `answer` to the wake for the free slot
-fn held_by(answer: &'static str) -> (Rig, Mutex<Runner>, Vec<String>) {
+pub(super) fn held_by(answer: &'static str) -> (Rig, Mutex<Runner>, Vec<String>) {
     let rig = Rig::new("koji");
     rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 3"));
     rig.edit_settings(|s| s.replace("pending_rulings = 2", "pending_rulings = 3"));
@@ -47,7 +49,7 @@ fn saved(rig: &Rig) -> Value {
     saved
 }
 
-const UNTIL_7: &str = "{\"pick\": null, \"hold\": [{\"issue\": 9, \"until\": 7}]}";
+pub(super) const UNTIL_7: &str = "{\"pick\": null, \"hold\": [{\"issue\": 9, \"until\": 7}]}";
 
 #[test]
 fn a_hold_until_one_item_survives_another_closing_and_ends_when_it_closes() {
@@ -190,4 +192,42 @@ fn a_hold_ends_when_the_held_issue_is_edited() {
     step(&runner).unwrap();
 
     assert_eq!(held(&rig, &runner), json!(null));
+}
+
+#[test]
+fn a_hold_that_ends_while_a_pick_wake_is_out_still_wakes_a_pick_for_its_issue() {
+    let (rig, runner, _) = held_by("{\"pick\": 12, \"hold\": [{\"issue\": 9, \"until\": 7}]}");
+    let work = Hold::default();
+    rig.claude
+        .script_for(Role::Worker, [Scripted::Hold(work.clone())]);
+    advance(&runner).unwrap();
+    assert!(matches!(advance(&runner).unwrap(), Pass::Started));
+    assert!(work.entered(CALL_PATIENCE), "#12's turn never began");
+    rig.ask(&runner, "drop", Some("8"));
+    rig.forge.list_ready(14, false);
+    rig.forge.list_ready(15, false);
+    let call = Hold::default();
+    rig.claude.script_for(
+        Role::Pm,
+        [
+            Scripted::HoldThenSay(call.clone(), NOTHING),
+            Scripted::Say(NOTHING),
+        ],
+    );
+    rig.clock.advance(61);
+    assert!(matches!(advance(&runner).unwrap(), Pass::Started));
+    assert!(call.entered(CALL_PATIENCE), "the pick wake never began");
+
+    rig.ask(&runner, "drop", Some("7"));
+    call.release();
+    step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    rig.clock.advance(61);
+    let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
+    let (woke_for, _, _) = answered(Some(report));
+
+    assert!(
+        woke_for[0].contains("3 ready issues could fill"),
+        "#9 is offered again: {woke_for:?}"
+    );
+    work.release();
 }

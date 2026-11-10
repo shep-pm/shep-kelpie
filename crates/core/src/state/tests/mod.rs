@@ -94,17 +94,21 @@ fn a_hold_ends_on_the_close_it_waits_on_and_no_hold_ends_on_no_close() {
         state.pm_holds.iter().map(|h| h.issue).collect()
     };
 
-    state.end_holds_on(&[]);
+    assert_eq!(
+        state.end_holds_on(&[]),
+        vec![],
+        "nothing closed, so none ends"
+    );
     assert_eq!(
         held(&state),
         vec![ticket(9), ticket(12)],
         "nothing closed, so no hold goes"
     );
 
-    state.end_holds_on(&[ticket(8)]);
+    assert_eq!(state.end_holds_on(&[ticket(8)]), vec![ticket(12)]);
     assert_eq!(held(&state), vec![ticket(9)], "#12 waits on any close");
 
-    state.end_holds_on(&[ticket(7)]);
+    assert_eq!(state.end_holds_on(&[ticket(7)]), vec![ticket(9)]);
     assert!(held(&state).is_empty(), "#9 waits on #7");
 }
 
