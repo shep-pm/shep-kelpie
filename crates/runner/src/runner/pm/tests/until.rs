@@ -10,7 +10,7 @@ use crate::test::{FakeForge, Rig, Scripted};
 
 /// A project with three slots and as many pending rulings, #7 and #8 open and stuck, #9 and #12 ready,
 /// whose project manager answered `answer` to the wake for the free slot
-fn held_by(answer: &'static str) -> (Rig, Mutex<Runner>, Vec<String>) {
+pub(super) fn held_by(answer: &'static str) -> (Rig, Mutex<Runner>, Vec<String>) {
     let rig = Rig::new("koji");
     rig.edit_settings(|s| s.replace("active_items = 1", "active_items = 3"));
     rig.edit_settings(|s| s.replace("pending_rulings = 2", "pending_rulings = 3"));
@@ -47,7 +47,7 @@ fn saved(rig: &Rig) -> Value {
     saved
 }
 
-const UNTIL_7: &str = "{\"pick\": null, \"hold\": [{\"issue\": 9, \"until\": 7}]}";
+pub(super) const UNTIL_7: &str = "{\"pick\": null, \"hold\": [{\"issue\": 9, \"until\": 7}]}";
 
 #[test]
 fn a_hold_until_one_item_survives_another_closing_and_ends_when_it_closes() {

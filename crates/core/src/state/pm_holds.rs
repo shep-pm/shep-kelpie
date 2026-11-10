@@ -81,14 +81,17 @@ impl ProjectState {
     }
 
     /// Ends every hold waiting on one of `closed`, which are the work items
-    /// that just ended. A hold naming no work item waits on any of them, so
-    /// none goes when nothing closed.
-    pub fn end_holds_on(&mut self, closed: &[TicketId]) {
+    /// that just ended, and returns the issues whose holds went. A hold naming
+    /// no work item waits on any of them, so none goes when nothing closed.
+    pub fn end_holds_on(&mut self, closed: &[TicketId]) -> Vec<TicketId> {
         if closed.is_empty() {
-            return;
+            return Vec::new();
         }
-        self.pm_holds
-            .retain(|held| !held.until.is_none_or(|until| closed.contains(&until)));
+        let (ended, kept): (Vec<PmHeld>, Vec<PmHeld>) = std::mem::take(&mut self.pm_holds)
+            .into_iter()
+            .partition(|held| held.until.is_none_or(|until| closed.contains(&until)));
+        self.pm_holds = kept;
+        ended.into_iter().map(|held| held.issue).collect()
     }
 
     /// Whether every issue in `takeable` is held with no work item open, so no

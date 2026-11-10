@@ -131,6 +131,7 @@ impl Runner {
         }
         if picking.is_some() {
             self.pm.asked_pick = false;
+            self.pm.after_hold.clear();
         }
         if answer.hold.is_some() && !self.state.pm_holds.is_empty() {
             let named: Vec<String> = self.state.pm_holds.iter().map(PmHeld::to_string).collect();

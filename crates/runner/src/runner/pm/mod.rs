@@ -153,6 +153,9 @@ pub(super) struct Desk {
     due: Vec<Wake>,
     // A pick wake is due or in flight
     asked_pick: bool,
+    // Each ready issue whose hold ended on a close, which a pick wake decides even
+    // as the only choice, until it starts, leaves the board or the wake ends
+    after_hold: BTreeSet<TicketId>,
     // Each red head it was woken for, so a head wakes it once
     red_woken: BTreeSet<(String, String)>,
     // Each fix work item read closed while its workflow was red, and when it was first read so
@@ -334,6 +337,9 @@ impl Runner {
         let mut next = self.state.clone();
         next.end_changed_holds(ready);
         self.pm_forget_unstartable(takeable);
+        self.pm
+            .after_hold
+            .retain(|ticket| takeable.contains(ticket));
         let stalled = next.holds_stalled(takeable);
         if stalled {
             next.pm_holds.clear();
@@ -358,12 +364,17 @@ impl Runner {
 
     /// What dispatch starts out of `takeable`, the ready issues the board
     /// could take now: the project manager's pick, or nothing while its pick
-    /// wake is out, asked where two or more could start; else the board rule's.
+    /// wake is out, asked where two or more could start, or one whose hold just
+    /// ended on a close; else the board rule's.
     /// A wake is out until its call answers, fails or is ended at [`CEILING`],
     /// and one queued behind another call waits for that call too.
     pub(super) fn pm_pick(&mut self, takeable: &[TicketId]) -> Choice {
         if self.agents.pm.is_none() {
             return Choice::Rule;
+        }
+        // A null pick made before the hold ended left no word on this issue.
+        if matches!(self.pm.pick, Some(Pick::Rule(_))) && self.pm_hold_ended(takeable) {
+            self.pm.pick = None;
         }
         match self.pm.pick.take() {
             Some(Pick::Issues(mut named)) => {
@@ -387,7 +398,7 @@ impl Runner {
                 self.pm.pick = (left > 0).then_some(Pick::Rule(left));
                 Choice::Rule
             }
-            None if self.pm_choices(takeable) < 2 || !self.pm_available() => Choice::Rule,
+            None if !self.pm_asks_pick(takeable) || !self.pm_available() => Choice::Rule,
             None if self.pm.asked_pick => Choice::Wait,
             None => {
                 self.pm.asked_pick = true;
@@ -401,6 +412,7 @@ impl Runner {
     /// opened
     pub(super) fn pm_started(&mut self, ticket: TicketId) {
         self.pm.unstartable.remove(&ticket);
+        self.pm.after_hold.remove(&ticket);
         match &mut self.pm.pick {
             Some(Pick::Issues(named)) => {
                 named.retain(|p| p.issue != ticket);
@@ -586,6 +598,7 @@ impl Runner {
                 Wake::Pick(_, free) => {
                     self.pm.pick = Some(Pick::Rule(free.max(1)));
                     self.pm.asked_pick = false;
+                    self.pm.after_hold.clear();
                 }
                 Wake::Told => self.pm_due(Wake::Told),
                 Wake::Conflict(..) | Wake::Stuck { .. } => self.pm.lapsed = true,
