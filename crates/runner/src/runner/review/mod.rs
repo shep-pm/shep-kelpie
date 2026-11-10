@@ -264,10 +264,8 @@ impl Runner {
             ask.as_ref()
                 .map(|(command, folder, tool)| (*command, folder.as_path(), *tool)),
         );
-        prompt.push_str(&prompts::disputes_note(&item.disputes));
-        prompt.push_str(&prompts::asked_note(&item.held));
-        prompt.push_str(&prompts::plan_note(item.review_plan.as_ref()));
-        prompt.push_str(&pull_request);
+        let standing = self.standing_note(ticket, None);
+        prompt.push_str(&prompts::notes(item, &standing, &pull_request));
         let call =
             calls::reviewer_call(ticket, &worktree, &self.paths.worker, model, prompt, tests);
         match call.and_then(|call| self.prepared(call)) {

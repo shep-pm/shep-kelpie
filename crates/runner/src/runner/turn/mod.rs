@@ -21,7 +21,7 @@ use super::contributions::Sent;
 use super::git_reads::start_of;
 use super::instructions;
 use super::pace::Pace;
-use super::pm::WORKER_COMPACT_PAST;
+use super::pm::{WORKER_COMPACT_PAST, standing};
 use super::pull_request_file;
 use super::question::asked;
 use super::report::{Begin, StepReport};
@@ -644,8 +644,10 @@ impl Runner {
                 let moved = moved_paths(&issue.body, || {
                     files_on(&self.settings.git.checkout, self.item_base(item))
                 });
+                let standing =
+                    standing::worker_note(&self.standing_note(ticket, Some(&issue.body)));
                 self.skills
-                    .invoke(Step::Implement, &format!("{first}{moved}"))
+                    .invoke(Step::Implement, &format!("{first}{moved}{standing}"))
             }
         };
         let prompt = match briefed {

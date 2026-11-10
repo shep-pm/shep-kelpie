@@ -500,6 +500,12 @@ impl Runner {
         self.brief.patches.get(&ticket)
     }
 
+    /// `ticket`'s issue body as the board last read it from the forge
+    pub(super) fn brief_body(&self, ticket: TicketId) -> Option<&str> {
+        let (_, body) = self.brief.bodies.iter().find(|(t, _)| *t == ticket)?;
+        Some(body)
+    }
+
     /// The paths `ticket`'s issue body names, once the board has read them
     /// from the body as it was last read from the forge
     pub(super) fn brief_named(&self, ticket: TicketId) -> Option<&[String]> {
