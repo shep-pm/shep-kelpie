@@ -49,7 +49,7 @@ fn is_status(line: &str) -> bool {
 // A rate limit is `Limited` with what the answer said of when, anything else
 // stays what gh printed.
 fn limited_or(kept: &str, text: &str, cooldown: Cooldown) -> ForgeError {
-    match says_used_up(kept) {
+    match says_used_up(kept).is_some() {
         true => ForgeError::Limited {
             said: format!("gh failed: {}", text.trim()),
             cooldown,

@@ -96,7 +96,7 @@ pub use pace::{AT_ONCE, CallPacer, LocalPace, PER_MINUTE, Pace, Pass};
 pub use paced_voice::PacedVoice;
 pub use pages::{ConsoleError, PageRequest, PageSession, Pages, Visit};
 pub use rate_limit::{
-    AppForges, AppReads, ForgeHold, RateHeld, Reading, Say, Warnings, says_used_up,
+    AppForges, AppReads, ForgeHold, Limit, RateHeld, Reading, Say, Warnings, says_used_up,
 };
 pub use recorded_voice::RecordedVoice;
 pub use registry::{Registry, RegistryError};

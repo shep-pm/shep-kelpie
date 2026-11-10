@@ -3,6 +3,7 @@
 //! The App has its own limits, but its calls and the maintainer's `gh`
 //! calls come from one machine and share the hold: a rate-limited App
 //! answer stops the forge calls too, until the time its own headers give.
+//! The login's calls that went out with no login hold the login alone.
 
 use std::fmt;
 use std::sync::Arc;

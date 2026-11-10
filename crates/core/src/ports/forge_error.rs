@@ -72,7 +72,8 @@ pub enum ForgeError {
         /// The hook, and what it said
         refusal: Refusal,
     },
-    /// The forge said its rate limit was used up, so no call is made until it resets then
+    /// The forge said its rate limit was used up, or that `gh` has no login, so
+    /// no call is made until then
     Held(Timestamp),
     /// The forge answered that a rate limit is used up, saying so in `said` and
     /// when to ask again in `cooldown`

@@ -8,6 +8,7 @@
 
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use super::Revalidated;
@@ -40,19 +41,56 @@ const USED_UP: [&str; 4] = [
     "http 429",
 ];
 
+/// Whose limit a used-up answer is about
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Limit {
+    /// A login's or the App's own, which holds every call on the machine
+    Login,
+    /// The machine's IP, answered to a call that went out with no login: it
+    /// holds the login's calls and no one else's
+    Anonymous,
+}
+
+// What gh prints when a call went out with no login and was refused
+const ANONYMOUS: &str = "authenticated requests get a higher rate limit";
+const NO_LOGIN: &str = "requires authentication";
+
 /// Whether `error` is the forge saying its rate limit is used up
 fn used_up(error: &ForgeError) -> bool {
+    limit_of(error).is_some()
+}
+
+fn limit_of(error: &ForgeError) -> Option<Limit> {
     match error {
-        ForgeError::Limited { .. } => true,
+        ForgeError::Limited { said, .. } => Some(says_used_up(said).unwrap_or(Limit::Login)),
         ForgeError::Failed(stderr) => says_used_up(stderr),
+        _ => None,
+    }
+}
+
+// Whether the login's call went out with no login: the anonymous limit, or a
+// 401 that asks for authentication.
+fn no_login(error: &ForgeError) -> bool {
+    match error {
+        ForgeError::Limited { said: text, .. } | ForgeError::Failed(text) => {
+            let text = text.to_lowercase();
+            text.contains(ANONYMOUS) || (text.contains("http 401") && text.contains(NO_LOGIN))
+        }
         _ => false,
     }
 }
 
-/// Whether a failed gh call's `stderr` says a rate limit is used up
-pub fn says_used_up(stderr: &str) -> bool {
+/// Which limit a failed gh call's `stderr` says is used up, if it says so
+pub fn says_used_up(stderr: &str) -> Option<Limit> {
     let stderr = stderr.to_lowercase();
-    USED_UP.iter().any(|said| stderr.contains(said))
+    if !USED_UP.iter().any(|said| stderr.contains(said)) {
+        return None;
+    }
+    Some(if stderr.contains(ANONYMOUS) {
+        Limit::Anonymous
+    } else {
+        Limit::Login
+    })
 }
 
 /// `at` as a UTC time, as `2026-10-10T05:31:54Z`
@@ -128,6 +166,9 @@ pub struct RateHeld {
     app: Option<AppReader>,
     // The reads the adapters sent a validator with and GitHub answered 304
     revalidated: Revalidated,
+    // Until when the login's calls are held for going out with no login, in
+    // this process alone: another runner's `gh` may be logged in. Zero is none.
+    no_login_until: AtomicU64,
 }
 
 impl RateHeld {
@@ -151,6 +192,7 @@ impl RateHeld {
             project: None,
             app: None,
             revalidated: Revalidated::default(),
+            no_login_until: AtomicU64::new(0),
         }
     }
 
@@ -207,10 +249,7 @@ impl RateHeld {
         kind: Kind,
         call: impl FnOnce() -> Result<T, ForgeError>,
     ) -> Result<T, ForgeError> {
-        let held = match &self.project {
-            Some(project) => self.hold.admit(self.clock.as_ref(), project).err(),
-            None => self.hold.until(self.clock.now()),
-        };
+        let held = self.held();
         let now = self.clock.now();
         if let Some(until) = held {
             self.record(now, kind, 0, Ended::Held);
@@ -225,18 +264,47 @@ impl RateHeld {
             Err(_) => Ended::Failed,
         };
         self.record(self.clock.now(), kind, millis, ended);
-        if let Err(error) = &result
-            && ended == Ended::UsedUp
-        {
-            let until = self.held_until(error, now);
-            self.hold.hold(until);
-            (self.say)(format!(
-                "the forge's rate limit is used up ({error}), so kelpie makes no forge call \
-                 until {}",
-                time_of(until)
-            ));
+        if let Err(error) = &result {
+            if no_login(error) {
+                self.hold_no_login(error, now);
+            } else if ended == Ended::UsedUp {
+                let until = self.held_until(error, now);
+                self.hold.hold(until);
+                (self.say)(format!(
+                    "the forge's rate limit is used up ({error}), so kelpie makes no forge call \
+                     until {}",
+                    time_of(until)
+                ));
+            }
         }
         result
+    }
+
+    // Until when the login's calls are held, while that is after now: for
+    // going out with no login, else as the shared hold says.
+    fn held(&self) -> Option<Timestamp> {
+        let until = Timestamp(self.no_login_until.load(Ordering::SeqCst));
+        if until > self.clock.now() {
+            return Some(until);
+        }
+        match &self.project {
+            Some(project) => self.hold.admit(self.clock.as_ref(), project).err(),
+            None => self.hold.until(self.clock.now()),
+        }
+    }
+
+    // The login went out with no login. Only its own calls are held, in this
+    // process, until the anonymous limit resets where that is what answered.
+    fn hold_no_login(&self, error: &ForgeError, now: Timestamp) {
+        let until = match limit_of(error) {
+            Some(_) => self.held_until(error, now),
+            None => fallback_from(now),
+        };
+        self.no_login_until.store(until.0, Ordering::SeqCst);
+        (self.say)(format!(
+            "gh answered without a login, so its calls are held until {}, and the App's calls go on",
+            time_of(until)
+        ));
     }
 
     // What the answer itself says of when to ask again comes first, then the
@@ -576,11 +644,7 @@ impl Forge for RateHeld {
     // The read costs none of the limits, but it is still a call to the forge:
     // it takes its turn in the pace, and fails unrecorded while the forge is held.
     fn rate_limit(&self) -> Result<RateLimits, ForgeError> {
-        let held = match &self.project {
-            Some(project) => self.hold.admit(self.clock.as_ref(), project).err(),
-            None => self.hold.until(self.clock.now()),
-        };
-        if let Some(until) = held {
+        if let Some(until) = self.held() {
             return Err(ForgeError::Held(until));
         }
         self.free_read(Kind::RateLimit, |f| f.rate_limit())
@@ -596,380 +660,4 @@ impl Forge for RateHeld {
 mod shared_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // The first is from the live runner's log; the rest are GitHub's
-    // documented messages, as gh prints a failed call.
-    #[test]
-    fn each_of_ghs_used_up_answers_is_a_used_up_limit() {
-        let said = [
-            "GraphQL: API rate limit already exceeded for user ID 1.",
-            "gh: API rate limit exceeded for user ID 1. (HTTP 403)",
-            "gh: You have exceeded a secondary rate limit. Please wait a few minutes before you \
-             try again. (HTTP 403)",
-            "gh: Too Many Requests (HTTP 429)",
-        ];
-        for stderr in said {
-            assert!(used_up(&ForgeError::Failed(stderr.into())), "{stderr}");
-        }
-    }
-
-    #[test]
-    fn any_other_failure_is_not() {
-        let other = [
-            ForgeError::Failed("gh: Not Found (HTTP 404)".into()),
-            ForgeError::Failed("error connecting to api.github.com".into()),
-            ForgeError::Unreadable("API rate limit exceeded".into()),
-        ];
-        for error in other {
-            assert!(!used_up(&error), "{error}");
-        }
-    }
-
-    fn bucket(used: u64, remaining: u64, reset: u64) -> crate::ports::RateBucket {
-        crate::ports::RateBucket {
-            used,
-            remaining,
-            reset: Timestamp(reset),
-        }
-    }
-
-    fn held_over(forge: &crate::test::FakeForge) -> RateHeld {
-        let source = Arc::new(forge.clone());
-        RateHeld::new(
-            Arc::clone(&source) as Arc<dyn Forge>,
-            Arc::clone(&source) as Arc<dyn Tickets>,
-            Arc::new(crate::test::FakeClock::at(1_000)),
-            ForgeHold::default(),
-            Box::new(|_| {}),
-        )
-    }
-
-    #[test]
-    fn rate_limit_reads_used_remaining_and_reset_for_core_and_graphql() {
-        let home = tempfile::tempdir().unwrap();
-        let forge = crate::test::FakeForge::new(home.path().join("origin"));
-        let limits = RateLimits {
-            core: bucket(120, 4_880, 1_800),
-            graphql: bucket(7, 4_993, 1_700),
-            search: bucket(3, 27, 1_600),
-        };
-        forge.set_rate_limits(limits);
-
-        assert_eq!(held_over(&forge).rate_limit(), Ok(limits));
-    }
-
-    #[test]
-    fn rate_limit_reset_still_answers_from_core_reset() {
-        let home = tempfile::tempdir().unwrap();
-        let forge = crate::test::FakeForge::new(home.path().join("origin"));
-        let held = held_over(&forge);
-        let spare = RateLimits {
-            core: bucket(120, 4_880, 1_800),
-            graphql: bucket(7, 4_993, 1_700),
-            search: bucket(3, 27, 1_600),
-        };
-        forge.set_rate_limits(spare);
-        assert_eq!(held.rate_limit_reset(), Ok(None), "none is used up");
-
-        forge.set_rate_limits(RateLimits {
-            core: bucket(5_000, 0, 1_800),
-            ..spare
-        });
-        assert_eq!(held.rate_limit_reset(), Ok(Some(Timestamp(1_800))));
-
-        forge.set_rate_limits(RateLimits {
-            graphql: bucket(5_000, 0, 1_900),
-            ..spare
-        });
-        assert_eq!(held.rate_limit_reset(), Ok(Some(Timestamp(1_900))));
-
-        forge.set_rate_limits(RateLimits {
-            search: bucket(30, 0, 1_650),
-            ..spare
-        });
-        assert_eq!(
-            held.rate_limit_reset(),
-            Ok(Some(Timestamp(1_650))),
-            "`gh search` spends from the search limit, so its reset holds too"
-        );
-    }
-
-    mod cooldown {
-        use super::*;
-        use crate::ports::Cooldown;
-        use crate::test::{FakeClock, FakeForge};
-
-        fn repo() -> ForgeSlug {
-            ForgeSlug::try_from("shep-pm/koji".to_owned()).unwrap()
-        }
-
-        fn held_on(forge: &FakeForge, clock: &FakeClock) -> RateHeld {
-            let source = Arc::new(forge.clone());
-            RateHeld::new(
-                Arc::clone(&source) as Arc<dyn Forge>,
-                Arc::clone(&source) as Arc<dyn Tickets>,
-                Arc::new(clock.clone()),
-                ForgeHold::default(),
-                Box::new(|_| {}),
-            )
-        }
-
-        #[test]
-        fn a_retry_after_holds_for_that_long_and_not_for_the_reset_or_the_fallback() {
-            let home = tempfile::tempdir().unwrap();
-            let forge = FakeForge::new(home.path().join("origin"));
-            let clock = FakeClock::at(1_000);
-            let held = held_on(&forge, &clock);
-            // The reset would hold for an hour, the fallback for ten minutes.
-            forge.set_used_up(Some(Timestamp(4_600)));
-            forge.set_limited(Cooldown {
-                retry_after: Some(90),
-                reset: None,
-            });
-
-            held.visibility(&repo()).unwrap_err();
-
-            clock.advance(89);
-            let held_for = held.viewer().unwrap_err();
-            assert_eq!(held_for, ForgeError::Held(Timestamp(1_090)));
-            forge.set_unlimited();
-            forge.set_down(false);
-            clock.advance(1);
-            held.viewer().unwrap();
-        }
-
-        #[test]
-        fn a_reset_in_the_answer_holds_until_then_without_asking_the_forge_for_it() {
-            let home = tempfile::tempdir().unwrap();
-            let forge = FakeForge::new(home.path().join("origin"));
-            let clock = FakeClock::at(1_000);
-            let held = held_on(&forge, &clock);
-            forge.set_limited(Cooldown {
-                retry_after: None,
-                reset: Some(Timestamp(1_500)),
-            });
-
-            held.visibility(&repo()).unwrap_err();
-
-            assert_eq!(forge.asked(), 1, "the reset was not asked for");
-            assert_eq!(
-                held.viewer().unwrap_err(),
-                ForgeError::Held(Timestamp(1_500))
-            );
-        }
-
-        #[test]
-        fn an_answer_that_says_nothing_of_when_holds_for_the_fallback() {
-            let home = tempfile::tempdir().unwrap();
-            let forge = FakeForge::new(home.path().join("origin"));
-            let clock = FakeClock::at(1_000);
-            let held = held_on(&forge, &clock);
-            forge.set_limited(Cooldown::default());
-
-            held.visibility(&repo()).unwrap_err();
-
-            assert_eq!(
-                held.viewer().unwrap_err(),
-                ForgeError::Held(Timestamp(1_000 + FALLBACK))
-            );
-        }
-    }
-
-    mod branch_runs {
-        use super::*;
-        use crate::test::{FakeClock, FakeForge};
-
-        fn repo() -> ForgeSlug {
-            ForgeSlug::try_from("shep-pm/koji".to_owned()).unwrap()
-        }
-
-        fn run(workflow: &str, id: u64, conclusion: &str) -> BranchRun {
-            BranchRun {
-                workflow: workflow.to_owned(),
-                id,
-                head: "abc".to_owned(),
-                event: "push".to_owned(),
-                conclusion: conclusion.to_owned(),
-                created: Timestamp(1_000),
-            }
-        }
-
-        fn held_on(forge: &FakeForge, clock: &FakeClock) -> RateHeld {
-            let source = Arc::new(forge.clone());
-            RateHeld::new(
-                Arc::clone(&source) as Arc<dyn Forge>,
-                Arc::clone(&source) as Arc<dyn Tickets>,
-                Arc::new(clock.clone()),
-                ForgeHold::default(),
-                Box::new(|_| {}),
-            )
-        }
-
-        #[test]
-        fn each_branch_lists_the_runs_a_test_scripted_for_it_and_a_run_has_its_log_tail() {
-            let home = tempfile::tempdir().unwrap();
-            let forge = FakeForge::new(home.path().join("origin"));
-            let held = held_on(&forge, &FakeClock::at(1_000));
-            forge.set_branch_runs("kelpie/1", vec![run("test", 7, "failure")]);
-            forge.set_branch_runs("kelpie/2", vec![run("test", 8, "cancelled")]);
-            forge.set_run_log_tail(7, "error[E0308]");
-
-            assert_eq!(
-                held.branch_runs(&repo(), "kelpie/1").unwrap(),
-                [run("test", 7, "failure")]
-            );
-            assert_eq!(
-                held.branch_runs(&repo(), "kelpie/2").unwrap(),
-                [run("test", 8, "cancelled")]
-            );
-            assert_eq!(held.branch_runs(&repo(), "kelpie/3").unwrap(), []);
-            assert_eq!(held.run_log_tail(&repo(), 7).unwrap(), "error[E0308]");
-            held.run_log_tail(&repo(), 8).unwrap_err();
-        }
-
-        #[test]
-        fn a_branchs_runs_fail_with_the_error_a_test_scripted() {
-            let home = tempfile::tempdir().unwrap();
-            let forge = FakeForge::new(home.path().join("origin"));
-            let held = held_on(&forge, &FakeClock::at(1_000));
-            forge.set_branch_runs_error("gh: Not Found (HTTP 404)");
-
-            assert_eq!(
-                held.branch_runs(&repo(), "kelpie/1").unwrap_err(),
-                ForgeError::Failed("gh: Not Found (HTTP 404)".into())
-            );
-        }
-
-        #[test]
-        fn listing_a_branchs_runs_is_held_while_the_rate_limit_is_used_up() {
-            let home = tempfile::tempdir().unwrap();
-            let forge = FakeForge::new(home.path().join("origin"));
-            let held = held_on(&forge, &FakeClock::at(1_000));
-            forge.set_limited(crate::ports::Cooldown::default());
-            held.visibility(&repo()).unwrap_err();
-
-            assert_eq!(
-                held.branch_runs(&repo(), "kelpie/1").unwrap_err(),
-                ForgeError::Held(Timestamp(1_000 + FALLBACK))
-            );
-            assert_eq!(
-                held.run_log_tail(&repo(), 7).unwrap_err(),
-                ForgeError::Held(Timestamp(1_000 + FALLBACK))
-            );
-        }
-    }
-
-    mod ledger {
-        use super::*;
-        use crate::forge_ledger::{self, Api, Line};
-        use crate::test::{FakeClock, FakeForge};
-
-        fn repo() -> ForgeSlug {
-            ForgeSlug::try_from("shep-pm/koji".to_owned()).unwrap()
-        }
-
-        struct Rig {
-            held: RateHeld,
-            forge: FakeForge,
-            clock: FakeClock,
-            home: tempfile::TempDir,
-        }
-
-        impl Rig {
-            fn new() -> Self {
-                let home = tempfile::tempdir().unwrap();
-                let forge = FakeForge::new(home.path().join("origin"));
-                let clock = FakeClock::at(1_000);
-                let source = Arc::new(forge.clone());
-                let held = RateHeld::new(
-                    Arc::clone(&source) as Arc<dyn Forge>,
-                    Arc::clone(&source) as Arc<dyn Tickets>,
-                    Arc::new(clock.clone()),
-                    ForgeHold::default(),
-                    Box::new(|_| {}),
-                )
-                .with_ledger(Arc::new(Ledger::in_home(home.path(), "koji")));
-                Self {
-                    held,
-                    forge,
-                    clock,
-                    home,
-                }
-            }
-
-            fn lines(&self) -> Vec<Line> {
-                forge_ledger::read(&self.home.path().join(forge_ledger::FILE)).unwrap()
-            }
-        }
-
-        #[test]
-        fn each_call_adds_a_line_with_its_kind_and_how_it_ended() {
-            let rig = Rig::new();
-            rig.held.visibility(&repo()).unwrap();
-            rig.clock.advance(30);
-            rig.held.default_branch(&repo()).unwrap();
-            rig.forge.set_down(true);
-            rig.clock.advance(30);
-            rig.held.repo_labels(&repo()).unwrap_err();
-
-            let lines = rig.lines();
-            let seen: Vec<_> = lines
-                .iter()
-                .map(|l| (l.at.0, l.project.as_str(), l.kind, l.api, l.ended))
-                .collect();
-            assert_eq!(
-                seen,
-                [
-                    (1_000, "koji", Kind::Visibility, Api::GraphQl, Ended::Ok),
-                    (1_030, "koji", Kind::DefaultBranch, Api::GraphQl, Ended::Ok),
-                    (1_060, "koji", Kind::RepoLabels, Api::GraphQl, Ended::Failed),
-                ]
-            );
-        }
-
-        #[test]
-        fn the_reads_that_came_back_304_are_put_on_the_line_of_the_call_they_were_made_in() {
-            let revalidated = Revalidated::default();
-            let rig = Rig::new();
-            let held = rig.held.counting(revalidated.clone());
-
-            held.viewer().unwrap();
-            revalidated.note();
-            revalidated.note();
-            held.visibility(&repo()).unwrap();
-            held.default_branch(&repo()).unwrap();
-
-            let lines = forge_ledger::read(&rig.home.path().join(forge_ledger::FILE)).unwrap();
-            let counts: Vec<_> = lines.iter().map(|l| l.not_modified).collect();
-            assert_eq!(counts, [0, 2, 0]);
-        }
-
-        #[test]
-        fn a_used_up_answer_is_recorded_and_the_calls_it_holds_are_recorded_as_held() {
-            let rig = Rig::new();
-            rig.forge.set_used_up(Some(Timestamp(1_600)));
-            rig.held.visibility(&repo()).unwrap_err();
-            rig.clock.advance(60);
-            rig.held.viewer().unwrap_err();
-            rig.forge.set_down(false);
-            rig.clock.advance(600);
-            rig.held.viewer().unwrap();
-
-            let lines = rig.lines();
-            let seen: Vec<_> = lines.iter().map(|l| (l.at.0, l.kind, l.ended)).collect();
-            assert_eq!(
-                seen,
-                [
-                    (1_000, Kind::Visibility, Ended::UsedUp),
-                    (1_000, Kind::RateLimitReset, Ended::Ok),
-                    (1_060, Kind::Viewer, Ended::Held),
-                    (1_660, Kind::Viewer, Ended::Ok),
-                ]
-            );
-            assert_eq!(lines[1].api, Api::Rest);
-            assert_eq!(lines[1].millis, 0);
-        }
-    }
-}
+mod tests;
