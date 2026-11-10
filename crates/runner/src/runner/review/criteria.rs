@@ -17,6 +17,15 @@ impl Runner {
     ///
     /// The ticket port's message when the ticket cannot be read.
     pub(super) fn criteria(&self, ticket: TicketId) -> Result<String, String> {
+        self.criteria_and_body(ticket).map(|(criteria, _)| criteria)
+    }
+
+    /// [`Self::criteria`] and the issue's whole body, as the forge gave it now
+    ///
+    /// # Errors
+    ///
+    /// The ticket port's message when the ticket cannot be read.
+    pub(super) fn criteria_and_body(&self, ticket: TicketId) -> Result<(String, String), String> {
         let found = self
             .ports
             .tickets
@@ -25,12 +34,13 @@ impl Runner {
                 let name = super::super::turn::ticket_name(ticket);
                 format!("cannot read {name} for the review round: {e}")
             })?;
-        Ok(format!(
+        let criteria = format!(
             "{} {}\n\n{}",
             ticket.shown(),
             found.title.trim(),
             acceptance(&found.body)
-        ))
+        );
+        Ok((criteria, found.body))
     }
 
     /// The note giving a round's reader the body of `pull_request`, if it has one

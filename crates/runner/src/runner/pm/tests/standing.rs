@@ -74,10 +74,11 @@ fn a_workers_opening_prompt_with_no_line_that_applies_is_unchanged() {
 fn a_reviewers_prompt_carries_the_standing_lines_that_apply() {
     let rig = Rig::new("shep");
     rig.allow(&["sonnet-high", "qwen", "claude"]);
-    // Dispatched from the ready queue, where the board reads the issue's body
+    // Dispatched from the ready queue
     std::fs::create_dir_all(rig.paths().pm).unwrap();
     std::fs::write(rig.paths().pm.join("pm-standing.md"), STANDING).unwrap();
     let runner = rig.open().unwrap();
+    rig.forge.open_issue(7, "Title of #7", &body());
     rig.forge.list_ready(7, false);
     rig.claude
         .script([Scripted::Push("work.txt", "work\n"), Scripted::Text(CLEAN)]);
@@ -117,4 +118,30 @@ fn a_project_with_no_standing_file_prompts_as_before() {
     step(&runner).unwrap();
     let prompt = rig.claude.all_calls().pop().unwrap().prompt;
     assert!(!prompt.contains("standing rulings"), "{prompt}");
+}
+
+#[test]
+fn a_reviewers_prompt_carries_the_lines_naming_the_blocker_of_an_item_the_board_never_read() {
+    let rig = Rig::new("shep");
+    rig.allow(&["sonnet-high", "qwen", "claude"]);
+    rig.forge
+        .open_issue(7, "Title of #7", "Change the retries.\n\nBlocked by: #9\n");
+    std::fs::create_dir_all(rig.paths().pm).unwrap();
+    std::fs::write(rig.paths().pm.join("pm-standing.md"), STANDING).unwrap();
+    let runner = rig.open().unwrap();
+    // Added by hand, so the board holds no body for it
+    rig.ask(&runner, "add", Some("7"));
+    rig.forge.open_pull_request(71, "kelpie/7", &[7]);
+    rig.claude
+        .script([Scripted::Push("work.txt", "work\n"), Scripted::Text(CLEAN)]);
+    for _ in 0..3 {
+        step(&runner).unwrap(); // the worker's turn, then rounds 1 and 2
+    }
+    let prompt = rig.claude.all_calls().pop().unwrap().prompt;
+
+    assert!(prompt.contains("Review the change"), "{prompt}");
+    assert!(
+        prompt.contains("Wait for #9 before any retry change"),
+        "{prompt}"
+    );
 }
