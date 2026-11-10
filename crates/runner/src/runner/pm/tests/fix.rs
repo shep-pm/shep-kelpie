@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use super::asked::advanced_until;
-use super::{answered, dispatched, past_the_window, pm_seen, step_until, with_pm};
+use super::{answered, asked_again, dispatched, past_the_window, pm_seen, step_until, with_pm};
 use crate::ports::{AgentError, Session, Tools};
 use crate::runner::voice::DRAFT;
 use crate::runner::{BOARD_POLL, Runner, StepReport, advance, step};
@@ -168,7 +168,11 @@ fn a_fix_on_an_item_not_parked_is_dropped_and_named() {
 
     let (acted, dropped) = answered_wake(&rig, &runner);
 
-    assert_eq!(acted, Vec::<String>::new());
+    assert_eq!(
+        acted,
+        [asked_again(7, 7)],
+        "the stuck item the reply never named is asked about again"
+    );
     assert_eq!(
         dropped,
         ["fix #12: it is no stuck work item parked on a ruling"]

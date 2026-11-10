@@ -8,6 +8,7 @@ Part of the design index, `README.md`. Read the rows for the code you touch, the
 | runner-start-stop.md | `start`, `pause`, `finish`: the runner's sheep | `src/flock/{verbs,control}/` |
 | board.md | board, items, adoption | `core/board/`, `runner/{dispatch,adopt}/` |
 | pm.md | the project manager | `runner/pm/`, `core/state/pm_holds.rs` |
+| pm-wakes.md | its wakes: what wakes it, the window they wait in, an item left alone, a ruling asked again | `runner/pm/{wakes,unanswered}.rs` |
 | pm-pick.md | its `pick`: the list, the entry object, holds | `runner/pm/picked.rs`, `core/state/pm_holds.rs` |
 | pm-retro.md | the project manager's batch retro and digest | `runner/retro/` |
 | pm-board.md | its board | `core/board/briefing/`, `runner/briefing/` |

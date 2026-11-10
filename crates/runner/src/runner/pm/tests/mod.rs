@@ -43,6 +43,7 @@ mod said_none;
 mod standing;
 mod threads;
 mod turn_answers;
+mod unanswered;
 mod until;
 mod wake_prompt;
 
@@ -98,6 +99,18 @@ fn answered(report: Option<StepReport>) -> (Vec<String>, Vec<String>, Vec<String
         }) => (woke_for, acted, dropped),
         other => panic!("the project manager did not answer: {other:?}"),
     }
+}
+
+/// What kelpie logs for `issue`, stuck on ruling `ruling`, whose reply named
+/// nothing for it: its wake is queued again (`runner/pm/unanswered.rs`)
+fn asked_again(issue: u64, ruling: u64) -> String {
+    format!("asked again about ruling {ruling}: the reply held no unstick for #{issue}")
+}
+
+/// What kelpie logs for `issue` when the reply after that one names nothing
+/// either: the item is left alone, as a `none` leaves it
+fn left_alone_again(issue: u64, ruling: u64) -> String {
+    format!("left #{issue} to resolve itself: the reply held no unstick for ruling {ruling} again")
 }
 
 fn dispatched(report: Option<StepReport>) -> TicketId {

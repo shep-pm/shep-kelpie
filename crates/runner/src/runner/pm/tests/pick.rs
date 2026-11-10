@@ -7,7 +7,9 @@ use std::sync::Mutex;
 use serde_json::{Value, json};
 
 use super::until::{UNTIL_7, held_by};
-use super::{NOTHING, PICK_12, answered, past_the_window, pm_on, pm_seen, step_until, with_pm};
+use super::{
+    NOTHING, PICK_12, answered, asked_again, past_the_window, pm_on, pm_seen, step_until, with_pm,
+};
 use crate::agents::Tier;
 use crate::board::briefing::date_time;
 use crate::ports::{AgentError, Clock, Session, Timestamp};
@@ -66,7 +68,8 @@ fn a_pick_survives_an_unrelated_item_closing_and_is_dispatched() {
     rig.forge.list_ready(12, false);
     rig.claude.script([Scripted::Say(PICK_12)]);
     let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
-    assert!(matches!(report, StepReport::PmAnswered { acted, .. } if acted == ["picked #12"]));
+    let (_, acted, _) = answered(Some(report));
+    assert_eq!(acted, ["picked #12".to_owned(), asked_again(7, 7)]);
 
     rig.ask(&runner, "drop", Some("7"));
 
@@ -878,6 +881,15 @@ fn woke_for_9(runner: &Mutex<Runner>) -> Vec<String> {
     answered(Some(report)).0
 }
 
+// The wake's pick reasons, whatever else it carries: a stuck item's ruling asked
+// about again (`runner/pm/unanswered.rs`) rides along in the same wake
+fn woke_for_pick(runner: &Mutex<Runner>) -> Vec<String> {
+    (woke_for_9(runner).iter())
+        .filter(|w| w.contains("ready issues could fill"))
+        .cloned()
+        .collect()
+}
+
 // The agent that opened #9, once a step does
 fn started_9(runner: &Mutex<Runner>) -> Option<String> {
     let started = step_until(runner, |r| matches!(r, StepReport::Dispatched { .. }));
@@ -892,7 +904,7 @@ fn an_issue_whose_hold_ended_on_a_close_wakes_a_pick_though_it_is_the_only_choic
     let (rig, runner) = released(UNTIL_7, "7");
     rig.claude.script([Scripted::Say(PICK_9)]);
 
-    let woke_for = woke_for_9(&runner);
+    let woke_for = woke_for_pick(&runner);
 
     assert_eq!(woke_for.len(), 1, "{woke_for:?}");
     assert!(
@@ -962,7 +974,7 @@ fn a_hold_naming_no_until_wakes_a_pick_when_any_work_item_closes() {
     let (rig, runner) = released("{\"pick\": null, \"hold\": [9]}", "8");
     rig.claude.script([Scripted::Say(PICK_9)]);
 
-    assert_eq!(woke_for_9(&runner).len(), 1);
+    assert_eq!(woke_for_pick(&runner).len(), 1);
 }
 
 #[test]
