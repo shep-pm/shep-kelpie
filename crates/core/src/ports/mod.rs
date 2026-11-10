@@ -43,6 +43,7 @@ mod metrics;
 mod notifications;
 mod pace;
 pub mod paced_voice;
+mod package_fetcher;
 mod pages;
 pub mod rate_limit;
 pub mod recorded_voice;
@@ -94,6 +95,7 @@ pub use metrics::{Sample, SeriesKind, Sink};
 pub use notifications::{Notification, Notifications};
 pub use pace::{AT_ONCE, CallPacer, LocalPace, PER_MINUTE, Pace, Pass};
 pub use paced_voice::PacedVoice;
+pub use package_fetcher::{CargoFetch, FetchOutcome, PackageFetcher};
 pub use pages::{ConsoleError, PageRequest, PageSession, Pages, Visit};
 pub use rate_limit::{
     AppForges, AppReads, ForgeHold, Limit, RateHeld, Reading, Say, Warnings, says_used_up,
@@ -943,6 +945,8 @@ pub struct Ports {
     pub alerts: Arc<dyn Alerts>,
     /// Runs a reviewer's test, inside the worker's sandbox
     pub test_runner: Arc<dyn TestRunner>,
+    /// Fetches a worker's pinned packages into the shared cache, on the host
+    pub package_fetcher: Arc<dyn PackageFetcher>,
     /// Starts a project's dev server for a worker turn that has the browser
     pub dev_servers: Arc<dyn DevServers>,
     /// Runs a bump's e2e tests on the dog's host

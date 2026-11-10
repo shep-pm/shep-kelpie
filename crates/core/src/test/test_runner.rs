@@ -1,12 +1,12 @@
-//! The rig's test runner: returns the outcomes a test scripts, one per run,
-//! and keeps every run it was asked for, with which watched paths the
+//! The rig's test runner and package fetcher: return the outcomes a test scripts, one per run,
+//! and keep every run they were asked for, with which watched paths the
 //! worktree held as it ran
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use crate::ports::{TestOutcome, TestRun, TestRunner};
+use crate::ports::{CargoFetch, FetchOutcome, PackageFetcher, TestOutcome, TestRun, TestRunner};
 
 /// One run the runner was asked for
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +24,8 @@ pub struct FakeTests {
     watched: Arc<Mutex<Vec<PathBuf>>>,
     left: Arc<Mutex<Vec<PathBuf>>>,
     ran: Arc<Mutex<Vec<Ran>>>,
+    fetches: Arc<Mutex<VecDeque<FetchOutcome>>>,
+    fetched: Arc<Mutex<Vec<CargoFetch>>>,
 }
 
 impl FakeTests {
@@ -47,6 +49,16 @@ impl FakeTests {
     pub fn ran(&self) -> Vec<Ran> {
         self.ran.lock().unwrap().clone()
     }
+
+    /// Queues the outcomes of the next fetches, one each. A fetch past the queue fetches.
+    pub fn script_fetch(&self, outcomes: impl IntoIterator<Item = FetchOutcome>) {
+        self.fetches.lock().unwrap().extend(outcomes);
+    }
+
+    /// Every fetch asked for, oldest first
+    pub fn fetched(&self) -> Vec<CargoFetch> {
+        self.fetched.lock().unwrap().clone()
+    }
 }
 
 impl TestRunner for FakeTests {
@@ -65,5 +77,12 @@ impl TestRunner for FakeTests {
             held,
         });
         (self.outcomes.lock().unwrap().pop_front()).unwrap_or(TestOutcome::Passed)
+    }
+}
+
+impl PackageFetcher for FakeTests {
+    fn cargo_fetch(&self, run: &CargoFetch) -> FetchOutcome {
+        self.fetched.lock().unwrap().push(run.clone());
+        (self.fetches.lock().unwrap().pop_front()).unwrap_or(FetchOutcome::Fetched)
     }
 }

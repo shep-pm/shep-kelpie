@@ -11,12 +11,15 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::Runner;
 use super::dev_server::install::{self, Installed};
 use super::report::{Begin, StepReport};
+use crate::board::check::fnv1a;
 use crate::fence;
-use crate::ports::{TestRun, TestRunner};
+use crate::package_managers;
+use crate::ports::{CargoFetch, FetchOutcome, PackageFetcher, TestRun, TestRunner};
 use crate::profile;
 use crate::settings::CatchUp;
 use crate::ticket::TicketId;
@@ -37,6 +40,7 @@ pub(in crate::runner) struct Kept {
     changes: Option<Result<Changes, WorktreeError>>,
     prepared: Option<Result<Worktree, WorktreeError>>,
     installed: Option<Installed>,
+    fetched: Option<Fetched>,
 }
 
 impl Kept {
@@ -54,6 +58,7 @@ impl Kept {
             && self.changes.is_none()
             && self.prepared.is_none()
             && self.installed.is_none()
+            && self.fetched.is_none()
     }
 
     /// Whether a job made the work item's worktree
@@ -64,6 +69,11 @@ impl Kept {
     /// What the install of the worktree's packages came to, once a job ran it
     pub(in crate::runner) fn installed(&self) -> Option<&Installed> {
         self.installed.as_ref()
+    }
+
+    /// What the fetch of the worktree's pinned crates came to, once a job ran it
+    pub(in crate::runner) fn fetched(&self) -> Option<&Fetched> {
+        self.fetched.as_ref()
     }
 
     /// Keeps what a job found for the step that asked
@@ -79,6 +89,7 @@ impl Kept {
             Found::Changes(changes) => self.changes = Some(changes),
             Found::Prepared(prepared) => self.prepared = Some(prepared),
             Found::Installed(installed) => self.installed = Some(installed),
+            Found::Fetched(fetched) => self.fetched = Some(fetched),
         }
     }
 }
@@ -91,6 +102,7 @@ pub(in crate::runner) enum Git {
     Changes(Changed),
     Prepare(Preparing),
     Install(Installing),
+    Fetch(Fetching),
 }
 
 /// What a [`Git`] read found, errors as the inline call returns them
@@ -107,6 +119,7 @@ pub(in crate::runner) enum Found {
     Changes(Result<Changes, WorktreeError>),
     Prepared(Result<Worktree, WorktreeError>),
     Installed(Installed),
+    Fetched(Fetched),
 }
 
 impl Git {
@@ -136,6 +149,7 @@ impl Git {
             Self::Changes(ask) => Found::Changes(ask.run()),
             Self::Prepare(ask) => Found::Prepared(ask.run()),
             Self::Install(ask) => Found::Installed(ask.run()),
+            Self::Fetch(ask) => Found::Fetched(ask.run()),
         }
     }
 }
@@ -309,6 +323,67 @@ impl Ask for Installing {
     }
 }
 
+/// How long one `cargo fetch` may run
+const FETCH_WITHIN: Duration = Duration::from_secs(10 * 60);
+
+/// The empty folder in the project's own that a fetch starts in, which no worker may write
+const FETCH_FOLDER: &str = "fetch";
+
+/// The environment variable that moves cargo's home, and with it the cache a fetch fills
+const CARGO_HOME: &str = "CARGO_HOME";
+
+/// A work item's pinned crates fetched on the host, once its worktree is made
+///
+/// The fetch writes the shared cargo cache, which the worker's sandbox may not, and runs outside
+/// any sandbox, so it follows the worktree's making as a call of its own and changes nothing in
+/// the worktree.
+pub(in crate::runner) struct Fetching {
+    fetcher: Arc<dyn PackageFetcher>,
+    // Each Cargo.lock's folder and digest as read, with the fetch that its manifest asks for
+    runs: Vec<(PathBuf, u64, CargoFetch)>,
+}
+
+/// What the fetches of a worktree's `Cargo.lock` files came to, one for each
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::runner) struct Fetched(Vec<Fetch>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Fetch {
+    // The folder that keeps the lockfile
+    folder: PathBuf,
+    // The lockfile as the fetch read it
+    digest: u64,
+    outcome: FetchOutcome,
+}
+
+impl Ask for Fetching {
+    type Answer = Fetched;
+
+    fn run(self) -> Self::Answer {
+        let fetches = (self.runs.into_iter())
+            .map(|(folder, digest, run)| Fetch {
+                folder,
+                digest,
+                outcome: self.fetcher.cargo_fetch(&run),
+            })
+            .collect();
+        Fetched(fetches)
+    }
+
+    fn job(self) -> Git {
+        Git::Fetch(self)
+    }
+}
+
+/// What a work item's fetches have left, in memory only
+#[derive(Debug, Default)]
+pub(in crate::runner) struct Fetches {
+    // The lockfile each folder held at its last good fetch, by its digest
+    locked: BTreeMap<PathBuf, u64>,
+    // Whether a failure was already noted for the work item
+    noted: bool,
+}
+
 /// Where a worktree made for `item` starts: a rework or adopted branch is the one `origin` holds
 pub(in crate::runner) fn start_of(item: &WorkItem) -> Start {
     if item.rework || item.adopted {
@@ -463,6 +538,60 @@ impl Runner {
         Some(Begin::Reads(job))
     }
 
+    /// The job that fetches the pinned crates of the focused work item's worktree on the host, or
+    /// none when no `Cargo.lock` changed since its last good fetch, the step's earlier ask kept
+    /// the answer, no pass runs to make it, the worktree is not made, the turn's opening read
+    /// failed, or the project's `build_env` moves `CARGO_HOME`
+    ///
+    /// The worker's own `cargo` reads its cache and may not write it, so it fails on a crate the
+    /// cache lacks. A worker whose `build_env` names its own `CARGO_HOME` reads that home instead.
+    pub(in crate::runner) fn fetching(&self) -> Option<Begin> {
+        let item = self
+            .current()
+            .filter(|_| self.reads.git.fetched.is_none())?;
+        if !matches!(self.reads.git.prepared, Some(Ok(_))) || self.moves_cargo_home(item) {
+            return None;
+        }
+        let started = self.reads.started(item.issue);
+        if matches!(started.issue(), Some(Err(_))) || !matches!(started.token(), Some(Ok(_))) {
+            return None;
+        }
+        // Cargo and rustup run what a config or toolchain file in the folder they start in names,
+        // and a worker writes its worktree and its build folder. The fetch starts in a folder of
+        // the runner's own, which holds nothing.
+        let cwd = self.paths.folder.join(FETCH_FOLDER);
+        let kept = self.fetches.get(&item.issue);
+        let runs: Vec<_> = package_managers::folders(&item.worktree)
+            .into_iter()
+            .filter_map(|folder| {
+                let digest = fnv1a(&std::fs::read(folder.join("Cargo.lock")).ok()?);
+                let fetched = kept.is_some_and(|k| k.locked.get(&folder) == Some(&digest));
+                (!fetched).then(|| {
+                    let run = CargoFetch {
+                        manifest: folder.join("Cargo.toml"),
+                        cwd: cwd.clone(),
+                        ceiling: FETCH_WITHIN,
+                    };
+                    (folder, digest, run)
+                })
+            })
+            .collect();
+        if runs.is_empty() {
+            return None;
+        }
+        // A folder that cannot be made fails the fetch, which is noted.
+        let _ = std::fs::create_dir_all(&cwd);
+        let job = self.git_job(Git::Fetch(Fetching {
+            fetcher: Arc::clone(&self.ports.package_fetcher),
+            runs,
+        }))?;
+        Some(Begin::Reads(job))
+    }
+
+    fn moves_cargo_home(&self, item: &WorkItem) -> bool {
+        (self.settings.worker.build_env_in(&item.worktree).keys()).any(|n| n.as_str() == CARGO_HOME)
+    }
+
     /// The job that installs the packages of the focused work item's worktree in the worker's
     /// sandbox, or none when the worktree needs none, the step's earlier ask kept the answer, an
     /// earlier install ran, no pass runs to make it, the worktree is not made, or the turn's
@@ -471,6 +600,9 @@ impl Runner {
     /// The install follows the worktree's making, which the step's `preparing` job kept. It
     /// belongs to the turn that starts its call, which is where a failed install is told.
     pub(in crate::runner) fn installing(&self) -> Option<Begin> {
+        if let Some(fetch) = self.fetching() {
+            return Some(fetch);
+        }
         let item = self.current().filter(|item| {
             self.reads.git.installed.is_none() && !self.install_ran.contains(&item.issue)
         })?;
@@ -517,8 +649,45 @@ impl Runner {
         Some(Begin::Reads(job))
     }
 
+    /// Keeps what the step's fetch job found: a good fetch's lockfile, which skips the fetch until
+    /// the lockfile changes, and the first failure of the work item, which goes in the notes
+    ///
+    /// A failed, timed out or unrun fetch fails no turn: the next turn fetches again.
+    fn crates_fetched(&mut self, issue: TicketId) {
+        let Some(Fetched(fetches)) = self.reads.git.fetched().cloned() else {
+            return;
+        };
+        let kept = self.fetches.entry(issue).or_default();
+        for Fetch {
+            folder,
+            digest,
+            outcome,
+        } in fetches
+        {
+            let why = match outcome {
+                FetchOutcome::Fetched => {
+                    kept.locked.insert(folder, digest);
+                    continue;
+                }
+                FetchOutcome::Failed { output } => error_line(&output),
+                FetchOutcome::TimedOut => {
+                    format!("it ran past {} seconds", FETCH_WITHIN.as_secs())
+                }
+                FetchOutcome::NotRun { reason } => reason,
+            };
+            if !std::mem::replace(&mut kept.noted, true) {
+                self.notes.push(format!(
+                    "issue #{issue}: `cargo fetch` of {} failed, so the worker's builds may lack \
+                     crates: {why}",
+                    folder.display()
+                ));
+            }
+        }
+    }
+
     /// Logs the install the step's job ran, and keeps it from being run again
     pub(in crate::runner) fn packages_installed(&mut self, issue: TicketId) {
+        self.crates_fetched(issue);
         let Some(installed) = self.reads.git.installed().cloned() else {
             return;
         };
