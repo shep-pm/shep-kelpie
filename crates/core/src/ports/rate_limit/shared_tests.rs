@@ -2,8 +2,12 @@
 
 use super::*;
 use crate::forge_ledger::{self, Ledger};
-use crate::ports::CallPacer;
+use crate::ports::{
+    CallPacer, CheckRunId, GateCheck, LineComment, PacedVoice, PostedComment, Voice,
+};
 use crate::test::{FakeClock, FakeForge};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 // A runner of `project` on `clock`, spaced and held by `hold`.
 fn runner(
@@ -132,4 +136,221 @@ fn the_reset_a_used_up_answer_asks_for_takes_its_turn_in_the_pace_too() {
     }
     assert_eq!(lines.len(), 4, "three calls and the reset");
     assert!(minutes.values().all(|n| *n <= CAP), "{minutes:?}");
+}
+
+// The App as a voice that mints a worker token and does nothing else, counting
+// the tokens it minted.
+#[derive(Default)]
+struct MintingApp {
+    minted: AtomicUsize,
+}
+
+impl MintingApp {
+    fn minted(&self) -> usize {
+        self.minted.load(Ordering::SeqCst)
+    }
+}
+
+fn unscripted<T>() -> Result<T, ForgeError> {
+    Err(ForgeError::App("not scripted".into()))
+}
+
+impl Voice for MintingApp {
+    fn covers(&self, _repo: &ForgeSlug) -> bool {
+        true
+    }
+
+    fn worker_token(&self, _repo: &ForgeSlug) -> Result<Option<InstallationToken>, ForgeError> {
+        self.minted.fetch_add(1, Ordering::SeqCst);
+        Ok(Some(InstallationToken::new("ghs_app".to_owned())))
+    }
+
+    fn comment(&self, _: &ForgeSlug, _: u64, _: &str) -> Result<(), ForgeError> {
+        unscripted()
+    }
+
+    fn post(&self, _: &ForgeSlug, _: u64, _: &str) -> Result<PostedComment, ForgeError> {
+        unscripted()
+    }
+
+    fn review(
+        &self,
+        _: &ForgeSlug,
+        _: u64,
+        _: &str,
+        _: &str,
+        _: &[LineComment],
+    ) -> Result<u64, ForgeError> {
+        unscripted()
+    }
+
+    fn edit_comment(&self, _: &ForgeSlug, _: u64, _: &str) -> Result<(), ForgeError> {
+        unscripted()
+    }
+
+    fn thumbs_up(&self, _: &ForgeSlug, _: u64) -> Result<(), ForgeError> {
+        unscripted()
+    }
+
+    fn create_issue(&self, _: &ForgeSlug, _: &str, _: &str, _: &[&str]) -> Result<u64, ForgeError> {
+        unscripted()
+    }
+
+    fn edit_issue_body(&self, _: &ForgeSlug, _: u64, _: &str) -> Result<(), ForgeError> {
+        unscripted()
+    }
+
+    fn resolve_thread(&self, _: &ForgeSlug, _: &str) -> Result<(), ForgeError> {
+        unscripted()
+    }
+
+    fn reply_to_thread(&self, _: &ForgeSlug, _: &str, _: &str) -> Result<(), ForgeError> {
+        unscripted()
+    }
+
+    fn create_label(&self, _: &ForgeSlug, _: &NewLabel) -> Result<(), ForgeError> {
+        unscripted()
+    }
+
+    fn rename_label(&self, _: &ForgeSlug, _: &str, _: &str) -> Result<(), ForgeError> {
+        unscripted()
+    }
+
+    fn set_issue_label(&self, _: &ForgeSlug, _: u64, _: &str, _: bool) -> Result<(), ForgeError> {
+        unscripted()
+    }
+
+    fn check_run(&self, _: &ForgeSlug, _: &str, _: &GateCheck) -> Result<CheckRunId, ForgeError> {
+        unscripted()
+    }
+
+    fn update_check_run(
+        &self,
+        _: &ForgeSlug,
+        _: CheckRunId,
+        _: &GateCheck,
+    ) -> Result<(), ForgeError> {
+        unscripted()
+    }
+}
+
+// A runner's `gh` and App on one clock and one shared hold, with what the `gh`
+// side said as each hold began.
+struct Machine {
+    clock: FakeClock,
+    forge: FakeForge,
+    gh: RateHeld,
+    app: PacedVoice,
+    minting: Arc<MintingApp>,
+    said: Arc<Mutex<Vec<String>>>,
+    _home: tempfile::TempDir,
+}
+
+impl Machine {
+    fn new() -> Self {
+        let home = tempfile::tempdir().unwrap();
+        let clock = FakeClock::at(1_000_000);
+        let hold = ForgeHold::shared(Arc::new(LocalPace::new()));
+        let forge = FakeForge::new(home.path().join("koji"));
+        let source = Arc::new(forge.clone());
+        let said = Arc::new(Mutex::new(Vec::new()));
+        let told = Arc::clone(&said);
+        let gh = RateHeld::new(
+            Arc::clone(&source) as Arc<dyn Forge>,
+            Arc::clone(&source) as Arc<dyn Tickets>,
+            Arc::new(clock.clone()),
+            hold.clone(),
+            Box::new(move |line| told.lock().unwrap().push(line)),
+        )
+        .paced_for("koji");
+        let minting = Arc::new(MintingApp::default());
+        let app = PacedVoice::new(
+            Arc::clone(&minting) as Arc<dyn Voice>,
+            Arc::new(clock.clone()),
+            hold,
+            "koji",
+            Box::new(|_| {}),
+        );
+        Self {
+            clock,
+            forge,
+            gh,
+            app,
+            minting,
+            said,
+            _home: home,
+        }
+    }
+
+    fn said(&self) -> Vec<String> {
+        self.said.lock().unwrap().clone()
+    }
+}
+
+fn koji() -> ForgeSlug {
+    ForgeSlug::try_from("shep-pm/koji".to_owned()).unwrap()
+}
+
+// gh's stderr for a call that went out with no login, and used up the
+// machine's anonymous limit
+const ANONYMOUS: &str = "gh: API rate limit exceeded for 203.0.113.7. (But here's the good news: \
+    Authenticated requests get a higher rate limit. Check out the documentation for more \
+    details.) (HTTP 403)";
+const UNAUTHENTICATED: &str = "HTTP 401: Requires authentication (https://api.github.com/user)";
+
+#[test]
+fn an_anonymous_limit_holds_the_login_and_not_the_app() {
+    let machine = Machine::new();
+    machine.forge.set_failing(ANONYMOUS);
+
+    machine.gh.viewer().unwrap_err();
+
+    let until = Timestamp(1_000_000 + FALLBACK);
+    assert_eq!(
+        machine.gh.viewer().unwrap_err(),
+        ForgeError::Held(until),
+        "the login's calls are held"
+    );
+    assert_eq!(machine.forge.asked(), 1, "the held call never went out");
+    assert!(machine.app.worker_token(&koji()).unwrap().is_some());
+    assert_eq!(machine.minting.minted(), 1, "the App was asked");
+    machine.clock.advance(FALLBACK);
+    machine.forge.set_down(false);
+    machine.gh.viewer().unwrap();
+}
+
+#[test]
+fn an_anonymous_limit_is_said_as_no_login() {
+    for answer in [ANONYMOUS, UNAUTHENTICATED] {
+        let machine = Machine::new();
+        machine.forge.set_failing(answer);
+
+        for _ in 0..3 {
+            machine.gh.viewer().unwrap_err();
+        }
+
+        let said = machine.said();
+        assert_eq!(said.len(), 1, "{said:?}");
+        let until = time_of(Timestamp(1_000_000 + FALLBACK));
+        assert_eq!(
+            said[0],
+            format!(
+                "gh answered without a login, so its calls are held until {until}, and the \
+                 App's calls go on"
+            )
+        );
+    }
+}
+
+#[test]
+fn the_logins_own_limit_still_holds_every_call() {
+    let machine = Machine::new();
+    machine.forge.set_used_up(Some(Timestamp(1_000_600)));
+
+    machine.gh.viewer().unwrap_err();
+
+    let held = ForgeError::Held(Timestamp(1_000_600));
+    assert_eq!(machine.gh.viewer().unwrap_err(), held);
+    assert_eq!(machine.app.worker_token(&koji()).unwrap_err(), held);
+    assert_eq!(machine.minting.minted(), 0, "the App was not asked");
 }
