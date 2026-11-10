@@ -51,6 +51,7 @@ pub(super) mod standing;
 #[cfg(test)]
 mod tests;
 mod threads;
+mod unanswered;
 mod unstartable;
 mod wakes;
 
@@ -178,6 +179,9 @@ pub(super) struct Desk {
     reply: Option<String>,
     // What it decided for an idle worker whose call it had ended
     after_end: BTreeMap<TicketId, (Action, String)>,
+    // Each stuck item's ruling it was asked about with no `unstick` for it, which
+    // it is asked about once more. In memory only: a gone ruling drops its entry.
+    nudged: BTreeSet<TicketId>,
     // Each work item it left to resolve itself, with the state it was in, when
     // it said so, how many `none`s in a row on that state, and when its hold
     // ends
@@ -883,6 +887,10 @@ impl Runner {
         if !requested.is_empty() {
             acted.extend(self.pm_requested(&requested, &answer.votes));
         }
+        // A stuck item whose ruling the reply left standing is asked about once
+        // more, read after the answers above so a ruling the reply answered is
+        // not asked about again. Its lines are part of what the wake did.
+        acted.extend(self.pm_unanswered(&flying.wakes, &answer));
         // What it called on the maintainer's words it read in this wake.
         let (said, unsaid) = self.pm_said(&flying.told, &answer.said);
         acted.extend(said);

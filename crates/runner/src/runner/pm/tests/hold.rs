@@ -10,7 +10,9 @@ use crate::runner::{Pass, Runner, StepReport, step};
 use crate::settings::Harness;
 use crate::test::{CALL_PATIENCE, Hold, Rig, Scripted, Seen, ticket};
 
-use super::{PICK_12, answered, dispatched, past_the_window, pm_seen, step_until, with_pm};
+use super::{
+    PICK_12, answered, asked_again, dispatched, past_the_window, pm_seen, step_until, with_pm,
+};
 use crate::runner::pm::HOLD_FOR;
 
 const NOTHING: &str = "{\"pick\": null}";
@@ -78,7 +80,10 @@ fn two_stuck_items_a_minute_apart_wake_it_once_with_both_reasons() {
         [stuck_reason(7, 7), stuck_reason(9, 9)],
         "both stuck items went in one wake"
     );
-    assert_eq!((acted, dropped), (vec![], vec![]));
+    // Neither ruling was named, so each is asked about once more, in the same
+    // call's answer, and its wake waits a new window.
+    assert_eq!(acted, [asked_again(7, 7), asked_again(9, 9)]);
+    assert_eq!(dropped, Vec::<String>::new());
     assert_eq!(pm_seen(&rig).len(), 1, "one call for both reasons");
 }
 
@@ -127,7 +132,10 @@ fn a_workers_question_inside_the_window_wakes_it_at_once_with_the_held_reasons()
         ],
         "the question went at once, carrying what was held"
     );
-    assert_eq!((acted, dropped), (vec![], vec![]));
+    // The held stuck item's ruling went unanswered, so it is asked about once
+    // more; the question is the maintainer's to answer.
+    assert_eq!(acted, [asked_again(7, 7)]);
+    assert_eq!(dropped, Vec::<String>::new());
     assert_eq!(pm_seen(&rig).len(), 1, "one call for both reasons");
 }
 
@@ -145,7 +153,11 @@ fn a_free_slot_wakes_it_at_once() {
         [stuck_reason(7, 7), PICK_REASON.to_owned()],
         "the free slot went at once, carrying what was held"
     );
-    assert_eq!(acted, ["picked #12".to_owned()]);
+    assert_eq!(
+        acted,
+        ["picked #12".to_owned(), asked_again(7, 7)],
+        "the held stuck item's ruling went unanswered, so it is asked about again"
+    );
     assert_eq!(dispatched(step(&runner).unwrap()), ticket(12));
 }
 
@@ -346,7 +358,12 @@ fn a_wake_whose_session_cannot_resume_starts_a_new_one_without_waiting_again() {
         matches!(report, StepReport::PmAnswered { .. }),
         "the new session starts on the pass its resume failed: {report:?}"
     );
-    assert_eq!(answered(Some(report)).0, [stuck_reason(9, 9)]);
+    // #7 rides along, its wake queued again for the ruling its first reply
+    // named nothing for.
+    assert_eq!(
+        answered(Some(report)).0,
+        [stuck_reason(7, 7), stuck_reason(9, 9)]
+    );
 
     let [first, resumed, fresh]: [Seen; 3] = pm_seen(&rig).try_into().unwrap();
     assert!(matches!(first.call.session, Session::New(_)));

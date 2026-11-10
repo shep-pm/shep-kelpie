@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use serde_json::{Value, json};
 
-use super::{answered, pm_on, step_until};
+use super::{answered, asked_again, left_alone_again, pm_on, step_until};
 use crate::runner::{Runner, StepReport, step};
 use crate::test::{FakeForge, Rig, Scripted};
 
@@ -52,7 +52,16 @@ const UNTIL_7: &str = "{\"pick\": null, \"hold\": [{\"issue\": 9, \"until\": 7}]
 #[test]
 fn a_hold_until_one_item_survives_another_closing_and_ends_when_it_closes() {
     let (rig, runner, acted) = held_by(UNTIL_7);
-    assert_eq!(acted, ["holds #9 until #7"]);
+    // The two stuck items' rulings went unanswered, so each is asked about once
+    // more, in the same answer.
+    assert_eq!(
+        acted,
+        [
+            "holds #9 until #7".to_owned(),
+            asked_again(7, 7),
+            asked_again(8, 8)
+        ]
+    );
     assert_eq!(held(&rig, &runner), json!([{ "issue": "9", "until": "7" }]));
 
     rig.ask(&runner, "drop", Some("8"));
@@ -81,7 +90,10 @@ fn a_later_answer_with_no_hold_leaves_the_hold_and_an_empty_list_clears_it() {
     rig.ask(&runner, "tell", Some("go on"));
     let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
     let (_, acted, dropped) = answered(Some(report));
-    assert_eq!((acted, dropped), (vec![], vec![]));
+    // The two rulings it was asked about again are now left alone, as a `none`
+    // leaves them, and the holds it gave earlier stand.
+    assert_eq!(acted, [left_alone_again(7, 7), left_alone_again(8, 8)]);
+    assert_eq!(dropped, Vec::<String>::new());
 
     assert_eq!(
         held(&rig, &runner),
@@ -102,7 +114,10 @@ fn a_later_answer_with_no_hold_leaves_the_hold_and_an_empty_list_clears_it() {
 #[test]
 fn a_hold_with_no_until_ends_at_any_close() {
     let (rig, runner, acted) = held_by("{\"pick\": null, \"hold\": [9]}");
-    assert_eq!(acted, ["holds #9"]);
+    assert_eq!(
+        acted,
+        ["holds #9".to_owned(), asked_again(7, 7), asked_again(8, 8)]
+    );
     assert_eq!(held(&rig, &runner), json!([{ "issue": "9" }]));
 
     rig.ask(&runner, "drop", Some("8"));
@@ -126,7 +141,7 @@ fn a_hold_until_what_is_no_open_work_item_is_refused_with_a_note() {
     let (_, acted, dropped) = answered(Some(report));
 
     assert_eq!(dropped, ["hold #9: #12 is no open work item"]);
-    assert_eq!(acted, ["holds #12 until #7"]);
+    assert_eq!(acted, ["holds #12 until #7".to_owned(), asked_again(7, 7)]);
     assert_eq!(
         held(&rig, &runner),
         json!([{ "issue": "12", "until": "7" }])

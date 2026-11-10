@@ -6,7 +6,9 @@ use std::sync::Mutex;
 
 use serde_json::{Value, json};
 
-use super::{NOTHING, PICK_12, answered, past_the_window, pm_on, pm_seen, step_until, with_pm};
+use super::{
+    NOTHING, PICK_12, answered, asked_again, past_the_window, pm_on, pm_seen, step_until, with_pm,
+};
 use crate::agents::Tier;
 use crate::board::briefing::date_time;
 use crate::ports::{Clock, Session, Timestamp};
@@ -64,7 +66,8 @@ fn a_pick_survives_an_unrelated_item_closing_and_is_dispatched() {
     rig.forge.list_ready(12, false);
     rig.claude.script([Scripted::Say(PICK_12)]);
     let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
-    assert!(matches!(report, StepReport::PmAnswered { acted, .. } if acted == ["picked #12"]));
+    let (_, acted, _) = answered(Some(report));
+    assert_eq!(acted, ["picked #12".to_owned(), asked_again(7, 7)]);
 
     rig.ask(&runner, "drop", Some("7"));
 

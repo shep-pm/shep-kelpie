@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
-use super::{answered, past_the_window, pm_on, pm_seen, step_until};
+use super::{answered, asked_again, past_the_window, pm_on, pm_seen, step_until};
 use crate::ports::{AgentError, CallActivity, Clock};
 use crate::runner::flight::advance;
 use crate::runner::pm::{DOWN_FOR, HOLD_FOR};
@@ -451,7 +451,9 @@ fn a_none_for_one_item_leaves_another_items_wake_alone() {
     let report = step_until(&runner, |r| matches!(r, StepReport::PmAnswered { .. }));
     let (woke_for, acted, _) = answered(Some(report));
     assert_eq!(woke_for, [parked_wake(9, 9)]);
-    assert_eq!(acted, Vec::<String>::new());
+    // #7 stays out of the wake, left alone. #9's ruling went unanswered, so it
+    // is asked about once more.
+    assert_eq!(acted, [asked_again(9, 9)]);
     assert_eq!(pm_seen(&rig).len(), 2);
 }
 
