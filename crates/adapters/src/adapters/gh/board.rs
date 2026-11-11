@@ -57,7 +57,7 @@ const OPEN_QUERY: &str = concat!(
     labels(first: 100) { nodes { name } } \
     reviews(first: 1) { totalCount } reviewThreads(first: 1) { totalCount } \
     commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { \
-    __typename ... on CheckRun { name status conclusion completedAt detailsUrl checkSuite { id } } \
+    __typename ... on CheckRun { name status conclusion completedAt detailsUrl startedAt workflowName checkSuite { id } } \
     ... on StatusContext { context state } } } } ",
     suites_fields!(),
     " } } } } } } }"
@@ -592,6 +592,27 @@ mod tests {
     #[test]
     fn the_listing_asks_for_what_reads_a_check_run_left_in_progress() {
         assert!(OPEN_QUERY.contains("completedAt detailsUrl"));
+    }
+
+    // The listing asks for the workflow a check run belongs to and the time it
+    // started, for a run a later run of the same check replaced.
+    #[test]
+    fn the_listing_asks_for_what_names_a_check_run_its_workflow_ran_again() {
+        assert!(OPEN_QUERY.contains("startedAt workflowName"));
+    }
+
+    #[test]
+    fn a_listed_cancelled_run_its_check_ran_again_is_dropped() {
+        let cancelled = r#"{"__typename":"CheckRun","name":"test","status":"COMPLETED",
+            "conclusion":"CANCELLED","completedAt":"2026-11-07T20:30:00Z",
+            "startedAt":"2026-11-07T20:25:54Z","workflowName":"test","checkSuite":{"id":"S1"}}"#;
+        let passed = r#"{"__typename":"CheckRun","name":"test","status":"COMPLETED",
+            "conclusion":"SUCCESS","completedAt":"2026-11-07T20:52:00Z",
+            "startedAt":"2026-11-07T20:46:52Z","workflowName":"test","checkSuite":{"id":"S2"}}"#;
+        assert_eq!(
+            listed_check(&format!("{cancelled},{passed}"), ""),
+            Checks::Passed
+        );
     }
 
     #[test]

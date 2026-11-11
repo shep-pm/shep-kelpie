@@ -566,6 +566,12 @@ enum Check {
         conclusion: Option<String>,
         #[serde(rename = "completedAt")]
         completed_at: Option<String>,
+        // Absent from a rollup read without asking for it
+        #[serde(rename = "startedAt", default)]
+        started_at: Option<String>,
+        // Empty for a check run no workflow posted, such as kelpie's own gates
+        #[serde(rename = "workflowName", default)]
+        workflow: Option<String>,
         #[serde(rename = "detailsUrl")]
         details_url: Option<String>,
         // Only in the board's listing, which counts each suite's check runs by it
@@ -685,18 +691,71 @@ impl Check {
     }
 }
 
+impl Check {
+    // A run of the same check as `other`: the same name under the same workflow
+    fn same_check(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::CheckRun { name, workflow, .. },
+                Self::CheckRun {
+                    name: other_name,
+                    workflow: other_workflow,
+                    ..
+                },
+            ) => name == other_name && workflow == other_workflow,
+            _ => false,
+        }
+    }
+
+    // The time a check run started, which GitHub writes for every one
+    fn started(&self) -> Option<jiff::Timestamp> {
+        match self {
+            Self::CheckRun { started_at, .. } => started_at
+                .as_deref()
+                .and_then(|at| at.parse::<jiff::Timestamp>().ok()),
+            Self::StatusContext { .. } => None,
+        }
+    }
+
+    // Ended because a later run of its workflow replaced it
+    fn cancelled(&self) -> bool {
+        matches!(self, Self::CheckRun { conclusion, .. }
+            if conclusion.as_deref() == Some("CANCELLED"))
+    }
+
+    // Whether a later run of the same check stands in for this cancelled one
+    fn superseded_by(&self, other: &Self) -> bool {
+        let (Some(at), Some(later)) = (self.started(), other.started()) else {
+            return false;
+        };
+        self.cancelled() && self.same_check(other) && later > at
+    }
+}
+
 // The workflow run a check run's link, `.../actions/runs/<id>/job/<id>`, names
 fn run_of(details_url: &str) -> Option<u64> {
     let (_, tail) = details_url.split_once("/actions/runs/")?;
     tail.split('/').next()?.parse().ok()
 }
 
+// A cancelled run of a check that ran again after it on the head. A concurrency
+// group cancels the run it supersedes. A closed and reopened pull request keeps
+// its first runs in the rollup beside the new ones.
+fn superseded(check: &Check, runs: &[&Check]) -> bool {
+    runs.iter().copied().any(|other| check.superseded_by(other))
+}
+
 // The whole run is read before a verdict, so a red run names every failure.
 fn checks(rollup: &[Check]) -> Checks {
-    let rollup: Vec<&Check> = rollup.iter().filter(|c| !c.gate()).collect();
-    if rollup.is_empty() {
+    let runs: Vec<&Check> = rollup.iter().filter(|c| !c.gate()).collect();
+    if runs.is_empty() {
         return Checks::None;
     }
+    let rollup: Vec<&Check> = runs
+        .iter()
+        .copied()
+        .filter(|c| !superseded(c, &runs))
+        .collect();
     let mut failed = Vec::new();
     let mut ran = false;
     let mut pending = false;
