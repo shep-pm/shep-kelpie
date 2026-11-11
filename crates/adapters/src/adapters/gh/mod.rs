@@ -569,14 +569,16 @@ enum Check {
         // Absent from a rollup read without asking for it
         #[serde(rename = "startedAt", default)]
         started_at: Option<String>,
-        // Empty for a check run no workflow posted, such as kelpie's own gates
+        // Only in `gh pr view`'s rollup, which names the workflow directly. It
+        // is empty for a check run no workflow posted, such as kelpie's own gates
         #[serde(rename = "workflowName", default)]
-        workflow: Option<String>,
+        workflow_name: Option<String>,
         #[serde(rename = "detailsUrl")]
         details_url: Option<String>,
-        // Only in the board's listing, which counts each suite's check runs by it
+        // Only in the board's listing, which counts each suite's check runs by
+        // its id and names the workflow through the suite's run
         #[serde(rename = "checkSuite", default)]
-        suite: Option<SuiteId>,
+        suite: Option<Suite>,
     },
     StatusContext {
         context: String,
@@ -584,9 +586,23 @@ enum Check {
     },
 }
 
+// GitHub's `CheckRun` names no workflow. Its suite's run carries the workflow.
 #[derive(Deserialize)]
-struct SuiteId {
+#[serde(rename_all = "camelCase")]
+struct Suite {
     id: String,
+    // Absent for a check run a workflow did not post, such as a review bot's
+    workflow_run: Option<SuiteRun>,
+}
+
+#[derive(Deserialize)]
+struct SuiteRun {
+    workflow: Option<SuiteWorkflow>,
+}
+
+#[derive(Deserialize)]
+struct SuiteWorkflow {
+    name: String,
 }
 
 enum Outcome {
@@ -692,17 +708,31 @@ impl Check {
 }
 
 impl Check {
-    // A run of the same check as `other`: the same name under the same workflow
+    // The workflow a check run belongs to. `gh pr view` names it, and the
+    // listing carries it through the suite's run
+    fn workflow(&self) -> Option<&str> {
+        match self {
+            Self::CheckRun {
+                workflow_name: Some(name),
+                ..
+            } => Some(name),
+            Self::CheckRun {
+                suite: Some(suite), ..
+            } => Some(&suite.workflow_run.as_ref()?.workflow.as_ref()?.name),
+            _ => None,
+        }
+    }
+
+    // A run of the same check as `other`: the same name under the same workflow.
+    // A rollup naming no workflow keys on the name alone.
     fn same_check(&self, other: &Self) -> bool {
         match (self, other) {
             (
-                Self::CheckRun { name, workflow, .. },
+                Self::CheckRun { name, .. },
                 Self::CheckRun {
-                    name: other_name,
-                    workflow: other_workflow,
-                    ..
+                    name: other_name, ..
                 },
-            ) => name == other_name && workflow == other_workflow,
+            ) => name == other_name && self.workflow() == other.workflow(),
             _ => false,
         }
     }

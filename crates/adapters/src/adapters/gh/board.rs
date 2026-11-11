@@ -57,7 +57,7 @@ const OPEN_QUERY: &str = concat!(
     labels(first: 100) { nodes { name } } \
     reviews(first: 1) { totalCount } reviewThreads(first: 1) { totalCount } \
     commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { \
-    __typename ... on CheckRun { name status conclusion completedAt detailsUrl startedAt workflowName checkSuite { id } } \
+    __typename ... on CheckRun { name status conclusion completedAt detailsUrl startedAt checkSuite { id workflowRun { workflow { name } } } } \
     ... on StatusContext { context state } } } } ",
     suites_fields!(),
     " } } } } } } }"
@@ -560,7 +560,7 @@ mod tests {
     #[test]
     fn the_listing_counts_no_check_runs_per_suite() {
         assert!(!OPEN_QUERY.contains("checkRuns("));
-        assert!(OPEN_QUERY.contains("checkSuite { id }"));
+        assert!(OPEN_QUERY.contains("checkSuite { id"));
     }
 
     // A pull request whose rollup holds `check_run`, beside `suites`
@@ -594,24 +594,63 @@ mod tests {
         assert!(OPEN_QUERY.contains("completedAt detailsUrl"));
     }
 
-    // The listing asks for the workflow a check run belongs to and the time it
-    // started, for a run a later run of the same check replaced.
+    // The listing asks for the time a check run started and the workflow of its
+    // suite's run, for a run a later run of the same check replaced. GitHub's
+    // `CheckRun` names no workflow of its own.
     #[test]
     fn the_listing_asks_for_what_names_a_check_run_its_workflow_ran_again() {
-        assert!(OPEN_QUERY.contains("startedAt workflowName"));
+        assert!(
+            OPEN_QUERY.contains("startedAt checkSuite { id workflowRun { workflow { name } } }")
+        );
+    }
+
+    // A listed check run of suite `suite`, of workflow `workflow`, named `name`,
+    // started at `started`, concluded `conclusion`. An empty one is still going.
+    fn listed_run(
+        suite: &str,
+        workflow: &str,
+        name: &str,
+        started: &str,
+        conclusion: &str,
+    ) -> String {
+        let (status, completed_at) = match conclusion {
+            "" => ("IN_PROGRESS", "0001-01-01T00:00:00Z"),
+            _ => ("COMPLETED", started),
+        };
+        format!(
+            concat!(
+                r#"{{"__typename":"CheckRun","name":"{name}","status":"{status}","#,
+                r#""conclusion":"{conclusion}","completedAt":"{completed_at}","#,
+                r#""startedAt":"{started}","checkSuite":{{"id":"{suite}","#,
+                r#""workflowRun":{{"workflow":{{"name":"{workflow}"}}}}}}}}"#,
+            ),
+            suite = suite,
+            name = name,
+            status = status,
+            conclusion = conclusion,
+            completed_at = completed_at,
+            started = started,
+            workflow = workflow,
+        )
     }
 
     #[test]
     fn a_listed_cancelled_run_its_check_ran_again_is_dropped() {
-        let cancelled = r#"{"__typename":"CheckRun","name":"test","status":"COMPLETED",
-            "conclusion":"CANCELLED","completedAt":"2026-11-07T20:30:00Z",
-            "startedAt":"2026-11-07T20:25:54Z","workflowName":"test","checkSuite":{"id":"S1"}}"#;
-        let passed = r#"{"__typename":"CheckRun","name":"test","status":"COMPLETED",
-            "conclusion":"SUCCESS","completedAt":"2026-11-07T20:52:00Z",
-            "startedAt":"2026-11-07T20:46:52Z","workflowName":"test","checkSuite":{"id":"S2"}}"#;
+        let cancelled = listed_run("S1", "test", "test", "2026-11-07T20:25:54Z", "CANCELLED");
+        let passed = listed_run("S2", "test", "test", "2026-11-07T20:46:52Z", "SUCCESS");
         assert_eq!(
             listed_check(&format!("{cancelled},{passed}"), ""),
             Checks::Passed
+        );
+    }
+
+    #[test]
+    fn a_listed_cancelled_run_of_another_workflow_still_fails() {
+        let cancelled = listed_run("S1", "test", "test", "2026-11-07T20:25:54Z", "CANCELLED");
+        let passed = listed_run("S2", "release", "test", "2026-11-07T20:46:52Z", "SUCCESS");
+        assert_eq!(
+            listed_check(&format!("{cancelled},{passed}"), ""),
+            Checks::Failed(vec!["test".into()])
         );
     }
 

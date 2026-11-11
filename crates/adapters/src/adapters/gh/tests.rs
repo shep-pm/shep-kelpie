@@ -410,6 +410,14 @@ fn a_cancelled_run_newer_than_a_pass_still_fails() {
     );
 }
 
+// A rollup read without `workflowName`, which keys on the name alone
+#[test]
+fn a_cancelled_run_in_a_rollup_naming_no_workflow_keys_on_the_name() {
+    let cancelled = r#"{"__typename":"CheckRun","name":"test","status":"COMPLETED","conclusion":"CANCELLED","startedAt":"2026-11-07T20:25:54Z","completedAt":"2026-11-07T20:30:00Z"}"#;
+    let passed = r#"{"__typename":"CheckRun","name":"test","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-07T20:46:52Z","completedAt":"2026-11-07T20:52:00Z"}"#;
+    assert_eq!(rollup(&format!("[{cancelled},{passed}]")), Checks::Passed);
+}
+
 #[test]
 fn a_cancelled_run_of_another_workflow_still_fails() {
     let cancelled = a_run("test", "test", "2026-11-07T20:25:54Z", "CANCELLED");
